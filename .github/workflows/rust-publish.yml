@@ -25,6 +25,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install git-cliff
+        uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
       - name: Build check
         run: cargo build
 
