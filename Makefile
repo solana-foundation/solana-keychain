@@ -1,4 +1,4 @@
-.PHONY: fmt build test
+.PHONY: fmt build test test-integration test-all release
 
 INTEGRATION_TESTS := test_privy_integration test_turnkey_integration test_vault_integration
 SDKV2_ALL_FEATURES := all,sdk-v2,unsafe-debug,integration-tests
@@ -35,3 +35,47 @@ build:
 	@cargo build --features all,sdk-v2
 	@echo "Building with SDK v3..."
 	@cargo build --no-default-features --features all,sdk-v3
+
+release:
+	@echo "🚀 Release Process"
+	@echo "=================="
+	@echo ""
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "❌ Error: Working directory is not clean. Commit or stash changes first."; \
+		exit 1; \
+	fi
+	@if ! command -v cargo-set-version >/dev/null 2>&1; then \
+		echo "❌ Error: cargo-set-version not installed. Install with: cargo install cargo-edit"; \
+		exit 1; \
+	fi
+	@if ! command -v git-cliff >/dev/null 2>&1; then \
+		echo "❌ Error: git-cliff not installed. Install with: cargo install git-cliff"; \
+		exit 1; \
+	fi
+	@echo "Current version: $$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+	@read -p "Enter new version (e.g., 0.1.1): " VERSION; \
+	if [ -z "$$VERSION" ]; then \
+		echo "❌ Error: Version cannot be empty"; \
+		exit 1; \
+	fi; \
+	echo ""; \
+	echo "📝 Updating version to $$VERSION..."; \
+	cargo set-version $$VERSION; \
+	echo ""; \
+	echo "📋 Generating CHANGELOG.md..."; \
+	LAST_TAG=$$(git tag -l "v*" --sort=-version:refname | head -1); \
+	if [ -z "$$LAST_TAG" ]; then \
+		git-cliff $$(git rev-list --max-parents=0 HEAD)..HEAD --config .github/cliff.toml --output CHANGELOG.md --strip all; \
+	else \
+		git-cliff $$LAST_TAG..HEAD --config .github/cliff.toml --output CHANGELOG.md --strip all; \
+	fi; \
+	echo ""; \
+	echo "📦 Committing changes..."; \
+	git add Cargo.toml CHANGELOG.md; \
+	git commit -m "chore: release v$$VERSION"; \
+	echo ""; \
+	echo "🏷️  Creating git tags..."; \
+	git tag "v$$VERSION"; \
+	git tag "solana-keychain-v$$VERSION"; \
+	echo ""; \
+	echo "✅ Release prepared!"; \

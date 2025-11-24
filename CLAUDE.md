@@ -41,6 +41,18 @@ cargo fmt
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
+### Publishing a Release
+```bash
+# Prepare a new release (bumps version, generates CHANGELOG, creates tags)
+make release
+
+# After reviewing changes, push to GitHub
+git push && git push --tags
+
+# Then manually trigger the "Publish Rust Crate" workflow on GitHub Actions
+# This will publish to crates.io and create a GitHub release
+```
+
 ## Architecture
 
 ### Core Trait System

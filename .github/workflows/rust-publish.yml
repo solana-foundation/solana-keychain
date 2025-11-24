@@ -25,83 +25,10 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install git-cliff
-        uses: taiki-e/install-action@v2
-        with:
-          tool: git-cliff
-
       - name: Build check
         run: cargo build
 
-      - name: Get current version
-        id: version
-        run: |
-          VERSION=$(grep "^version" Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "📦 solana-keychain v$VERSION"
-
-          # Get last release tag for changelog range
-          LAST_TAG=$(git tag -l "v*" --sort=-version:refname | head -1)
-          if [ -z "$LAST_TAG" ]; then
-            # First release - use all commits
-            echo "tag_range=$(git rev-list --max-parents=0 HEAD)..HEAD" >> $GITHUB_OUTPUT
-          else
-            echo "tag_range=$LAST_TAG..HEAD" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Generate changelog
-        id: changelog
-        run: |
-          # Generate CHANGELOG.md file
-          git-cliff ${{ steps.version.outputs.tag_range }} --config .github/cliff.toml --output CHANGELOG.md --strip all
-
-          # Also capture content for GitHub release
-          echo "content<<EOF" >> $GITHUB_OUTPUT
-          git-cliff ${{ steps.version.outputs.tag_range }} --config .github/cliff.toml --strip all
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Commit CHANGELOG
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          git commit -m "chore: update CHANGELOG for v${{ steps.version.outputs.version }}"
-          git push
-
-      - name: Create git tags
-        run: |
-          git tag "v${{ steps.version.outputs.version }}"
-          git tag "solana-keychain-v${{ steps.version.outputs.version }}"
-          git push origin --tags
-
-      - name: Publish solana-keychain to crates.io
+      - name: Publish to crates.io
         run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
-
-      - name: Create GitHub Release
-        if: success()
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: solana-keychain v${{ steps.version.outputs.version }}
-          body: |
-            ## solana-keychain v${{ steps.version.outputs.version }}
-
-            ### Changes
-
-            ${{ steps.changelog.outputs.content }}
-
-            ### Installation
-
-            ```bash
-            # Add to your Rust project
-            cargo add solana-keychain
-
-            # Or with specific features
-            cargo add solana-keychain --features vault,privy,turnkey
-            ```
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
