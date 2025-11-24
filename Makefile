@@ -60,22 +60,29 @@ release:
 	fi; \
 	echo ""; \
 	echo "📝 Updating version to $$VERSION..."; \
-	cd rust && cargo set-version $$VERSION; \
+	(cd rust && cargo set-version $$VERSION); \
 	echo ""; \
 	echo "📋 Generating CHANGELOG.md..."; \
 	LAST_TAG=$$(git tag -l "v*" --sort=-version:refname | head -1); \
 	if [ -z "$$LAST_TAG" ]; then \
-		git-cliff $$(git rev-list --max-parents=0 HEAD)..HEAD --config .github/cliff.toml --output rust/CHANGELOG.md --strip all; \
+		git-cliff $$(git rev-list --max-parents=0 HEAD)..HEAD --tag v$$VERSION --config .github/cliff.toml --output rust/CHANGELOG.md --strip all; \
 	else \
-		git-cliff $$LAST_TAG..HEAD --config .github/cliff.toml --output rust/CHANGELOG.md --strip all; \
+		if [ -f rust/CHANGELOG.md ]; then \
+			git-cliff $$LAST_TAG..HEAD --tag v$$VERSION --config .github/cliff.toml --strip all > rust/CHANGELOG.new.md; \
+			cat rust/CHANGELOG.md >> rust/CHANGELOG.new.md; \
+			mv rust/CHANGELOG.new.md rust/CHANGELOG.md; \
+		else \
+			git-cliff $$LAST_TAG..HEAD --tag v$$VERSION --config .github/cliff.toml --output rust/CHANGELOG.md --strip all; \
+		fi; \
 	fi; \
 	echo ""; \
-	echo "📦 Committing changes..."; \
+	echo "📦 Staging changes..."; \
 	git add rust/Cargo.toml rust/CHANGELOG.md; \
-	git commit -m "chore: release v$$VERSION"; \
-	echo ""; \
-	echo "🏷️  Creating git tags..."; \
-	git tag "v$$VERSION"; \
-	git tag "solana-keychain-v$$VERSION"; \
 	echo ""; \
 	echo "✅ Release prepared!"; \
+	echo ""; \
+	echo "Next steps:"; \
+	echo "  1. Review rust/CHANGELOG.md"; \
+	echo "  2. Commit: git commit -m 'chore: release v$$VERSION'"; \
+	echo "  3. Push to GitHub: git push"; \
+	echo "  4. Trigger 'Publish Rust Crate' workflow on GitHub Actions (tags will be created automatically)"

@@ -47,14 +47,17 @@ cd rust && cargo clippy --all-targets --all-features -- -D warnings
 
 ### Publishing a Release
 ```bash
-# Prepare a new release (bumps version, generates CHANGELOG, creates tags)
+# Prepare a new release (bumps version, generates CHANGELOG, stages changes)
 make release
 
-# After reviewing changes, push to GitHub
-git push && git push --tags
+# Review the CHANGELOG.md, then commit
+git commit -m "chore: release vX.Y.Z"
+
+# Push to GitHub
+git push
 
 # Then manually trigger the "Publish Rust Crate" workflow on GitHub Actions
-# This will publish to crates.io and create a GitHub release
+# This will create git tags and publish to crates.io
 ```
 
 ## Architecture

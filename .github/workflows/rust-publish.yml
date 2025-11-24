@@ -31,6 +31,19 @@ jobs:
       - name: Build check
         run: cargo build
 
+      - name: Get current version
+        id: version
+        run: |
+          VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 solana-keychain v$VERSION"
+
+      - name: Create git tags
+        working-directory: .
+        run: |
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin --tags
+
       - name: Publish to crates.io
         run: cargo publish --locked
         env:
