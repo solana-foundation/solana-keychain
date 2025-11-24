@@ -7,6 +7,8 @@ export default defineConfig({
         include: ['**/src/**/*.integration.test.ts'],
         exclude: ['**/node_modules/**', '**/dist/**'],
         testTimeout: 30000, // 30 second timeout for integration tests
+        fileParallelism: false, // Disable for CI 
+        maxWorkers: 1, // Disable for CI 
         coverage: {
             provider: 'v8',
             reporter: ['text', 'json', 'html'],
