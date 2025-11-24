@@ -1,8 +1,8 @@
 # Rust
-/rust/target
+**/target
 **/*.rs.bk
 *.pdb
-/rust/Cargo.lock
+**/Cargo.lock
 
 # IDE
 .vscode/
