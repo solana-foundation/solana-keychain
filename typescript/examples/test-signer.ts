@@ -11,9 +11,9 @@
  *   3. SIGNER_TYPE=turnkey pnpm test:signer
  */
 
-import { assertIsSolanaSigner, SolanaSigner } from '@solana-signers/core';
-import { PrivySigner } from '@solana-signers/privy';
-import { TurnkeySigner } from '@solana-signers/turnkey';
+import { assertIsSolanaSigner, SolanaSigner } from '@solana-keychain/core';
+import { PrivySigner } from '@solana-keychain/privy';
+import { TurnkeySigner } from '@solana-keychain/turnkey';
 import {
     Address,
     airdropFactory,

@@ -1,11 +1,11 @@
-# @solana-signers/privy
+# @solana-keychain/privy
 
 Privy-based signer for Solana transactions using Privy's wallet API.
 
 ## Installation
 
 ```bash
-pnpm add @solana-signers/privy
+pnpm add @solana-keychain/privy
 ```
 
 ## Usage
@@ -13,7 +13,7 @@ pnpm add @solana-signers/privy
 ### Create and Initialize
 
 ```typescript
-import { PrivySigner } from '@solana-signers/privy';
+import { PrivySigner } from '@solana-keychain/privy';
 
 // Create and initialize the signer (fetches public key from Privy API)
 const signer = await PrivySigner.create({

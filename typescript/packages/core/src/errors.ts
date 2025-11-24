@@ -1,5 +1,5 @@
 /**
- * Custom error codes for solana-signers, specific to this library
+ * Custom error codes for solana-keychain, specific to this library
  */
 export enum SignerErrorCode {
     INVALID_PRIVATE_KEY = 'SIGNER_INVALID_PRIVATE_KEY',

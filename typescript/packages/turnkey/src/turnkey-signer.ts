@@ -8,7 +8,7 @@ import {
     TransactionWithinSizeLimit,
     TransactionWithLifetime,
 } from '@solana/transactions';
-import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana-signers/core';
+import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana-keychain/core';
 
 import { ApiKeyStamper } from './stamper.js';
 import type { ActivityResponse, SignRequest, SignTransactionRequest, WhoAmIRequest, WhoAmIResponse } from './types.js';

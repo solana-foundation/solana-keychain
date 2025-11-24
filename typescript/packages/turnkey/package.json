@@ -1,10 +1,10 @@
 {
-    "name": "@solana-signers/turnkey",
+    "name": "@solana-keychain/turnkey",
     "author": "Solana Foundation",
     "version": "0.1.0",
     "description": "Turnkey-based signer for Solana transactions",
     "license": "MIT",
-    "repository": "https://github.com/solana-foundation/solana-signers",
+    "repository": "https://github.com/solana-foundation/solana-keychain",
     "keywords": [
         "solana",
         "signing",
@@ -40,7 +40,7 @@
     },
     "dependencies": {
         "@noble/curves": "^2.0.1",
-        "@solana-signers/core": "workspace:*",
+        "@solana-keychain/core": "workspace:*",
         "@solana/addresses": "^5.0.0",
         "@solana/codecs-core": "^5.0.0",
         "@solana/codecs-strings": "^5.0.0",
@@ -49,7 +49,7 @@
         "@solana/transactions": "^5.0.0"
     },
     "devDependencies": {
-        "@solana-signers/test-utils": "workspace:*",
+        "@solana-keychain/test-utils": "workspace:*",
         "dotenv": "^17.2.3"
     },
     "publishConfig": {

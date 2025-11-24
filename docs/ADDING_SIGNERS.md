@@ -1,8 +1,8 @@
-# Adding New Signers to solana-signers
+# Adding New Signers to solana-keychain
 
 ## Overview
 
-This guide is for wallet service providers and developers who want to integrate new key management solutions into the `solana-signers` library. By adding your signer implementation, you'll enable Rust developers to use your service for secure Solana transaction signing through a unified interface.
+This guide is for wallet service providers and developers who want to integrate new key management solutions into the `solana-keychain` library. By adding your signer implementation, you'll enable Rust developers to use your service for secure Solana transaction signing through a unified interface.
 
 ## Architecture Overview
 
@@ -403,7 +403,7 @@ Add usage example:
 ### YourService
 
 \```rust
-use solana_signers::{Signer, SolanaSigner};
+use solana_keychain::{Signer, SolanaSigner};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -534,4 +534,4 @@ Adds support for YourService as a signing backend. [Link to YourService Document
 Closes #1337
 ```
 
-Welcome to the solana-signers ecosystem! We're excited to have your key management solution as part of the library.
+Welcome to the solana-keychain ecosystem! We're excited to have your key management solution as part of the library.
