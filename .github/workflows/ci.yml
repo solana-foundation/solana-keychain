@@ -9,6 +9,9 @@ on:
 jobs:
   rust-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
     strategy:
       matrix:
         sdk_version: [v2, v3]
@@ -28,6 +31,9 @@ jobs:
 
   rust-integration-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
     strategy:
       matrix:
         sdk_version: [v2, v3]
@@ -54,6 +60,9 @@ jobs:
 
   rust-lint:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

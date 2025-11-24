@@ -14,6 +14,9 @@ jobs:
   publish:
     name: Publish solana-keychain crate
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,6 +55,7 @@ jobs:
           args: ${{ steps.version.outputs.tag_range }} --strip all
 
       - name: Create git tags
+        working-directory: .
         run: |
           git tag "v${{ steps.version.outputs.version }}"
           git tag "solana-keychain-v${{ steps.version.outputs.version }}"
