@@ -46,10 +46,22 @@ jobs:
 
       - name: Generate changelog
         id: changelog
-        uses: orhun/git-cliff-action@v4
-        with:
-          config: .github/cliff.toml
-          args: ${{ steps.version.outputs.tag_range }} --strip all
+        run: |
+          # Generate CHANGELOG.md file
+          git-cliff ${{ steps.version.outputs.tag_range }} --config .github/cliff.toml --output CHANGELOG.md --strip all
+
+          # Also capture content for GitHub release
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          git-cliff ${{ steps.version.outputs.tag_range }} --config .github/cliff.toml --strip all
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Commit CHANGELOG
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "chore: update CHANGELOG for v${{ steps.version.outputs.version }}"
+          git push
 
       - name: Create git tags
         run: |

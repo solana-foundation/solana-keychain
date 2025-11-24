@@ -2,6 +2,7 @@
 # See: https://git-cliff.org/docs/configuration
 
 [changelog]
+output = "CHANGELOG.md"
 header = ""
 body = """
 {% for group, commits in commits | group_by(attribute="group") %}
