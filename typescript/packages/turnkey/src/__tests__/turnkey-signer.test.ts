@@ -6,7 +6,7 @@ import {
     TransactionWithinSizeLimit,
     TransactionWithLifetime,
 } from '@solana/transactions';
-import { assertIsSolanaSigner } from '@solana-signers/core';
+import { assertIsSolanaSigner } from '@solana-keychain/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TurnkeySigner } from '../turnkey-signer.js';

@@ -1,10 +1,10 @@
-# solana-signers
+# solana-keychain
 
 **Flexible, framework-agnostic Solana transaction signing for Rust applications**
 
 > ⚠️ **SECURITY NOTICE**: This library has not been audited. Use at your own risk. Not recommended for production use with real funds without a thorough security review. The authors and contributors are not responsible for any loss of funds or damages resulting from the use of this library.
 
-`solana-signers` provides a unified interface for signing Solana transactions with multiple backend implementations. Whether you need local keypairs for development, enterprise vault integration, or managed wallet services, this library offers a consistent API across all signing methods.
+`solana-keychain` provides a unified interface for signing Solana transactions with multiple backend implementations. Whether you need local keypairs for development, enterprise vault integration, or managed wallet services, this library offers a consistent API across all signing methods.
 
 ## Features
 
@@ -28,13 +28,13 @@
 ```toml
 [dependencies]
 # Basic usage (memory signer only)
-solana-signers = "0.1"
+solana-keychain = "0.1"
 
 # With Vault support
-solana-signers = { version = "0.1", features = ["vault"] }
+solana-keychain = { version = "0.1", features = ["vault"] }
 
 # All backends
-solana-signers = { version = "0.1", features = ["all"] }
+solana-keychain = { version = "0.1", features = ["all"] }
 ```
 
 ## Quick Start
@@ -42,7 +42,7 @@ solana-signers = { version = "0.1", features = ["all"] }
 ### Memory Signer (Local Development)
 
 ```rust
-use solana_signers::{MemorySigner, SolanaSigner};
+use solana_keychain::{MemorySigner, SolanaSigner};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

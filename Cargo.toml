@@ -1,10 +1,10 @@
 [package]
-name = "solana-signers"
+name = "solana-keychain"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Framework-agnostic Solana signing abstractions"
-repository = "https://github.com/solana-foundation/solana-signers"
+repository = "https://github.com/solana-foundation/solana-keychain"
 keywords = ["solana", "blockchain", "signer", "wallet", "crypto"]
 
 [features]

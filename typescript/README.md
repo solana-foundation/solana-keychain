@@ -1,11 +1,11 @@
-# @solana-signers (TypeScript)
+# @solana-keychain (TypeScript)
 
 TypeScript packages for building custom Solana signers compatible with `@solana/kit` and `@solana/signers`
 
 ## Quick Example
 
 ```typescript
-import { SolanaSigner } from '@solana-signers/core';
+import { SolanaSigner } from '@solana-keychain/core';
 import { signTransactionMessageWithSigners } from '@solana/signers';
 
 class MyCustomSigner implements SolanaSigner {
@@ -38,10 +38,10 @@ const signedTx = await signTransactionMessageWithSigners(transaction);
 
 | Package | Description |
 |---------|-------------|
-| [@solana-signers/core](./packages/core) | Core interfaces, types, and utilities for building custom signers |
-| [@solana-signers/privy](./packages/privy) | Privy wallet signer implementation |
-| [@solana-signers/turnkey](./packages/turnkey) | Turnkey wallet signer implementation |
-| [@solana-signers/vault](./packages/vault) | Vault wallet signer implementation |
+| [@solana-keychain/core](./packages/core) | Core interfaces, types, and utilities for building custom signers |
+| [@solana-keychain/privy](./packages/privy) | Privy wallet signer implementation |
+| [@solana-keychain/turnkey](./packages/turnkey) | Turnkey wallet signer implementation |
+| [@solana-keychain/vault](./packages/vault) | Vault wallet signer implementation |
 
 ## Installation
 
@@ -49,11 +49,11 @@ const signedTx = await signTransactionMessageWithSigners(transaction);
 
 ```bash
 # Core package (required for building custom signers)
-pnpm add @solana-signers/core
+pnpm add @solana-keychain/core
 
 # Privy implementation
-pnpm add @solana-signers/privy
+pnpm add @solana-keychain/privy
 
 # Turnkey implementation
-pnpm add @solana-signers/turnkey
+pnpm add @solana-keychain/turnkey
 ```

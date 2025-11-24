@@ -1,6 +1,6 @@
 import { p256 } from '@noble/curves/nist.js';
 import { numberToBytesBE } from '@noble/curves/utils.js';
-import { SignerErrorCode, throwSignerError } from '@solana-signers/core';
+import { SignerErrorCode, throwSignerError } from '@solana-keychain/core';
 import * as crypto from 'crypto';
 
 /**

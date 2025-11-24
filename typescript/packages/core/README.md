@@ -1,11 +1,11 @@
-# @solana-signers/core
+# @solana-keychain/core
 
 Core interfaces and utilities for building external Solana signers.
 
 ## Installation
 
 ```bash
-pnpm add @solana-signers/core
+pnpm add @solana-keychain/core
 ```
 
 ## What's Included
@@ -15,7 +15,7 @@ pnpm add @solana-signers/core
 **`SolanaSigner`** - Unified interface that all signer implementations extend:
 
 ```typescript
-import { SolanaSigner } from '@solana-signers/core';
+import { SolanaSigner } from '@solana-keychain/core';
 
 interface SolanaSigner {
     address: Address;
@@ -28,7 +28,7 @@ interface SolanaSigner {
 ### Error Handling
 
 ```typescript
-import { SignerError, SignerErrorCode, throwSignerError } from '@solana-signers/core';
+import { SignerError, SignerErrorCode, throwSignerError } from '@solana-keychain/core';
 
 // Check error type
 if (error instanceof SignerError) {
@@ -60,7 +60,7 @@ throwSignerError(SignerErrorCode.SIGNING_FAILED, {
 **`extractSignatureFromWireTransaction`** - Extract a specific signer's signature from a signed transaction:
 
 ```typescript
-import { extractSignatureFromWireTransaction } from '@solana-signers/core';
+import { extractSignatureFromWireTransaction } from '@solana-keychain/core';
 
 // When a remote API returns a fully signed base64 transaction, we need to extract the signature to use Kit's native methods (which rely on .signTransactions to return a SignatureDictionary)
 const signedTx = await remoteApi.signTransaction(...);
@@ -73,7 +73,7 @@ const sigDict = extractSignatureFromWireTransaction({
 **`createSignatureDictionary`** - Create a signature dictionary from raw signature bytes:
 
 ```typescript
-import { createSignatureDictionary } from '@solana-signers/core';
+import { createSignatureDictionary } from '@solana-keychain/core';
 
 const sigDict = createSignatureDictionary({
     signature: signatureBytes,
@@ -83,10 +83,10 @@ const sigDict = createSignatureDictionary({
 
 ## Usage
 
-This package is typically used as a dependency when building custom signer implementations. See [@solana-signers/privy](https://www.npmjs.com/package/@solana-signers/privy) for an example implementation.
+This package is typically used as a dependency when building custom signer implementations. See [@solana-keychain/privy](https://www.npmjs.com/package/@solana-keychain/privy) for an example implementation.
 
 ```typescript
-import { SolanaSigner, SignerErrorCode, throwSignerError } from '@solana-signers/core';
+import { SolanaSigner, SignerErrorCode, throwSignerError } from '@solana-keychain/core';
 
 class MyCustomSigner implements SolanaSigner {
     readonly address: Address;
@@ -110,7 +110,7 @@ class MyCustomSigner implements SolanaSigner {
 **`isSolanaSigner`** - Check if a value is a SolanaSigner:
 
 ```typescript
-import { isSolanaSigner } from '@solana-signers/core';
+import { isSolanaSigner } from '@solana-keychain/core';
 
 const isSigner = isSolanaSigner(value); // true or false
 ```
@@ -118,7 +118,7 @@ const isSigner = isSolanaSigner(value); // true or false
 **`assertIsSolanaSigner`** - Assert that a value is a SolanaSigner:
 
 ```typescript
-import { assertIsSolanaSigner } from '@solana-signers/core';
+import { assertIsSolanaSigner } from '@solana-keychain/core';
 
 assertIsSolanaSigner(value); // void (throws if not a SolanaSigner)
 ```

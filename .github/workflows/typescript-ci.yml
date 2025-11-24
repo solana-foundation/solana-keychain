@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
       - uses: pnpm/action-setup@v2
         with:
           version: 10.14.0
@@ -27,8 +27,8 @@ jobs:
         run: pnpm install
       - name: Build packages
         run: pnpm build
-      - name: Run unit tests for @solana-signers/${{ matrix.package }}
-        run: pnpm -F @solana-signers/${{ matrix.package }} run test:unit
+      - name: Run unit tests for @solana-keychain/${{ matrix.package }}
+        run: pnpm -F @solana-keychain/${{ matrix.package }} run test:unit
 
   typescript-test-integration:
     runs-on: ubuntu-latest
@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
       - uses: pnpm/action-setup@v2
         with:
           version: 10.14.0
@@ -50,7 +50,7 @@ jobs:
         run: pnpm install
       - name: Build packages
         run: pnpm build
-      - name: Run integration tests for @solana-signers/${{ matrix.package }}
+      - name: Run integration tests for @solana-keychain/${{ matrix.package }}
         env:
           # Privy
           PRIVY_APP_ID: ${{ secrets.PRIVY_APP_ID }}
@@ -62,7 +62,7 @@ jobs:
           TURNKEY_ORGANIZATION_ID: ${{ secrets.TURNKEY_ORGANIZATION_ID }}
           TURNKEY_PRIVATE_KEY_ID: ${{ secrets.TURNKEY_PRIVATE_KEY_ID }}
           TURNKEY_PUBLIC_KEY: ${{ secrets.TURNKEY_SIGNER_PUBKEY }}
-        run: pnpm -F @solana-signers/${{ matrix.package }} run test:integration
+        run: pnpm -F @solana-keychain/${{ matrix.package }} run test:integration
 
   typescript-lint:
     runs-on: ubuntu-latest
@@ -73,7 +73,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
       - uses: pnpm/action-setup@v2
         with:
           version: 10.14.0

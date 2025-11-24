@@ -1,4 +1,4 @@
-import { SignerTestConfig, TestScenario } from '@solana-signers/test-utils';
+import { SignerTestConfig, TestScenario } from '@solana-keychain/test-utils';
 import { TurnkeySigner } from '../turnkey-signer';
 
 const SIGNER_TYPE = 'turnkey';

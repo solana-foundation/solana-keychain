@@ -1,8 +1,8 @@
 {
-    "name": "@solana-signers/core",
+    "name": "@solana-keychain/core",
     "author": "Solana Foundation",
     "license": "MIT",
-    "repository": "https://github.com/solana-foundation/solana-signers",
+    "repository": "https://github.com/solana-foundation/solana-keychain",
     "version": "0.1.0",
     "description": "Core interfaces and types for external Solana signers",
     "keywords": [

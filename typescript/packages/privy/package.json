@@ -1,10 +1,10 @@
 {
-    "name": "@solana-signers/privy",
+    "name": "@solana-keychain/privy",
     "author": "Solana Foundation",
     "version": "0.1.0",
     "description": "Privy-based signer for Solana transactions",
     "license": "MIT",
-    "repository": "https://github.com/solana-foundation/solana-signers",
+    "repository": "https://github.com/solana-foundation/solana-keychain",
     "keywords": [
         "solana",
         "signing",
@@ -39,7 +39,7 @@
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
-        "@solana-signers/core": "workspace:*",
+        "@solana-keychain/core": "workspace:*",
         "@solana/addresses": "^5.0.0",
         "@solana/codecs-core": "^5.0.0",
         "@solana/codecs-strings": "^5.0.0",
@@ -51,7 +51,7 @@
         "access": "public"
     },
     "devDependencies": {
-        "@solana-signers/test-utils": "workspace:*",
+        "@solana-keychain/test-utils": "workspace:*",
         "@solana/nominal-types": "^5.0.0",
         "dotenv": "^17.2.3"
     }
