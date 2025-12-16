@@ -65,6 +65,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### AWS KMS Signer
+
+```rust
+use solana_keychain::{KmsSigner, SolanaSigner};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create signer using AWS KMS
+    // Credentials are loaded from the AWS default credential chain
+    let signer = KmsSigner::new(
+        "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012".to_string(),
+        "YourSolanaPublicKeyBase58".to_string(),
+        Some("us-east-1".to_string()), // Optional region
+    ).await?;
+
+    // Sign a message
+    let message = b"Hello Solana!";
+    let signature = signer.sign_message(message).await?;
+    println!("Signature: {}", signature);
+
+    Ok(())
+}
+```
+
+#### AWS Credentials
+
+The AWS KMS signer uses the **AWS default credential provider chain**. Credentials are automatically loaded from:
+
+1. **Environment variables**: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`
+2. **Shared credentials file**: `~/.aws/credentials`
+3. **IAM role** (automatic on EC2, ECS, Lambda)
+4. **Web identity token** (for EKS/Kubernetes with IRSA)
+
+| Environment | Recommended Method |
+|-------------|-------------------|
+| **Production on AWS** | IAM role (no explicit credentials needed) |
+| **Local development** | Environment variables or `~/.aws/credentials` |
+| **CI/CD pipelines** | Environment variables or OIDC |
+
+#### Creating an AWS KMS Key
+
+```bash
+aws kms create-key \
+  --key-spec ECC_NIST_EDWARDS25519 \
+  --key-usage SIGN_VERIFY \
+  --description "Solana signing key"
+```
+
+Required IAM permissions:
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [{
+        "Effect": "Allow",
+        "Action": ["kms:Sign", "kms:DescribeKey"],
+        "Resource": "arn:aws:kms:*:*:key/*"
+    }]
+}
+```
+
 ## Core API
 
 All signers implement the `SolanaSigner` trait:

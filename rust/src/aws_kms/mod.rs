@@ -384,8 +384,7 @@ mod tests {
             )
             .await;
 
-            if result.is_ok() {
-                let signer = result.unwrap();
+            if let Ok(signer) = result {
                 assert_eq!(signer.key_id, key_id);
             }
         }
@@ -419,8 +418,7 @@ mod tests {
         )
         .await;
 
-        if result.is_ok() {
-            let signer = result.unwrap();
+        if let Ok(signer) = result {
             let cloned = signer.clone();
 
             assert_eq!(signer.pubkey(), cloned.pubkey());
@@ -444,8 +442,7 @@ mod tests {
             )
             .await;
 
-            if result.is_ok() {
-                let signer = result.unwrap();
+            if let Ok(signer) = result {
                 assert_eq!(signer.region, Some(region.to_string()));
             }
         }

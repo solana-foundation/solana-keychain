@@ -14,7 +14,50 @@ npm install @solana-keychain/aws-kms @aws-sdk/client-kms
    - **Key spec**: `ECC_NIST_EDWARDS25519`
    - **Key usage**: `SIGN_VERIFY`
 
-2. AWS credentials configured (via environment variables, IAM role, or credentials file)
+2. AWS credentials configured (see [AWS Credentials](#aws-credentials) below)
+
+## AWS Credentials
+
+The signer uses the **AWS default credential provider chain** to authenticate. You don't need to pass credentials explicitly unless you want to override the defaults.
+
+### Credential Resolution Order
+
+The AWS SDK looks for credentials in this order:
+
+1. **Environment variables**
+   ```bash
+   export AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE"
+   export AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+   export AWS_SESSION_TOKEN="..." # Optional, for temporary credentials
+   export AWS_REGION="us-east-1"  # Optional
+   ```
+
+2. **Shared credentials file** (`~/.aws/credentials`)
+   ```ini
+   [default]
+   aws_access_key_id = AKIAIOSFODNN7EXAMPLE
+   aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+   ```
+
+3. **IAM role** (automatic when running on AWS EC2, ECS, or Lambda)
+
+4. **Web identity token** (for EKS/Kubernetes with IRSA)
+
+### Recommended Setup
+
+| Environment | Recommended Method |
+|-------------|-------------------|
+| **Production on AWS** | IAM role attached to EC2/ECS/Lambda (no explicit creds needed) |
+| **Local development** | Environment variables or `~/.aws/credentials` file |
+| **CI/CD pipelines** | Environment variables or OIDC |
+| **Explicit control** | Pass `credentials` in config (TypeScript only) |
+
+### Security Best Practices
+
+- **Never commit credentials** to source control
+- **Use IAM roles** in production instead of long-lived access keys
+- **Use least-privilege IAM policies** - only grant `kms:Sign` and `kms:DescribeKey`
+- **Enable CloudTrail** to audit KMS key usage
 
 ## Creating an AWS KMS Key
 
