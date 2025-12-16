@@ -9,6 +9,12 @@
  *   1. Copy .env.example to .env and fill in credentials for your signer
  *   2. SIGNER_TYPE=privy pnpm test:signer
  *   3. SIGNER_TYPE=turnkey pnpm test:signer
+ *   4. SIGNER_TYPE=keypair pnpm test:signer
+ * 
+ * Example AWS KMS args (Rust only):
+ *   - AWS_KMS_KEY_ID: "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
+ *   - AWS_KMS_PUBLIC_KEY: "YourSolanaPublicKeyBase58Here"
+ *   - AWS_KMS_REGION: "us-east-1" (optional, defaults to AWS config default region)
  */
 
 import { assertIsSolanaSigner, SolanaSigner } from '@solana-keychain/core';
@@ -95,6 +101,18 @@ const SIGNER_CONFIGS: Record<SignerType, SignerConfig> = {
             });
         },
     },
+    // Example AWS KMS args (Rust only - not yet implemented in TypeScript):
+    // aws_kms: {
+    //     requiredEnvVars: ['AWS_KMS_KEY_ID', 'AWS_KMS_PUBLIC_KEY'],
+    //     create: async () => {
+    //         // AWS KMS signer implementation would go here
+    //         // Example args:
+    //         //   key_id: process.env.AWS_KMS_KEY_ID! // e.g., "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
+    //         //   public_key: process.env.AWS_KMS_PUBLIC_KEY! // Solana public key (base58-encoded)
+    //         //   region: process.env.AWS_KMS_REGION // Optional AWS region
+    //         throw new Error('AWS KMS signer not yet implemented in TypeScript');
+    //     },
+    // },
     keypair: {
         requiredEnvVars: [],
         create: async () => {

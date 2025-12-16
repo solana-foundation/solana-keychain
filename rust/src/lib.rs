@@ -1,7 +1,7 @@
 //! Framework-agnostic Solana signing abstractions
 //!
 //! This crate provides a unified interface for signing Solana transactions
-//! with multiple backend implementations (memory, Vault, Privy, Turnkey).
+//! with multiple backend implementations (memory, Vault, Privy, Turnkey, AWS KMS).
 //!
 //! # Features
 //!
@@ -10,6 +10,7 @@
 //! - `vault`: HashiCorp Vault integration
 //! - `privy`: Privy API integration
 //! - `turnkey`: Turnkey API integration
+//! - `aws_kms`: AWS KMS integration with EdDSA (Ed25519) signing
 //! - `all`: Enable all signer backends
 //!
 //! ## SDK Version Selection
@@ -39,6 +40,9 @@ pub mod privy;
 #[cfg(feature = "turnkey")]
 pub mod turnkey;
 
+#[cfg(feature = "aws_kms")]
+pub mod aws_kms;
+
 // Re-export core types
 pub use error::SignerError;
 pub use traits::SolanaSigner;
@@ -56,6 +60,9 @@ pub use privy::PrivySigner;
 #[cfg(feature = "turnkey")]
 pub use turnkey::TurnkeySigner;
 
+#[cfg(feature = "aws_kms")]
+pub use aws_kms::KmsSigner;
+
 use crate::traits::SignedTransaction;
 
 // Ensure at least one signer backend is enabled
@@ -63,10 +70,11 @@ use crate::traits::SignedTransaction;
     feature = "memory",
     feature = "vault",
     feature = "privy",
-    feature = "turnkey"
+    feature = "turnkey",
+    feature = "aws_kms"
 )))]
 compile_error!(
-    "At least one signer backend feature must be enabled: memory, vault, privy, or turnkey"
+    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, or aws_kms"
 );
 
 /// Unified signer enum supporting multiple backends
@@ -82,6 +90,9 @@ pub enum Signer {
 
     #[cfg(feature = "turnkey")]
     Turnkey(TurnkeySigner),
+
+    #[cfg(feature = "aws_kms")]
+    Kms(KmsSigner),
 }
 
 impl Signer {
@@ -138,6 +149,16 @@ impl Signer {
             public_key,
         )?))
     }
+
+    /// Create an AWS KMS signer (requires initialization)
+    #[cfg(feature = "aws_kms")]
+    pub async fn from_kms(
+        key_id: String,
+        public_key: String,
+        region: Option<String>,
+    ) -> Result<Self, SignerError> {
+        Ok(Self::Kms(KmsSigner::new(key_id, public_key, region).await?))
+    }
 }
 
 #[async_trait::async_trait]
@@ -155,6 +176,9 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "turnkey")]
             Signer::Turnkey(s) => s.pubkey(),
+
+            #[cfg(feature = "aws_kms")]
+            Signer::Kms(s) => s.pubkey(),
         }
     }
 
@@ -174,6 +198,9 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "turnkey")]
             Signer::Turnkey(s) => s.sign_transaction(tx).await,
+
+            #[cfg(feature = "aws_kms")]
+            Signer::Kms(s) => s.sign_transaction(tx).await,
         }
     }
 
@@ -190,6 +217,9 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "turnkey")]
             Signer::Turnkey(s) => s.sign_message(message).await,
+
+            #[cfg(feature = "aws_kms")]
+            Signer::Kms(s) => s.sign_message(message).await,
         }
     }
 
@@ -209,6 +239,9 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "turnkey")]
             Signer::Turnkey(s) => s.sign_partial_transaction(tx).await,
+
+            #[cfg(feature = "aws_kms")]
+            Signer::Kms(s) => s.sign_partial_transaction(tx).await,
         }
     }
 
@@ -225,6 +258,9 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "turnkey")]
             Signer::Turnkey(s) => s.is_available().await,
+
+            #[cfg(feature = "aws_kms")]
+            Signer::Kms(s) => s.is_available().await,
         }
     }
 }

@@ -15,7 +15,8 @@ memory = []
 vault = ["dep:reqwest"]
 privy = ["dep:reqwest"]
 turnkey = ["dep:reqwest", "dep:p256", "dep:hex", "dep:chrono"]
-all = ["memory", "vault", "privy", "turnkey"]
+aws_kms = ["dep:aws-sdk-kms", "dep:aws-config"]
+all = ["memory", "vault", "privy", "turnkey", "aws_kms"]
 
 # SDK version selection (mutually exclusive)
 sdk-v2 = ["dep:solana-sdk"]
@@ -48,6 +49,8 @@ reqwest = { version = "0.12.23", optional = true, features = ["json"] }
 p256 = { version = "0.13.2", optional = true }
 hex = { version = "0.4.3", optional = true }
 chrono = { version = "0.4.42", optional = true }
+aws-sdk-kms = { version = "1.97.0", optional = true }
+aws-config = { version = "1.1.7", optional = true }
 
 # Core dependencies (used by all signers for transaction serialization)
 bincode = "1.3"

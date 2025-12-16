@@ -22,6 +22,7 @@
 | **Vault** | Enterprise key management with HashiCorp Vault | `vault` |
 | **Privy** | Embedded wallets with Privy infrastructure | `privy` |
 | **Turnkey** | Non-custodial key management via Turnkey | `turnkey` |
+| **AWS KMS** | AWS Key Management Service with EdDSA (Ed25519) signing | `aws_kms` |
 
 ## Installation
 
