@@ -131,9 +131,7 @@ describe('AwsKmsSigner', () => {
                 requestDelayMs: 5000,
             });
 
-            expect(warnSpy).toHaveBeenCalledWith(
-                expect.stringContaining('requestDelayMs is greater than 3000ms'),
-            );
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
 
             warnSpy.mockRestore();
         });
@@ -196,7 +194,7 @@ describe('AwsKmsSigner', () => {
             });
 
             // Provide required 'signatures' property to satisfy the type
-            const message = { 
+            const message = {
                 content: new Uint8Array([1, 2, 3, 4]),
                 signatures: {},
             };

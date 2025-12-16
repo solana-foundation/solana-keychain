@@ -1,11 +1,11 @@
+import { DescribeKeyCommand, KMSClient, MessageType, SignCommand, SigningAlgorithmSpec } from '@aws-sdk/client-kms';
 import { Address, assertIsAddress } from '@solana/addresses';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
-import { KMSClient, SignCommand, DescribeKeyCommand, MessageType, SigningAlgorithmSpec } from '@aws-sdk/client-kms';
 import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana-keychain/core';
 
-import type { AwsKmsSignerConfig, AwsCredentials } from './types.js';
+import type { AwsCredentials,AwsKmsSignerConfig } from './types.js';
 
 /**
  * AWS KMS-based signer using EdDSA (Ed25519) signing
@@ -57,8 +57,8 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
 
         // Create AWS KMS client
         const clientConfig: {
-            region?: string;
             credentials?: AwsCredentials;
+            region?: string;
         } = {};
 
         if (config.region) {
@@ -133,7 +133,7 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
             }
             if (error instanceof Error) {
                 // AWS SDK errors
-                const awsError = error as { name?: string; message?: string; $metadata?: { httpStatusCode?: number } };
+                const awsError = error as { $metadata?: { httpStatusCode?: number }, message?: string; name?: string; };
                 throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                     cause: error,
                     message: `AWS KMS Sign operation failed: ${awsError.message || error.message}`,
