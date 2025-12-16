@@ -284,8 +284,7 @@ mod tests {
 
         // This will succeed because we only validate the pubkey format
         // AWS config loading happens but doesn't fail without credentials
-        if result.is_ok() {
-            let signer = result.unwrap();
+        if let Ok(signer) = result {
             assert_eq!(signer.public_key, keypair.pubkey());
             assert_eq!(signer.key_id, TEST_KEY_ID);
             assert_eq!(signer.region, Some(TEST_REGION.to_string()));
@@ -299,8 +298,7 @@ mod tests {
 
         let result = KmsSigner::new(TEST_KEY_ID.to_string(), pubkey_str, None).await;
 
-        if result.is_ok() {
-            let signer = result.unwrap();
+        if let Ok(signer) = result {
             assert_eq!(signer.public_key, keypair.pubkey());
             assert_eq!(signer.key_id, TEST_KEY_ID);
             assert_eq!(signer.region, None);
@@ -319,8 +317,7 @@ mod tests {
         )
         .await;
 
-        if result.is_ok() {
-            let signer = result.unwrap();
+        if let Ok(signer) = result {
             assert_eq!(signer.pubkey(), keypair.pubkey());
             assert_eq!(signer.pubkey().to_string(), pubkey_str);
         }
@@ -338,8 +335,7 @@ mod tests {
         )
         .await;
 
-        if result.is_ok() {
-            let signer = result.unwrap();
+        if let Ok(signer) = result {
             assert_eq!(signer.key_id(), TEST_KEY_ID);
         }
     }
@@ -356,8 +352,7 @@ mod tests {
         )
         .await;
 
-        if result.is_ok() {
-            let signer = result.unwrap();
+        if let Ok(signer) = result {
             let debug_str = format!("{:?}", signer);
 
             // Verify debug output contains expected fields
