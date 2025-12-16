@@ -5,7 +5,7 @@ import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
 import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana-keychain/core';
 
-import type { AwsCredentials,AwsKmsSignerConfig } from './types.js';
+import type { AwsCredentials, AwsKmsSignerConfig } from './types.js';
 
 /**
  * AWS KMS-based signer using EdDSA (Ed25519) signing
@@ -133,7 +133,7 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
             }
             if (error instanceof Error) {
                 // AWS SDK errors
-                const awsError = error as { $metadata?: { httpStatusCode?: number }, message?: string; name?: string; };
+                const awsError = error as { $metadata?: { httpStatusCode?: number }; message?: string; name?: string };
                 throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                     cause: error,
                     message: `AWS KMS Sign operation failed: ${awsError.message || error.message}`,
