@@ -206,11 +206,7 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
             const keyUsage = response.KeyMetadata.KeyUsage;
             const keyState = response.KeyMetadata.KeyState;
 
-            return (
-                keySpec === 'ECC_NIST_EDWARDS25519' &&
-                keyUsage === 'SIGN_VERIFY' &&
-                keyState === 'Enabled'
-            );
+            return keySpec === 'ECC_NIST_EDWARDS25519' && keyUsage === 'SIGN_VERIFY' && keyState === 'Enabled';
         } catch {
             return false;
         }
