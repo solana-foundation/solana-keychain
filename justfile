@@ -49,8 +49,14 @@ rust-test-integration:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    VAULT_PID=""
+
     cleanup() {
-        echo "Stopping Vault dev server..."
+        if [ -n "$VAULT_PID" ]; then
+            echo "Stopping Vault dev server..."
+            kill "$VAULT_PID" 2>/dev/null || true
+            wait "$VAULT_PID" 2>/dev/null || true
+        fi
         pkill -f "vault server -dev" 2>/dev/null || true
     }
     trap cleanup EXIT
@@ -68,6 +74,11 @@ rust-test-integration:
     # Start Vault in dev mode
     echo "Starting Vault dev server..."
     vault server -dev -dev-root-token-id="root" &
+    VAULT_PID=$!
+
+    # Set Vault environment variables
+    export VAULT_ADDR='http://127.0.0.1:8200'
+    export VAULT_TOKEN='root'
 
     # Wait for Vault API
     echo "Waiting for Vault to be ready..."
@@ -115,8 +126,14 @@ ts-test-integration:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    VAULT_PID=""
+
     cleanup() {
-        echo "Stopping Vault dev server..."
+        if [ -n "$VAULT_PID" ]; then
+            echo "Stopping Vault dev server..."
+            kill "$VAULT_PID" 2>/dev/null || true
+            wait "$VAULT_PID" 2>/dev/null || true
+        fi
         pkill -f "vault server -dev" 2>/dev/null || true
     }
     trap cleanup EXIT
@@ -132,6 +149,11 @@ ts-test-integration:
 
     echo "Starting Vault dev server..."
     vault server -dev -dev-root-token-id="root" &
+    VAULT_PID=$!
+
+    # Set Vault environment variables
+    export VAULT_ADDR='http://127.0.0.1:8200'
+    export VAULT_TOKEN='root'
 
     echo "Waiting for Vault to be ready..."
     for i in {1..10}; do

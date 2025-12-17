@@ -150,6 +150,8 @@ pub trait SolanaSigner: Send + Sync {
 
 ### Local Development
 
+Local development and testing use [Just](https://github.com/casey/just) as a build and development tool--make sure to install it before running any commands.
+
 ```bash
 just build
 just test
