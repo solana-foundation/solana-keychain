@@ -151,9 +151,9 @@ pub trait SolanaSigner: Send + Sync {
 ### Local Development
 
 ```bash
-make build
-make test
-make fmt
+just build
+just test
+just fmt
 ```
 
 ### Adding a New Signer Backend

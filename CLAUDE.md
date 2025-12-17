@@ -28,15 +28,15 @@ cd rust && cargo test --features turnkey
 # Run a single test
 cd rust && cargo test test_name --all-features
 
-# Or use the Makefile (runs from project root)
-make build
-make test
+# Or use just (runs from project root)
+just build
+just test
 ```
 
 ### Linting and Formatting
 ```bash
 # Format and lint code (runs clippy with all warnings as errors)
-make fmt
+just fmt
 
 # Just format code
 cd rust && cargo fmt
@@ -48,7 +48,7 @@ cd rust && cargo clippy --all-targets --all-features -- -D warnings
 ### Publishing a Release
 ```bash
 # Prepare a new release (bumps version, generates CHANGELOG, stages changes)
-make release
+just release 0.1.1
 
 # Review the CHANGELOG.md, then commit
 git commit -m "chore: release vX.Y.Z"
