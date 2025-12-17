@@ -5,7 +5,7 @@ AWS KMS-based signer for Solana transactions using EdDSA (Ed25519) signing.
 ## Installation
 
 ```bash
-npm install @solana-keychain/aws-kms @aws-sdk/client-kms
+pnpm add @solana-keychain/aws-kms @aws-sdk/client-kms
 ```
 
 ## Prerequisites
