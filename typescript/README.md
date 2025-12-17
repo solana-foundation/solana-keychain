@@ -42,6 +42,7 @@ const signedTx = await signTransactionMessageWithSigners(transaction);
 | [@solana-keychain/privy](./packages/privy) | Privy wallet signer implementation |
 | [@solana-keychain/turnkey](./packages/turnkey) | Turnkey wallet signer implementation |
 | [@solana-keychain/vault](./packages/vault) | Vault wallet signer implementation |
+| [@solana-keychain/aws-kms](./packages/aws-kms) | AWS KMS wallet signer implementation |
 
 ## Installation
 

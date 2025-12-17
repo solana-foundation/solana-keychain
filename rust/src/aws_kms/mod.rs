@@ -228,6 +228,8 @@ impl SolanaSigner for KmsSigner {
 mod tests {
     use super::*;
     use crate::sdk_adapter::{Keypair, Signer};
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn create_test_keypair() -> Keypair {
         Keypair::new()
@@ -469,5 +471,273 @@ mod tests {
                 "Signature length should not be 64 bytes"
             );
         }
+    }
+
+    // Wiremock tests for actual signing operations
+
+    /// Helper to create a KMS client configured for testing with wiremock
+    fn create_test_client(endpoint_url: &str) -> KmsClient {
+        use aws_config::Region;
+        use aws_sdk_kms::config::{BehaviorVersion, Credentials};
+
+        let credentials = Credentials::new("test", "test", None, None, "test");
+        let config = aws_sdk_kms::config::Builder::new()
+            .behavior_version(BehaviorVersion::latest())
+            .region(Region::new("us-east-1"))
+            .endpoint_url(endpoint_url)
+            .credentials_provider(credentials)
+            .build();
+        KmsClient::from_conf(config)
+    }
+
+    #[tokio::test]
+    async fn test_kms_sign_message_success() {
+        use wiremock::matchers::any;
+
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+
+        // Create the expected 64-byte Ed25519 signature
+        let message = b"test message";
+        let signature = keypair.sign_message(message);
+
+        // Mock AWS KMS Sign API response
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "KeyId": TEST_KEY_ID,
+                "Signature": STANDARD.encode(signature.as_ref()),
+                "SigningAlgorithm": "ED25519_SHA_512"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server.uri());
+        let signer = KmsSigner::with_client(
+            client,
+            TEST_KEY_ID.to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .expect("Failed to create KmsSigner");
+
+        let result = signer.sign_message(message).await;
+        assert!(result.is_ok(), "Sign message failed");
+        assert_eq!(result.unwrap().as_ref().len(), 64);
+    }
+
+    #[tokio::test]
+    async fn test_kms_sign_message_invalid_signature_length() {
+        use wiremock::matchers::any;
+
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+
+        // Return invalid signature (not 64 bytes)
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "KeyId": TEST_KEY_ID,
+                "Signature": STANDARD.encode(vec![0u8; 32]),
+                "SigningAlgorithm": "ED25519_SHA_512"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server.uri());
+        let signer = KmsSigner::with_client(
+            client,
+            TEST_KEY_ID.to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .expect("Failed to create KmsSigner");
+
+        let result = signer.sign_message(b"test").await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    #[tokio::test]
+    async fn test_kms_sign_api_error() {
+        use wiremock::matchers::any;
+
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+
+        // Mock AWS KMS error response
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "__type": "InvalidKeyUsageException",
+                "message": "Key is not valid for signing"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server.uri());
+        let signer = KmsSigner::with_client(
+            client,
+            TEST_KEY_ID.to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .expect("Failed to create KmsSigner");
+
+        let result = signer.sign_message(b"test").await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SignerError::RemoteApiError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_kms_sign_unauthorized() {
+        use wiremock::matchers::any;
+
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+
+        // Mock 403 Forbidden response (AWS uses 403 for auth errors)
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+                "__type": "AccessDeniedException",
+                "message": "User is not authorized to perform kms:Sign"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server.uri());
+        let signer = KmsSigner::with_client(
+            client,
+            TEST_KEY_ID.to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .expect("Failed to create KmsSigner");
+
+        let result = signer.sign_message(b"test").await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SignerError::RemoteApiError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_kms_is_available_success() {
+        use wiremock::matchers::any;
+
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+
+        // Mock DescribeKey response for availability check
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "KeyMetadata": {
+                    "KeyId": TEST_KEY_ID,
+                    "KeySpec": "ECC_NIST_EDWARDS25519",
+                    "KeyUsage": "SIGN_VERIFY",
+                    "Enabled": true
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server.uri());
+        let signer = KmsSigner::with_client(
+            client,
+            TEST_KEY_ID.to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .expect("Failed to create KmsSigner");
+
+        assert!(signer.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_kms_is_available_wrong_key_spec() {
+        use wiremock::matchers::any;
+
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+
+        // Mock DescribeKey with wrong key spec (not Ed25519)
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "KeyMetadata": {
+                    "KeyId": TEST_KEY_ID,
+                    "KeySpec": "RSA_2048",
+                    "KeyUsage": "SIGN_VERIFY",
+                    "Enabled": true
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server.uri());
+        let signer = KmsSigner::with_client(
+            client,
+            TEST_KEY_ID.to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .expect("Failed to create KmsSigner");
+
+        assert!(!signer.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_kms_sign_transaction_success() {
+        use crate::test_util::create_test_transaction;
+        use wiremock::matchers::any;
+
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+
+        let mut tx = create_test_transaction(&keypair.pubkey());
+        let signature = keypair.sign_message(&tx.message_data());
+
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "KeyId": TEST_KEY_ID,
+                "Signature": STANDARD.encode(signature.as_ref()),
+                "SigningAlgorithm": "ED25519_SHA_512"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server.uri());
+        let signer = KmsSigner::with_client(
+            client,
+            TEST_KEY_ID.to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .expect("Failed to create KmsSigner");
+
+        let result = signer.sign_transaction(&mut tx).await;
+        assert!(result.is_ok());
+
+        let (base64_tx, sig) = result.unwrap();
+        assert!(!base64_tx.is_empty());
+        assert_eq!(sig.as_ref().len(), 64);
+    }
+
+    #[tokio::test]
+    async fn test_kms_with_client_invalid_pubkey() {
+        let mock_server = MockServer::start().await;
+        let client = create_test_client(&mock_server.uri());
+
+        let result = KmsSigner::with_client(
+            client,
+            TEST_KEY_ID.to_string(),
+            "not-a-valid-pubkey".to_string(),
+        );
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SignerError::InvalidPublicKey(_)
+        ));
     }
 }
