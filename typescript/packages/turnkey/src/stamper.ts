@@ -5,7 +5,7 @@ import * as crypto from 'crypto';
 
 /**
  * Configuration for ApiKeyStamper
- */ 
+ */
 export interface ApiKeyStamperConfig {
     /** Turnkey API private key in hex format (32 bytes) */
     apiPrivateKey: string;
