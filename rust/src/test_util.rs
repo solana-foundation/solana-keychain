@@ -16,7 +16,11 @@ fn create_transfer_instruction(from: &Pubkey, to: &Pubkey, lamports: u64) -> Ins
 
 pub fn create_test_transaction(from: &Pubkey) -> Transaction {
     let to = Pubkey::new_unique();
-    let instruction = create_transfer_instruction(from, &to, 1_000_000);
+    create_test_transaction_with_recipient(from, &to)
+}
+
+pub fn create_test_transaction_with_recipient(from: &Pubkey, to: &Pubkey) -> Transaction {
+    let instruction = create_transfer_instruction(from, to, 1_000_000);
     let message = Message::new(&[instruction], Some(from));
     let mut tx = Transaction::new_unsigned(message);
     tx.message.recent_blockhash = Hash::default();

@@ -440,9 +440,9 @@ cargo test --all-features
 
 Before submitting your PR:
 
-- [ ] Code compiles without warnings (`make build`)
-- [ ] All tests pass (`make test`)
-- [ ] Code is formatted/linting passes (`make fmt`)
+- [ ] Code compiles without warnings (`just build`)
+- [ ] All tests pass (`just test`)
+- [ ] Code is formatted/linting passes (`just fmt`)
 - [ ] No hardcoded values or secrets in code
 - [ ] Error messages are helpful and descriptive
 - [ ] Follows Rust naming conventions (snake_case)
@@ -524,9 +524,9 @@ feat(signer): add YourService signer integration
 Adds support for YourService as a signing backend. [Link to YourService Documentation](https://yourservice.com/docs)
 
 
-- [X] Code compiles without warnings (`make build`)
-- [X] Code is formatted/linting passes (`make fmt`)
-- [X] Add comprehensive tests with wiremock - All tests pass (`make test`)
+- [X] Code compiles without warnings (`just build`)
+- [X] Code is formatted/linting passes (`just fmt`)
+- [X] Add comprehensive tests with wiremock - All tests pass (`just test`)
 - [X] Implemented SolanaSigner trait for YourServiceSigner
 - [X] Added feature flag 'your_service'
 - [X] Added to README.md supported backends table

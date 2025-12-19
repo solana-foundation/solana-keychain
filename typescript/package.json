@@ -14,6 +14,7 @@
     "test:unit": "pnpm -r test:unit",
     "test:integration": "pnpm -r test:integration",
     "lint": "eslint packages --ext .ts",
+    "lint:fix": "eslint packages --ext .ts --fix",
     "format": "prettier --write \"packages/**/*.{ts,json,md}\"",
     "format:check": "prettier --check \"packages/**/*.{ts,json,md}\"",
     "clean": "pnpm -r clean",

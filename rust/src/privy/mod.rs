@@ -76,18 +76,18 @@ impl PrivySigner {
 
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            let error_text = response
+            let _error_text = response
                 .text()
                 .await
                 .unwrap_or_else(|_| "Failed to read error response".to_string());
 
             #[cfg(feature = "unsafe-debug")]
             log::error!(
-                "Privy API get_public_key error - status: {status}, response: {error_text}"
+                "Privy API fetch_public_key error - status: {status}, response: {_error_text}"
             );
 
             #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Privy API get_public_key error - status: {status}");
+            log::error!("Privy API fetch_public_key error - status: {status}");
 
             return Err(SignerError::RemoteApiError(format!("API error {status}")));
         }
@@ -124,13 +124,13 @@ impl PrivySigner {
 
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            let error_text = response
+            let _error_text = response
                 .text()
                 .await
                 .unwrap_or_else(|_| "Failed to read error response".to_string());
 
             #[cfg(feature = "unsafe-debug")]
-            log::error!("Privy API sign_message error - status: {status}, response: {error_text}");
+            log::error!("Privy API sign_message error - status: {status}, response: {_error_text}");
 
             #[cfg(not(feature = "unsafe-debug"))]
             log::error!("Privy API sign_message error - status: {status}");

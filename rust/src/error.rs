@@ -59,7 +59,12 @@ impl From<serde_json::Error> for SignerError {
     }
 }
 
-#[cfg(any(feature = "vault", feature = "privy", feature = "turnkey"))]
+#[cfg(any(
+    feature = "vault",
+    feature = "privy",
+    feature = "turnkey",
+    feature = "fireblocks"
+))]
 impl From<reqwest::Error> for SignerError {
     fn from(err: reqwest::Error) -> Self {
         SignerError::HttpError(err.to_string())

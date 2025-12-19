@@ -14,7 +14,7 @@ jobs:
         working-directory: typescript
     strategy:
       matrix:
-        package: [vault, privy, turnkey]
+        package: [vault, privy, turnkey, fireblocks]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,7 +37,7 @@ jobs:
         working-directory: typescript
     strategy:
       matrix:
-        package: [privy, turnkey]
+        package: [privy, turnkey, fireblocks]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -62,6 +62,10 @@ jobs:
           TURNKEY_ORGANIZATION_ID: ${{ secrets.TURNKEY_ORGANIZATION_ID }}
           TURNKEY_PRIVATE_KEY_ID: ${{ secrets.TURNKEY_PRIVATE_KEY_ID }}
           TURNKEY_PUBLIC_KEY: ${{ secrets.TURNKEY_SIGNER_PUBKEY }}
+          # Fireblocks
+          FIREBLOCKS_API_KEY: ${{ secrets.FIREBLOCKS_API_KEY }}
+          FIREBLOCKS_PRIVATE_KEY_PEM: ${{ secrets.FIREBLOCKS_PRIVATE_KEY_PEM }}
+          FIREBLOCKS_VAULT_ACCOUNT_ID: ${{ secrets.FIREBLOCKS_VAULT_ACCOUNT_ID }}
         run: pnpm -F @solana-keychain/${{ matrix.package }} run test:integration
 
   typescript-lint:

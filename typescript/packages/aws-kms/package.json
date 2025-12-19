@@ -1,0 +1,58 @@
+{
+    "name": "@solana-keychain/aws-kms",
+    "author": "Solana Foundation",
+    "version": "0.1.0",
+    "description": "AWS KMS-based signer for Solana transactions using EdDSA (Ed25519)",
+    "license": "MIT",
+    "repository": "https://github.com/solana-foundation/solana-keychain",
+    "keywords": [
+        "solana",
+        "signing",
+        "wallet",
+        "aws",
+        "kms",
+        "ed25519",
+        "eddsa"
+    ],
+    "type": "module",
+    "sideEffects": false,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "src"
+    ],
+    "scripts": {
+        "build": "tsc --build",
+        "clean": "rm -rf dist *.tsbuildinfo",
+        "test": "vitest run",
+        "test:unit": "vitest run --config ../../vitest.config.unit.ts",
+        "test:integration": "vitest run --config ../../vitest.config.integration.ts",
+        "test:watch": "vitest",
+        "test:watch:unit": "vitest --config ../../vitest.config.unit.ts",
+        "test:watch:integration": "vitest --config ../../vitest.config.integration.ts",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@aws-sdk/client-kms": "^3.700.0",
+        "@solana-keychain/core": "workspace:*",
+        "@solana/addresses": "^5.0.0",
+        "@solana/codecs-strings": "^5.0.0",
+        "@solana/keys": "^5.0.0",
+        "@solana/signers": "^5.0.0",
+        "@solana/transactions": "^5.0.0"
+    },
+    "devDependencies": {
+        "@solana-keychain/test-utils": "workspace:*",
+        "dotenv": "^17.2.3"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}
