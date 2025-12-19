@@ -131,6 +131,27 @@ importers:
         specifier: ^17.2.3
         version: 17.2.3
 
+  packages/keychain:
+    dependencies:
+      '@solana/keychain-aws-kms':
+        specifier: workspace:*
+        version: link:../aws-kms
+      '@solana/keychain-core':
+        specifier: workspace:*
+        version: link:../core
+      '@solana/keychain-fireblocks':
+        specifier: workspace:*
+        version: link:../fireblocks
+      '@solana/keychain-privy':
+        specifier: workspace:*
+        version: link:../privy
+      '@solana/keychain-turnkey':
+        specifier: workspace:*
+        version: link:../turnkey
+      '@solana/keychain-vault':
+        specifier: workspace:*
+        version: link:../vault
+
   packages/privy:
     dependencies:
       '@solana/addresses':

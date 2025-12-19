@@ -1,0 +1,50 @@
+{
+    "name": "@solana/keychain",
+    "author": "Solana Foundation",
+    "license": "MIT",
+    "repository": "https://github.com/solana-foundation/solana-keychain",
+    "version": "0.1.0",
+    "description": "Unified Solana transaction signing across multiple backends",
+    "keywords": [
+        "solana",
+        "signing",
+        "wallet",
+        "privy",
+        "vault",
+        "turnkey",
+        "aws",
+        "kms",
+        "fireblocks"
+    ],
+    "type": "module",
+    "sideEffects": false,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "src"
+    ],
+    "scripts": {
+        "build": "tsc --build",
+        "clean": "rm -rf dist *.tsbuildinfo",
+        "test": "pnpm run typecheck",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@solana/keychain-core": "workspace:*",
+        "@solana/keychain-aws-kms": "workspace:*",
+        "@solana/keychain-fireblocks": "workspace:*",
+        "@solana/keychain-privy": "workspace:*",
+        "@solana/keychain-turnkey": "workspace:*",
+        "@solana/keychain-vault": "workspace:*"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}
