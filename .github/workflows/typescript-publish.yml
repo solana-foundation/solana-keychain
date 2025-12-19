@@ -92,7 +92,7 @@ jobs:
         working-directory: typescript/packages/keychain
         run: |
           echo "📦 Publishing @solana/keychain@${{ steps.version.outputs.version }} to npm..."
-          npm publish --access public
+          npm publish --access public --provenance
 
       - name: Create and push tag
         run: |
