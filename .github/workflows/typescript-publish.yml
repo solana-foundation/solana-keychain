@@ -1,0 +1,142 @@
+name: Publish @solana/keychain (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish-to-npm:
+        description: 'Publish to npm registry'
+        required: true
+        default: true
+        type: boolean
+      create-github-release:
+        description: 'Create GitHub release'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+  pull-requests: write
+
+# Prevent concurrent publishes
+concurrency:
+  group: keychain-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish @solana/keychain
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.14.0
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        working-directory: typescript
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile
+
+      - name: Get version
+        id: version
+        working-directory: typescript/packages/keychain
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Publishing version: $VERSION"
+
+      - name: Build all packages
+        working-directory: typescript
+        run: pnpm build
+
+      - name: Run type check
+        working-directory: typescript
+        run: pnpm typecheck
+
+      - name: Create and push tag
+        run: |
+          git tag "ts-keychain-v${{ steps.version.outputs.version }}"
+          git push origin "ts-keychain-v${{ steps.version.outputs.version }}"
+
+      - name: Publish to npm
+        if: ${{ github.event.inputs.publish-to-npm == 'true' }}
+        working-directory: typescript/packages/keychain
+        run: |
+          echo "📦 Publishing @solana/keychain@${{ steps.version.outputs.version }} to npm..."
+          pnpm publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        if: ${{ github.event.inputs.create-github-release == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tagName = `ts-keychain-v${{ steps.version.outputs.version }}`;
+            const releaseName = `@solana/keychain v${{ steps.version.outputs.version }}`;
+
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tagName,
+              name: releaseName,
+              body: `Release of @solana/keychain v${{ steps.version.outputs.version }} (TypeScript)`,
+              draft: false,
+              prerelease: false,
+            });
+
+            console.log(`✅ Created release: ${releaseName}`);
+
+      - name: Publish summary
+        run: |
+          echo "## 🎉 @solana/keychain Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version**: \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Package**: \`@solana/keychain\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag**: \`ts-keychain-v${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.publish-to-npm }}" == "true" ]; then
+            echo "✅ Published to npm: https://www.npmjs.com/package/@solana/keychain/v/${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⏭️ Skipped npm publish (dry run)" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ github.event.inputs.create-github-release }}" == "true" ]; then
+            echo "✅ GitHub release created: https://github.com/${{ github.repository }}/releases/tag/ts-keychain-v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⏭️ Skipped GitHub release creation" >> $GITHUB_STEP_SUMMARY
+          fi
