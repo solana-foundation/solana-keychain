@@ -1,5 +1,6 @@
 import {
     appendTransactionMessageInstructions,
+    createSolanaRpc,
     createTransactionMessage,
     pipe,
     setTransactionMessageFeePayerSigner,
@@ -7,7 +8,6 @@ import {
     signTransactionMessageWithSigners,
 } from '@solana/kit';
 import { getAddMemoInstruction } from '@solana-program/memo';
-import { getRpcBlockhash } from '@solana-keychain/test-utils';
 import { config } from 'dotenv';
 import { describe, expect, it } from 'vitest';
 
@@ -41,7 +41,10 @@ describe('FireblocksSigner Integration', () => {
             const rpcUrl = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
 
             // Get real blockhash from devnet
-            const { blockhash, lastValidBlockHeight } = await getRpcBlockhash(rpcUrl);
+            const rpc = createSolanaRpc(rpcUrl);
+            const {
+                value: { blockhash, lastValidBlockHeight },
+            } = await rpc.getLatestBlockhash().send();
 
             // Create memo transaction (doesn't need funds)
             const transaction = pipe(

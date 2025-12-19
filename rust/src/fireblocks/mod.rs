@@ -76,7 +76,7 @@ impl FireblocksSigner {
                 .unwrap_or_else(|| "https://api.fireblocks.io".to_string()),
             client: reqwest::Client::new(),
             poll_interval_ms: config.poll_interval_ms.unwrap_or(1000),
-            max_poll_attempts: config.max_poll_attempts.unwrap_or(60),
+            max_poll_attempts: config.max_poll_attempts.unwrap_or(300),
             use_program_call: config.use_program_call.unwrap_or(false),
         }
     }
@@ -275,9 +275,10 @@ impl FireblocksSigner {
             }
         }
 
-        Err(SignerError::SigningFailed(
-            "Transaction polling timeout".to_string(),
-        ))
+        Err(SignerError::RemoteApiError(format!(
+            "Transaction polling timeout after {} attempts - signing request may still complete",
+            self.max_poll_attempts
+        )))
     }
 
     /// Get transaction status
