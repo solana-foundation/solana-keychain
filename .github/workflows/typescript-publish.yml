@@ -28,6 +28,8 @@ jobs:
   publish:
     name: Publish @solana/keychain
     runs-on: ubuntu-latest
+    env:
+      NPM_CONFIG_PROVENANCE: true
 
     steps:
       - name: Checkout repository
@@ -45,7 +47,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -92,7 +93,7 @@ jobs:
         working-directory: typescript/packages/keychain
         run: |
           echo "📦 Publishing @solana/keychain@${{ steps.version.outputs.version }} to npm..."
-          npm publish --access public --provenance
+          npm publish --access public
 
       - name: Create and push tag
         run: |
