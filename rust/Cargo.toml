@@ -16,7 +16,15 @@ vault = ["dep:reqwest"]
 privy = ["dep:reqwest"]
 turnkey = ["dep:reqwest", "dep:p256", "dep:hex", "dep:chrono"]
 aws_kms = ["dep:aws-sdk-kms", "dep:aws-config"]
-all = ["memory", "vault", "privy", "turnkey", "aws_kms"]
+fireblocks = [
+    "dep:reqwest",
+    "dep:jsonwebtoken",
+    "dep:sha2",
+    "dep:uuid",
+    "dep:hex",
+    "dep:chrono",
+]
+all = ["memory", "vault", "privy", "turnkey", "aws_kms", "fireblocks"]
 
 # SDK version selection (mutually exclusive)
 sdk-v2 = ["dep:solana-sdk"]
@@ -51,6 +59,9 @@ hex = { version = "0.4.3", optional = true }
 chrono = { version = "0.4.42", optional = true }
 aws-sdk-kms = { version = "1.97.0", optional = true }
 aws-config = { version = "1.1.7", optional = true }
+jsonwebtoken = { version = "10.2", optional = true, features = ["rust_crypto"] }
+sha2 = { version = "0.10.9", optional = true }
+uuid = { version = "1.19", optional = true, features = ["v4"] }
 
 # Core dependencies (used by all signers for transaction serialization)
 bincode = "1.3"

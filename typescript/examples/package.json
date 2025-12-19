@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:fireblocks": "SIGNER_TYPE=fireblocks tsx test-signer.ts",
     "test:privy": "SIGNER_TYPE=privy tsx test-signer.ts",
     "test:turnkey": "SIGNER_TYPE=turnkey tsx test-signer.ts",
     "test:keypair": "SIGNER_TYPE=keypair tsx test-signer.ts"
   },
   "dependencies": {
     "@solana-keychain/core": "workspace:*",
+    "@solana-keychain/fireblocks": "workspace:*",
     "@solana-keychain/privy": "workspace:*",
     "@solana-keychain/turnkey": "workspace:*"
   },

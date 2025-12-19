@@ -41,8 +41,9 @@ const signedTx = await signTransactionMessageWithSigners(transaction);
 | [@solana-keychain/core](./packages/core) | Core interfaces, types, and utilities for building custom signers |
 | [@solana-keychain/privy](./packages/privy) | Privy wallet signer implementation |
 | [@solana-keychain/turnkey](./packages/turnkey) | Turnkey wallet signer implementation |
-| [@solana-keychain/vault](./packages/vault) | Vault wallet signer implementation |
-| [@solana-keychain/aws-kms](./packages/aws-kms) | AWS KMS wallet signer implementation |
+| [@solana-keychain/vault](./packages/vault) | HashiCorp Vault signer implementation |
+| [@solana-keychain/aws-kms](./packages/aws-kms) | AWS KMS signer implementation |
+| [@solana-keychain/fireblocks](./packages/fireblocks) | Fireblocks signer implementation |
 
 ## Installation
 
@@ -52,9 +53,10 @@ const signedTx = await signTransactionMessageWithSigners(transaction);
 # Core package (required for building custom signers)
 pnpm add @solana-keychain/core
 
-# Privy implementation
+# Signer implementations
+pnpm add @solana-keychain/aws-kms
+pnpm add @solana-keychain/fireblocks
 pnpm add @solana-keychain/privy
-
-# Turnkey implementation
 pnpm add @solana-keychain/turnkey
+pnpm add @solana-keychain/vault
 ```

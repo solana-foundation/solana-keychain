@@ -37,7 +37,7 @@ jobs:
     strategy:
       matrix:
         sdk_version: [v2, v3]
-        test: [test_privy_integration, test_turnkey_integration]
+        test: [test_privy_integration, test_turnkey_integration, test_fireblocks_integration]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -51,6 +51,10 @@ jobs:
           TURNKEY_ORGANIZATION_ID: ${{ secrets.TURNKEY_ORGANIZATION_ID }}
           TURNKEY_PRIVATE_KEY_ID: ${{ secrets.TURNKEY_PRIVATE_KEY_ID }}
           TURNKEY_PUBLIC_KEY: ${{ secrets.TURNKEY_SIGNER_PUBKEY }}
+          FIREBLOCKS_API_KEY: ${{ secrets.FIREBLOCKS_API_KEY }}
+          FIREBLOCKS_PRIVATE_KEY_PEM: ${{ secrets.FIREBLOCKS_PRIVATE_KEY_PEM }}
+          FIREBLOCKS_VAULT_ACCOUNT_ID: ${{ secrets.FIREBLOCKS_VAULT_ACCOUNT_ID }}
+          SOLANA_RPC_URL: https://api.devnet.solana.com
         run: |
           if [ "${{ matrix.sdk_version }}" = "v2" ]; then
             cargo test --no-default-features --features all,sdk-v2,unsafe-debug,integration-tests tests::${{ matrix.test }}::

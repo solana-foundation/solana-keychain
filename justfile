@@ -4,7 +4,7 @@ sdkv2 := "all,sdk-v2,unsafe-debug"
 sdkv3 := "all,sdk-v3,unsafe-debug"
 sdkv2_int := "all,sdk-v2,unsafe-debug,integration-tests"
 sdkv3_int := "all,sdk-v3,unsafe-debug,integration-tests"
-integration_tests := "test_privy_integration test_turnkey_integration test_vault_integration"
+integration_tests := "test_fireblocks_integration test_privy_integration test_turnkey_integration test_vault_integration"
 
 default:
     @just --list
@@ -169,7 +169,7 @@ ts-test-integration:
     vault write transit/restore/solana-test-key backup=@"../rust/src/tests/vault-test-key.b64" >/dev/null 2>&1 || true
 
     echo "Running TypeScript integration tests..."
-    pnpm -F @solana-keychain/privy -F @solana-keychain/turnkey -F @solana-keychain/vault test:integration
+    pnpm -F @solana-keychain/fireblocks -F @solana-keychain/privy -F @solana-keychain/turnkey -F @solana-keychain/vault test:integration
 
 # ===========================================================
 # ========================= Release =========================

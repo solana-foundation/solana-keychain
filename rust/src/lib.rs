@@ -11,6 +11,7 @@
 //! - `privy`: Privy API integration
 //! - `turnkey`: Turnkey API integration
 //! - `aws_kms`: AWS KMS integration with EdDSA (Ed25519) signing
+//! - `fireblocks`: Fireblocks API integration
 //! - `all`: Enable all signer backends
 //!
 //! ## SDK Version Selection
@@ -43,6 +44,9 @@ pub mod turnkey;
 #[cfg(feature = "aws_kms")]
 pub mod aws_kms;
 
+#[cfg(feature = "fireblocks")]
+pub mod fireblocks;
+
 // Re-export core types
 pub use error::SignerError;
 pub use traits::SolanaSigner;
@@ -63,6 +67,9 @@ pub use turnkey::TurnkeySigner;
 #[cfg(feature = "aws_kms")]
 pub use aws_kms::KmsSigner;
 
+#[cfg(feature = "fireblocks")]
+pub use fireblocks::{FireblocksSigner, FireblocksSignerConfig};
+
 use crate::traits::SignedTransaction;
 
 // Ensure at least one signer backend is enabled
@@ -71,10 +78,11 @@ use crate::traits::SignedTransaction;
     feature = "vault",
     feature = "privy",
     feature = "turnkey",
-    feature = "aws_kms"
+    feature = "aws_kms",
+    feature = "fireblocks"
 )))]
 compile_error!(
-    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, or aws_kms"
+    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, or fireblocks"
 );
 
 /// Unified signer enum supporting multiple backends
@@ -93,6 +101,9 @@ pub enum Signer {
 
     #[cfg(feature = "aws_kms")]
     Kms(KmsSigner),
+
+    #[cfg(feature = "fireblocks")]
+    Fireblocks(FireblocksSigner),
 }
 
 impl Signer {
@@ -159,6 +170,14 @@ impl Signer {
     ) -> Result<Self, SignerError> {
         Ok(Self::Kms(KmsSigner::new(key_id, public_key, region).await?))
     }
+
+    /// Create a Fireblocks signer (requires initialization)
+    #[cfg(feature = "fireblocks")]
+    pub async fn from_fireblocks(config: FireblocksSignerConfig) -> Result<Self, SignerError> {
+        let mut signer = FireblocksSigner::new(config);
+        signer.init().await?;
+        Ok(Self::Fireblocks(signer))
+    }
 }
 
 #[async_trait::async_trait]
@@ -179,6 +198,9 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "aws_kms")]
             Signer::Kms(s) => s.pubkey(),
+
+            #[cfg(feature = "fireblocks")]
+            Signer::Fireblocks(s) => s.pubkey(),
         }
     }
 
@@ -201,6 +223,9 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "aws_kms")]
             Signer::Kms(s) => s.sign_transaction(tx).await,
+
+            #[cfg(feature = "fireblocks")]
+            Signer::Fireblocks(s) => s.sign_transaction(tx).await,
         }
     }
 
@@ -220,6 +245,9 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "aws_kms")]
             Signer::Kms(s) => s.sign_message(message).await,
+
+            #[cfg(feature = "fireblocks")]
+            Signer::Fireblocks(s) => s.sign_message(message).await,
         }
     }
 
@@ -242,6 +270,9 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "aws_kms")]
             Signer::Kms(s) => s.sign_partial_transaction(tx).await,
+
+            #[cfg(feature = "fireblocks")]
+            Signer::Fireblocks(s) => s.sign_partial_transaction(tx).await,
         }
     }
 
@@ -261,6 +292,9 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "aws_kms")]
             Signer::Kms(s) => s.is_available().await,
+
+            #[cfg(feature = "fireblocks")]
+            Signer::Fireblocks(s) => s.is_available().await,
         }
     }
 }

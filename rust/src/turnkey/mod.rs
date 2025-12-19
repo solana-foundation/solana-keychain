@@ -92,13 +92,13 @@ impl TurnkeySigner {
 
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            let error_text = response
+            let _error_text = response
                 .text()
                 .await
                 .unwrap_or_else(|_| "Failed to read error response".to_string());
 
             #[cfg(feature = "unsafe-debug")]
-            log::error!("Turnkey API error - status: {status}, response: {error_text}");
+            log::error!("Turnkey API error - status: {status}, response: {_error_text}");
 
             #[cfg(not(feature = "unsafe-debug"))]
             log::error!("Turnkey API error - status: {status}");
