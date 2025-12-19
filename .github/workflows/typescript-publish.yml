@@ -87,17 +87,17 @@ jobs:
         working-directory: typescript
         run: pnpm typecheck
 
-      - name: Create and push tag
-        run: |
-          git tag "ts-keychain-v${{ steps.version.outputs.version }}"
-          git push origin "ts-keychain-v${{ steps.version.outputs.version }}"
-
       - name: Publish to npm
         if: ${{ github.event.inputs.publish-to-npm == 'true' }}
         working-directory: typescript/packages/keychain
         run: |
           echo "📦 Publishing @solana/keychain@${{ steps.version.outputs.version }} to npm..."
           npm publish --access public
+
+      - name: Create and push tag
+        run: |
+          git tag "ts-keychain-v${{ steps.version.outputs.version }}"
+          git push origin "ts-keychain-v${{ steps.version.outputs.version }}"
 
       - name: Create GitHub Release
         if: ${{ github.event.inputs.create-github-release == 'true' }}
