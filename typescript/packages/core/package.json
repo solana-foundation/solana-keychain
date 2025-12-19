@@ -1,5 +1,5 @@
 {
-    "name": "@solana-keychain/core",
+    "name": "@solana/keychain-core",
     "author": "Solana Foundation",
     "license": "MIT",
     "repository": "https://github.com/solana-foundation/solana-keychain",

@@ -1,4 +1,4 @@
-import { SignerTestConfig, TestScenario } from '@solana-keychain/test-utils';
+import { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
 import { FireblocksSigner } from '../fireblocks-signer';
 
 const SIGNER_TYPE = 'fireblocks';

@@ -20,10 +20,10 @@
  *   - AWS_KMS_REGION: "us-east-1" (optional, defaults to AWS config default region)
  */
 
-import { assertIsSolanaSigner, SolanaSigner } from '@solana-keychain/core';
-import { FireblocksSigner } from '@solana-keychain/fireblocks';
-import { PrivySigner } from '@solana-keychain/privy';
-import { TurnkeySigner } from '@solana-keychain/turnkey';
+import { assertIsSolanaSigner, SolanaSigner } from '@solana/keychain-core';
+import { FireblocksSigner } from '@solana/keychain-fireblocks';
+import { PrivySigner } from '@solana/keychain-privy';
+import { TurnkeySigner } from '@solana/keychain-turnkey';
 import {
     Address,
     airdropFactory,

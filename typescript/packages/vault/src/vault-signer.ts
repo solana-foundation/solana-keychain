@@ -1,9 +1,9 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
+import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
-import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana-keychain/core';
 
 import type {
     VaultErrorResponse,

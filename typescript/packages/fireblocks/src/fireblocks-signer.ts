@@ -1,5 +1,6 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase58Encoder } from '@solana/codecs-strings';
+import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import {
@@ -8,7 +9,6 @@ import {
     TransactionWithinSizeLimit,
     TransactionWithLifetime,
 } from '@solana/transactions';
-import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana-keychain/core';
 
 import { createJwt } from './jwt.js';
 import type {

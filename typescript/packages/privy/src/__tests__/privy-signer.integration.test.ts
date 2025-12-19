@@ -1,5 +1,5 @@
 import { describe, it } from 'vitest';
-import { runSignerIntegrationTest } from '@solana-keychain/test-utils';
+import { runSignerIntegrationTest } from '@solana/keychain-test-utils';
 import { getConfig } from './setup';
 import { config } from 'dotenv';
 config();

@@ -1,5 +1,5 @@
 {
-    "name": "@solana-keychain/vault",
+    "name": "@solana/keychain-vault",
     "author": "Solana Foundation",
     "version": "0.1.0",
     "description": "HashiCorp Vault signer for Solana transactions",
@@ -38,7 +38,7 @@
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
-        "@solana-keychain/core": "workspace:*",
+        "@solana/keychain-core": "workspace:*",
         "@solana/addresses": "^5.0.0",
         "@solana/codecs-core": "^5.0.0",
         "@solana/codecs-strings": "^5.0.0",
@@ -50,7 +50,7 @@
         "access": "public"
     },
     "devDependencies": {
-        "@solana-keychain/test-utils": "workspace:*",
+        "@solana/keychain-test-utils": "workspace:*",
         "@solana/nominal-types": "^5.0.0",
         "dotenv": "^17.2.3"
     }

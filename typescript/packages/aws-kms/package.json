@@ -1,5 +1,5 @@
 {
-    "name": "@solana-keychain/aws-kms",
+    "name": "@solana/keychain-aws-kms",
     "author": "Solana Foundation",
     "version": "0.1.0",
     "description": "AWS KMS-based signer for Solana transactions using EdDSA (Ed25519)",
@@ -41,7 +41,7 @@
     },
     "dependencies": {
         "@aws-sdk/client-kms": "^3.700.0",
-        "@solana-keychain/core": "workspace:*",
+        "@solana/keychain-core": "workspace:*",
         "@solana/addresses": "^5.0.0",
         "@solana/codecs-strings": "^5.0.0",
         "@solana/keys": "^5.0.0",
@@ -49,7 +49,7 @@
         "@solana/transactions": "^5.0.0"
     },
     "devDependencies": {
-        "@solana-keychain/test-utils": "workspace:*",
+        "@solana/keychain-test-utils": "workspace:*",
         "dotenv": "^17.2.3"
     },
     "publishConfig": {

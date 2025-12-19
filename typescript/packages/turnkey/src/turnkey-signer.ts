@@ -1,5 +1,6 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase64Encoder } from '@solana/codecs-strings';
+import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import {
@@ -8,7 +9,6 @@ import {
     TransactionWithinSizeLimit,
     TransactionWithLifetime,
 } from '@solana/transactions';
-import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana-keychain/core';
 
 import { ApiKeyStamper } from './stamper.js';
 import type { ActivityResponse, SignRequest, SignTransactionRequest, WhoAmIRequest, WhoAmIResponse } from './types.js';

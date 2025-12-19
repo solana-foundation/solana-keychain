@@ -1,19 +1,23 @@
 {
-    "name": "@solana/keychain-test-utils",
+    "name": "@solana/keychain",
     "author": "Solana Foundation",
     "license": "MIT",
     "repository": "https://github.com/solana-foundation/solana-keychain",
     "version": "0.1.0",
-    "description": "Shared testing utilities for Solana signer integration tests",
+    "description": "Unified Solana transaction signing across multiple backends",
     "keywords": [
         "solana",
-        "testing",
-        "integration-tests",
-        "litesvm"
+        "signing",
+        "wallet",
+        "privy",
+        "vault",
+        "turnkey",
+        "aws",
+        "kms",
+        "fireblocks"
     ],
     "type": "module",
     "sideEffects": false,
-    "private": true,
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "exports": {
@@ -29,15 +33,18 @@
     "scripts": {
         "build": "tsc --build",
         "clean": "rm -rf dist *.tsbuildinfo",
+        "test": "pnpm run typecheck",
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
-        "@solana-program/memo": "^0.10.0",
         "@solana/keychain-core": "workspace:*",
-        "@solana/kit": "^5.0.0",
-        "litesvm": "^0.3.3"
+        "@solana/keychain-aws-kms": "workspace:*",
+        "@solana/keychain-fireblocks": "workspace:*",
+        "@solana/keychain-privy": "workspace:*",
+        "@solana/keychain-turnkey": "workspace:*",
+        "@solana/keychain-vault": "workspace:*"
     },
-    "devDependencies": {
-        "@types/node": "^24.10.1"
+    "publishConfig": {
+        "access": "public"
     }
 }

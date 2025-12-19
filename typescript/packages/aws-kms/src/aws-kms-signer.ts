@@ -1,9 +1,9 @@
 import { DescribeKeyCommand, KMSClient, MessageType, SignCommand, SigningAlgorithmSpec } from '@aws-sdk/client-kms';
 import { Address, assertIsAddress } from '@solana/addresses';
+import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
-import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana-keychain/core';
 
 import type { AwsCredentials, AwsKmsSignerConfig } from './types.js';
 

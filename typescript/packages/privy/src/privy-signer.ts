@@ -1,5 +1,12 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase64Decoder, getBase64Encoder, getUtf8Encoder } from '@solana/codecs-strings';
+import {
+    createSignatureDictionary,
+    extractSignatureFromWireTransaction,
+    SignerErrorCode,
+    SolanaSigner,
+    throwSignerError,
+} from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import {
@@ -10,13 +17,6 @@ import {
     TransactionWithinSizeLimit,
     TransactionWithLifetime,
 } from '@solana/transactions';
-import {
-    createSignatureDictionary,
-    extractSignatureFromWireTransaction,
-    SignerErrorCode,
-    SolanaSigner,
-    throwSignerError,
-} from '@solana-keychain/core';
 
 import {
     SignatureBytesBase64,
