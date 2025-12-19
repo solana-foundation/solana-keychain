@@ -1,11 +1,11 @@
 import { p256 } from '@noble/curves/nist.js';
 import { numberToBytesBE } from '@noble/curves/utils.js';
-import { SignerErrorCode, throwSignerError } from '@solana-keychain/core';
+import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 import * as crypto from 'crypto';
 
 /**
  * Configuration for ApiKeyStamper
- */
+ */ 
 export interface ApiKeyStamperConfig {
     /** Turnkey API private key in hex format (32 bytes) */
     apiPrivateKey: string;

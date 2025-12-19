@@ -1,4 +1,4 @@
-import { SignerTestConfig, TestScenario } from '@solana-keychain/test-utils';
+import { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
 import { VaultSigner } from '../vault-signer';
 
 const SIGNER_TYPE = 'vault';

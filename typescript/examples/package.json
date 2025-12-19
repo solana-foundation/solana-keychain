@@ -1,5 +1,5 @@
 {
-  "name": "@solana-keychain/example",
+  "name": "@solana/keychain-example",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,10 +10,10 @@
     "test:keypair": "SIGNER_TYPE=keypair tsx test-signer.ts"
   },
   "dependencies": {
-    "@solana-keychain/core": "workspace:*",
-    "@solana-keychain/fireblocks": "workspace:*",
-    "@solana-keychain/privy": "workspace:*",
-    "@solana-keychain/turnkey": "workspace:*"
+    "@solana/keychain-core": "workspace:*",
+    "@solana/keychain-fireblocks": "workspace:*",
+    "@solana/keychain-privy": "workspace:*",
+    "@solana/keychain-turnkey": "workspace:*"
   },
   "devDependencies": {
     "@solana-program/memo": "^0.10.0",

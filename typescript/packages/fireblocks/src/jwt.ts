@@ -1,4 +1,4 @@
-import { SignerErrorCode, throwSignerError } from '@solana-keychain/core';
+import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 import { importPKCS8, SignJWT } from 'jose';
 
 /**

@@ -1,6 +1,6 @@
 import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { assertIsSolanaSigner } from '@solana-keychain/core';
+import { assertIsSolanaSigner } from '@solana/keychain-core';
 
 import { FireblocksSigner } from '../fireblocks-signer.js';
 import type { FireblocksSignerConfig } from '../types.js';

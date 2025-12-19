@@ -27,8 +27,8 @@ jobs:
         run: pnpm install
       - name: Build packages
         run: pnpm build
-      - name: Run unit tests for @solana-keychain/${{ matrix.package }}
-        run: pnpm -F @solana-keychain/${{ matrix.package }} run test:unit
+      - name: Run unit tests for @solana/keychain-${{ matrix.package }}
+        run: pnpm -F @solana/keychain-${{ matrix.package }} run test:unit
 
   typescript-test-integration:
     runs-on: ubuntu-latest
@@ -50,7 +50,7 @@ jobs:
         run: pnpm install
       - name: Build packages
         run: pnpm build
-      - name: Run integration tests for @solana-keychain/${{ matrix.package }}
+      - name: Run integration tests for @solana/keychain-${{ matrix.package }}
         env:
           # Privy
           PRIVY_APP_ID: ${{ secrets.PRIVY_APP_ID }}
@@ -66,7 +66,7 @@ jobs:
           FIREBLOCKS_API_KEY: ${{ secrets.FIREBLOCKS_API_KEY }}
           FIREBLOCKS_PRIVATE_KEY_PEM: ${{ secrets.FIREBLOCKS_PRIVATE_KEY_PEM }}
           FIREBLOCKS_VAULT_ACCOUNT_ID: ${{ secrets.FIREBLOCKS_VAULT_ACCOUNT_ID }}
-        run: pnpm -F @solana-keychain/${{ matrix.package }} run test:integration
+        run: pnpm -F @solana/keychain-${{ matrix.package }} run test:integration
 
   typescript-lint:
     runs-on: ubuntu-latest

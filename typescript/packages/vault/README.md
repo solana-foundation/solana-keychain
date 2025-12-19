@@ -1,11 +1,11 @@
-# @solana-keychain/vault
+# @solana/keychain-vault
 
 HashiCorp Vault-based signer for Solana transactions using Vault's transit engine.
 
 ## Installation
 
 ```bash
-npm install @solana-keychain/vault
+npm install @solana/keychain-vault
 ```
 
 ## Prerequisites
@@ -32,7 +32,7 @@ vault read -field=keys transit/export/signing-key/my-solana-key/1
 ### Basic Setup
 
 ```typescript
-import { VaultSigner } from '@solana-keychain/vault';
+import { VaultSigner } from '@solana/keychain-vault';
 
 const signer = new VaultSigner({
     vaultAddr: 'https://vault.example.com',
@@ -114,7 +114,7 @@ path "transit/keys/my-solana-key" {
 
 ## Error Handling
 
-The signer will throw errors with specific codes from `@solana-keychain/core`:
+The signer will throw errors with specific codes from `@solana/keychain-core`:
 
 - `CONFIG_ERROR` - Invalid configuration
 - `HTTP_ERROR` - Network request failed
@@ -122,7 +122,7 @@ The signer will throw errors with specific codes from `@solana-keychain/core`:
 - `PARSING_ERROR` - Failed to parse Vault response
 
 ```typescript
-import { SignerErrorCode } from '@solana-keychain/core';
+import { SignerErrorCode } from '@solana/keychain-core';
 
 try {
     await signer.signMessages([message]);

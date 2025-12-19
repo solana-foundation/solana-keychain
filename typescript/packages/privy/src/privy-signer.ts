@@ -16,7 +16,7 @@ import {
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
-} from '@solana-keychain/core';
+} from '@solana/keychain-core';
 
 import {
     SignatureBytesBase64,
