@@ -97,9 +97,7 @@ jobs:
         working-directory: typescript/packages/keychain
         run: |
           echo "📦 Publishing @solana/keychain@${{ steps.version.outputs.version }} to npm..."
-          pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          pnpm publish --access public --no-git-checks --provenance
 
       - name: Create GitHub Release
         if: ${{ github.event.inputs.create-github-release == 'true' }}
