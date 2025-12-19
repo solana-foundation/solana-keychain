@@ -1,4 +1,4 @@
-import type { Blockhash, Slot } from '@solana/kit';
+import { createSolanaRpc, type Blockhash, type Slot } from '@solana/kit';
 
 export interface BlockhashWithExpiryBlockHeight {
     blockhash: Blockhash;
@@ -10,46 +10,18 @@ export interface BlockhashWithExpiryBlockHeight {
  * Used for integration tests that need real network blockhash (e.g., PROGRAM_CALL signers)
  */
 export async function getRpcBlockhash(rpcUrl: string): Promise<BlockhashWithExpiryBlockHeight> {
-    const response = await fetch(rpcUrl, {
-        body: JSON.stringify({
-            id: 1,
-            jsonrpc: '2.0',
-            method: 'getLatestBlockhash',
-            params: [],
-        }),
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        method: 'POST',
-    });
+    const rpc = createSolanaRpc(rpcUrl);
+    try {
+        const { value: { blockhash, lastValidBlockHeight } } = await rpc.getLatestBlockhash().send();
 
-    if (!response.ok) {
-        throw new Error(`RPC request failed: ${response.status}`);
-    }
-
-    const json = (await response.json()) as {
-        error?: { message: string };
-        result?: {
-            value?: {
-                blockhash?: string;
-                lastValidBlockHeight?: number;
-            };
+        if (!blockhash || lastValidBlockHeight === undefined) {
+            throw new Error('Failed to get blockhash from RPC response');
+        }
+        return {
+            blockhash,
+            lastValidBlockHeight,
         };
-    };
-
-    if (json.error) {
-        throw new Error(`RPC error: ${json.error.message}`);
+    } catch (error) {
+        throw new Error(`Failed to get blockhash from RPC: ${error}`);
     }
-
-    const blockhash = json.result?.value?.blockhash;
-    const lastValidBlockHeight = json.result?.value?.lastValidBlockHeight;
-
-    if (!blockhash || lastValidBlockHeight === undefined) {
-        throw new Error('Failed to get blockhash from RPC response');
-    }
-
-    return {
-        blockhash: blockhash as Blockhash,
-        lastValidBlockHeight: BigInt(lastValidBlockHeight),
-    };
 }
