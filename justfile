@@ -174,9 +174,53 @@ ts-test-integration:
 # ===========================================================
 # ========================= Release =========================
 # ===========================================================
+
+# Bump TypeScript package versions and prepare for release
+[confirm("This will bump all TypeScript package versions. Continue?")]
+[working-directory: 'typescript']
+ts-release version: _check-ts-release
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    current_version=$(node -p "require('./packages/keychain/package.json').version")
+    echo "Current version: ${current_version}"
+    echo "New version: {{ version }}"
+
+    # Update version in all packages
+    PACKAGES="core aws-kms fireblocks privy turnkey vault keychain test-utils"
+    for pkg in $PACKAGES; do
+        echo "  Updating packages/${pkg}..."
+        cd packages/${pkg}
+        npm version {{ version }} --no-git-tag-version
+        cd ../..
+    done
+
+    # Update root workspace version
+    npm version {{ version }} --no-git-tag-version
+
+    git add .
+
+    echo ""
+    echo "TypeScript release prepared! Next steps:"
+    echo "  1. git commit -m 'chore(ts): release v{{ version }}'"
+    echo "  2. git push"
+    echo "  3. Trigger 'Publish TypeScript Packages' workflow in GitHub Actions"
+    echo ""
+    echo "After publishing, deprecate broken versions if needed:"
+    echo "  npm deprecate @solana/keychain@0.1.0 'Broken publish. Please upgrade to >=0.1.1'"
+
+[private]
+_check-ts-release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "Error: Working directory not clean"
+        exit 1
+    fi
+
 [confirm("This will bump version and stage changes. Continue?")]
 [working-directory: 'rust']
-release version: _check-release-tools
+rust-release version: _check-release-tools
     #!/usr/bin/env bash
     set -euo pipefail
 

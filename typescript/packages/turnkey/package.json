@@ -1,7 +1,7 @@
 {
     "name": "@solana/keychain-turnkey",
     "author": "Solana Foundation",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Turnkey-based signer for Solana transactions",
     "license": "MIT",
     "repository": "https://github.com/solana-foundation/solana-keychain",
@@ -30,6 +30,7 @@
     "scripts": {
         "build": "tsc --build",
         "clean": "rm -rf dist *.tsbuildinfo",
+        "prepack": "pnpm run build",
         "test": "vitest run",
         "test:unit": "vitest run --config ../../vitest.config.unit.ts",
         "test:integration": "vitest run --config ../../vitest.config.integration.ts",
