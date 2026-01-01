@@ -96,8 +96,7 @@ jobs:
           # Check that all publishable packages have the same version
           echo "🔍 Checking version consistency across packages..."
           
-          PACKAGES="core aws-kms fireblocks privy turnkey vault keychain"
-          for pkg in $PACKAGES; do
+          for pkg in $PUBLISH_PACKAGES; do
             PKG_VERSION=$(node -p "require('./packages/${pkg}/package.json').version")
             if [ "$PKG_VERSION" != "$VERSION" ]; then
               echo "❌ Version mismatch: packages/${pkg} has version ${PKG_VERSION}, expected ${VERSION}"
@@ -125,12 +124,11 @@ jobs:
           mkdir -p .npm-pack
           
           # Use pnpm pack (not npm pack) to ensure workspace:* is resolved to real versions
-          PACKAGES="core aws-kms fireblocks privy turnkey vault keychain"
-          for pkg in $PACKAGES; do
+          for pkg in $PUBLISH_PACKAGES; do
             echo "  Packing packages/${pkg}..."
-            cd packages/${pkg}
+            pushd "packages/${pkg}" > /dev/null
             pnpm pack --pack-destination ../../.npm-pack
-            cd ../..
+            popd > /dev/null
           done
           
           echo ""
@@ -214,33 +212,32 @@ jobs:
         run: |
           echo "📦 Publishing all packages to npm..."
           
-          # Publish order: core first, then signers, then umbrella last
-          TARBALLS=(
-            ".npm-pack/solana-keychain-core-${{ steps.version.outputs.version }}.tgz"
-            ".npm-pack/solana-keychain-aws-kms-${{ steps.version.outputs.version }}.tgz"
-            ".npm-pack/solana-keychain-fireblocks-${{ steps.version.outputs.version }}.tgz"
-            ".npm-pack/solana-keychain-privy-${{ steps.version.outputs.version }}.tgz"
-            ".npm-pack/solana-keychain-turnkey-${{ steps.version.outputs.version }}.tgz"
-            ".npm-pack/solana-keychain-vault-${{ steps.version.outputs.version }}.tgz"
-            ".npm-pack/solana-keychain-${{ steps.version.outputs.version }}.tgz"
-          )
+          VERSION="${{ steps.version.outputs.version }}"
+          PUBLISHED=0
           
-          PUBLISHED=()
-          for tarball in "${TARBALLS[@]}"; do
-            if [ -f "$tarball" ]; then
-              echo ""
-              echo "📤 Publishing ${tarball}..."
-              npm publish "$tarball" --access public
-              PUBLISHED+=("$tarball")
+          # Publish in dependency order (defined by PUBLISH_PACKAGES)
+          for pkg in $PUBLISH_PACKAGES; do
+            # Handle package name: "keychain" -> "solana-keychain", others -> "solana-keychain-{pkg}"
+            if [ "$pkg" = "keychain" ]; then
+              TARBALL=".npm-pack/solana-keychain-${VERSION}.tgz"
             else
-              echo "⚠️  Tarball not found: ${tarball}"
+              TARBALL=".npm-pack/solana-keychain-${pkg}-${VERSION}.tgz"
+            fi
+            
+            if [ -f "$TARBALL" ]; then
+              echo ""
+              echo "📤 Publishing ${TARBALL}..."
+              npm publish "$TARBALL" --access public
+              PUBLISHED=$((PUBLISHED + 1))
+            else
+              echo "⚠️  Tarball not found: ${TARBALL}"
               echo "   Looking for alternatives..."
-              ls -la .npm-pack/ | grep -i "$(basename "$tarball" .tgz)" || true
+              ls -la .npm-pack/ | grep -i "${pkg}" || true
             fi
           done
           
           echo ""
-          echo "✅ Published ${#PUBLISHED[@]} packages successfully"
+          echo "✅ Published ${PUBLISHED} packages successfully"
 
       - name: Create and push tag
         run: |
