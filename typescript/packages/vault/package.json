@@ -1,7 +1,7 @@
 {
     "name": "@solana/keychain-vault",
     "author": "Solana Foundation",
-    "version": "0.1.0",
+    "version": "0.2.1",
     "description": "HashiCorp Vault signer for Solana transactions",
     "license": "MIT",
     "repository": "https://github.com/solana-foundation/solana-keychain",
