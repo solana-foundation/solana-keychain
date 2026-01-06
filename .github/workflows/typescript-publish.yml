@@ -81,6 +81,18 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Publishing version: $VERSION"
 
+      - name: Check if prerelease
+        id: prerelease
+        run: |
+          if [[ "${{ steps.version.outputs.version }}" == *"-"* ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            echo "npm_tag=beta" >> $GITHUB_OUTPUT
+            echo "📦 Pre-release version detected, using 'beta' npm tag"
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            echo "npm_tag=latest" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build all packages
         working-directory: typescript
         run: pnpm build
@@ -89,17 +101,23 @@ jobs:
         working-directory: typescript
         run: pnpm typecheck
 
+      - name: Create and push tag
+        run: |
+          TAG="ts-keychain-v${{ steps.version.outputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "⏭️ Tag $TAG already exists, skipping"
+          else
+            git tag "$TAG"
+            echo "✅ Created tag $TAG"
+          fi
+          git push origin "$TAG" 2>/dev/null || echo "⏭️ Tag already pushed"
+
       - name: Publish to npm
         if: ${{ github.event.inputs.publish-to-npm == 'true' }}
         working-directory: typescript/packages/keychain
         run: |
           echo "📦 Publishing @solana/keychain@${{ steps.version.outputs.version }} to npm..."
-          npm publish --access public
-
-      - name: Create and push tag
-        run: |
-          git tag "ts-keychain-v${{ steps.version.outputs.version }}"
-          git push origin "ts-keychain-v${{ steps.version.outputs.version }}"
+          npm publish --access public --tag ${{ steps.prerelease.outputs.npm_tag }}
 
       - name: Create GitHub Release
         if: ${{ github.event.inputs.create-github-release == 'true' }}
@@ -109,6 +127,20 @@ jobs:
           script: |
             const tagName = `ts-keychain-v${{ steps.version.outputs.version }}`;
             const releaseName = `@solana/keychain v${{ steps.version.outputs.version }}`;
+            const isPrerelease = '${{ steps.prerelease.outputs.is_prerelease }}' === 'true';
+
+            // Check if release already exists
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: tagName,
+              });
+              console.log(`⏭️ Release ${tagName} already exists, skipping`);
+              return;
+            } catch (e) {
+              if (e.status !== 404) throw e;
+            }
 
             await github.rest.repos.createRelease({
               owner: context.repo.owner,
@@ -117,7 +149,7 @@ jobs:
               name: releaseName,
               body: `Release of @solana/keychain v${{ steps.version.outputs.version }} (TypeScript)`,
               draft: false,
-              prerelease: false,
+              prerelease: isPrerelease,
             });
 
             console.log(`✅ Created release: ${releaseName}`);

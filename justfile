@@ -209,6 +209,80 @@ release version: _check-release-tools
     echo "  3. git push"
     echo "  4. Trigger 'Publish Rust Crate' workflow"
 
+# Start a hotfix branch from the latest stable release
+[confirm("Create hotfix branch from latest stable?")]
+hotfix:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Find latest stable tag (no -beta, -alpha, -rc)
+    stable_tag=$(git tag -l "v*" --sort=-version:refname | grep -v -E -- '-(beta|alpha|rc)' | head -1)
+
+    if [ -z "$stable_tag" ]; then
+        echo "Error: No stable release tag found"
+        exit 1
+    fi
+
+    echo "Latest stable release: $stable_tag"
+
+    # Extract major.minor for branch name
+    version=${stable_tag#v}
+    major_minor=$(echo "$version" | cut -d. -f1,2)
+    branch_name="release/${major_minor}.x"
+
+    # Check if branch already exists
+    if git show-ref --verify --quiet "refs/heads/$branch_name"; then
+        echo "Branch $branch_name already exists"
+        read -p "Switch to it? [y/N] " switch
+        if [[ "$switch" =~ ^[Yy]$ ]]; then
+            git checkout "$branch_name"
+        fi
+    else
+        read -p "Create branch $branch_name from $stable_tag? [y/N] " create
+        if [[ "$create" =~ ^[Yy]$ ]]; then
+            git checkout -b "$branch_name" "$stable_tag"
+            echo ""
+            echo "✅ Created $branch_name from $stable_tag"
+        else
+            echo "Aborted"
+            exit 0
+        fi
+    fi
+
+    echo ""
+    echo "Next steps:"
+    echo "  1. Apply your hotfix commits"
+    echo "  2. Run 'just release X.Y.Z' to bump version"
+    echo "  3. Push and trigger release workflow"
+    echo "  4. Merge hotfix back to main: git checkout main && git merge $branch_name"
+
+# Prepare a new TypeScript SDK release
+[confirm("Start TS SDK release process?")]
+release-ts version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "Error: Working directory not clean"
+        exit 1
+    fi
+
+    current=$(node -p "require('./typescript/packages/keychain/package.json').version")
+    echo "Current version: $current"
+    echo "New version: {{ version }}"
+
+    cd typescript/packages/keychain
+    npm version "{{ version }}" --no-git-tag-version
+
+    cd ../../..
+    git add typescript/packages/keychain/package.json
+
+    echo ""
+    echo "Ready! Next steps:"
+    echo "  git commit -m 'chore: release ts-keychain v{{ version }}'"
+    echo "  git push origin HEAD"
+    echo "  Trigger 'Publish @solana/keychain (Manual)' workflow"
+
 [private]
 _check-release-tools:
     #!/usr/bin/env bash
