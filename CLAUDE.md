@@ -45,10 +45,22 @@ cd rust && cargo fmt
 cd rust && cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-### Publishing a Release
+### Branch Workflow
 ```bash
-# Prepare a new release (bumps version, generates CHANGELOG, stages changes)
-just release 0.1.1
+# Show branch workflow guidance
+just branch-info
+
+# Branch strategy:
+#   main           → Audited code only, stable releases
+#   release/X.Y.Z  → Pre-audit features for version X.Y.Z
+#   hotfix/*       → Hotfixes from main
+```
+
+### Publishing a Rust Release
+```bash
+# Prepare a new release (prompts for version, generates CHANGELOG, stages changes)
+# Run from main for stable release, or release/X.Y.Z for beta
+just release
 
 # Review the CHANGELOG.md, then commit
 git commit -m "chore: release vX.Y.Z"
@@ -58,6 +70,28 @@ git push
 
 # Then manually trigger the "Publish Rust Crate" workflow on GitHub Actions
 # This will create git tags and publish to crates.io
+```
+
+### Publishing a TypeScript Release
+```bash
+# Prepare a new TypeScript SDK release (prompts for version)
+just release-ts
+
+# Commit and push
+git commit -m "chore: release ts-keychain vX.Y.Z"
+git push
+
+# Then manually trigger the "Publish @solana/keychain (Manual)" workflow
+```
+
+### Creating a Hotfix
+```bash
+# Create a hotfix branch from main
+just hotfix              # prompts for name
+just hotfix fix-auth     # or pass name directly
+
+# Apply fixes, then create PR to main
+# After merge, run 'just release' on main to publish
 ```
 
 ## Architecture
