@@ -268,35 +268,49 @@ hotfix name='':
     echo "  2. Push and create PR to main"
     echo "  3. After merge, run 'just release' on main to publish"
 
-# Prepare a new TypeScript SDK release
-[confirm("Start TS SDK release process?")]
-release-ts:
+# Bump TypeScript package versions and prepare for release
+[confirm("This will bump all TypeScript package versions. Continue?")]
+[working-directory: 'typescript']
+release-ts: _check-ts-release
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [ -n "$(git status --porcelain)" ]; then
-        echo "Error: Working directory not clean"
-        exit 1
-    fi
-
-    current=$(node -p "require('./typescript/packages/keychain/package.json').version")
-    echo "Current version: $current"
+    current_version=$(node -p "require('./packages/keychain/package.json').version")
+    echo "Current version: ${current_version}"
 
     read -p "New version: " version
     [ -z "$version" ] && { echo "Version required"; exit 1; }
 
     echo "Updating to $version..."
-    cd typescript/packages/keychain
+
+    # Update version in all packages
+    PACKAGES="core aws-kms fireblocks privy turnkey vault keychain test-utils"
+    for pkg in $PACKAGES; do
+        echo "  Updating packages/${pkg}..."
+        cd packages/${pkg}
+        npm version "$version" --no-git-tag-version
+        cd ../..
+    done
+
+    # Update root workspace version
     npm version "$version" --no-git-tag-version
 
-    cd ../../..
-    git add typescript/packages/keychain/package.json
+    git add .
 
     echo ""
-    echo "Ready! Next steps:"
-    echo "  git commit -m 'chore: release ts-keychain v$version'"
-    echo "  git push origin HEAD"
-    echo "  Trigger 'Publish @solana/keychain (Manual)' workflow"
+    echo "TypeScript release prepared! Next steps:"
+    echo "  1. git commit -m 'chore(ts): release v$version'"
+    echo "  2. git push"
+    echo "  3. Trigger 'Publish TypeScript Packages' workflow in GitHub Actions"
+
+[private]
+_check-ts-release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "Error: Working directory not clean"
+        exit 1
+    fi
 
 [private]
 _check-release-tools:

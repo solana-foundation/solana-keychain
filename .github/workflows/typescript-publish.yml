@@ -1,4 +1,4 @@
-name: Publish @solana/keychain (Manual)
+name: Publish TypeScript Packages (Manual)
 
 on:
   workflow_dispatch:
@@ -24,9 +24,20 @@ concurrency:
   group: keychain-publish
   cancel-in-progress: false
 
+env:
+  # Packages to publish in dependency order (core first, umbrella last)
+  PUBLISH_PACKAGES: |
+    core
+    aws-kms
+    fireblocks
+    privy
+    turnkey
+    vault
+    keychain
+
 jobs:
   publish:
-    name: Publish @solana/keychain
+    name: Publish @solana/keychain-* packages
     runs-on: ubuntu-latest
     env:
       NPM_CONFIG_PROVENANCE: true
@@ -73,13 +84,28 @@ jobs:
         working-directory: typescript
         run: pnpm install --frozen-lockfile
 
-      - name: Get version
+      - name: Get version and check consistency
         id: version
-        working-directory: typescript/packages/keychain
+        working-directory: typescript
         run: |
-          VERSION=$(node -p "require('./package.json').version")
+          # Get version from umbrella package
+          VERSION=$(node -p "require('./packages/keychain/package.json').version")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "📦 Publishing version: $VERSION"
+          echo "📦 Target version: $VERSION"
+
+          # Check that all publishable packages have the same version
+          echo "🔍 Checking version consistency across packages..."
+
+          for pkg in $PUBLISH_PACKAGES; do
+            PKG_VERSION=$(node -p "require('./packages/${pkg}/package.json').version")
+            if [ "$PKG_VERSION" != "$VERSION" ]; then
+              echo "❌ Version mismatch: packages/${pkg} has version ${PKG_VERSION}, expected ${VERSION}"
+              exit 1
+            fi
+            echo "  ✓ packages/${pkg}: ${PKG_VERSION}"
+          done
+
+          echo "✅ All packages have version $VERSION"
 
       - name: Check if prerelease
         id: prerelease
@@ -101,6 +127,97 @@ jobs:
         working-directory: typescript
         run: pnpm typecheck
 
+      - name: Pack all packages
+        working-directory: typescript
+        run: |
+          echo "📦 Packing all publishable packages..."
+
+          # Create output directory for tarballs
+          mkdir -p .npm-pack
+
+          # Use pnpm pack (not npm pack) to ensure workspace:* is resolved to real versions
+          for pkg in $PUBLISH_PACKAGES; do
+            echo "  Packing packages/${pkg}..."
+            pushd "packages/${pkg}" > /dev/null
+            pnpm pack --pack-destination ../../.npm-pack
+            popd > /dev/null
+          done
+
+          echo ""
+          echo "📦 Packed tarballs:"
+          ls -la .npm-pack/
+
+      - name: "Guard - Fail if tarballs contain workspace: protocol"
+        working-directory: typescript
+        run: |
+          echo "🔍 Checking tarballs for workspace: protocol..."
+
+          FAILED=0
+          for tarball in .npm-pack/*.tgz; do
+            echo "  Checking ${tarball}..."
+
+            # Extract package.json from tarball
+            tar -xzf "$tarball" package/package.json -O > /tmp/pkg.json
+
+            # Check for workspace: in dependencies
+            if grep -q '"workspace:' /tmp/pkg.json; then
+              echo "❌ FAIL: ${tarball} contains workspace: dependencies!"
+              echo "    Found:"
+              grep '"workspace:' /tmp/pkg.json || true
+              FAILED=1
+            else
+              echo "    ✓ No workspace: dependencies found"
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "❌ One or more tarballs contain workspace: dependencies."
+            echo "   This indicates npm pack did not resolve workspace dependencies."
+            echo "   Check that pnpm is being used correctly or dependencies are specified with semver ranges."
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ All tarballs are clean (no workspace: dependencies)"
+
+      - name: Guard - Fail if tarballs are missing dist/ artifacts
+        working-directory: typescript
+        run: |
+          echo "🔍 Checking tarballs for dist/ artifacts..."
+
+          FAILED=0
+          for tarball in .npm-pack/*.tgz; do
+            echo "  Checking ${tarball}..."
+
+            # List tarball contents and check for dist/
+            CONTENTS=$(tar -tzf "$tarball")
+
+            if ! echo "$CONTENTS" | grep -q "package/dist/index.js"; then
+              echo "❌ FAIL: ${tarball} is missing dist/index.js!"
+              FAILED=1
+            fi
+
+            if ! echo "$CONTENTS" | grep -q "package/dist/index.d.ts"; then
+              echo "❌ FAIL: ${tarball} is missing dist/index.d.ts!"
+              FAILED=1
+            fi
+
+            if [ "$FAILED" -eq 0 ]; then
+              echo "    ✓ dist/index.js and dist/index.d.ts present"
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "❌ One or more tarballs are missing required dist/ artifacts."
+            echo "   Make sure 'pnpm build' ran successfully before packing."
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ All tarballs contain required dist/ artifacts"
+
       - name: Create and push tag
         run: |
           TAG="ts-keychain-v${{ steps.version.outputs.version }}"
@@ -114,10 +231,37 @@ jobs:
 
       - name: Publish to npm
         if: ${{ github.event.inputs.publish-to-npm == 'true' }}
-        working-directory: typescript/packages/keychain
+        working-directory: typescript
         run: |
-          echo "📦 Publishing @solana/keychain@${{ steps.version.outputs.version }} to npm..."
-          npm publish --access public --tag ${{ steps.prerelease.outputs.npm_tag }}
+          echo "📦 Publishing all packages to npm..."
+
+          VERSION="${{ steps.version.outputs.version }}"
+          NPM_TAG="${{ steps.prerelease.outputs.npm_tag }}"
+          PUBLISHED=0
+
+          # Publish in dependency order (defined by PUBLISH_PACKAGES)
+          for pkg in $PUBLISH_PACKAGES; do
+            # Handle package name: "keychain" -> "solana-keychain", others -> "solana-keychain-{pkg}"
+            if [ "$pkg" = "keychain" ]; then
+              TARBALL=".npm-pack/solana-keychain-${VERSION}.tgz"
+            else
+              TARBALL=".npm-pack/solana-keychain-${pkg}-${VERSION}.tgz"
+            fi
+
+            if [ -f "$TARBALL" ]; then
+              echo ""
+              echo "📤 Publishing ${TARBALL} with tag '${NPM_TAG}'..."
+              npm publish "$TARBALL" --access public --tag "$NPM_TAG"
+              PUBLISHED=$((PUBLISHED + 1))
+            else
+              echo "⚠️  Tarball not found: ${TARBALL}"
+              echo "   Looking for alternatives..."
+              ls -la .npm-pack/ | grep -i "${pkg}" || true
+            fi
+          done
+
+          echo ""
+          echo "✅ Published ${PUBLISHED} packages successfully"
 
       - name: Create GitHub Release
         if: ${{ github.event.inputs.create-github-release == 'true' }}
@@ -126,8 +270,40 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const tagName = `ts-keychain-v${{ steps.version.outputs.version }}`;
-            const releaseName = `@solana/keychain v${{ steps.version.outputs.version }}`;
+            const version = `${{ steps.version.outputs.version }}`;
+            const releaseName = `@solana/keychain v${version}`;
             const isPrerelease = '${{ steps.prerelease.outputs.is_prerelease }}' === 'true';
+
+            const packages = [
+              '@solana/keychain-core',
+              '@solana/keychain-aws-kms',
+              '@solana/keychain-fireblocks',
+              '@solana/keychain-privy',
+              '@solana/keychain-turnkey',
+              '@solana/keychain-vault',
+              '@solana/keychain'
+            ];
+
+            const packageList = packages.map(p => `- \`${p}@${version}\``).join('\n');
+
+            const body = `## TypeScript Packages v${version}
+
+            This release includes the following packages:
+
+            ${packageList}
+
+            ### Installation
+
+            \`\`\`bash
+            # Install the umbrella package (includes all signers)
+            pnpm add @solana/keychain
+
+            # Or install individual packages
+            pnpm add @solana/keychain-core
+            pnpm add @solana/keychain-privy
+            # etc.
+            \`\`\`
+            `;
 
             // Check if release already exists
             try {
@@ -147,7 +323,7 @@ jobs:
               repo: context.repo.repo,
               tag_name: tagName,
               name: releaseName,
-              body: `Release of @solana/keychain v${{ steps.version.outputs.version }} (TypeScript)`,
+              body: body.trim(),
               draft: false,
               prerelease: isPrerelease,
             });
@@ -156,19 +332,38 @@ jobs:
 
       - name: Publish summary
         run: |
-          echo "## 🎉 @solana/keychain Published" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version**: \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Package**: \`@solana/keychain\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Tag**: \`ts-keychain-v${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          VERSION="${{ steps.version.outputs.version }}"
+
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## 🎉 TypeScript Packages Published
+
+          **Version**: \`${VERSION}\`
+          **Tag**: \`ts-keychain-v${VERSION}\`
+
+          ### Published Packages
+
+          | Package | npm |
+          |---------|-----|
+          | \`@solana/keychain-core\` | [npm](https://www.npmjs.com/package/@solana/keychain-core/v/${VERSION}) |
+          | \`@solana/keychain-aws-kms\` | [npm](https://www.npmjs.com/package/@solana/keychain-aws-kms/v/${VERSION}) |
+          | \`@solana/keychain-fireblocks\` | [npm](https://www.npmjs.com/package/@solana/keychain-fireblocks/v/${VERSION}) |
+          | \`@solana/keychain-privy\` | [npm](https://www.npmjs.com/package/@solana/keychain-privy/v/${VERSION}) |
+          | \`@solana/keychain-turnkey\` | [npm](https://www.npmjs.com/package/@solana/keychain-turnkey/v/${VERSION}) |
+          | \`@solana/keychain-vault\` | [npm](https://www.npmjs.com/package/@solana/keychain-vault/v/${VERSION}) |
+          | \`@solana/keychain\` | [npm](https://www.npmjs.com/package/@solana/keychain/v/${VERSION}) |
+
+          EOF
+
           if [ "${{ github.event.inputs.publish-to-npm }}" == "true" ]; then
-            echo "✅ Published to npm: https://www.npmjs.com/package/@solana/keychain/v/${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **Published to npm**" >> $GITHUB_STEP_SUMMARY
           else
-            echo "⏭️ Skipped npm publish (dry run)" >> $GITHUB_STEP_SUMMARY
+            echo "⏭️ **Skipped npm publish** (dry run)" >> $GITHUB_STEP_SUMMARY
           fi
+
           if [ "${{ github.event.inputs.create-github-release }}" == "true" ]; then
-            echo "✅ GitHub release created: https://github.com/${{ github.repository }}/releases/tag/ts-keychain-v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **GitHub release created**: https://github.com/${{ github.repository }}/releases/tag/ts-keychain-v${VERSION}" >> $GITHUB_STEP_SUMMARY
           else
-            echo "⏭️ Skipped GitHub release creation" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⏭️ **Skipped GitHub release creation**" >> $GITHUB_STEP_SUMMARY
           fi

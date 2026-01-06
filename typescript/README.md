@@ -47,16 +47,15 @@ const signedTx = await signTransactionMessageWithSigners(transaction);
 
 ## Installation
 
-*note: not yet published to npm registry. must build locally to use*
-
 ```bash
-# Core package (required for building custom signers)
-pnpm add @solana/keychain-core
+# Install the umbrella package (includes all signers)
+pnpm add @solana/keychain
 
-# Signer implementations
-pnpm add @solana/keychain-aws-kms
-pnpm add @solana/keychain-fireblocks
-pnpm add @solana/keychain-privy
-pnpm add @solana/keychain-turnkey
-pnpm add @solana/keychain-vault
+# Or install individual packages as needed
+pnpm add @solana/keychain-core        # Core interfaces (required for custom signers)
+pnpm add @solana/keychain-aws-kms     # AWS KMS signer
+pnpm add @solana/keychain-fireblocks  # Fireblocks signer
+pnpm add @solana/keychain-privy       # Privy signer
+pnpm add @solana/keychain-turnkey     # Turnkey signer
+pnpm add @solana/keychain-vault       # HashiCorp Vault signer
 ```
