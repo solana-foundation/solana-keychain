@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`solana-keychain` is a Rust library providing a unified interface for signing Solana transactions across multiple backend implementations. The architecture centers around a single `SolanaSigner` trait that abstracts over four different signing backends: Memory (local keypairs), Vault (HashiCorp), Privy, and Turnkey.
+`solana-keychain` is a Rust library providing a unified interface for signing Solana transactions across multiple backend implementations. The architecture centers around a single `SolanaSigner` trait that abstracts over seven different signing backends: Memory (local keypairs), Vault (HashiCorp), Privy, Turnkey, AWS KMS, Fireblocks, and GCP KMS.
 
 ## Common Commands
 
@@ -24,6 +24,9 @@ cd rust && cargo test --features memory
 cd rust && cargo test --features vault
 cd rust && cargo test --features privy
 cd rust && cargo test --features turnkey
+cd rust && cargo test --features aws_kms
+cd rust && cargo test --features fireblocks
+cd rust && cargo test --features gcp_kms
 
 # Run a single test
 cd rust && cargo test test_name --all-features
@@ -136,6 +139,23 @@ All signers follow a consistent pattern but differ in where keys are stored:
    - Response contains r,s signature components that must be padded to 32 bytes each
    - Availability checked via `whoami` endpoint
 
+5. **AWS KMS** ([rust/src/aws_kms/mod.rs](rust/src/aws_kms/mod.rs))
+   - Uses AWS SDK with EdDSA (Ed25519) signing
+   - Automatic credential discovery via environment or IAM
+   - Availability checked via `DescribeKey`
+
+6. **FireblocksSigner** ([rust/src/fireblocks/mod.rs](rust/src/fireblocks/mod.rs))
+   - Uses Fireblocks API with EdDSA (Ed25519) signing
+   - Requires `init()` to fetch public key before use
+   - JWT-based authentication
+   - Availability checked via user details endpoint
+
+7. **GCP KMS** ([rust/src/gcp_kms/mod.rs](rust/src/gcp_kms/mod.rs))
+   - Uses Google Cloud SDK with EdDSA (Ed25519) signing
+   - PureEdDSA mode with `EC_SIGN_ED25519` algorithm
+   - Automatic credential discovery via ADC
+   - Availability checked via `GetCryptoKeyVersion`
+
 ### Error Handling
 
 All errors are centralized in [rust/src/error.rs](rust/src/error.rs) using `thiserror`. The `SignerError` enum covers key formats, signing failures, remote API errors, serialization, and configuration issues.
@@ -147,13 +167,16 @@ The library uses Cargo features for zero-cost abstraction:
 - `vault` - Adds VaultSigner with reqwest, vaultrs, base64
 - `privy` - Adds PrivySigner with reqwest, base64
 - `turnkey` - Adds TurnkeySigner with reqwest, base64, p256, hex, chrono
+- `aws_kms` - Adds KmsSigner with aws-sdk-kms
+- `fireblocks` - Adds FireblocksSigner with reqwest, jsonwebtoken
+- `gcp_kms` - Adds GcpKmsSigner with google-cloud-kms-v1, gcp_auth
 - `all` - Enables all backends
 
 At least one feature must be enabled (enforced by `compile_error!` in lib.rs).
 
 ## Testing
 
-Tests are co-located with implementation code in each module. Remote signers (Vault, Privy, Turnkey) use `wiremock` to mock HTTP endpoints, avoiding actual API calls during testing. Tests cover:
+Tests are co-located with implementation code in each module. Remote signers (Vault, Privy, Turnkey, AWS, Fireblocks, GCP) use `wiremock` to mock HTTP endpoints, avoiding actual API calls during testing. Tests cover:
 - Constructor validation (invalid keys, etc.)
 - Successful signing operations
 - Error cases (unauthorized, malformed responses)
@@ -161,7 +184,12 @@ Tests are co-located with implementation code in each module. Remote signers (Va
 
 Run specific backend tests:
 ```bash
+cd rust && cargo test --features vault vault::tests
 cd rust && cargo test --features privy privy::tests
+cd rust && cargo test --features turnkey turnkey::tests
+cd rust && cargo test --features aws_kms aws_kms::tests
+cd rust && cargo test --features fireblocks fireblocks::tests
+cd rust && cargo test --features gcp_kms gcp_kms::tests
 ```
 
 ## Key Implementation Notes
@@ -170,5 +198,7 @@ cd rust && cargo test --features privy privy::tests
 - Privy and Turnkey use Base64 encoding for payloads/responses
 - Vault uses Base64 for both input and output
 - Turnkey requires special handling for signature component padding (see [rust/src/turnkey/mod.rs:125-136](rust/src/turnkey/mod.rs))
-- PrivySigner must call `init()` before use; other signers are ready after construction
+- PrivySigner and FireblocksSigner must call `init()` before use; other signers are ready after construction
+- AWS KMS and GCP KMS use official cloud SDKs with automatic credential discovery
+- GCP KMS operates in PureEdDSA mode with `EC_SIGN_ED25519` algorithm
 - The unified `Signer` enum uses conditional compilation extensively with `#[cfg(feature = "...")]`
