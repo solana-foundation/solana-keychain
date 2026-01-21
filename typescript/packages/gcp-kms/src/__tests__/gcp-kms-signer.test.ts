@@ -1,4 +1,4 @@
-import { generateKeyPairSigner } from '@solana/signers';
+import { address } from '@solana/addresses';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
 
@@ -22,36 +22,33 @@ vi.mock('@google-cloud/kms', () => {
 
 describe('GcpKmsSigner', () => {
     const TEST_KEY_NAME = 'projects/test-project/locations/us-east1/keyRings/test-ring/cryptoKeys/test-key/cryptoKeyVersions/1';
+    const TEST_PUBLIC_KEY = address('11111111111111111111111111111111');
 
     beforeEach(() => {
         vi.clearAllMocks();
     });
 
     describe('constructor', () => {
-        it('creates a GcpKmsSigner with valid config', async () => {
-            const keyPair = await generateKeyPairSigner();
-
+        it('creates a GcpKmsSigner with valid config', () => {
             const config: GcpKmsSignerConfig = {
                 keyName: TEST_KEY_NAME,
-                publicKey: keyPair.address,
+                publicKey: TEST_PUBLIC_KEY,
             };
 
             const signer = new GcpKmsSigner(config);
 
-            expect(signer.address).toBe(keyPair.address);
+            expect(signer.address).toBe(TEST_PUBLIC_KEY);
             assertIsSolanaSigner(signer);
             expect(signer.signMessages).toBeDefined();
             expect(signer.signTransactions).toBeDefined();
             expect(signer.isAvailable).toBeDefined();
         });
 
-        it('should throw error for missing keyName', async () => {
-            const keyPair = await generateKeyPairSigner();
-
+        it('should throw error for missing keyName', () => {
             expect(() => {
                 new GcpKmsSigner({
                     keyName: '',
-                    publicKey: keyPair.address,
+                    publicKey: TEST_PUBLIC_KEY,
                 });
             }).toThrow('Missing required keyName field');
         });
@@ -73,25 +70,22 @@ describe('GcpKmsSigner', () => {
             }).toThrow('Invalid Solana public key format');
         });
 
-        it('should validate requestDelayMs', async () => {
-            const keyPair = await generateKeyPairSigner();
-
+        it('should validate requestDelayMs', () => {
             expect(() => {
                 new GcpKmsSigner({
                     keyName: TEST_KEY_NAME,
-                    publicKey: keyPair.address,
+                    publicKey: TEST_PUBLIC_KEY,
                     requestDelayMs: -1,
                 });
             }).toThrow('requestDelayMs must not be negative');
         });
 
-        it('should warn for high requestDelayMs', async () => {
-            const keyPair = await generateKeyPairSigner();
+        it('should warn for high requestDelayMs', () => {
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
             new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
-                publicKey: keyPair.address,
+                publicKey: TEST_PUBLIC_KEY,
                 requestDelayMs: 5000,
             });
 
@@ -103,15 +97,13 @@ describe('GcpKmsSigner', () => {
 
     describe('signMessages', () => {
         it('should sign a message successfully', async () => {
-            const keyPair = await generateKeyPairSigner();
-
             mockAsymmetricSign.mockResolvedValue([{
                 signature: new Uint8Array(64).fill(0x42),
             }]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
-                publicKey: keyPair.address,
+                publicKey: TEST_PUBLIC_KEY,
             });
 
             const message = {
@@ -130,15 +122,13 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should handle multiple messages with delay', async () => {
-            const keyPair = await generateKeyPairSigner();
-
             mockAsymmetricSign.mockResolvedValue([{
                 signature: new Uint8Array(64).fill(0x42),
             }]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
-                publicKey: keyPair.address,
+                publicKey: TEST_PUBLIC_KEY,
                 requestDelayMs: 10,
             });
 
@@ -159,15 +149,13 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should throw error on invalid signature length', async () => {
-            const keyPair = await generateKeyPairSigner();
-
             mockAsymmetricSign.mockResolvedValue([{
                 signature: new Uint8Array(32), // Wrong length
             }]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
-                publicKey: keyPair.address,
+                publicKey: TEST_PUBLIC_KEY,
             });
 
             const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
@@ -176,13 +164,11 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should throw error on missing signature', async () => {
-            const keyPair = await generateKeyPairSigner();
-
             mockAsymmetricSign.mockResolvedValue([{}]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
-                publicKey: keyPair.address,
+                publicKey: TEST_PUBLIC_KEY,
             });
 
             const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
@@ -191,15 +177,13 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should handle GCP KMS API errors', async () => {
-            const keyPair = await generateKeyPairSigner();
-
             const apiError = new Error('GCP Error');
             (apiError as any).code = 403;
             mockAsymmetricSign.mockRejectedValue(apiError);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
-                publicKey: keyPair.address,
+                publicKey: TEST_PUBLIC_KEY,
             });
 
             const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
@@ -210,15 +194,13 @@ describe('GcpKmsSigner', () => {
 
     describe('signTransactions', () => {
         it('should sign a transaction successfully', async () => {
-            const keyPair = await generateKeyPairSigner();
-
             mockAsymmetricSign.mockResolvedValue([{
                 signature: new Uint8Array(64).fill(0x42),
             }]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
-                publicKey: keyPair.address,
+                publicKey: TEST_PUBLIC_KEY,
             });
 
             const transaction = {
@@ -234,15 +216,13 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should sign multiple transactions successfully', async () => {
-            const keyPair = await generateKeyPairSigner();
-
             mockAsymmetricSign.mockResolvedValue([{
                 signature: new Uint8Array(64).fill(0x42),
             }]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
-                publicKey: keyPair.address,
+                publicKey: TEST_PUBLIC_KEY,
             });
 
             const transactions = [
@@ -255,12 +235,53 @@ describe('GcpKmsSigner', () => {
             expect(result).toHaveLength(2);
             expect(mockAsymmetricSign).toHaveBeenCalledTimes(2);
         });
+
+        it('should throw error on invalid signature length', async () => {
+            mockAsymmetricSign.mockResolvedValue([{
+                signature: new Uint8Array(32),
+            }]);
+
+            const signer = new GcpKmsSigner({
+                keyName: TEST_KEY_NAME,
+                publicKey: TEST_PUBLIC_KEY,
+            });
+
+            const transaction = { messageBytes: new Uint8Array([1, 2, 3, 4]), signatures: {} } as any;
+
+            await expect(signer.signTransactions([transaction])).rejects.toThrow('Invalid signature length');
+        });
+
+        it('should throw error on missing signature', async () => {
+            mockAsymmetricSign.mockResolvedValue([{}]);
+
+            const signer = new GcpKmsSigner({
+                keyName: TEST_KEY_NAME,
+                publicKey: TEST_PUBLIC_KEY,
+            });
+
+            const transaction = { messageBytes: new Uint8Array([1, 2, 3, 4]), signatures: {} } as any;
+
+            await expect(signer.signTransactions([transaction])).rejects.toThrow('No signature in GCP KMS response');
+        });
+
+        it('should handle GCP KMS API errors', async () => {
+            const apiError = new Error('GCP Error');
+            (apiError as any).code = 403;
+            mockAsymmetricSign.mockRejectedValue(apiError);
+
+            const signer = new GcpKmsSigner({
+                keyName: TEST_KEY_NAME,
+                publicKey: TEST_PUBLIC_KEY,
+            });
+
+            const transaction = { messageBytes: new Uint8Array([1, 2, 3, 4]), signatures: {} } as any;
+
+            await expect(signer.signTransactions([transaction])).rejects.toThrow('GCP KMS Sign operation failed: GCP Error');
+        });
     });
 
     describe('isAvailable', () => {
         it('should return true for valid Ed25519 key', async () => {
-            const keyPair = await generateKeyPairSigner();
-
             mockGetCryptoKeyVersion.mockResolvedValue([{
                 name: TEST_KEY_NAME,
                 algorithm: 'EC_SIGN_ED25519',
@@ -269,7 +290,7 @@ describe('GcpKmsSigner', () => {
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
-                publicKey: keyPair.address,
+                publicKey: TEST_PUBLIC_KEY,
             });
 
             const available = await signer.isAvailable();
@@ -278,8 +299,6 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should return false for wrong algorithm', async () => {
-            const keyPair = await generateKeyPairSigner();
-
             mockGetCryptoKeyVersion.mockResolvedValue([{
                 name: TEST_KEY_NAME,
                 algorithm: 'RSA_SIGN_PKCS1_2048_SHA256',
@@ -288,7 +307,7 @@ describe('GcpKmsSigner', () => {
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
-                publicKey: keyPair.address,
+                publicKey: TEST_PUBLIC_KEY,
             });
 
             const available = await signer.isAvailable();
@@ -297,8 +316,6 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should return false for disabled key', async () => {
-            const keyPair = await generateKeyPairSigner();
-
             mockGetCryptoKeyVersion.mockResolvedValue([{
                 name: TEST_KEY_NAME,
                 algorithm: 'EC_SIGN_ED25519',
@@ -307,7 +324,7 @@ describe('GcpKmsSigner', () => {
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
-                publicKey: keyPair.address,
+                publicKey: TEST_PUBLIC_KEY,
             });
 
             const available = await signer.isAvailable();
@@ -316,13 +333,11 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should return false on error', async () => {
-            const keyPair = await generateKeyPairSigner();
-
             mockGetCryptoKeyVersion.mockRejectedValue(new Error('GCP error'));
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
-                publicKey: keyPair.address,
+                publicKey: TEST_PUBLIC_KEY,
             });
 
             const available = await signer.isAvailable();

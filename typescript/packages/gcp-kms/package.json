@@ -41,10 +41,9 @@
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
-        "@google-cloud/kms": "^4.5.0",
+        "@google-cloud/kms": "^5.2.1",
         "@solana/keychain-core": "workspace:*",
         "@solana/addresses": "^5.0.0",
-        "@solana/codecs-strings": "^5.0.0",
         "@solana/keys": "^5.0.0",
         "@solana/signers": "^5.0.0",
         "@solana/transactions": "^5.0.0"

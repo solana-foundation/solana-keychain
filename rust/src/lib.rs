@@ -12,6 +12,7 @@
 //! - `turnkey`: Turnkey API integration
 //! - `aws_kms`: AWS KMS integration with EdDSA (Ed25519) signing
 //! - `fireblocks`: Fireblocks API integration
+//! - `gcp_kms`: GCP KMS integration with EdDSA (Ed25519) signing
 //! - `all`: Enable all signer backends
 //!
 //! ## SDK Version Selection

@@ -5,7 +5,9 @@ use crate::sdk_adapter::{Pubkey, Signature, Transaction};
 use crate::traits::{SignedTransaction, SolanaSigner};
 use crate::transaction_util::TransactionUtil;
 use google_cloud_kms_v1::client::KeyManagementService;
-use google_cloud_kms_v1::model::crypto_key_version::CryptoKeyVersionAlgorithm;
+use google_cloud_kms_v1::model::crypto_key_version::{
+    CryptoKeyVersionAlgorithm, CryptoKeyVersionState,
+};
 use std::str::FromStr;
 
 /// GCP KMS-based signer using EdDSA (Ed25519) signing
@@ -140,8 +142,9 @@ impl GcpKmsSigner {
 
         match result {
             Ok(version) => {
-                // Verify the algorithm is EC_SIGN_ED25519
+                // Verify the algorithm is EC_SIGN_ED25519 and the state is ENABLED
                 version.algorithm == CryptoKeyVersionAlgorithm::EcSignEd25519
+                    && version.state == CryptoKeyVersionState::Enabled
             }
             Err(_) => false,
         }
@@ -185,6 +188,8 @@ mod tests {
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
     use google_cloud_kms_v1::client::KeyManagementService;
+    use scoped_env::ScopedEnv;
+    use serial_test::serial;
     use wiremock::matchers::{any, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -285,6 +290,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_gcp_kms_is_available_success() {
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
@@ -304,7 +310,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        std::env::set_var("GCE_METADATA_HOST", mock_server.address().to_string());
+        let metadata_host = mock_server.address().to_string();
+        let _env = ScopedEnv::set("GCE_METADATA_HOST", &metadata_host);
 
         let client = create_test_client(&mock_server.uri()).await;
         let signer = GcpKmsSigner::with_client(
@@ -331,6 +338,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_gcp_kms_sign_message_success() {
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
@@ -350,7 +358,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        std::env::set_var("GCE_METADATA_HOST", mock_server.address().to_string());
+        let metadata_host = mock_server.address().to_string();
+        let _env = ScopedEnv::set("GCE_METADATA_HOST", &metadata_host);
 
         let client = create_test_client(&mock_server.uri()).await;
         let signer = GcpKmsSigner::with_client(
@@ -381,6 +390,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_gcp_kms_sign_transaction_success() {
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
@@ -400,7 +410,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        std::env::set_var("GCE_METADATA_HOST", mock_server.address().to_string());
+        let metadata_host = mock_server.address().to_string();
+        let _env = ScopedEnv::set("GCE_METADATA_HOST", &metadata_host);
 
         let client = create_test_client(&mock_server.uri()).await;
         let signer = GcpKmsSigner::with_client(
@@ -440,6 +451,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_gcp_kms_sign_message_invalid_signature_length() {
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
@@ -459,7 +471,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        std::env::set_var("GCE_METADATA_HOST", mock_server.address().to_string());
+        let metadata_host = mock_server.address().to_string();
+        let _env = ScopedEnv::set("GCE_METADATA_HOST", &metadata_host);
 
         let client = create_test_client(&mock_server.uri()).await;
         let signer = GcpKmsSigner::with_client(
@@ -487,6 +500,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_gcp_kms_sign_api_error() {
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
@@ -506,7 +520,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        std::env::set_var("GCE_METADATA_HOST", mock_server.address().to_string());
+        let metadata_host = mock_server.address().to_string();
+        let _env = ScopedEnv::set("GCE_METADATA_HOST", &metadata_host);
 
         let client = create_test_client(&mock_server.uri()).await;
         let signer = GcpKmsSigner::with_client(
@@ -539,6 +554,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_gcp_kms_sign_unauthorized() {
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
@@ -557,7 +573,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        std::env::set_var("GCE_METADATA_HOST", mock_server.address().to_string());
+        let metadata_host = mock_server.address().to_string();
+        let _env = ScopedEnv::set("GCE_METADATA_HOST", &metadata_host);
 
         let client = create_test_client(&mock_server.uri()).await;
         let signer = GcpKmsSigner::with_client(
@@ -591,6 +608,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_gcp_kms_is_available_wrong_algorithm() {
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
@@ -610,7 +628,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        std::env::set_var("GCE_METADATA_HOST", mock_server.address().to_string());
+        let metadata_host = mock_server.address().to_string();
+        let _env = ScopedEnv::set("GCE_METADATA_HOST", &metadata_host);
 
         let client = create_test_client(&mock_server.uri()).await;
         let signer = GcpKmsSigner::with_client(

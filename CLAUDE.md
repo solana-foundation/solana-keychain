@@ -169,7 +169,7 @@ The library uses Cargo features for zero-cost abstraction:
 - `turnkey` - Adds TurnkeySigner with reqwest, base64, p256, hex, chrono
 - `aws_kms` - Adds KmsSigner with aws-sdk-kms
 - `fireblocks` - Adds FireblocksSigner with reqwest, jsonwebtoken
-- `gcp_kms` - Adds GcpKmsSigner with google-cloud-kms-v1, gcp_auth
+- `gcp_kms` - Adds GcpKmsSigner with google-cloud-kms-v1, google-cloud-auth
 - `all` - Enables all backends
 
 At least one feature must be enabled (enforced by `compile_error!` in lib.rs).
