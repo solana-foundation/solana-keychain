@@ -68,13 +68,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### AWS KMS Signer
 
 ```rust
-use solana_keychain::{KmsSigner, SolanaSigner};
+use solana_keychain::{AwsKmsSigner, SolanaSigner};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create signer using AWS KMS
     // Credentials are loaded from the AWS default credential chain
-    let signer = KmsSigner::new(
+    let signer = AwsKmsSigner::new(
         "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012".to_string(),
         "YourSolanaPublicKeyBase58".to_string(),
         Some("us-east-1".to_string()), // Optional region

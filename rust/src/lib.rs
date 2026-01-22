@@ -65,7 +65,7 @@ pub use privy::PrivySigner;
 pub use turnkey::TurnkeySigner;
 
 #[cfg(feature = "aws_kms")]
-pub use aws_kms::KmsSigner;
+pub use aws_kms::AwsKmsSigner;
 
 #[cfg(feature = "fireblocks")]
 pub use fireblocks::{FireblocksSigner, FireblocksSignerConfig};
@@ -100,7 +100,7 @@ pub enum Signer {
     Turnkey(TurnkeySigner),
 
     #[cfg(feature = "aws_kms")]
-    Kms(KmsSigner),
+    AwsKms(AwsKmsSigner),
 
     #[cfg(feature = "fireblocks")]
     Fireblocks(FireblocksSigner),
@@ -168,7 +168,9 @@ impl Signer {
         public_key: String,
         region: Option<String>,
     ) -> Result<Self, SignerError> {
-        Ok(Self::Kms(KmsSigner::new(key_id, public_key, region).await?))
+        Ok(Self::AwsKms(
+            AwsKmsSigner::new(key_id, public_key, region).await?,
+        ))
     }
 
     /// Create a Fireblocks signer (requires initialization)
@@ -197,7 +199,7 @@ impl SolanaSigner for Signer {
             Signer::Turnkey(s) => s.pubkey(),
 
             #[cfg(feature = "aws_kms")]
-            Signer::Kms(s) => s.pubkey(),
+            Signer::AwsKms(s) => s.pubkey(),
 
             #[cfg(feature = "fireblocks")]
             Signer::Fireblocks(s) => s.pubkey(),
@@ -222,7 +224,7 @@ impl SolanaSigner for Signer {
             Signer::Turnkey(s) => s.sign_transaction(tx).await,
 
             #[cfg(feature = "aws_kms")]
-            Signer::Kms(s) => s.sign_transaction(tx).await,
+            Signer::AwsKms(s) => s.sign_transaction(tx).await,
 
             #[cfg(feature = "fireblocks")]
             Signer::Fireblocks(s) => s.sign_transaction(tx).await,
@@ -244,7 +246,7 @@ impl SolanaSigner for Signer {
             Signer::Turnkey(s) => s.sign_message(message).await,
 
             #[cfg(feature = "aws_kms")]
-            Signer::Kms(s) => s.sign_message(message).await,
+            Signer::AwsKms(s) => s.sign_message(message).await,
 
             #[cfg(feature = "fireblocks")]
             Signer::Fireblocks(s) => s.sign_message(message).await,
@@ -269,7 +271,7 @@ impl SolanaSigner for Signer {
             Signer::Turnkey(s) => s.sign_partial_transaction(tx).await,
 
             #[cfg(feature = "aws_kms")]
-            Signer::Kms(s) => s.sign_partial_transaction(tx).await,
+            Signer::AwsKms(s) => s.sign_partial_transaction(tx).await,
 
             #[cfg(feature = "fireblocks")]
             Signer::Fireblocks(s) => s.sign_partial_transaction(tx).await,
@@ -291,7 +293,7 @@ impl SolanaSigner for Signer {
             Signer::Turnkey(s) => s.is_available().await,
 
             #[cfg(feature = "aws_kms")]
-            Signer::Kms(s) => s.is_available().await,
+            Signer::AwsKms(s) => s.is_available().await,
 
             #[cfg(feature = "fireblocks")]
             Signer::Fireblocks(s) => s.is_available().await,

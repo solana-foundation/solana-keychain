@@ -19,12 +19,12 @@ mod tests {
     use dotenvy::dotenv;
 
     use super::*;
-    use crate::aws_kms::KmsSigner;
+    use crate::aws_kms::AwsKmsSigner;
     use crate::test_util::create_test_transaction;
     use crate::traits::SolanaSigner;
     use std::env;
 
-    async fn get_signer() -> KmsSigner {
+    async fn get_signer() -> AwsKmsSigner {
         dotenv().ok();
 
         let key_id =
@@ -33,9 +33,9 @@ mod tests {
             .expect("AWS_KMS_SIGNER_PUBKEY must be set for integration tests");
         let region = env::var(AWS_KMS_REGION).ok();
 
-        KmsSigner::new(key_id, signer_pubkey, region)
+        AwsKmsSigner::new(key_id, signer_pubkey, region)
             .await
-            .expect("Failed to create KmsSigner")
+            .expect("Failed to create AwsKmsSigner")
     }
 
     #[tokio::test]

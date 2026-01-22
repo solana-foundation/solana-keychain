@@ -16,25 +16,25 @@ use std::str::FromStr;
 /// # Example
 ///
 /// ```rust,ignore
-/// use solana_keychain::KmsSigner;
+/// use solana_keychain::AwsKmsSigner;
 ///
-/// let signer = KmsSigner::new(
+/// let signer = AwsKmsSigner::new(
 ///     "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012".to_string(),
 ///     "YourSolanaPublicKeyBase58".to_string(),
 ///     Some("us-east-1".to_string()),
 /// ).await?;
 /// ```
 #[derive(Clone)]
-pub struct KmsSigner {
+pub struct AwsKmsSigner {
     client: KmsClient,
     key_id: String,
     public_key: Pubkey,
     region: Option<String>,
 }
 
-impl std::fmt::Debug for KmsSigner {
+impl std::fmt::Debug for AwsKmsSigner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("KmsSigner")
+        f.debug_struct("AwsKmsSigner")
             .field("key_id", &self.key_id)
             .field("public_key", &self.public_key)
             .field("region", &self.region)
@@ -42,8 +42,8 @@ impl std::fmt::Debug for KmsSigner {
     }
 }
 
-impl KmsSigner {
-    /// Create a new KmsSigner
+impl AwsKmsSigner {
+    /// Create a new AwsKmsSigner
     ///
     /// # Arguments
     ///
@@ -80,7 +80,7 @@ impl KmsSigner {
         })
     }
 
-    /// Create a new KmsSigner with an existing KMS client
+    /// Create a new AwsKmsSigner with an existing KMS client
     ///
     /// This is useful for testing or when you want to configure the client yourself.
     ///
@@ -196,7 +196,7 @@ impl KmsSigner {
 }
 
 #[async_trait::async_trait]
-impl SolanaSigner for KmsSigner {
+impl SolanaSigner for AwsKmsSigner {
     fn pubkey(&self) -> Pubkey {
         self.public_key
     }
@@ -242,7 +242,7 @@ mod tests {
     #[tokio::test]
     async fn test_kms_new_invalid_pubkey() {
         // Test that invalid pubkey is caught before AWS config is loaded
-        let result = KmsSigner::new(
+        let result = AwsKmsSigner::new(
             TEST_KEY_ID.to_string(),
             "not-a-valid-pubkey".to_string(),
             Some(TEST_REGION.to_string()),
@@ -258,7 +258,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_kms_new_empty_pubkey() {
-        let result = KmsSigner::new(
+        let result = AwsKmsSigner::new(
             TEST_KEY_ID.to_string(),
             "".to_string(),
             Some(TEST_REGION.to_string()),
@@ -277,7 +277,7 @@ mod tests {
         let keypair = create_test_keypair();
         let pubkey_str = keypair.pubkey().to_string();
 
-        let result = KmsSigner::new(
+        let result = AwsKmsSigner::new(
             TEST_KEY_ID.to_string(),
             pubkey_str,
             Some(TEST_REGION.to_string()),
@@ -298,7 +298,7 @@ mod tests {
         let keypair = create_test_keypair();
         let pubkey_str = keypair.pubkey().to_string();
 
-        let result = KmsSigner::new(TEST_KEY_ID.to_string(), pubkey_str, None).await;
+        let result = AwsKmsSigner::new(TEST_KEY_ID.to_string(), pubkey_str, None).await;
 
         if let Ok(signer) = result {
             assert_eq!(signer.public_key, keypair.pubkey());
@@ -312,7 +312,7 @@ mod tests {
         let keypair = create_test_keypair();
         let pubkey_str = keypair.pubkey().to_string();
 
-        let result = KmsSigner::new(
+        let result = AwsKmsSigner::new(
             TEST_KEY_ID.to_string(),
             pubkey_str.clone(),
             Some(TEST_REGION.to_string()),
@@ -330,7 +330,7 @@ mod tests {
         let keypair = create_test_keypair();
         let pubkey_str = keypair.pubkey().to_string();
 
-        let result = KmsSigner::new(
+        let result = AwsKmsSigner::new(
             TEST_KEY_ID.to_string(),
             pubkey_str,
             Some(TEST_REGION.to_string()),
@@ -347,7 +347,7 @@ mod tests {
         let keypair = create_test_keypair();
         let pubkey_str = keypair.pubkey().to_string();
 
-        let result = KmsSigner::new(
+        let result = AwsKmsSigner::new(
             TEST_KEY_ID.to_string(),
             pubkey_str,
             Some(TEST_REGION.to_string()),
@@ -358,7 +358,7 @@ mod tests {
             let debug_str = format!("{:?}", signer);
 
             // Verify debug output contains expected fields
-            assert!(debug_str.contains("KmsSigner"));
+            assert!(debug_str.contains("AwsKmsSigner"));
             assert!(debug_str.contains("key_id"));
             assert!(debug_str.contains("public_key"));
             assert!(debug_str.contains("region"));
@@ -379,7 +379,7 @@ mod tests {
         ];
 
         for key_id in key_ids {
-            let result = KmsSigner::new(
+            let result = AwsKmsSigner::new(
                 key_id.to_string(),
                 pubkey_str.clone(),
                 Some(TEST_REGION.to_string()),
@@ -413,7 +413,7 @@ mod tests {
         let keypair = create_test_keypair();
         let pubkey_str = keypair.pubkey().to_string();
 
-        let result = KmsSigner::new(
+        let result = AwsKmsSigner::new(
             TEST_KEY_ID.to_string(),
             pubkey_str,
             Some(TEST_REGION.to_string()),
@@ -437,7 +437,7 @@ mod tests {
         let regions = vec!["us-east-1", "us-west-2", "eu-west-1"];
 
         for region in regions {
-            let result = KmsSigner::new(
+            let result = AwsKmsSigner::new(
                 TEST_KEY_ID.to_string(),
                 pubkey_str.clone(),
                 Some(region.to_string()),
@@ -513,12 +513,12 @@ mod tests {
             .await;
 
         let client = create_test_client(&mock_server.uri());
-        let signer = KmsSigner::with_client(
+        let signer = AwsKmsSigner::with_client(
             client,
             TEST_KEY_ID.to_string(),
             keypair.pubkey().to_string(),
         )
-        .expect("Failed to create KmsSigner");
+        .expect("Failed to create AwsKmsSigner");
 
         let result = signer.sign_message(message).await;
         assert!(result.is_ok(), "Sign message failed");
@@ -544,12 +544,12 @@ mod tests {
             .await;
 
         let client = create_test_client(&mock_server.uri());
-        let signer = KmsSigner::with_client(
+        let signer = AwsKmsSigner::with_client(
             client,
             TEST_KEY_ID.to_string(),
             keypair.pubkey().to_string(),
         )
-        .expect("Failed to create KmsSigner");
+        .expect("Failed to create AwsKmsSigner");
 
         let result = signer.sign_message(b"test").await;
         assert!(result.is_err());
@@ -574,12 +574,12 @@ mod tests {
             .await;
 
         let client = create_test_client(&mock_server.uri());
-        let signer = KmsSigner::with_client(
+        let signer = AwsKmsSigner::with_client(
             client,
             TEST_KEY_ID.to_string(),
             keypair.pubkey().to_string(),
         )
-        .expect("Failed to create KmsSigner");
+        .expect("Failed to create AwsKmsSigner");
 
         let result = signer.sign_message(b"test").await;
         assert!(result.is_err());
@@ -607,12 +607,12 @@ mod tests {
             .await;
 
         let client = create_test_client(&mock_server.uri());
-        let signer = KmsSigner::with_client(
+        let signer = AwsKmsSigner::with_client(
             client,
             TEST_KEY_ID.to_string(),
             keypair.pubkey().to_string(),
         )
-        .expect("Failed to create KmsSigner");
+        .expect("Failed to create AwsKmsSigner");
 
         let result = signer.sign_message(b"test").await;
         assert!(result.is_err());
@@ -644,12 +644,12 @@ mod tests {
             .await;
 
         let client = create_test_client(&mock_server.uri());
-        let signer = KmsSigner::with_client(
+        let signer = AwsKmsSigner::with_client(
             client,
             TEST_KEY_ID.to_string(),
             keypair.pubkey().to_string(),
         )
-        .expect("Failed to create KmsSigner");
+        .expect("Failed to create AwsKmsSigner");
 
         assert!(signer.is_available().await);
     }
@@ -676,12 +676,12 @@ mod tests {
             .await;
 
         let client = create_test_client(&mock_server.uri());
-        let signer = KmsSigner::with_client(
+        let signer = AwsKmsSigner::with_client(
             client,
             TEST_KEY_ID.to_string(),
             keypair.pubkey().to_string(),
         )
-        .expect("Failed to create KmsSigner");
+        .expect("Failed to create AwsKmsSigner");
 
         assert!(!signer.is_available().await);
     }
@@ -708,12 +708,12 @@ mod tests {
             .await;
 
         let client = create_test_client(&mock_server.uri());
-        let signer = KmsSigner::with_client(
+        let signer = AwsKmsSigner::with_client(
             client,
             TEST_KEY_ID.to_string(),
             keypair.pubkey().to_string(),
         )
-        .expect("Failed to create KmsSigner");
+        .expect("Failed to create AwsKmsSigner");
 
         let result = signer.sign_transaction(&mut tx).await;
         assert!(result.is_ok());
@@ -728,7 +728,7 @@ mod tests {
         let mock_server = MockServer::start().await;
         let client = create_test_client(&mock_server.uri());
 
-        let result = KmsSigner::with_client(
+        let result = AwsKmsSigner::with_client(
             client,
             TEST_KEY_ID.to_string(),
             "not-a-valid-pubkey".to_string(),
