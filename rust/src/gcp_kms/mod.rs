@@ -85,11 +85,11 @@ impl GcpKmsSigner {
             .set_data(message.to_vec())
             .send()
             .await
-            .map_err(|e| {
+            .map_err(|_e| {
                 #[cfg(feature = "unsafe-debug")]
-                log::error!("GCP KMS Sign operation failed: {e:?}");
+                log::error!("GCP KMS Sign operation failed: {_e:?}");
 
-                SignerError::RemoteApiError(format!("GCP KMS Sign operation failed: {e}"))
+                SignerError::RemoteApiError("GCP KMS Sign operation failed".to_string())
             })?;
 
         // Extract signature from response
@@ -146,7 +146,12 @@ impl GcpKmsSigner {
                 version.algorithm == CryptoKeyVersionAlgorithm::EcSignEd25519
                     && version.state == CryptoKeyVersionState::Enabled
             }
-            Err(_) => false,
+            Err(_e) => {
+                #[cfg(feature = "unsafe-debug")]
+                log::error!("GCP KMS availability check failed: {_e:?}");
+
+                false
+            }
         }
     }
 }
