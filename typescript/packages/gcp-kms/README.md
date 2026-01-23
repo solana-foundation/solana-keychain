@@ -5,7 +5,7 @@ Google Cloud KMS-based signer for Solana transactions using EdDSA (Ed25519) sign
 ## Installation
 
 ```bash
-pnpm add @solana/keychain-gcp-kms @google-cloud/kms
+pnpm add @solana/keychain-gcp-kms
 ```
 
 ## Prerequisites
@@ -83,6 +83,11 @@ new GcpKmsSigner(config: GcpKmsSignerConfig)
 **Config Options:**
 - `keyName` (required): Full resource name of the GCP KMS crypto key version
 - `publicKey` (required): Solana public key (base58-encoded)
+- `requestDelayMs` (optional): Delay in ms between concurrent signing requests to avoid rate limits (default: 0)
+
+#### Properties
+
+- `address`: The Solana address (public key) for this signer
 
 #### Methods
 
