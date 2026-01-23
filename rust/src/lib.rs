@@ -174,7 +174,7 @@ impl Signer {
 
     /// Create an AWS KMS signer (requires initialization)
     #[cfg(feature = "aws_kms")]
-    pub async fn from_kms(
+    pub async fn from_aws_kms(
         key_id: String,
         public_key: String,
         region: Option<String>,

@@ -5,7 +5,7 @@ HashiCorp Vault-based signer for Solana transactions using Vault's transit engin
 ## Installation
 
 ```bash
-npm install @solana/keychain-vault
+pnpm add @solana/keychain-vault
 ```
 
 ## Prerequisites
