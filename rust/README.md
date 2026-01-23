@@ -29,13 +29,13 @@
 ```toml
 [dependencies]
 # Basic usage (memory signer only)
-solana-keychain = "0.1"
+solana-keychain = "0.2"
 
 # With Vault support
-solana-keychain = { version = "0.1", features = ["vault"] }
+solana-keychain = { version = "0.2", features = ["vault"] }
 
 # All backends
-solana-keychain = { version = "0.1", features = ["all"] }
+solana-keychain = { version = "0.2", features = ["all"] }
 ```
 
 ## Quick Start
