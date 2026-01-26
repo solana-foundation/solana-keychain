@@ -34,14 +34,17 @@ jobs:
 
   typescript-test-integration:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     defaults:
       run:
         working-directory: typescript
     strategy:
       matrix:
         # TODO: Re-enable gcp-kms when we have GCP KMS access configured in CI
-        # package: [privy, turnkey, fireblocks, gcp-kms]
-        package: [privy, turnkey, fireblocks]
+        # package: [privy, turnkey, fireblocks, aws-kms, gcp-kms]
+        package: [privy, turnkey, fireblocks, aws-kms]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -50,6 +53,12 @@ jobs:
       - uses: pnpm/action-setup@v2
         with:
           version: 10.14.0
+      - name: Configure AWS credentials
+        if: matrix.package == 'aws-kms'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_KMS_REGION }}
       - name: Install dependencies
         run: pnpm install
       # TODO: Re-enable when we have GCP KMS access configured in CI
@@ -80,6 +89,10 @@ jobs:
           # # GCP KMS
           # GCP_KMS_KEY_NAME: ${{ secrets.GCP_KMS_KEY_NAME }}
           # GCP_KMS_SIGNER_PUBKEY: ${{ secrets.GCP_KMS_SIGNER_PUBKEY }}
+          # AWS KMS
+          AWS_KMS_KEY_ID: ${{ secrets.AWS_KMS_KEY_ID }}
+          AWS_KMS_SIGNER_PUBKEY: ${{ secrets.AWS_KMS_SIGNER_PUBKEY }}
+          AWS_KMS_REGION: ${{ secrets.AWS_KMS_REGION }}
         run: pnpm -F @solana/keychain-${{ matrix.package }} run test:integration
 
   typescript-lint:

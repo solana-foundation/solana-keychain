@@ -33,6 +33,9 @@ jobs:
 
   rust-integration-test:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     defaults:
       run:
         working-directory: rust
@@ -40,8 +43,14 @@ jobs:
       matrix:
         sdk_version: [v2, v3]
         # TODO: Re-enable test_gcp_kms_integration when we have GCP KMS access configured in CI
-        # test: [test_privy_integration, test_turnkey_integration, test_fireblocks_integration, test_gcp_kms_integration]
-        test: [test_privy_integration, test_turnkey_integration, test_fireblocks_integration]
+        # test: [test_privy_integration, test_turnkey_integration, test_fireblocks_integration, test_aws_kms_integration, test_gcp_kms_integration]
+        test:
+          [
+            test_privy_integration,
+            test_turnkey_integration,
+            test_fireblocks_integration,
+            test_aws_kms_integration,
+          ]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -51,6 +60,12 @@ jobs:
       #   uses: google-github-actions/auth@v2
       #   with:
       #     credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+      - name: Configure AWS credentials
+        if: matrix.test == 'test_aws_kms_integration'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_KMS_REGION }}
       - name: Run ${{ matrix.test }} with SDK ${{ matrix.sdk_version }}
         env:
           PRIVY_APP_ID: ${{ secrets.PRIVY_APP_ID }}
@@ -67,6 +82,9 @@ jobs:
           # TODO: Re-enable when we have GCP KMS access configured in CI
           # GCP_KMS_KEY_NAME: ${{ secrets.GCP_KMS_KEY_NAME }}
           # GCP_KMS_SIGNER_PUBKEY: ${{ secrets.GCP_KMS_SIGNER_PUBKEY }}
+          AWS_KMS_KEY_ID: ${{ secrets.AWS_KMS_KEY_ID }}
+          AWS_KMS_SIGNER_PUBKEY: ${{ secrets.AWS_KMS_SIGNER_PUBKEY }}
+          AWS_KMS_REGION: ${{ secrets.AWS_KMS_REGION }}
           SOLANA_RPC_URL: https://api.devnet.solana.com
         run: |
           if [ "${{ matrix.sdk_version }}" = "v2" ]; then

@@ -15,7 +15,7 @@ memory = []
 vault = ["dep:reqwest"]
 privy = ["dep:reqwest"]
 turnkey = ["dep:reqwest", "dep:p256", "dep:hex", "dep:chrono"]
-aws_kms = ["dep:aws-sdk-kms", "dep:aws-config"]
+aws_kms = ["dep:aws-sdk-kms", "dep:aws-config", "dep:reqwest"]
 fireblocks = [
     "dep:reqwest",
     "dep:jsonwebtoken",
