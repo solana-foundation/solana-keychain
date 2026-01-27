@@ -21,7 +21,8 @@ vi.mock('@google-cloud/kms', () => {
 });
 
 describe('GcpKmsSigner', () => {
-    const TEST_KEY_NAME = 'projects/test-project/locations/us-east1/keyRings/test-ring/cryptoKeys/test-key/cryptoKeyVersions/1';
+    const TEST_KEY_NAME =
+        'projects/test-project/locations/us-east1/keyRings/test-ring/cryptoKeys/test-key/cryptoKeyVersions/1';
     const TEST_PUBLIC_KEY = address('11111111111111111111111111111111');
 
     beforeEach(() => {
@@ -97,9 +98,11 @@ describe('GcpKmsSigner', () => {
 
     describe('signMessages', () => {
         it('should sign a message successfully', async () => {
-            mockAsymmetricSign.mockResolvedValue([{
-                signature: new Uint8Array(64).fill(0x42),
-            }]);
+            mockAsymmetricSign.mockResolvedValue([
+                {
+                    signature: new Uint8Array(64).fill(0x42),
+                },
+            ]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
@@ -122,9 +125,11 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should handle multiple messages with delay', async () => {
-            mockAsymmetricSign.mockResolvedValue([{
-                signature: new Uint8Array(64).fill(0x42),
-            }]);
+            mockAsymmetricSign.mockResolvedValue([
+                {
+                    signature: new Uint8Array(64).fill(0x42),
+                },
+            ]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
@@ -149,9 +154,11 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should throw error on invalid signature length', async () => {
-            mockAsymmetricSign.mockResolvedValue([{
-                signature: new Uint8Array(32), // Wrong length
-            }]);
+            mockAsymmetricSign.mockResolvedValue([
+                {
+                    signature: new Uint8Array(32), // Wrong length
+                },
+            ]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
@@ -194,9 +201,11 @@ describe('GcpKmsSigner', () => {
 
     describe('signTransactions', () => {
         it('should sign a transaction successfully', async () => {
-            mockAsymmetricSign.mockResolvedValue([{
-                signature: new Uint8Array(64).fill(0x42),
-            }]);
+            mockAsymmetricSign.mockResolvedValue([
+                {
+                    signature: new Uint8Array(64).fill(0x42),
+                },
+            ]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
@@ -216,9 +225,11 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should sign multiple transactions successfully', async () => {
-            mockAsymmetricSign.mockResolvedValue([{
-                signature: new Uint8Array(64).fill(0x42),
-            }]);
+            mockAsymmetricSign.mockResolvedValue([
+                {
+                    signature: new Uint8Array(64).fill(0x42),
+                },
+            ]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
@@ -237,9 +248,11 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should throw error on invalid signature length', async () => {
-            mockAsymmetricSign.mockResolvedValue([{
-                signature: new Uint8Array(32),
-            }]);
+            mockAsymmetricSign.mockResolvedValue([
+                {
+                    signature: new Uint8Array(32),
+                },
+            ]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
@@ -276,17 +289,21 @@ describe('GcpKmsSigner', () => {
 
             const transaction = { messageBytes: new Uint8Array([1, 2, 3, 4]), signatures: {} } as any;
 
-            await expect(signer.signTransactions([transaction])).rejects.toThrow('GCP KMS Sign operation failed: GCP Error');
+            await expect(signer.signTransactions([transaction])).rejects.toThrow(
+                'GCP KMS Sign operation failed: GCP Error',
+            );
         });
     });
 
     describe('isAvailable', () => {
         it('should return true for valid Ed25519 key', async () => {
-            mockGetCryptoKeyVersion.mockResolvedValue([{
-                name: TEST_KEY_NAME,
-                algorithm: 'EC_SIGN_ED25519',
-                state: 'ENABLED',
-            }]);
+            mockGetCryptoKeyVersion.mockResolvedValue([
+                {
+                    name: TEST_KEY_NAME,
+                    algorithm: 'EC_SIGN_ED25519',
+                    state: 'ENABLED',
+                },
+            ]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
@@ -299,11 +316,13 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should return false for wrong algorithm', async () => {
-            mockGetCryptoKeyVersion.mockResolvedValue([{
-                name: TEST_KEY_NAME,
-                algorithm: 'RSA_SIGN_PKCS1_2048_SHA256',
-                state: 'ENABLED',
-            }]);
+            mockGetCryptoKeyVersion.mockResolvedValue([
+                {
+                    name: TEST_KEY_NAME,
+                    algorithm: 'RSA_SIGN_PKCS1_2048_SHA256',
+                    state: 'ENABLED',
+                },
+            ]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
@@ -316,11 +335,13 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should return false for disabled key', async () => {
-            mockGetCryptoKeyVersion.mockResolvedValue([{
-                name: TEST_KEY_NAME,
-                algorithm: 'EC_SIGN_ED25519',
-                state: 'DISABLED',
-            }]);
+            mockGetCryptoKeyVersion.mockResolvedValue([
+                {
+                    name: TEST_KEY_NAME,
+                    algorithm: 'EC_SIGN_ED25519',
+                    state: 'DISABLED',
+                },
+            ]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
