@@ -1,3 +1,22 @@
+## 0.3.0 - 2026-01-28
+
+
+### Documentation
+
+- update READMEs and add missing package documentation (#33)
+
+
+### Features
+
+- add GCP signer integration (#29)
+
+
+### Refactoring
+
+- rename from_kms to from_aws_kms for consistency (#32)
+
+- Rename KmsSigner to AwsKmsSigner since other third party use the KMS acronym as well (#30)
+
 ## 0.2.1 - 2026-01-06
 
 ## 0.2.0 - 2025-12-19

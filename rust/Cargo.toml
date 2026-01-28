@@ -1,6 +1,6 @@
 [package]
 name = "solana-keychain"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "Framework-agnostic Solana signing abstractions"
@@ -25,7 +25,15 @@ fireblocks = [
     "dep:chrono",
 ]
 gcp_kms = ["dep:google-cloud-kms-v1", "dep:google-cloud-auth", "dep:reqwest"]
-all = ["memory", "vault", "privy", "turnkey", "aws_kms", "fireblocks", "gcp_kms"]
+all = [
+    "memory",
+    "vault",
+    "privy",
+    "turnkey",
+    "aws_kms",
+    "fireblocks",
+    "gcp_kms",
+]
 
 # SDK version selection (mutually exclusive)
 sdk-v2 = ["dep:solana-sdk"]
