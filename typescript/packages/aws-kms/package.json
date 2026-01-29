@@ -51,6 +51,8 @@
     },
     "devDependencies": {
         "@solana/keychain-test-utils": "workspace:*",
+        "@solana-program/memo": "^0.10.0",
+        "@solana/kit": "^5.0.0",
         "dotenv": "^17.2.3"
     },
     "publishConfig": {
