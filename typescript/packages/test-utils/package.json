@@ -32,9 +32,9 @@
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
-        "@solana-program/memo": "^0.10.0",
+        "@solana-program/memo": "^0.11.0",
         "@solana/keychain-core": "workspace:*",
-        "@solana/kit": "^5.0.0",
+        "@solana/kit": "^6.0.1",
         "litesvm": "^0.3.3"
     },
     "devDependencies": {

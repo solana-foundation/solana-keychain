@@ -41,19 +41,19 @@
     },
     "dependencies": {
         "@solana/keychain-core": "workspace:*",
-        "@solana/addresses": "^5.0.0",
-        "@solana/codecs-core": "^5.0.0",
-        "@solana/codecs-strings": "^5.0.0",
-        "@solana/keys": "^5.0.0",
-        "@solana/signers": "^5.0.0",
-        "@solana/transactions": "^5.0.0"
+        "@solana/addresses": "^6.0.1",
+        "@solana/codecs-core": "^6.0.1",
+        "@solana/codecs-strings": "^6.0.1",
+        "@solana/keys": "^6.0.1",
+        "@solana/signers": "^6.0.1",
+        "@solana/transactions": "^6.0.1"
     },
     "publishConfig": {
         "access": "public"
     },
     "devDependencies": {
         "@solana/keychain-test-utils": "workspace:*",
-        "@solana/nominal-types": "^5.0.0",
+        "@solana/nominal-types": "^6.0.1",
         "dotenv": "^17.2.3"
     }
 }

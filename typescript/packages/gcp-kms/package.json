@@ -43,15 +43,15 @@
     "dependencies": {
         "@google-cloud/kms": "^5.2.1",
         "@solana/keychain-core": "workspace:*",
-        "@solana/addresses": "^5.0.0",
-        "@solana/keys": "^5.0.0",
-        "@solana/signers": "^5.0.0",
-        "@solana/transactions": "^5.0.0"
+        "@solana/addresses": "^6.0.1",
+        "@solana/keys": "^6.0.1",
+        "@solana/signers": "^6.0.1",
+        "@solana/transactions": "^6.0.1"
     },
     "devDependencies": {
         "@solana/keychain-test-utils": "workspace:*",
-        "@solana-program/memo": "^0.10.0",
-        "@solana/kit": "^5.0.0",
+        "@solana-program/memo": "^0.11.0",
+        "@solana/kit": "^6.0.1",
         "dotenv": "^17.2.3"
     },
     "publishConfig": {
