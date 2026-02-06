@@ -12,8 +12,7 @@ import type { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime }
  * Provides both high-level (simple) and low-level (@solana/kit compatible) APIs.
  */
 export interface SolanaSigner<TAddress extends string = string>
-    extends TransactionPartialSigner<TAddress>,
-        MessagePartialSigner<TAddress> {
+    extends TransactionPartialSigner<TAddress>, MessagePartialSigner<TAddress> {
     /**
      * Get the public key address of this signer
      */
