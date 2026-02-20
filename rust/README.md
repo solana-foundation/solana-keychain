@@ -23,19 +23,25 @@
 | **Privy** | Embedded wallets with Privy infrastructure | `privy` |
 | **Turnkey** | Non-custodial key management via Turnkey | `turnkey` |
 | **AWS KMS** | AWS Key Management Service with EdDSA (Ed25519) signing | `aws_kms` |
+| **Fireblocks** | Fireblocks institutional custody platform | `fireblocks` |
+| **GCP KMS** | Google Cloud Key Management Service with Ed25519 signing | `gcp_kms` |
+| **CDP** | Coinbase Developer Platform managed wallet infrastructure | `cdp` |
 
 ## Installation
 
 ```toml
 [dependencies]
 # Basic usage (memory signer only)
-solana-keychain = "0.2"
+solana-keychain = "0.3"
+
+# With CDP support
+solana-keychain = { version = "0.3", features = ["cdp"] }
 
 # With Vault support
-solana-keychain = { version = "0.2", features = ["vault"] }
+solana-keychain = { version = "0.3", features = ["vault"] }
 
 # All backends
-solana-keychain = { version = "0.2", features = ["all"] }
+solana-keychain = { version = "0.3", features = ["all"] }
 ```
 
 ## Quick Start
@@ -65,6 +71,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+**Note:** CDP's `sign_message` API only accepts UTF-8 messages. Non-UTF-8 byte payloads will return an error.
+
 ### AWS KMS Signer
 
 ```rust
@@ -88,6 +96,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+### CDP Signer (Coinbase Developer Platform)
+
+```rust
+use solana_keychain::{CdpSigner, SolanaSigner};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create signer using CDP managed wallet infrastructure
+    // API keys are created at https://portal.cdp.coinbase.com
+    let signer = CdpSigner::new(
+        std::env::var("CDP_API_KEY_ID")?,   // CDP API key ID
+        std::env::var("CDP_API_KEY_SECRET")?,    // Base64 Ed25519 key
+        std::env::var("CDP_WALLET_SECRET")?,  // Base64-encoded wallet secret
+        std::env::var("CDP_SOLANA_ADDRESS")?, // Solana account address
+    ).await?;
+
+    // Get public key
+    let pubkey = signer.pubkey();
+    println!("Public key: {}", pubkey);
+
+    // Sign a message
+    let message = b"Hello Solana!";
+    let signature = signer.sign_message(message).await?;
+    println!("Signature: {}", signature);
+
+    Ok(())
+}
+```
+
+**Note:** CDP's `sign_message` API only accepts UTF-8 messages. Non-UTF-8 byte payloads will return an error.
 
 #### AWS Credentials
 

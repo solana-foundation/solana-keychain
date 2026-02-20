@@ -1,0 +1,61 @@
+{
+    "name": "@solana/keychain-cdp",
+    "author": "Solana Foundation",
+    "version": "0.4.0",
+    "description": "Coinbase Developer Platform (CDP) signer for Solana transactions",
+    "license": "MIT",
+    "repository": "https://github.com/solana-foundation/solana-keychain",
+    "keywords": [
+        "solana",
+        "signing",
+        "wallet",
+        "cdp",
+        "coinbase"
+    ],
+    "type": "module",
+    "engines": {
+        "node": ">=19"
+    },
+    "sideEffects": false,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "src"
+    ],
+    "scripts": {
+        "build": "tsc --build",
+        "clean": "rm -rf dist *.tsbuildinfo",
+        "prepack": "pnpm run build",
+        "test": "vitest run",
+        "test:unit": "vitest run --config ../../vitest.config.unit.ts",
+        "test:integration": "vitest run --config ../../vitest.config.integration.ts",
+        "test:watch": "vitest",
+        "test:watch:unit": "vitest --config ../../vitest.config.unit.ts",
+        "test:watch:integration": "vitest --config ../../vitest.config.integration.ts",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@solana/keychain-core": "workspace:*",
+        "@solana/addresses": "^6.0.1",
+        "@solana/codecs-strings": "^6.0.1",
+        "@solana/keys": "^6.0.1",
+        "@solana/signers": "^6.0.1",
+        "@solana/transactions": "^6.0.1"
+    },
+    "devDependencies": {
+        "@solana-program/memo": "^0.11.0",
+        "@solana/keychain-test-utils": "workspace:*",
+        "@solana/kit": "^6.0.1",
+        "dotenv": "^17.2.3"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}

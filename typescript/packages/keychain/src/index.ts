@@ -3,6 +3,7 @@ export * from '@solana/keychain-core';
 
 // Signer implementations (namespaced to avoid conflicts)
 export * as awsKms from '@solana/keychain-aws-kms';
+export * as cdp from '@solana/keychain-cdp';
 export * as fireblocks from '@solana/keychain-fireblocks';
 export * as gcpKms from '@solana/keychain-gcp-kms';
 export * as privy from '@solana/keychain-privy';
@@ -11,6 +12,7 @@ export * as vault from '@solana/keychain-vault';
 
 // Re-export signer classes directly for convenience
 export { AwsKmsSigner } from '@solana/keychain-aws-kms';
+export { CdpSigner } from '@solana/keychain-cdp';
 export { FireblocksSigner } from '@solana/keychain-fireblocks';
 export { GcpKmsSigner } from '@solana/keychain-gcp-kms';
 export { PrivySigner } from '@solana/keychain-privy';

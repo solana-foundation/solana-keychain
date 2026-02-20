@@ -23,6 +23,12 @@ pub fn keypair_pubkey(keypair: &Keypair) -> Pubkey {
     keypair.pubkey()
 }
 
+/// Derive a keypair from a 32-byte seed (v2 adapter)
+pub fn keypair_from_seed(seed: &[u8]) -> Result<Keypair, String> {
+    #[allow(deprecated)]
+    solana_sdk::signer::keypair::keypair_from_seed(seed).map_err(|e| e.to_string())
+}
+
 /// Sign a message with a keypair (v2 adapter)
 pub fn keypair_sign_message(keypair: &Keypair, message: &[u8]) -> Signature {
     keypair.sign_message(message)

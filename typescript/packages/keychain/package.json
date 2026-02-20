@@ -14,7 +14,9 @@
         "turnkey",
         "aws",
         "kms",
-        "fireblocks"
+        "fireblocks",
+        "cdp",
+        "coinbase"
     ],
     "type": "module",
     "sideEffects": false,
@@ -40,6 +42,7 @@
     "dependencies": {
         "@solana/keychain-core": "workspace:*",
         "@solana/keychain-aws-kms": "workspace:*",
+        "@solana/keychain-cdp": "workspace:*",
         "@solana/keychain-fireblocks": "workspace:*",
         "@solana/keychain-gcp-kms": "workspace:*",
         "@solana/keychain-privy": "workspace:*",

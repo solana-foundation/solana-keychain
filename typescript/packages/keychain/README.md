@@ -11,6 +11,7 @@ pnpm add @solana/keychain
 This installs all signer implementations. For a smaller bundle, install individual packages instead:
 
 - `@solana/keychain-aws-kms` - AWS KMS signer
+- `@solana/keychain-cdp` - Coinbase Developer Platform (CDP) signer
 - `@solana/keychain-fireblocks` - Fireblocks signer
 - `@solana/keychain-privy` - Privy signer
 - `@solana/keychain-turnkey` - Turnkey signer
