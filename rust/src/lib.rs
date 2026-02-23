@@ -15,6 +15,7 @@
 //! - `gcp_kms`: GCP KMS integration with EdDSA (Ed25519) signing
 //! - `cdp`: Coinbase Developer Platform integration
 //! - `para`: Para MPC wallet integration
+//! - `dfns`: Dfns Wallet API integration
 //! - `all`: Enable all signer backends
 //!
 //! ## SDK Version Selection
@@ -56,6 +57,8 @@ pub mod gcp_kms;
 
 #[cfg(feature = "cdp")]
 pub mod cdp;
+#[cfg(feature = "dfns")]
+pub mod dfns;
 #[cfg(feature = "para")]
 pub mod para;
 
@@ -87,6 +90,8 @@ pub use gcp_kms::GcpKmsSigner;
 
 #[cfg(feature = "cdp")]
 pub use cdp::CdpSigner;
+#[cfg(feature = "dfns")]
+pub use dfns::{DfnsSigner, DfnsSignerConfig};
 #[cfg(feature = "para")]
 pub use para::ParaSigner;
 
@@ -102,10 +107,11 @@ use crate::traits::SignedTransaction;
     feature = "fireblocks",
     feature = "gcp_kms",
     feature = "cdp",
+    feature = "dfns",
     feature = "para"
 )))]
 compile_error!(
-    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, cdp, or para"
+    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, cdp, para, or dfns"
 );
 
 /// Unified signer enum supporting multiple backends
@@ -133,6 +139,8 @@ pub enum Signer {
 
     #[cfg(feature = "cdp")]
     Cdp(CdpSigner),
+    #[cfg(feature = "dfns")]
+    Dfns(DfnsSigner),
     #[cfg(feature = "para")]
     Para(ParaSigner),
 }
@@ -245,6 +253,14 @@ impl Signer {
             address,
         )?))
     }
+
+    /// Create a Dfns signer (requires initialization)
+    #[cfg(feature = "dfns")]
+    pub async fn from_dfns(config: DfnsSignerConfig) -> Result<Self, SignerError> {
+        let mut signer = DfnsSigner::new(config);
+        signer.init().await?;
+        Ok(Self::Dfns(signer))
+    }
 }
 
 #[async_trait::async_trait]
@@ -274,6 +290,8 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "cdp")]
             Signer::Cdp(s) => s.pubkey(),
+            #[cfg(feature = "dfns")]
+            Signer::Dfns(s) => s.pubkey(),
             #[cfg(feature = "para")]
             Signer::Para(s) => s.pubkey(),
         }
@@ -307,6 +325,8 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "cdp")]
             Signer::Cdp(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "dfns")]
+            Signer::Dfns(s) => s.sign_transaction(tx).await,
             #[cfg(feature = "para")]
             Signer::Para(s) => s.sign_transaction(tx).await,
         }
@@ -337,6 +357,8 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "cdp")]
             Signer::Cdp(s) => s.sign_message(message).await,
+            #[cfg(feature = "dfns")]
+            Signer::Dfns(s) => s.sign_message(message).await,
             #[cfg(feature = "para")]
             Signer::Para(s) => s.sign_message(message).await,
         }
@@ -370,6 +392,8 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "cdp")]
             Signer::Cdp(s) => s.sign_partial_transaction(tx).await,
+            #[cfg(feature = "dfns")]
+            Signer::Dfns(s) => s.sign_partial_transaction(tx).await,
             #[cfg(feature = "para")]
             Signer::Para(s) => s.sign_partial_transaction(tx).await,
         }
@@ -400,6 +424,8 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "cdp")]
             Signer::Cdp(s) => s.is_available().await,
+            #[cfg(feature = "dfns")]
+            Signer::Dfns(s) => s.is_available().await,
             #[cfg(feature = "para")]
             Signer::Para(s) => s.is_available().await,
         }

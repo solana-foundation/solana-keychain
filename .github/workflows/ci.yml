@@ -15,7 +15,7 @@ jobs:
     strategy:
       matrix:
         sdk_version: [v2, v3]
-        backend: [memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, all]
+        backend: [memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, dfns, all]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -48,6 +48,7 @@ jobs:
             test_fireblocks_integration,
             test_aws_kms_integration,
             test_gcp_kms_integration,
+            test_dfns_integration,
           ]
     steps:
       - uses: actions/checkout@v4
@@ -88,6 +89,11 @@ jobs:
           CDP_API_KEY_SECRET: ${{ secrets.CDP_API_KEY_SECRET }}
           CDP_WALLET_SECRET: ${{ secrets.CDP_WALLET_SECRET }}
           CDP_SOLANA_ADDRESS: ${{ secrets.CDP_SOLANA_ADDRESS }}
+          DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN }}
+          DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID }}
+          DFNS_PRIVATE_KEY_PEM: ${{ secrets.DFNS_PRIVATE_KEY_PEM }}
+          DFNS_WALLET_ID: ${{ secrets.DFNS_WALLET_ID }}
+          DFNS_API_BASE_URL: ${{ secrets.DFNS_API_BASE_URL }}
           SOLANA_RPC_URL: https://api.devnet.solana.com
         run: |
           if [ "${{ matrix.sdk_version }}" = "v2" ]; then
