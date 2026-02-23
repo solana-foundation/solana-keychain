@@ -134,6 +134,37 @@ importers:
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
 
+  packages/dfns:
+    dependencies:
+      '@solana/addresses':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/codecs-strings':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/keychain-core':
+        specifier: workspace:*
+        version: link:../core
+      '@solana/keys':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/signers':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/transactions':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+    devDependencies:
+      '@solana/keychain-test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+      '@solana/kit':
+        specifier: ^6.0.1
+        version: 6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
+
   packages/fireblocks:
     dependencies:
       '@solana/addresses':
@@ -216,6 +247,9 @@ importers:
       '@solana/keychain-core':
         specifier: workspace:*
         version: link:../core
+      '@solana/keychain-dfns':
+        specifier: workspace:*
+        version: link:../dfns
       '@solana/keychain-fireblocks':
         specifier: workspace:*
         version: link:../fireblocks
