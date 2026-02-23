@@ -12,6 +12,7 @@
         { "path": "../aws-kms" },
         { "path": "../fireblocks" },
         { "path": "../gcp-kms" },
+        { "path": "../para" },
         { "path": "../privy" },
         { "path": "../turnkey" },
         { "path": "../vault" }

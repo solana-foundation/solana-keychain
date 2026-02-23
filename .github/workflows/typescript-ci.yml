@@ -16,7 +16,7 @@ jobs:
       matrix:
         # TODO: Re-enable gcp-kms when we have GCP KMS access configured in CI
         # package: [vault, privy, turnkey, fireblocks, gcp-kms]
-        package: [vault, privy, turnkey, fireblocks]
+        package: [vault, privy, turnkey, fireblocks, para]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,7 +44,7 @@ jobs:
       matrix:
         # TODO: Re-enable gcp-kms when we have GCP KMS access configured in CI
         # package: [privy, turnkey, fireblocks, aws-kms, gcp-kms]
-        package: [privy, turnkey, fireblocks, aws-kms]
+        package: [privy, turnkey, fireblocks, aws-kms, para]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -93,6 +93,10 @@ jobs:
           AWS_KMS_KEY_ID: ${{ secrets.AWS_KMS_KEY_ID }}
           AWS_KMS_SIGNER_PUBKEY: ${{ secrets.AWS_KMS_SIGNER_PUBKEY }}
           AWS_KMS_REGION: ${{ secrets.AWS_KMS_REGION }}
+          # Para
+          PARA_API_KEY: ${{ secrets.PARA_API_KEY }}
+          PARA_WALLET_ID: ${{ secrets.PARA_WALLET_ID }}
+          PARA_API_BASE_URL: ${{ secrets.PARA_API_BASE_URL }}
         run: pnpm -F @solana/keychain-${{ matrix.package }} run test:integration
 
   typescript-lint:

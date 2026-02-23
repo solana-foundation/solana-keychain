@@ -30,6 +30,7 @@ env:
     core
     aws-kms
     fireblocks
+    para
     privy
     turnkey
     vault
@@ -278,6 +279,7 @@ jobs:
               '@solana/keychain-core',
               '@solana/keychain-aws-kms',
               '@solana/keychain-fireblocks',
+              '@solana/keychain-para',
               '@solana/keychain-privy',
               '@solana/keychain-turnkey',
               '@solana/keychain-vault',
@@ -347,6 +349,7 @@ jobs:
           | \`@solana/keychain-core\` | [npm](https://www.npmjs.com/package/@solana/keychain-core/v/${VERSION}) |
           | \`@solana/keychain-aws-kms\` | [npm](https://www.npmjs.com/package/@solana/keychain-aws-kms/v/${VERSION}) |
           | \`@solana/keychain-fireblocks\` | [npm](https://www.npmjs.com/package/@solana/keychain-fireblocks/v/${VERSION}) |
+          | \`@solana/keychain-para\` | [npm](https://www.npmjs.com/package/@solana/keychain-para/v/${VERSION}) |
           | \`@solana/keychain-privy\` | [npm](https://www.npmjs.com/package/@solana/keychain-privy/v/${VERSION}) |
           | \`@solana/keychain-turnkey\` | [npm](https://www.npmjs.com/package/@solana/keychain-turnkey/v/${VERSION}) |
           | \`@solana/keychain-vault\` | [npm](https://www.npmjs.com/package/@solana/keychain-vault/v/${VERSION}) |

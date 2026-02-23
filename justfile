@@ -169,7 +169,7 @@ ts-test-integration:
     vault write transit/restore/solana-test-key backup=@"../rust/src/tests/vault-test-key.b64" >/dev/null 2>&1 || true
 
     echo "Running TypeScript integration tests..."
-    pnpm -F @solana/keychain-fireblocks -F @solana/keychain-privy -F @solana/keychain-turnkey -F @solana/keychain-vault test:integration
+    pnpm -F @solana/keychain-fireblocks -F @solana/keychain-para -F @solana/keychain-privy -F @solana/keychain-turnkey -F @solana/keychain-vault test:integration
 
 # ===========================================================
 # ========================= Release =========================
@@ -284,7 +284,7 @@ release-ts: _check-ts-release
     echo "Updating to $version..."
 
     # Update version in all packages
-    PACKAGES="core aws-kms fireblocks privy turnkey vault keychain test-utils"
+    PACKAGES="core aws-kms fireblocks para privy turnkey vault keychain test-utils"
     for pkg in $PACKAGES; do
         echo "  Updating packages/${pkg}..."
         cd packages/${pkg}

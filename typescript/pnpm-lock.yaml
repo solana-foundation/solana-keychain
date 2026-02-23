@@ -185,6 +185,9 @@ importers:
       '@solana/keychain-gcp-kms':
         specifier: workspace:*
         version: link:../gcp-kms
+      '@solana/keychain-para':
+        specifier: workspace:*
+        version: link:../para
       '@solana/keychain-privy':
         specifier: workspace:*
         version: link:../privy
@@ -194,6 +197,34 @@ importers:
       '@solana/keychain-vault':
         specifier: workspace:*
         version: link:../vault
+
+  packages/para:
+    dependencies:
+      '@solana/addresses':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/codecs-strings':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/keychain-core':
+        specifier: workspace:*
+        version: link:../core
+      '@solana/keys':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/signers':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/transactions':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+    devDependencies:
+      '@solana/keychain-test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
 
   packages/privy:
     dependencies:
@@ -2341,10 +2372,6 @@ packages:
 
   color-name@1.1.4:
     resolution: {integrity: sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==}
-
-  commander@14.0.2:
-    resolution: {integrity: sha512-TywoWNNRbhoD0BXs1P3ZEScW8W5iKrnbithIl0YH+uCmBd0QpPOA8yc82DS3BIE5Ma6FnBVUsJ7wVUDz4dvOWQ==}
-    engines: {node: '>=20'}
 
   commander@14.0.3:
     resolution: {integrity: sha512-H+y0Jo/T1RZ9qPP4Eh1pkcQcLRglraJaSLoyOtHxu6AapkjWVCy2Sit1QQ4x3Dng8qDlSsZEet7g5Pq06MvTgw==}
@@ -5271,7 +5298,7 @@ snapshots:
   '@solana/errors@2.3.0(typescript@5.9.3)':
     dependencies:
       chalk: 5.6.2
-      commander: 14.0.2
+      commander: 14.0.3
       typescript: 5.9.3
 
   '@solana/errors@6.0.1(typescript@5.9.3)':
@@ -6371,8 +6398,6 @@ snapshots:
       color-name: 1.1.4
 
   color-name@1.1.4: {}
-
-  commander@14.0.2: {}
 
   commander@14.0.3: {}
 
