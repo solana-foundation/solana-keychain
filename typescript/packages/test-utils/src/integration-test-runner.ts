@@ -1,6 +1,5 @@
-import type { Address, SignatureBytes, SignaturesMap } from '@solana/kit';
+import type { SignatureBytes, SignaturesMap } from '@solana/kit';
 import {
-    AccountRole,
     appendTransactionMessageInstructions,
     createSignableMessage,
     createTransactionMessage,
@@ -10,6 +9,7 @@ import {
     setTransactionMessageLifetimeUsingBlockhash,
     signTransactionMessageWithSigners,
 } from '@solana/kit';
+import { getTransferSolInstruction } from '@solana-program/system';
 
 import { airdropLamports, formatSimulationResult, LiteSVM, truncateAddress } from './litesvm-helpers.js';
 import type { SignerTestConfig, TestContext, TestOptions, TestScenario, TestSigner } from './types.js';
@@ -25,25 +25,6 @@ const DEFAULT_OPTIONS: Required<TestOptions> = {
 const AIRDROP_FEE_BUFFER = BigInt(50_000);
 
 const ALL_SCENARIOS: TestScenario[] = ['signTransaction', 'signMessage', 'simulateTransaction', 'badSignature'];
-const SYSTEM_PROGRAM_ADDRESS = '11111111111111111111111111111111' as Address;
-const SYSTEM_TRANSFER_INSTRUCTION_INDEX = 2;
-
-function getSystemTransferInstruction(fromAddress: Address, toAddress: Address, lamports: bigint) {
-    const data = new Uint8Array(12);
-    const dataView = new DataView(data.buffer, data.byteOffset, data.byteLength);
-
-    dataView.setUint32(0, SYSTEM_TRANSFER_INSTRUCTION_INDEX, true);
-    dataView.setBigUint64(4, lamports, true);
-
-    return {
-        accounts: [
-            { address: fromAddress, role: AccountRole.WRITABLE_SIGNER },
-            { address: toAddress, role: AccountRole.WRITABLE },
-        ],
-        data,
-        programAddress: SYSTEM_PROGRAM_ADDRESS,
-    };
-}
 
 /**
  * Main entry point for running integration tests
@@ -147,7 +128,11 @@ async function testSignTransaction<T extends TestSigner>(context: TestContext<T>
         console.log('Testing transaction signing...');
     }
 
-    const instruction = getSystemTransferInstruction(signer.address, recipientAddress, options.transferAmount);
+    const instruction = getTransferSolInstruction({
+        amount: options.transferAmount,
+        destination: recipientAddress,
+        source: signer,
+    });
     litesvm.expireBlockhash();
     const blockhash = litesvm.latestBlockhash();
 
@@ -227,7 +212,11 @@ async function testSimulateTransaction<T extends TestSigner>(context: TestContex
         console.log('Testing transaction simulation...');
     }
 
-    const instruction = getSystemTransferInstruction(signer.address, recipientAddress, options.transferAmount);
+    const instruction = getTransferSolInstruction({
+        amount: options.transferAmount,
+        destination: recipientAddress,
+        source: signer,
+    });
     litesvm.expireBlockhash();
     const blockhash = litesvm.latestBlockhash();
 
@@ -266,7 +255,11 @@ async function testBadSignature<T extends TestSigner>(context: TestContext<T>): 
         console.log('Testing bad signature detection...');
     }
 
-    const instruction = getSystemTransferInstruction(signer.address, recipientAddress, options.transferAmount);
+    const instruction = getTransferSolInstruction({
+        amount: options.transferAmount,
+        destination: recipientAddress,
+        source: signer,
+    });
     litesvm.expireBlockhash();
     const blockhash = litesvm.latestBlockhash();
 
