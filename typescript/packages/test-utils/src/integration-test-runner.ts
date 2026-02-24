@@ -42,8 +42,9 @@ export async function runSignerIntegrationTest<T extends TestSigner>(
     // Validate environment
     validateEnvironment(config.requiredEnvVars);
 
-    // Create LiteSVM instance
-    const litesvm = new LiteSVM();
+    // Create LiteSVM instance with minimal setup to avoid OOM on constrained CI runners.
+    // The full constructor loads SPL programs which require significantly more memory.
+    const litesvm = LiteSVM.default().withSysvars().withBuiltins().withPrecompiles();
 
     // Create signer
     const signer = await config.createSigner();
