@@ -9,7 +9,7 @@ import {
     setTransactionMessageLifetimeUsingBlockhash,
     signTransactionMessageWithSigners,
 } from '@solana/kit';
-import { getAddMemoInstruction } from '@solana-program/memo';
+import { getTransferSolInstruction } from '@solana-program/system';
 
 import { airdropLamports, formatSimulationResult, LiteSVM, truncateAddress } from './litesvm-helpers.js';
 import type { SignerTestConfig, TestContext, TestOptions, TestScenario, TestSigner } from './types.js';
@@ -22,6 +22,7 @@ const DEFAULT_OPTIONS: Required<TestOptions> = {
     transferAmount: DEFAULT_TRANSFER,
     verbose: false,
 };
+const AIRDROP_FEE_BUFFER = BigInt(50_000);
 
 const ALL_SCENARIOS: TestScenario[] = ['signTransaction', 'signMessage', 'simulateTransaction', 'badSignature'];
 
@@ -38,12 +39,19 @@ export async function runSignerIntegrationTest<T extends TestSigner>(
     options: TestOptions = {},
 ): Promise<void> {
     const opts = { ...DEFAULT_OPTIONS, ...options };
+    const airdropSourceLamports = opts.airdropAmount + AIRDROP_FEE_BUFFER;
 
     // Validate environment
     validateEnvironment(config.requiredEnvVars);
 
-    // Create LiteSVM instance
-    const litesvm = new LiteSVM();
+    // Create LiteSVM instance with minimal setup to avoid OOM on constrained CI runners.
+    // The full constructor loads SPL programs which require significantly more memory.
+    const litesvm = LiteSVM.default()
+        .withLamports(airdropSourceLamports)
+        .withSysvars()
+        .withBuiltins()
+        .withSigverify(true)
+        .withPrecompiles();
 
     // Create signer
     const signer = await config.createSigner();
@@ -57,6 +65,7 @@ export async function runSignerIntegrationTest<T extends TestSigner>(
     const recipientAddress = config.recipientAddress ?? (await generateKeyPairSigner()).address;
 
     airdropLamports(litesvm, signer.address, opts.airdropAmount);
+    airdropLamports(litesvm, recipientAddress, BigInt(1));
 
     const context: TestContext<T> = {
         litesvm,
@@ -113,13 +122,18 @@ async function runScenario<T extends TestSigner>(scenario: TestScenario, context
  * Test: Sign a transaction and verify it can be simulated successfully
  */
 async function testSignTransaction<T extends TestSigner>(context: TestContext<T>): Promise<void> {
-    const { signer, litesvm, options } = context;
+    const { signer, litesvm, options, recipientAddress } = context;
 
     if (options.verbose) {
         console.log('Testing transaction signing...');
     }
 
-    const instruction = getAddMemoInstruction({ memo: `Test transaction` });
+    const instruction = getTransferSolInstruction({
+        amount: options.transferAmount,
+        destination: recipientAddress,
+        source: signer,
+    });
+    litesvm.expireBlockhash();
     const blockhash = litesvm.latestBlockhash();
 
     const transaction = pipe(
@@ -192,13 +206,18 @@ async function testSignMessage<T extends TestSigner>(context: TestContext<T>): P
  * Test: Simulate a transaction without actually sending it
  */
 async function testSimulateTransaction<T extends TestSigner>(context: TestContext<T>): Promise<void> {
-    const { signer, litesvm, options } = context;
+    const { signer, litesvm, options, recipientAddress } = context;
 
     if (options.verbose) {
         console.log('Testing transaction simulation...');
     }
 
-    const instruction = getAddMemoInstruction({ memo: 'Simulation test' });
+    const instruction = getTransferSolInstruction({
+        amount: options.transferAmount,
+        destination: recipientAddress,
+        source: signer,
+    });
+    litesvm.expireBlockhash();
     const blockhash = litesvm.latestBlockhash();
 
     const transaction = pipe(
@@ -230,13 +249,18 @@ async function testSimulateTransaction<T extends TestSigner>(context: TestContex
  * Test: Verify that a transaction with a bad signature fails validation
  */
 async function testBadSignature<T extends TestSigner>(context: TestContext<T>): Promise<void> {
-    const { signer, litesvm, options } = context;
+    const { signer, litesvm, options, recipientAddress } = context;
 
     if (options.verbose) {
         console.log('Testing bad signature detection...');
     }
 
-    const instruction = getAddMemoInstruction({ memo: 'Bad signature test' });
+    const instruction = getTransferSolInstruction({
+        amount: options.transferAmount,
+        destination: recipientAddress,
+        source: signer,
+    });
+    litesvm.expireBlockhash();
     const blockhash = litesvm.latestBlockhash();
 
     const transaction = pipe(

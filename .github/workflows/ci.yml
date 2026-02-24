@@ -24,11 +24,11 @@ jobs:
       - name: Build and test with SDK ${{ matrix.sdk_version }}
         run: |
           if [ "${{ matrix.sdk_version }}" = "v2" ]; then
-            cargo build --features ${{ matrix.backend }},sdk-v2,unsafe-debug
-            cargo test --features ${{ matrix.backend }},sdk-v2,unsafe-debug
+            cargo build --locked --features ${{ matrix.backend }},sdk-v2,unsafe-debug
+            cargo test --locked --features ${{ matrix.backend }},sdk-v2,unsafe-debug
           else
-            cargo build --no-default-features --features ${{ matrix.backend }},sdk-v3,unsafe-debug
-            cargo test --no-default-features --features ${{ matrix.backend }},sdk-v3,unsafe-debug
+            cargo build --locked --no-default-features --features ${{ matrix.backend }},sdk-v3,unsafe-debug
+            cargo test --locked --no-default-features --features ${{ matrix.backend }},sdk-v3,unsafe-debug
           fi
 
   rust-integration-test:
@@ -88,9 +88,9 @@ jobs:
           SOLANA_RPC_URL: https://api.devnet.solana.com
         run: |
           if [ "${{ matrix.sdk_version }}" = "v2" ]; then
-            cargo test --no-default-features --features all,sdk-v2,unsafe-debug,integration-tests tests::${{ matrix.test }}::
+            cargo test --locked --no-default-features --features all,sdk-v2,unsafe-debug,integration-tests tests::${{ matrix.test }}::
           else
-            cargo test --no-default-features --features all,sdk-v3,unsafe-debug,integration-tests tests::${{ matrix.test }}::
+            cargo test --locked --no-default-features --features all,sdk-v3,unsafe-debug,integration-tests tests::${{ matrix.test }}::
           fi
 
   rust-lint:
@@ -105,6 +105,6 @@ jobs:
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
       - name: Clippy SDK v2
-        run: cargo clippy --all-targets --features all,sdk-v2,unsafe-debug,integration-tests -- -D warnings
+        run: cargo clippy --locked --all-targets --features all,sdk-v2,unsafe-debug,integration-tests -- -D warnings
       - name: Clippy SDK v3
-        run: cargo clippy --all-targets --no-default-features --features all,sdk-v3,unsafe-debug,integration-tests -- -D warnings
+        run: cargo clippy --locked --all-targets --no-default-features --features all,sdk-v3,unsafe-debug,integration-tests -- -D warnings
