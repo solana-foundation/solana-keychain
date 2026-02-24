@@ -86,6 +86,11 @@ wiremock = "0.6"
 rand = "0.8.0"
 dotenvy = "0.15.7"
 litesvm = "0.7.0"
-litesvm-v3 = { package = "litesvm", version = "0.8.1" }
+litesvm-v3 = { package = "litesvm", version = "=0.8.1" }
+# Pins the agave-* / solana-*-program cluster to 3.0.11 (last known-good).
+# v3.0.14 is partially migrated to solana-hash v4 which causes type mismatches.
+# All packages in this cluster have exact cross-version pins, so a single
+# agave-feature-set pin cascades the entire cluster.
+agave-feature-set-pin = { package = "agave-feature-set", version = "=3.0.11" }
 serial_test = "3.3.1"
 scoped-env = "2.1"
