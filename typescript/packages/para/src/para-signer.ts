@@ -155,7 +155,7 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
             const response = await fetch(url, {
                 headers: { 'X-API-Key': this.apiKey },
                 method: 'GET',
-                signal: AbortSignal.timeout(10_000),
+                signal: AbortSignal.timeout(5_000),
             });
 
             if (!response.ok) return false;
