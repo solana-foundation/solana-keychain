@@ -23,6 +23,7 @@
 | **Privy** | Embedded wallets with Privy infrastructure | `privy` |
 | **Turnkey** | Non-custodial key management via Turnkey | `turnkey` |
 | **AWS KMS** | AWS Key Management Service with EdDSA (Ed25519) signing | `aws_kms` |
+| **Para** | MPC wallets with Para infrastructure | `para` |
 
 ## Installation
 
@@ -122,6 +123,30 @@ Required IAM permissions:
         "Action": ["kms:Sign", "kms:DescribeKey"],
         "Resource": "arn:aws:kms:*:*:key/*"
     }]
+}
+```
+
+### Para Signer
+
+```rust
+use solana_keychain::{Signer, SolanaSigner};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create signer using Para's MPC wallet API
+    // API key must start with "sk_", wallet ID must be a valid UUID
+    let signer = Signer::from_para(
+        "sk_your-api-key".to_string(),
+        "your-wallet-uuid".to_string(),
+        None, // defaults to https://api.getpara.com
+    ).await?;
+
+    // Sign a message
+    let message = b"Hello Solana!";
+    let signature = signer.sign_message(message).await?;
+    println!("Signature: {}", signature);
+
+    Ok(())
 }
 ```
 

@@ -24,6 +24,7 @@ fireblocks = [
     "dep:hex",
     "dep:chrono",
 ]
+para = ["dep:reqwest", "dep:hex"]
 gcp_kms = ["dep:google-cloud-kms-v1", "dep:google-cloud-auth", "dep:reqwest"]
 all = [
     "memory",
@@ -33,6 +34,7 @@ all = [
     "aws_kms",
     "fireblocks",
     "gcp_kms",
+    "para",
 ]
 
 # SDK version selection (mutually exclusive)

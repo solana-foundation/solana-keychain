@@ -14,7 +14,7 @@ This repository contains two implementations:
 
 Framework-agnostic Rust library with async support and multiple signing backends.
 
-- **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS
+- **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Para
 - **Features**: Async/await, feature flags for zero-cost abstractions, SDK v2 & v3 support
 - [View Rust Documentation →](rust/README.md)
 
