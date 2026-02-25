@@ -18,7 +18,7 @@ jobs:
       contents: read
       id-token: write
       issues: write
-      pull-requests: read
+      pull-requests: write
     steps:
       - name: Validate PR and capture head SHA
         id: pr
