@@ -33,6 +33,7 @@ jobs:
         run: pnpm -F @solana/keychain-${{ matrix.package }} run test:unit
 
   typescript-test-integration:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
     runs-on: ubuntu-latest
     permissions:
       id-token: write
