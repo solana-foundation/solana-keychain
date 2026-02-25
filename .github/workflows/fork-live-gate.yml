@@ -23,6 +23,10 @@ jobs:
               return;
             }
 
+            if (!pr.head.repo) {
+              core.setFailed("The fork repository for this PR has been deleted. Cannot validate live-test marker.");
+              return;
+            }
             if (!pr.head.repo.fork) {
               core.info("Internal PR detected. No manual fork live-test marker required.");
               return;
