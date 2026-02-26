@@ -1,0 +1,233 @@
+name: Fork External Live Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Fork pull request number
+        required: true
+        type: number
+
+jobs:
+  fork-external-live-manual:
+    name: fork-external-live-manual
+    runs-on: ubuntu-latest
+    environment: external-live-tests
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Validate PR and capture head SHA
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const rawPrNumber = '${{ inputs.pr_number }}';
+            const prNumber = Number(rawPrNumber);
+            if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              core.setFailed(`Invalid pr_number input: ${rawPrNumber}`);
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            if (!pr.head.repo) {
+              core.setFailed(`PR #${prNumber}'s fork repository has been deleted.`);
+              return;
+            }
+            if (!pr.head.repo.fork) {
+              core.setFailed(`PR #${prNumber} is not from a fork. This workflow is only for fork PRs.`);
+              return;
+            }
+
+            core.setOutput("pr_number", String(pr.number));
+            core.setOutput("head_sha", pr.head.sha);
+            core.setOutput("head_ref", pr.head.ref);
+            core.info(`Running external live tests for fork PR #${pr.number} at ${pr.head.sha}.`);
+
+      - name: Checkout PR head SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.head_sha }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 10.14.0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_KMS_REGION }}
+
+      - name: Run Rust external live integration tests
+        working-directory: rust
+        env:
+          PRIVY_APP_ID: ${{ secrets.PRIVY_APP_ID }}
+          PRIVY_APP_SECRET: ${{ secrets.PRIVY_APP_SECRET }}
+          PRIVY_WALLET_ID: ${{ secrets.PRIVY_WALLET_ID }}
+          TURNKEY_API_PUBLIC_KEY: ${{ secrets.TURNKEY_API_KEY }}
+          TURNKEY_API_PRIVATE_KEY: ${{ secrets.TURNKEY_API_PRIVATE_KEY }}
+          TURNKEY_ORGANIZATION_ID: ${{ secrets.TURNKEY_ORGANIZATION_ID }}
+          TURNKEY_PRIVATE_KEY_ID: ${{ secrets.TURNKEY_PRIVATE_KEY_ID }}
+          TURNKEY_PUBLIC_KEY: ${{ secrets.TURNKEY_SIGNER_PUBKEY }}
+          FIREBLOCKS_API_KEY: ${{ secrets.FIREBLOCKS_API_KEY }}
+          FIREBLOCKS_PRIVATE_KEY_PEM: ${{ secrets.FIREBLOCKS_PRIVATE_KEY_PEM }}
+          FIREBLOCKS_VAULT_ACCOUNT_ID: ${{ secrets.FIREBLOCKS_VAULT_ACCOUNT_ID }}
+          AWS_KMS_KEY_ID: ${{ secrets.AWS_KMS_KEY_ID }}
+          AWS_KMS_SIGNER_PUBKEY: ${{ secrets.AWS_KMS_SIGNER_PUBKEY }}
+          AWS_KMS_REGION: ${{ secrets.AWS_KMS_REGION }}
+          SOLANA_RPC_URL: https://api.devnet.solana.com
+        run: |
+          set -euo pipefail
+
+          tests=(
+            test_privy_integration
+            test_turnkey_integration
+            test_fireblocks_integration
+            test_aws_kms_integration
+          )
+
+          for sdk in v2 v3; do
+            for test_name in "${tests[@]}"; do
+              echo "Running ${test_name} with ${sdk}"
+              if [ "${sdk}" = "v2" ]; then
+                cargo test --locked --no-default-features --features all,sdk-v2,unsafe-debug,integration-tests tests::${test_name}::
+              else
+                cargo test --locked --no-default-features --features all,sdk-v3,unsafe-debug,integration-tests tests::${test_name}::
+              fi
+            done
+          done
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: pnpm install
+
+      - name: Build TypeScript packages
+        working-directory: typescript
+        run: pnpm build
+
+      - name: Run TypeScript external live integration tests
+        working-directory: typescript
+        env:
+          PRIVY_APP_ID: ${{ secrets.PRIVY_APP_ID }}
+          PRIVY_APP_SECRET: ${{ secrets.PRIVY_APP_SECRET }}
+          PRIVY_WALLET_ID: ${{ secrets.PRIVY_WALLET_ID }}
+          TURNKEY_API_PUBLIC_KEY: ${{ secrets.TURNKEY_API_KEY }}
+          TURNKEY_API_PRIVATE_KEY: ${{ secrets.TURNKEY_API_PRIVATE_KEY }}
+          TURNKEY_ORGANIZATION_ID: ${{ secrets.TURNKEY_ORGANIZATION_ID }}
+          TURNKEY_PRIVATE_KEY_ID: ${{ secrets.TURNKEY_PRIVATE_KEY_ID }}
+          TURNKEY_PUBLIC_KEY: ${{ secrets.TURNKEY_SIGNER_PUBKEY }}
+          FIREBLOCKS_API_KEY: ${{ secrets.FIREBLOCKS_API_KEY }}
+          FIREBLOCKS_PRIVATE_KEY_PEM: ${{ secrets.FIREBLOCKS_PRIVATE_KEY_PEM }}
+          FIREBLOCKS_VAULT_ACCOUNT_ID: ${{ secrets.FIREBLOCKS_VAULT_ACCOUNT_ID }}
+          AWS_KMS_KEY_ID: ${{ secrets.AWS_KMS_KEY_ID }}
+          AWS_KMS_SIGNER_PUBKEY: ${{ secrets.AWS_KMS_SIGNER_PUBKEY }}
+          AWS_KMS_REGION: ${{ secrets.AWS_KMS_REGION }}
+        run: |
+          set -euo pipefail
+
+          packages=(
+            privy
+            turnkey
+            fireblocks
+            aws-kms
+          )
+
+          for package_name in "${packages[@]}"; do
+            echo "Running @solana/keychain-${package_name} integration tests"
+            pnpm -F @solana/keychain-${package_name} run test:integration
+          done
+
+      - name: Verify PR head SHA is unchanged
+        id: verify-sha
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = Number('${{ steps.pr.outputs.pr_number }}');
+            const expectedSha = '${{ steps.pr.outputs.head_sha }}';
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            if (pr.head.sha !== expectedSha) {
+              core.setFailed(
+                `PR #${prNumber} head changed during run. Expected ${expectedSha}, got ${pr.head.sha}. Re-run this workflow.`
+              );
+              return;
+            }
+
+            core.setOutput("head_sha", expectedSha);
+
+      - name: Post marker and rerun gate
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = Number('${{ steps.pr.outputs.pr_number }}');
+            const headSha = '${{ steps.verify-sha.outputs.head_sha }}';
+            const headRef = '${{ steps.pr.outputs.head_ref }}';
+            const marker = `fork-external-live-pass:${headSha}`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: `${marker}\n\nExternal live tests passed in ${runUrl}.`,
+            });
+
+            let runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "fork-live-gate.yml",
+              event: "pull_request",
+              head_sha: headSha,
+              per_page: 1,
+            });
+
+            if (runs.data.workflow_runs.length === 0) {
+              core.warning(`No Fork Live Gate run found for head_sha=${headSha}, falling back to branch filter.`);
+              const branchRuns = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: "fork-live-gate.yml",
+                event: "pull_request",
+                branch: headRef,
+                per_page: 10,
+              });
+              const match = branchRuns.data.workflow_runs.find(r => r.head_sha === headSha);
+              if (!match) {
+                core.warning(
+                  `No Fork Live Gate run found for ${headSha} (branch: ${headRef}). ` +
+                  `Push a new commit or re-run the gate manually.`
+                );
+                return;
+              }
+              runs = { data: { workflow_runs: [match] } };
+            }
+
+            const gateRunId = runs.data.workflow_runs[0].id;
+            await github.request("POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun", {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: gateRunId,
+            });
+
+            core.info(`Re-ran Fork Live Gate workflow run ${gateRunId}.`);
