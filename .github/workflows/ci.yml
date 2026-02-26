@@ -15,9 +15,7 @@ jobs:
     strategy:
       matrix:
         sdk_version: [v2, v3]
-        # TODO: Re-enable gcp_kms when we have GCP KMS access configured in CI
-        # backend: [memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, all]
-        backend: [memory, vault, privy, turnkey, aws_kms, fireblocks, all]
+        backend: [memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, all]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -43,24 +41,22 @@ jobs:
     strategy:
       matrix:
         sdk_version: [v2, v3]
-        # TODO: Re-enable test_gcp_kms_integration when we have GCP KMS access configured in CI
-        # test: [test_privy_integration, test_turnkey_integration, test_fireblocks_integration, test_aws_kms_integration, test_gcp_kms_integration]
         test:
           [
             test_privy_integration,
             test_turnkey_integration,
             test_fireblocks_integration,
             test_aws_kms_integration,
+            test_gcp_kms_integration,
           ]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      # TODO: Re-enable when we have GCP KMS access configured in CI
-      # - name: Setup GCP credentials
-      #   if: matrix.test == 'test_gcp_kms_integration'
-      #   uses: google-github-actions/auth@v2
-      #   with:
-      #     credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+      - name: Setup GCP credentials
+        if: matrix.test == 'test_gcp_kms_integration'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
       - name: Configure AWS credentials
         if: matrix.test == 'test_aws_kms_integration'
         uses: aws-actions/configure-aws-credentials@v4
@@ -80,9 +76,8 @@ jobs:
           FIREBLOCKS_API_KEY: ${{ secrets.FIREBLOCKS_API_KEY }}
           FIREBLOCKS_PRIVATE_KEY_PEM: ${{ secrets.FIREBLOCKS_PRIVATE_KEY_PEM }}
           FIREBLOCKS_VAULT_ACCOUNT_ID: ${{ secrets.FIREBLOCKS_VAULT_ACCOUNT_ID }}
-          # TODO: Re-enable when we have GCP KMS access configured in CI
-          # GCP_KMS_KEY_NAME: ${{ secrets.GCP_KMS_KEY_NAME }}
-          # GCP_KMS_SIGNER_PUBKEY: ${{ secrets.GCP_KMS_SIGNER_PUBKEY }}
+          GCP_KMS_KEY_NAME: ${{ secrets.GCP_KMS_KEY_NAME }}
+          GCP_KMS_SIGNER_PUBKEY: ${{ secrets.GCP_KMS_SIGNER_PUBKEY }}
           AWS_KMS_KEY_ID: ${{ secrets.AWS_KMS_KEY_ID }}
           AWS_KMS_SIGNER_PUBKEY: ${{ secrets.AWS_KMS_SIGNER_PUBKEY }}
           AWS_KMS_REGION: ${{ secrets.AWS_KMS_REGION }}

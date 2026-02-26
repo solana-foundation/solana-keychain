@@ -133,9 +133,9 @@ impl AwsKmsSigner {
             .signing_algorithm(signing_algorithm)
             .send()
             .await
-            .map_err(|e| {
+            .map_err(|_e| {
                 #[cfg(feature = "unsafe-debug")]
-                log::error!("AWS KMS Sign operation failed: {e:?}");
+                log::error!("AWS KMS Sign operation failed: {_e:?}");
 
                 SignerError::RemoteApiError("AWS KMS Sign operation failed".to_string())
             })?;
