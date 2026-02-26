@@ -7,14 +7,14 @@ import type { GcpKmsSignerConfig } from '../types.js';
 
 // Mock GCP KMS SDK
 const mockAsymmetricSign = vi.fn();
-const mockGetCryptoKeyVersion = vi.fn();
+const mockGetPublicKey = vi.fn();
 
 vi.mock('@google-cloud/kms', () => {
     return {
         v1: {
             KeyManagementServiceClient: class {
                 asymmetricSign = mockAsymmetricSign;
-                getCryptoKeyVersion = mockGetCryptoKeyVersion;
+                getPublicKey = mockGetPublicKey;
             },
         },
     };
@@ -297,11 +297,10 @@ describe('GcpKmsSigner', () => {
 
     describe('isAvailable', () => {
         it('should return true for valid Ed25519 key', async () => {
-            mockGetCryptoKeyVersion.mockResolvedValue([
+            mockGetPublicKey.mockResolvedValue([
                 {
                     name: TEST_KEY_NAME,
                     algorithm: 'EC_SIGN_ED25519',
-                    state: 'ENABLED',
                 },
             ]);
 
@@ -316,11 +315,10 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should return false for wrong algorithm', async () => {
-            mockGetCryptoKeyVersion.mockResolvedValue([
+            mockGetPublicKey.mockResolvedValue([
                 {
                     name: TEST_KEY_NAME,
                     algorithm: 'RSA_SIGN_PKCS1_2048_SHA256',
-                    state: 'ENABLED',
                 },
             ]);
 
@@ -334,14 +332,8 @@ describe('GcpKmsSigner', () => {
             expect(available).toBe(false);
         });
 
-        it('should return false for disabled key', async () => {
-            mockGetCryptoKeyVersion.mockResolvedValue([
-                {
-                    name: TEST_KEY_NAME,
-                    algorithm: 'EC_SIGN_ED25519',
-                    state: 'DISABLED',
-                },
-            ]);
+        it('should return false for missing public key response', async () => {
+            mockGetPublicKey.mockResolvedValue([undefined]);
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
@@ -354,7 +346,7 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should return false on error', async () => {
-            mockGetCryptoKeyVersion.mockRejectedValue(new Error('GCP error'));
+            mockGetPublicKey.mockRejectedValue(new Error('GCP error'));
 
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,

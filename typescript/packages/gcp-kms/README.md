@@ -20,6 +20,13 @@ pnpm add @solana/keychain-gcp-kms
 
 The signer uses the **Application Default Credentials (ADC)** to authenticate. You don't need to pass credentials explicitly when running in a Google Cloud environment (Compute Engine, GKE, Cloud Run, etc.).
 
+### IAM Permissions
+
+For this signer:
+
+- Signing operations require `cloudkms.cryptoKeyVersions.useToSign`
+- Availability checks (`isAvailable()`) require `cloudkms.cryptoKeyVersions.viewPublicKey`
+
 ### Local Development
 
 For local development, you can:
@@ -93,4 +100,4 @@ new GcpKmsSigner(config: GcpKmsSignerConfig)
 
 - `signMessages(messages)`: Sign multiple messages
 - `signTransactions(transactions)`: Sign multiple transactions
-- `isAvailable()`: Check if the signer is available and the key is valid
+- `isAvailable()`: Check if the signer is available by retrieving the public key and verifying `EC_SIGN_ED25519`
