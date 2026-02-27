@@ -209,8 +209,7 @@ impl ParaSigner {
 
     /// Check wallet availability with a timeout
     async fn check_availability(&self) -> bool {
-        let result =
-            tokio::time::timeout(AVAILABILITY_TIMEOUT, self.fetch_wallet()).await;
+        let result = tokio::time::timeout(AVAILABILITY_TIMEOUT, self.fetch_wallet()).await;
 
         match result {
             Ok(Ok(wallet)) => {
@@ -320,11 +319,7 @@ mod tests {
     }
 
     /// Helper to create a ParaSigner for tests, bypassing `sk_` and UUID validation.
-    fn create_test_signer(
-        api_key: &str,
-        wallet_id: &str,
-        base_url: Option<String>,
-    ) -> ParaSigner {
+    fn create_test_signer(api_key: &str, wallet_id: &str, base_url: Option<String>) -> ParaSigner {
         ParaSigner {
             api_key: api_key.to_string(),
             wallet_id: wallet_id.to_string(),
@@ -354,11 +349,7 @@ mod tests {
 
     #[test]
     fn test_para_new_validates_wallet_id_uuid() {
-        let result = ParaSigner::new(
-            "sk_test-key".to_string(),
-            "not-a-uuid".to_string(),
-            None,
-        );
+        let result = ParaSigner::new("sk_test-key".to_string(), "not-a-uuid".to_string(), None);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, SignerError::ConfigError(_)));
@@ -709,10 +700,7 @@ mod tests {
 
         let result = signer.sign_message(b"test").await;
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SignerError::SigningFailed(_)
-        ));
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
     }
 
     #[tokio::test]
@@ -735,10 +723,7 @@ mod tests {
 
         let result = signer.sign_message(b"test").await;
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SignerError::SigningFailed(_)
-        ));
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
     }
 
     // --- is_available tests ---
@@ -834,8 +819,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let signer =
-            create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
+        let signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
 
         assert!(!signer.is_available().await);
     }
@@ -851,8 +835,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let signer =
-            create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
+        let signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
 
         assert!(!signer.is_available().await);
     }
@@ -880,10 +863,7 @@ mod tests {
 
         let result = signer.sign_message(b"test").await;
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SignerError::SigningFailed(_)
-        ));
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
     }
 
     #[tokio::test]
@@ -994,8 +974,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let signer =
-            create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
+        let signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
 
         assert!(!signer.is_available().await);
     }
@@ -1071,9 +1050,6 @@ mod tests {
 
         let result = signer.sign_message(b"test").await;
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SignerError::SigningFailed(_)
-        ));
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
     }
 }

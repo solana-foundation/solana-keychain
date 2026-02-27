@@ -94,7 +94,9 @@ describe('ParaSigner', () => {
         });
 
         it('should throw CONFIG_ERROR for non-HTTPS apiBaseUrl', async () => {
-            await expect(ParaSigner.create({ ...mockConfig, apiBaseUrl: 'http://api.getpara.com' })).rejects.toMatchObject({
+            await expect(
+                ParaSigner.create({ ...mockConfig, apiBaseUrl: 'http://api.getpara.com' }),
+            ).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
                 message: expect.stringContaining('apiBaseUrl must use HTTPS'),
             });
@@ -378,9 +380,9 @@ describe('ParaSigner', () => {
         it('should apply request delay for multiple messages', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create
-                .mockResolvedValueOnce(mockSignResponse())   // sign 1
-                .mockResolvedValueOnce(mockSignResponse())   // sign 2
-                .mockResolvedValueOnce(mockSignResponse());  // sign 3
+                .mockResolvedValueOnce(mockSignResponse()) // sign 1
+                .mockResolvedValueOnce(mockSignResponse()) // sign 2
+                .mockResolvedValueOnce(mockSignResponse()); // sign 3
 
             const delaySpy = vi.spyOn(global, 'setTimeout');
             const signer = await ParaSigner.create({ ...mockConfig, requestDelayMs: 100 });
@@ -438,8 +440,8 @@ describe('ParaSigner', () => {
         it('should sign multiple transactions', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create
-                .mockResolvedValueOnce(mockSignResponse())   // sign 1
-                .mockResolvedValueOnce(mockSignResponse());  // sign 2
+                .mockResolvedValueOnce(mockSignResponse()) // sign 1
+                .mockResolvedValueOnce(mockSignResponse()); // sign 2
 
             const signer = await ParaSigner.create(mockConfig);
             const transactions = [

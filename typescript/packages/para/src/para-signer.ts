@@ -14,10 +14,10 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
  * Configuration for creating a ParaSigner
  */
 export interface ParaSignerConfig {
-    /** Para API key (server-side only) */
-    apiKey: string;
     /** Para API base URL (default: https://api.getpara.com) */
     apiBaseUrl?: string;
+    /** Para API key (server-side only) */
+    apiKey: string;
     /** Optional delay in ms between concurrent signing requests to avoid rate limits (default: 0) */
     requestDelayMs?: number;
     /** Para wallet UUID */
