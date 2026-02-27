@@ -3,6 +3,21 @@ name: Publish TypeScript Packages (Manual)
 on:
   workflow_dispatch:
     inputs:
+      package:
+        description: 'Package to publish (or "all")'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - core
+          - aws-kms
+          - fireblocks
+          - gcp-kms
+          - privy
+          - turnkey
+          - vault
+          - keychain
       publish-to-npm:
         description: 'Publish to npm registry'
         required: true
@@ -30,7 +45,7 @@ env:
     core
     aws-kms
     fireblocks
-    para
+    gcp-kms
     privy
     turnkey
     vault
@@ -85,6 +100,18 @@ jobs:
         working-directory: typescript
         run: pnpm install --frozen-lockfile
 
+      - name: Resolve target packages
+        id: targets
+        run: |
+          SELECTED="${{ github.event.inputs.package }}"
+          if [ "$SELECTED" = "all" ]; then
+            FLAT=$(echo $PUBLISH_PACKAGES | tr '\n' ' ')
+            echo "packages=$FLAT" >> $GITHUB_OUTPUT
+          else
+            echo "packages=$SELECTED" >> $GITHUB_OUTPUT
+          fi
+          echo "📦 Target packages: ${SELECTED}"
+
       - name: Get version and check consistency
         id: version
         working-directory: typescript
@@ -94,10 +121,10 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Target version: $VERSION"
 
-          # Check that all publishable packages have the same version
-          echo "🔍 Checking version consistency across packages..."
+          # Check that target packages have the expected version
+          echo "🔍 Checking version consistency..."
 
-          for pkg in $PUBLISH_PACKAGES; do
+          for pkg in ${{ steps.targets.outputs.packages }}; do
             PKG_VERSION=$(node -p "require('./packages/${pkg}/package.json').version")
             if [ "$PKG_VERSION" != "$VERSION" ]; then
               echo "❌ Version mismatch: packages/${pkg} has version ${PKG_VERSION}, expected ${VERSION}"
@@ -106,7 +133,7 @@ jobs:
             echo "  ✓ packages/${pkg}: ${PKG_VERSION}"
           done
 
-          echo "✅ All packages have version $VERSION"
+          echo "✅ Version check passed"
 
       - name: Check if prerelease
         id: prerelease
@@ -128,16 +155,16 @@ jobs:
         working-directory: typescript
         run: pnpm typecheck
 
-      - name: Pack all packages
+      - name: Pack packages
         working-directory: typescript
         run: |
-          echo "📦 Packing all publishable packages..."
+          echo "📦 Packing packages..."
 
           # Create output directory for tarballs
           mkdir -p .npm-pack
 
           # Use pnpm pack (not npm pack) to ensure workspace:* is resolved to real versions
-          for pkg in $PUBLISH_PACKAGES; do
+          for pkg in ${{ steps.targets.outputs.packages }}; do
             echo "  Packing packages/${pkg}..."
             pushd "packages/${pkg}" > /dev/null
             pnpm pack --pack-destination ../../.npm-pack
@@ -220,6 +247,7 @@ jobs:
           echo "✅ All tarballs contain required dist/ artifacts"
 
       - name: Create and push tag
+        if: ${{ github.event.inputs.package == 'all' }}
         run: |
           TAG="ts-keychain-v${{ steps.version.outputs.version }}"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
@@ -234,14 +262,13 @@ jobs:
         if: ${{ github.event.inputs.publish-to-npm == 'true' }}
         working-directory: typescript
         run: |
-          echo "📦 Publishing all packages to npm..."
+          echo "📦 Publishing packages to npm..."
 
           VERSION="${{ steps.version.outputs.version }}"
           NPM_TAG="${{ steps.prerelease.outputs.npm_tag }}"
           PUBLISHED=0
 
-          # Publish in dependency order (defined by PUBLISH_PACKAGES)
-          for pkg in $PUBLISH_PACKAGES; do
+          for pkg in ${{ steps.targets.outputs.packages }}; do
             # Handle package name: "keychain" -> "solana-keychain", others -> "solana-keychain-{pkg}"
             if [ "$pkg" = "keychain" ]; then
               TARBALL=".npm-pack/solana-keychain-${VERSION}.tgz"
@@ -265,7 +292,7 @@ jobs:
           echo "✅ Published ${PUBLISHED} packages successfully"
 
       - name: Create GitHub Release
-        if: ${{ github.event.inputs.create-github-release == 'true' }}
+        if: ${{ github.event.inputs.create-github-release == 'true' && github.event.inputs.package == 'all' }}
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -279,7 +306,7 @@ jobs:
               '@solana/keychain-core',
               '@solana/keychain-aws-kms',
               '@solana/keychain-fireblocks',
-              '@solana/keychain-para',
+              '@solana/keychain-gcp-kms',
               '@solana/keychain-privy',
               '@solana/keychain-turnkey',
               '@solana/keychain-vault',
@@ -336,26 +363,25 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          cat >> $GITHUB_STEP_SUMMARY << EOF
-          ## 🎉 TypeScript Packages Published
+          echo "## 🎉 TypeScript Packages Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version**: \`${VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Published Packages" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | npm |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
 
-          **Version**: \`${VERSION}\`
-          **Tag**: \`ts-keychain-v${VERSION}\`
+          for pkg in ${{ steps.targets.outputs.packages }}; do
+            if [ "$pkg" = "keychain" ]; then
+              NPM_NAME="@solana/keychain"
+            else
+              NPM_NAME="@solana/keychain-${pkg}"
+            fi
+            echo "| \`${NPM_NAME}\` | [npm](https://www.npmjs.com/package/${NPM_NAME}/v/${VERSION}) |" >> $GITHUB_STEP_SUMMARY
+          done
 
-          ### Published Packages
-
-          | Package | npm |
-          |---------|-----|
-          | \`@solana/keychain-core\` | [npm](https://www.npmjs.com/package/@solana/keychain-core/v/${VERSION}) |
-          | \`@solana/keychain-aws-kms\` | [npm](https://www.npmjs.com/package/@solana/keychain-aws-kms/v/${VERSION}) |
-          | \`@solana/keychain-fireblocks\` | [npm](https://www.npmjs.com/package/@solana/keychain-fireblocks/v/${VERSION}) |
-          | \`@solana/keychain-para\` | [npm](https://www.npmjs.com/package/@solana/keychain-para/v/${VERSION}) |
-          | \`@solana/keychain-privy\` | [npm](https://www.npmjs.com/package/@solana/keychain-privy/v/${VERSION}) |
-          | \`@solana/keychain-turnkey\` | [npm](https://www.npmjs.com/package/@solana/keychain-turnkey/v/${VERSION}) |
-          | \`@solana/keychain-vault\` | [npm](https://www.npmjs.com/package/@solana/keychain-vault/v/${VERSION}) |
-          | \`@solana/keychain\` | [npm](https://www.npmjs.com/package/@solana/keychain/v/${VERSION}) |
-
-          EOF
+          echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ "${{ github.event.inputs.publish-to-npm }}" == "true" ]; then
             echo "✅ **Published to npm**" >> $GITHUB_STEP_SUMMARY
@@ -363,10 +389,7 @@ jobs:
             echo "⏭️ **Skipped npm publish** (dry run)" >> $GITHUB_STEP_SUMMARY
           fi
 
-          if [ "${{ github.event.inputs.create-github-release }}" == "true" ]; then
+          if [ "${{ github.event.inputs.package }}" == "all" ] && [ "${{ github.event.inputs.create-github-release }}" == "true" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "✅ **GitHub release created**: https://github.com/${{ github.repository }}/releases/tag/ts-keychain-v${VERSION}" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "⏭️ **Skipped GitHub release creation**" >> $GITHUB_STEP_SUMMARY
           fi

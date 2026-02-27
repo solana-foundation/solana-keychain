@@ -174,17 +174,16 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
      */
     async isAvailable(): Promise<boolean> {
         try {
-            const [version] = await this.client.getCryptoKeyVersion({
+            const [publicKey] = await this.client.getPublicKey({
                 name: this.keyName,
             });
 
-            if (!version) {
+            if (!publicKey) {
                 return false;
             }
 
             // Verify the algorithm is EC_SIGN_ED25519
-            // and the state is ENABLED
-            return version.algorithm === 'EC_SIGN_ED25519' && version.state === 'ENABLED';
+            return publicKey.algorithm === 'EC_SIGN_ED25519';
         } catch {
             return false;
         }

@@ -5,9 +5,7 @@ use crate::sdk_adapter::{Pubkey, Signature, Transaction};
 use crate::traits::{SignedTransaction, SolanaSigner};
 use crate::transaction_util::TransactionUtil;
 use google_cloud_kms_v1::client::KeyManagementService;
-use google_cloud_kms_v1::model::crypto_key_version::{
-    CryptoKeyVersionAlgorithm, CryptoKeyVersionState,
-};
+use google_cloud_kms_v1::model::crypto_key_version::CryptoKeyVersionAlgorithm;
 use std::str::FromStr;
 
 /// GCP KMS-based signer using EdDSA (Ed25519) signing
@@ -132,19 +130,18 @@ impl GcpKmsSigner {
 
     /// Check if GCP KMS is available and the key is accessible
     async fn check_availability(&self) -> bool {
-        // Try to get the crypto key version as a health check
+        // Try to get the public key as a health check
         let result = self
             .client
-            .get_crypto_key_version()
+            .get_public_key()
             .set_name(&self.key_name)
             .send()
             .await;
 
         match result {
-            Ok(version) => {
-                // Verify the algorithm is EC_SIGN_ED25519 and the state is ENABLED
-                version.algorithm == CryptoKeyVersionAlgorithm::EcSignEd25519
-                    && version.state == CryptoKeyVersionState::Enabled
+            Ok(public_key) => {
+                // Verify the algorithm is EC_SIGN_ED25519
+                public_key.algorithm == CryptoKeyVersionAlgorithm::EcSignEd25519
             }
             Err(_e) => {
                 #[cfg(feature = "unsafe-debug")]
@@ -326,13 +323,12 @@ mod tests {
         )
         .expect("Failed to create signer");
 
-        // Mock GetCryptoKeyVersion
+        // Mock GetPublicKey
         Mock::given(any())
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
                 {
                     "name": TEST_KEY_NAME,
-                    "algorithm": "EC_SIGN_ED25519",
-                    "state": "ENABLED"
+                    "algorithm": "EC_SIGN_ED25519"
                 }
             )))
             .expect(1)
@@ -644,13 +640,12 @@ mod tests {
         )
         .expect("Failed to create signer");
 
-        // Mock GetCryptoKeyVersion with WRONG algorithm
+        // Mock GetPublicKey with WRONG algorithm
         Mock::given(any())
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
                 {
                     "name": TEST_KEY_NAME,
-                    "algorithm": "RSA_SIGN_PSS_2048_SHA256",
-                    "state": "ENABLED"
+                    "algorithm": "RSA_SIGN_PSS_2048_SHA256"
                 }
             )))
             .expect(1)
