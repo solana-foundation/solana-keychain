@@ -30,8 +30,8 @@ mod tests {
 
         let api_key_id =
             env::var(CDP_API_KEY_ID).expect("CDP_API_KEY_ID must be set for integration tests");
-        let api_key_secret =
-            env::var(CDP_API_KEY_SECRET).expect("CDP_API_KEY_SECRET must be set for integration tests");
+        let api_key_secret = env::var(CDP_API_KEY_SECRET)
+            .expect("CDP_API_KEY_SECRET must be set for integration tests");
         let wallet_secret = env::var(CDP_WALLET_SECRET)
             .expect("CDP_WALLET_SECRET must be set for integration tests");
         let address = env::var(CDP_SOLANA_ADDRESS)
@@ -53,11 +53,7 @@ mod tests {
             .await
             .expect("Failed to sign message with CDP");
 
-        assert_eq!(
-            signature.as_ref().len(),
-            64,
-            "Signature should be 64 bytes"
-        );
+        assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
     }
 
     #[tokio::test]
@@ -85,11 +81,7 @@ mod tests {
             .await
             .expect("Failed to sign transaction with CDP");
 
-        assert_eq!(
-            signature.as_ref().len(),
-            64,
-            "Signature should be 64 bytes"
-        );
+        assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
         assert!(
             signature.verify(&signer.pubkey().to_bytes(), &transaction.message_data()),
             "Signature should be valid"

@@ -219,11 +219,7 @@ impl CdpSigner {
         &self,
         base64_tx: &str,
     ) -> Result<SignTransactionResponse, SignerError> {
-        let path = format!(
-            "{}/{}/sign/transaction",
-            CDP_BASE_PATH,
-            self.public_key
-        );
+        let path = format!("{}/{}/sign/transaction", CDP_BASE_PATH, self.public_key);
         let url = format!("{}{}", self.api_base_url, path);
 
         let body = serde_json::json!({ "transaction": base64_tx });
@@ -255,22 +251,21 @@ impl CdpSigner {
             )));
         }
 
-        response.json::<SignTransactionResponse>().await.map_err(|_e| {
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Failed to parse CDP sign_transaction response: {_e}");
-            SignerError::SerializationError(
-                "Failed to parse CDP sign_transaction response".to_string(),
-            )
-        })
+        response
+            .json::<SignTransactionResponse>()
+            .await
+            .map_err(|_e| {
+                #[cfg(feature = "unsafe-debug")]
+                log::error!("Failed to parse CDP sign_transaction response: {_e}");
+                SignerError::SerializationError(
+                    "Failed to parse CDP sign_transaction response".to_string(),
+                )
+            })
     }
 
     /// Sign a message via the CDP API.
     async fn call_sign_message(&self, message: &str) -> Result<SignMessageResponse, SignerError> {
-        let path = format!(
-            "{}/{}/sign/message",
-            CDP_BASE_PATH,
-            self.public_key
-        );
+        let path = format!("{}/{}/sign/message", CDP_BASE_PATH, self.public_key);
         let url = format!("{}{}", self.api_base_url, path);
 
         let body = serde_json::json!({ "message": message });
@@ -305,9 +300,7 @@ impl CdpSigner {
         response.json::<SignMessageResponse>().await.map_err(|_e| {
             #[cfg(feature = "unsafe-debug")]
             log::error!("Failed to parse CDP sign_message response: {_e}");
-            SignerError::SerializationError(
-                "Failed to parse CDP sign_message response".to_string(),
-            )
+            SignerError::SerializationError("Failed to parse CDP sign_message response".to_string())
         })
     }
 
@@ -322,22 +315,19 @@ impl CdpSigner {
         let response = self.call_sign_message(message_str).await?;
 
         // CDP returns a base58-encoded signature
-        let sig_bytes = bs58::decode(&response.signature)
-            .into_vec()
-            .map_err(|_e| {
-                #[cfg(feature = "unsafe-debug")]
-                log::error!("Failed to decode base58 signature: {_e}");
-                SignerError::SerializationError(
-                    "Failed to decode base58 signature from CDP".to_string(),
-                )
-            })?;
+        let sig_bytes = bs58::decode(&response.signature).into_vec().map_err(|_e| {
+            #[cfg(feature = "unsafe-debug")]
+            log::error!("Failed to decode base58 signature: {_e}");
+            SignerError::SerializationError(
+                "Failed to decode base58 signature from CDP".to_string(),
+            )
+        })?;
 
-        let sig_array: [u8; EXPECTED_SIGNATURE_LENGTH] =
-            sig_bytes.try_into().map_err(|_| {
-                SignerError::SigningFailed(format!(
-                    "Invalid signature length from CDP (expected {EXPECTED_SIGNATURE_LENGTH} bytes)"
-                ))
-            })?;
+        let sig_array: [u8; EXPECTED_SIGNATURE_LENGTH] = sig_bytes.try_into().map_err(|_| {
+            SignerError::SigningFailed(format!(
+                "Invalid signature length from CDP (expected {EXPECTED_SIGNATURE_LENGTH} bytes)"
+            ))
+        })?;
 
         Ok(Signature::from(sig_array))
     }
@@ -356,27 +346,30 @@ impl CdpSigner {
         let response = self.call_sign_transaction(&base64_tx).await?;
 
         // Decode and deserialize the returned signed transaction
-        let signed_bytes = STANDARD.decode(&response.signed_transaction).map_err(|_e| {
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Failed to decode base64 signed transaction: {_e}");
-            SignerError::SerializationError(
-                "Failed to decode base64 signed transaction from CDP".to_string(),
-            )
-        })?;
-
-        let signed_tx: Transaction =
-            bincode::deserialize(&signed_bytes).map_err(|_e| {
+        let signed_bytes = STANDARD
+            .decode(&response.signed_transaction)
+            .map_err(|_e| {
                 #[cfg(feature = "unsafe-debug")]
-                log::error!("Failed to deserialize signed transaction: {_e}");
+                log::error!("Failed to decode base64 signed transaction: {_e}");
                 SignerError::SerializationError(
-                    "Failed to deserialize signed transaction from CDP".to_string(),
+                    "Failed to decode base64 signed transaction from CDP".to_string(),
                 )
             })?;
+
+        let signed_tx: Transaction = bincode::deserialize(&signed_bytes).map_err(|_e| {
+            #[cfg(feature = "unsafe-debug")]
+            log::error!("Failed to deserialize signed transaction: {_e}");
+            SignerError::SerializationError(
+                "Failed to deserialize signed transaction from CDP".to_string(),
+            )
+        })?;
 
         // Extract the signature at our public key's position
         let pos = TransactionUtil::get_signing_keypair_position(&signed_tx, &self.public_key)?;
         let signature = *signed_tx.signatures.get(pos).ok_or_else(|| {
-            SignerError::SigningFailed("Signature not found at expected position in CDP response".to_string())
+            SignerError::SigningFailed(
+                "Signature not found at expected position in CDP response".to_string(),
+            )
         })?;
 
         *transaction = signed_tx;
@@ -436,8 +429,8 @@ impl SolanaSigner for CdpSigner {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::jwt;
+    use super::*;
     use crate::sdk_adapter::{keypair_from_seed, keypair_pubkey, Keypair};
     use crate::test_util::create_test_transaction;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -695,10 +688,7 @@ mod tests {
 
         let result = signer.sign_message(b"test").await;
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SignerError::SigningFailed(_)
-        ));
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
     }
 
     #[tokio::test]
@@ -729,7 +719,11 @@ mod tests {
 
         let mut tx = create_test_transaction(&pubkey);
         let result = signer.sign_transaction(&mut tx).await;
-        assert!(result.is_ok(), "sign_transaction failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "sign_transaction failed: {:?}",
+            result.err()
+        );
 
         let (returned_base64, returned_sig) = result.unwrap();
         assert!(!returned_base64.is_empty());

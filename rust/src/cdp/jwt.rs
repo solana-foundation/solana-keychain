@@ -10,8 +10,7 @@ use uuid::Uuid;
 /// PKCS#8 DER prefix for Ed25519 private keys.
 /// Structure: SEQUENCE { INTEGER 0, SEQUENCE { OID Ed25519 }, OCTET STRING { OCTET STRING { seed } } }
 const ED25519_PKCS8_PREFIX: &[u8] = &[
-    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04,
-    0x20,
+    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
 ];
 
 // ─── JWT Types ───────────────────────────────────────────────────────────────
@@ -84,9 +83,8 @@ pub(super) fn jwt_uri(host: &str, method: &str, path: &str) -> String {
 
 /// Extract request host (including port if present) from a base URL.
 pub(super) fn extract_host(base_url: &str) -> Result<String, SignerError> {
-    let url = reqwest::Url::parse(base_url).map_err(|_| {
-        SignerError::ConfigError(format!("Invalid CDP base URL: {base_url}"))
-    })?;
+    let url = reqwest::Url::parse(base_url)
+        .map_err(|_| SignerError::ConfigError(format!("Invalid CDP base URL: {base_url}")))?;
 
     let host = url.host_str().ok_or_else(|| {
         SignerError::ConfigError(format!("Missing host in CDP base URL: {base_url}"))
@@ -195,9 +193,7 @@ pub(super) fn create_auth_jwt(
     let key = EncodingKey::from_ed_pem(pem.as_bytes()).map_err(|_e| {
         #[cfg(feature = "unsafe-debug")]
         log::error!("Failed to create Ed25519 encoding key: {_e}");
-        SignerError::InvalidPrivateKey(
-            "Failed to create Ed25519 key for JWT signing".to_string(),
-        )
+        SignerError::InvalidPrivateKey("Failed to create Ed25519 key for JWT signing".to_string())
     })?;
     let alg = Algorithm::EdDSA;
 
@@ -241,9 +237,7 @@ pub(super) fn create_wallet_jwt(
     let der_bytes = STANDARD.decode(wallet_secret).map_err(|_e| {
         #[cfg(feature = "unsafe-debug")]
         log::error!("Failed to decode walletSecret from base64: {_e}");
-        SignerError::InvalidPrivateKey(
-            "Failed to decode walletSecret from base64".to_string(),
-        )
+        SignerError::InvalidPrivateKey("Failed to decode walletSecret from base64".to_string())
     })?;
 
     let pem = der_to_pkcs8_pem(&der_bytes);
@@ -251,9 +245,7 @@ pub(super) fn create_wallet_jwt(
     let key = EncodingKey::from_ec_pem(pem.as_bytes()).map_err(|_e| {
         #[cfg(feature = "unsafe-debug")]
         log::error!("Failed to parse wallet EC key: {_e}");
-        SignerError::InvalidPrivateKey(
-            "Failed to parse walletSecret as EC private key".to_string(),
-        )
+        SignerError::InvalidPrivateKey("Failed to parse walletSecret as EC private key".to_string())
     })?;
 
     let mut header = Header::new(Algorithm::ES256);
