@@ -24,8 +24,8 @@ mod tests {
 
         let api_base_url = env::var(PARA_API_BASE_URL).ok();
 
-        let mut signer =
-            ParaSigner::new(api_key, wallet_id, api_base_url).expect("Failed to create Para signer");
+        let mut signer = ParaSigner::new(api_key, wallet_id, api_base_url)
+            .expect("Failed to create Para signer");
 
         signer
             .init()
