@@ -92,6 +92,7 @@ jobs:
           AWS_KMS_REGION: ${{ secrets.AWS_KMS_REGION }}
           PARA_API_KEY: ${{ secrets.PARA_API_KEY }}
           PARA_WALLET_ID: ${{ secrets.PARA_WALLET_ID }}
+          PARA_API_BASE_URL: ${{ secrets.PARA_API_BASE_URL }}
           SOLANA_RPC_URL: https://api.devnet.solana.com
         run: |
           set -euo pipefail
