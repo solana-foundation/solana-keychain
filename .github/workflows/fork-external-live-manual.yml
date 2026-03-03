@@ -90,6 +90,9 @@ jobs:
           AWS_KMS_KEY_ID: ${{ secrets.AWS_KMS_KEY_ID }}
           AWS_KMS_SIGNER_PUBKEY: ${{ secrets.AWS_KMS_SIGNER_PUBKEY }}
           AWS_KMS_REGION: ${{ secrets.AWS_KMS_REGION }}
+          PARA_API_KEY: ${{ secrets.PARA_API_KEY }}
+          PARA_WALLET_ID: ${{ secrets.PARA_WALLET_ID }}
+          PARA_API_BASE_URL: ${{ secrets.PARA_API_BASE_URL }}
           SOLANA_RPC_URL: https://api.devnet.solana.com
         run: |
           set -euo pipefail
@@ -99,6 +102,7 @@ jobs:
             test_turnkey_integration
             test_fireblocks_integration
             test_aws_kms_integration
+            test_para_integration
           )
 
           for sdk in v2 v3; do
