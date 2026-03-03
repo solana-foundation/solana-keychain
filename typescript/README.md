@@ -63,35 +63,3 @@ pnpm add @solana/keychain-privy       # Privy signer
 pnpm add @solana/keychain-turnkey     # Turnkey signer
 pnpm add @solana/keychain-vault       # HashiCorp Vault signer
 ```
-
-## CDP Signer Example
-
-```typescript
-import { CdpSigner } from '@solana/keychain-cdp';
-import {
-    createTransactionMessage,
-    pipe,
-    setTransactionMessageFeePayerSigner,
-    setTransactionMessageLifetimeUsingBlockhash,
-    signTransactionMessageWithSigners,
-} from '@solana/kit';
-
-// Create signer using CDP managed wallet infrastructure
-// API keys are created at https://portal.cdp.coinbase.com
-const signer = new CdpSigner({
-    cdpApiKeyId: process.env.CDP_API_KEY_ID!,
-    cdpApiKeySecret: process.env.CDP_API_KEY_SECRET!,
-    cdpWalletSecret: process.env.CDP_WALLET_SECRET!,
-    address: process.env.CDP_SOLANA_ADDRESS!,
-    // baseUrl should be the host root (no "/platform" suffix)
-    // baseUrl: 'https://api.cdp.coinbase.com',
-});
-
-// Build and sign a transaction
-const transaction = pipe(
-    createTransactionMessage({ version: 0 }),
-    tx => setTransactionMessageFeePayerSigner(signer, tx),
-    tx => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, tx),
-);
-const signed = await signTransactionMessageWithSigners(transaction);
-```
