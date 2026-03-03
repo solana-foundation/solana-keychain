@@ -103,5 +103,3 @@ litesvm-v3 = { package = "litesvm", version = "=0.8.1" }
 agave-feature-set-pin = { package = "agave-feature-set", version = "=3.0.11" }
 serial_test = "3.3.1"
 scoped-env = "2.1"
-litesvm = "0.7.0"
-litesvm-v3 = { package = "litesvm", version = "0.8.1" }
