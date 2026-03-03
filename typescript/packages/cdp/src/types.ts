@@ -3,6 +3,17 @@
  */
 export interface CdpSignerConfig {
     /**
+     * The Solana account address managed by CDP.
+     */
+    address: string;
+
+    /**
+     * Optional custom CDP API base URL.
+     * Defaults to https://api.cdp.coinbase.com
+     */
+    baseUrl?: string;
+
+    /**
      * CDP API key ID.
      * Used as the `apiKeyId` when authenticating with the CDP API.
      */
@@ -23,22 +34,10 @@ export interface CdpSignerConfig {
     cdpWalletSecret: string;
 
     /**
-     * The Solana account address managed by CDP.
-     */
-    address: string;
-
-    /**
      * Optional delay in ms between concurrent signing requests to avoid rate limits.
      * Default: 0 (no delay)
      */
     requestDelayMs?: number;
-
-    /**
-     * Optional custom CDP API base URL.
-     * Defaults to https://api.cdp.coinbase.com
-     */
-    baseUrl?: string;
-
 }
 
 /** Response from the CDP signMessage endpoint. */

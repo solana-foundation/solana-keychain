@@ -21,8 +21,8 @@ function hasRequiredEnvVars(): boolean {
     return REQUIRED_ENV_VARS.every(v => process.env[v]);
 }
 
-function createCdpSigner(): CdpSigner {
-    return new CdpSigner({
+async function createCdpSigner(): Promise<CdpSigner> {
+    return CdpSigner.create({
         cdpApiKeyId: process.env.CDP_API_KEY_ID!,
         cdpApiKeySecret: process.env.CDP_API_KEY_SECRET!,
         cdpWalletSecret: process.env.CDP_WALLET_SECRET!,
@@ -34,7 +34,7 @@ describe('CdpSigner Integration', () => {
     it.skipIf(!hasRequiredEnvVars())(
         'signs transactions with CDP',
         async () => {
-            const signer = createCdpSigner();
+            const signer = await createCdpSigner();
             const rpcUrl = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
 
             // Get real blockhash from devnet
@@ -47,11 +47,7 @@ describe('CdpSigner Integration', () => {
             const transaction = pipe(
                 createTransactionMessage({ version: 0 }),
                 tx => setTransactionMessageFeePayerSigner(signer, tx),
-                tx =>
-                    appendTransactionMessageInstructions(
-                        [getAddMemoInstruction({ memo: 'CDP keychain test' })],
-                        tx,
-                    ),
+                tx => appendTransactionMessageInstructions([getAddMemoInstruction({ memo: 'CDP keychain test' })], tx),
                 tx => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, tx),
             );
 
@@ -67,7 +63,7 @@ describe('CdpSigner Integration', () => {
     it.skipIf(!hasRequiredEnvVars())(
         'signs messages with CDP',
         async () => {
-            const signer = createCdpSigner();
+            const signer = await createCdpSigner();
 
             const message = {
                 content: new TextEncoder().encode('CDP keychain test'),
@@ -86,7 +82,7 @@ describe('CdpSigner Integration', () => {
     it.skipIf(!hasRequiredEnvVars())(
         'checks availability',
         async () => {
-            const signer = createCdpSigner();
+            const signer = await createCdpSigner();
             const available = await signer.isAvailable();
             expect(available).toBe(true);
         },

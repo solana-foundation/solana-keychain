@@ -1,3 +1,5 @@
+import * as nodeCrypto from 'node:crypto';
+
 import { Address } from '@solana/addresses';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
 import { generateKeyPairSigner } from '@solana/signers';
@@ -13,8 +15,20 @@ import { CdpSigner } from '../cdp-signer.js';
 import type { CdpSignerConfig } from '../types.js';
 
 // --- Valid test credentials ---
-// Ed25519: 64 bytes of 0x42 (seed || placeholder pubkey)
-const TEST_CDP_API_KEY_SECRET = Buffer.alloc(64, 0x42).toString('base64');
+
+// Generate a real Ed25519 keypair so that createKeyPairFromBytes seed↔pubkey validation passes.
+// Ed25519 PKCS#8 DER: 16-byte header + 32-byte seed
+// Ed25519 SPKI DER:   12-byte header + 32-byte public key
+function generateTestApiKeySecret(): string {
+    const { privateKey, publicKey } = nodeCrypto.generateKeyPairSync('ed25519');
+    const pkcs8 = privateKey.export({ format: 'der', type: 'pkcs8' }) as Buffer;
+    const seed = pkcs8.subarray(16, 48);
+    const spki = publicKey.export({ format: 'der', type: 'spki' }) as Buffer;
+    const pubKeyBytes = spki.subarray(12, 44);
+    return Buffer.concat([seed, pubKeyBytes]).toString('base64');
+}
+
+const TEST_CDP_API_KEY_SECRET = generateTestApiKeySecret();
 
 // P-256 PKCS#8 DER (67 bytes)
 const TEST_CDP_WALLET_SECRET = Buffer.from([
@@ -35,11 +49,8 @@ const TEST_CDP_WALLET_SECRET = Buffer.from([
     // version INTEGER 1
     0x02, 0x01, 0x01,
     // privateKey OCTET STRING (32 bytes) — scalar 0x01...01 is in [1, n-1] for P-256
-    0x04, 0x20,
-    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x04, 0x20, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
 ]).toString('base64');
 
 // Mock global fetch
@@ -80,9 +91,9 @@ describe('CdpSigner', () => {
         vi.resetAllMocks();
     });
 
-    describe('constructor', () => {
-        it('creates a CdpSigner with valid config', () => {
-            const signer = new CdpSigner(makeConfig());
+    describe('create()', () => {
+        it('creates a CdpSigner with valid config', async () => {
+            const signer = await CdpSigner.create(makeConfig());
 
             expect(signer.address).toBe(TEST_ADDRESS);
             assertIsSolanaSigner(signer);
@@ -91,59 +102,65 @@ describe('CdpSigner', () => {
             expect(signer.isAvailable).toBeDefined();
         });
 
-        it('throws CONFIG_ERROR for missing cdpApiKeyId', () => {
-            expect(() => new CdpSigner(makeConfig({ cdpApiKeyId: '' }))).toThrow(
+        it('throws CONFIG_ERROR for missing cdpApiKeyId', async () => {
+            await expect(CdpSigner.create(makeConfig({ cdpApiKeyId: '' }))).rejects.toThrow(
                 'Missing required cdpApiKeyId field',
             );
         });
 
-        it('throws CONFIG_ERROR for missing cdpApiKeySecret', () => {
-            expect(() => new CdpSigner(makeConfig({ cdpApiKeySecret: '' }))).toThrow(
+        it('throws CONFIG_ERROR for missing cdpApiKeySecret', async () => {
+            await expect(CdpSigner.create(makeConfig({ cdpApiKeySecret: '' }))).rejects.toThrow(
                 'Missing required cdpApiKeySecret field',
             );
         });
 
-        it('throws CONFIG_ERROR for missing cdpWalletSecret', () => {
-            expect(() => new CdpSigner(makeConfig({ cdpWalletSecret: '' }))).toThrow(
+        it('throws CONFIG_ERROR for missing cdpWalletSecret', async () => {
+            await expect(CdpSigner.create(makeConfig({ cdpWalletSecret: '' }))).rejects.toThrow(
                 'Missing required cdpWalletSecret field',
             );
         });
 
-        it('throws CONFIG_ERROR for missing address', () => {
-            expect(() => new CdpSigner(makeConfig({ address: '' }))).toThrow(
+        it('throws CONFIG_ERROR for missing address', async () => {
+            await expect(CdpSigner.create(makeConfig({ address: '' }))).rejects.toThrow(
                 'Missing required address field',
             );
         });
 
-        it('throws CONFIG_ERROR for invalid address', () => {
-            expect(() => new CdpSigner(makeConfig({ address: 'not-a-valid-address' }))).toThrow(
+        it('throws CONFIG_ERROR for invalid address', async () => {
+            await expect(CdpSigner.create(makeConfig({ address: 'not-a-valid-address' }))).rejects.toThrow(
                 'Invalid Solana address format',
             );
         });
 
-        it('throws CONFIG_ERROR for negative requestDelayMs', () => {
-            expect(() => new CdpSigner(makeConfig({ requestDelayMs: -1 }))).toThrow(
+        it('throws CONFIG_ERROR for negative requestDelayMs', async () => {
+            await expect(CdpSigner.create(makeConfig({ requestDelayMs: -1 }))).rejects.toThrow(
                 'requestDelayMs must not be negative',
             );
         });
 
-        it('warns for high requestDelayMs', () => {
+        it('warns for high requestDelayMs', async () => {
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-            new CdpSigner(makeConfig({ requestDelayMs: 5000 }));
-            expect(warnSpy).toHaveBeenCalledWith(
-                expect.stringContaining('requestDelayMs is greater than 3000ms'),
-            );
+            await CdpSigner.create(makeConfig({ requestDelayMs: 5000 }));
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
             warnSpy.mockRestore();
         });
 
-        it('accepts custom baseUrl', () => {
-            const signer = new CdpSigner(makeConfig({ baseUrl: 'https://custom.example.com' }));
+        it('accepts custom baseUrl', async () => {
+            const signer = await CdpSigner.create(makeConfig({ baseUrl: 'https://custom.example.com' }));
             expect(signer).toBeDefined();
         });
 
-        it('accepts requestDelayMs of 0', () => {
-            const signer = new CdpSigner(makeConfig({ requestDelayMs: 0 }));
+        it('accepts requestDelayMs of 0', async () => {
+            const signer = await CdpSigner.create(makeConfig({ requestDelayMs: 0 }));
             expect(signer).toBeDefined();
+        });
+
+        it('throws CONFIG_ERROR when Ed25519 pubkey does not match seed', async () => {
+            // 64 bytes where seed and pubkey are mismatched (all 0x42)
+            const mismatchedKey = Buffer.alloc(64, 0x42).toString('base64');
+            await expect(CdpSigner.create(makeConfig({ cdpApiKeySecret: mismatchedKey }))).rejects.toThrow(
+                'Invalid cdpApiKeySecret',
+            );
         });
     });
 
@@ -151,11 +168,9 @@ describe('CdpSigner', () => {
         it('signs a message and returns a signature dictionary', async () => {
             // Base58-encoded 64-byte signature
             const base58Sig = '5LfnqEfGPFBaHHeQBiNkgQ2EPy4FkVLKE7cjMYc7gv6EjE8Vs5gqaXcZHjpxr3yj5TMt7j3JdJPkXfnwXxXiNAh';
-            mockFetch.mockResolvedValue(
-                new Response(JSON.stringify({ signature: base58Sig }), { status: 200 }),
-            );
+            mockFetch.mockResolvedValue(new Response(JSON.stringify({ signature: base58Sig }), { status: 200 }));
 
-            const signer = new CdpSigner(makeConfig());
+            const signer = await CdpSigner.create(makeConfig());
             const message = { content: new TextEncoder().encode('hello'), signatures: {} };
             const result = await signer.signMessages([message]);
 
@@ -174,7 +189,7 @@ describe('CdpSigner', () => {
                 Promise.resolve(new Response(JSON.stringify({ signature: base58Sig }), { status: 200 })),
             );
 
-            const signer = new CdpSigner(makeConfig({ requestDelayMs: 10 }));
+            const signer = await CdpSigner.create(makeConfig({ requestDelayMs: 10 }));
             const messages = [
                 { content: new TextEncoder().encode('one'), signatures: {} },
                 { content: new TextEncoder().encode('two'), signatures: {} },
@@ -191,23 +206,19 @@ describe('CdpSigner', () => {
         it('throws HTTP_ERROR on network failure', async () => {
             mockFetch.mockRejectedValue(new Error('Network error'));
 
-            const signer = new CdpSigner(makeConfig());
+            const signer = await CdpSigner.create(makeConfig());
             const message = { content: new TextEncoder().encode('hello'), signatures: {} };
 
-            await expect(signer.signMessages([message])).rejects.toThrow(
-                'CDP signMessage network request failed',
-            );
+            await expect(signer.signMessages([message])).rejects.toThrow('CDP signMessage network request failed');
         });
 
         it('throws REMOTE_API_ERROR on non-2xx response', async () => {
             mockFetch.mockResolvedValue(new Response('{"error":"Unauthorized"}', { status: 401 }));
 
-            const signer = new CdpSigner(makeConfig());
+            const signer = await CdpSigner.create(makeConfig());
             const message = { content: new TextEncoder().encode('hello'), signatures: {} };
 
-            await expect(signer.signMessages([message])).rejects.toThrow(
-                'CDP signMessage API error: 401',
-            );
+            await expect(signer.signMessages([message])).rejects.toThrow('CDP signMessage API error: 401');
         });
 
         it('throws SIGNING_FAILED for invalid signature length', async () => {
@@ -216,16 +227,14 @@ describe('CdpSigner', () => {
                 new Response(JSON.stringify({ signature: '1' }), { status: 200 }), // '1' decodes to 1 byte
             );
 
-            const signer = new CdpSigner(makeConfig());
+            const signer = await CdpSigner.create(makeConfig());
             const message = { content: new TextEncoder().encode('hello'), signatures: {} };
 
-            await expect(signer.signMessages([message])).rejects.toThrow(
-                'Invalid signature length',
-            );
+            await expect(signer.signMessages([message])).rejects.toThrow('Invalid signature length');
         });
 
         it('throws SERIALIZATION_ERROR for invalid UTF-8 message', async () => {
-            const signer = new CdpSigner(makeConfig());
+            const signer = await CdpSigner.create(makeConfig());
             const message = { content: new Uint8Array([0xff]), signatures: {} };
 
             await expect(signer.signMessages([message])).rejects.toThrow(
@@ -237,7 +246,7 @@ describe('CdpSigner', () => {
     describe('signTransactions', () => {
         it('accepts a key pair address as the signer address', async () => {
             const keyPair = await generateKeyPairSigner();
-            const signer = new CdpSigner(makeConfig({ address: keyPair.address }));
+            const signer = await CdpSigner.create(makeConfig({ address: keyPair.address }));
             expect(signer.address).toBe(keyPair.address);
         });
 
@@ -246,7 +255,7 @@ describe('CdpSigner', () => {
                 new Response(JSON.stringify({ signedTransaction: MOCK_B64_WIRE_TX }), { status: 200 }),
             );
 
-            const signer = new CdpSigner(makeConfig());
+            const signer = await CdpSigner.create(makeConfig());
             const mockTx = createMockTransaction();
 
             // The CDP call succeeds; extractSignatureFromWireTransaction throws because
@@ -262,7 +271,7 @@ describe('CdpSigner', () => {
         it('throws HTTP_ERROR on network failure', async () => {
             mockFetch.mockRejectedValue(new Error('Network error'));
 
-            const signer = new CdpSigner(makeConfig());
+            const signer = await CdpSigner.create(makeConfig());
             const mockTx = createMockTransaction();
 
             await expect(signer.signTransactions([mockTx])).rejects.toThrow(
@@ -273,22 +282,18 @@ describe('CdpSigner', () => {
         it('throws REMOTE_API_ERROR on non-2xx response', async () => {
             mockFetch.mockResolvedValue(new Response('{"error":"Forbidden"}', { status: 403 }));
 
-            const signer = new CdpSigner(makeConfig());
+            const signer = await CdpSigner.create(makeConfig());
             const mockTx = createMockTransaction();
 
-            await expect(signer.signTransactions([mockTx])).rejects.toThrow(
-                'CDP signTransaction API error: 403',
-            );
+            await expect(signer.signTransactions([mockTx])).rejects.toThrow('CDP signTransaction API error: 403');
         });
     });
 
     describe('isAvailable', () => {
         it('returns true when the account is accessible', async () => {
-            mockFetch.mockResolvedValue(
-                new Response(JSON.stringify({ address: TEST_ADDRESS }), { status: 200 }),
-            );
+            mockFetch.mockResolvedValue(new Response(JSON.stringify({ address: TEST_ADDRESS }), { status: 200 }));
 
-            const signer = new CdpSigner(makeConfig());
+            const signer = await CdpSigner.create(makeConfig());
             const available = await signer.isAvailable();
 
             expect(available).toBe(true);
@@ -300,7 +305,7 @@ describe('CdpSigner', () => {
         it('returns false when the account is not found', async () => {
             mockFetch.mockResolvedValue(new Response('', { status: 404 }));
 
-            const signer = new CdpSigner(makeConfig());
+            const signer = await CdpSigner.create(makeConfig());
             const available = await signer.isAvailable();
 
             expect(available).toBe(false);
@@ -309,7 +314,7 @@ describe('CdpSigner', () => {
         it('returns false when the CDP API is unreachable', async () => {
             mockFetch.mockRejectedValue(new Error('Network error'));
 
-            const signer = new CdpSigner(makeConfig());
+            const signer = await CdpSigner.create(makeConfig());
             const available = await signer.isAvailable();
 
             expect(available).toBe(false);
@@ -318,7 +323,7 @@ describe('CdpSigner', () => {
         it('returns false on 401 unauthorized', async () => {
             mockFetch.mockResolvedValue(new Response('', { status: 401 }));
 
-            const signer = new CdpSigner(makeConfig());
+            const signer = await CdpSigner.create(makeConfig());
             const available = await signer.isAvailable();
 
             expect(available).toBe(false);
