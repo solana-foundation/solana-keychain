@@ -1,5 +1,6 @@
 pub const PARA_API_KEY: &str = "PARA_API_KEY";
 pub const PARA_WALLET_ID: &str = "PARA_WALLET_ID";
+pub const PARA_API_BASE_URL: &str = "PARA_API_BASE_URL";
 
 #[cfg(feature = "para")]
 #[cfg(test)]
@@ -21,8 +22,10 @@ mod tests {
         let wallet_id =
             env::var(PARA_WALLET_ID).expect("PARA_WALLET_ID must be set for integration tests");
 
+        let api_base_url = env::var(PARA_API_BASE_URL).ok();
+
         let mut signer =
-            ParaSigner::new(api_key, wallet_id, None).expect("Failed to create Para signer");
+            ParaSigner::new(api_key, wallet_id, api_base_url).expect("Failed to create Para signer");
 
         signer
             .init()
