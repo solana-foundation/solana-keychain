@@ -15,7 +15,7 @@ jobs:
     strategy:
       matrix:
         sdk_version: [v2, v3]
-        backend: [memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, para, all]
+        backend: [memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, all]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -48,7 +48,6 @@ jobs:
             test_fireblocks_integration,
             test_aws_kms_integration,
             test_gcp_kms_integration,
-            test_para_integration,
           ]
     steps:
       - uses: actions/checkout@v4

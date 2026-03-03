@@ -1,28 +1,19 @@
 ---
-description: Add a new signer backend to all CI workflow files
+description: Prepare CI for a new fork-contributed signer backend
 allowed-tools: Read, Edit, Glob, Grep
 ---
 
-# Add Signer to CI
+# Add Fork Signer to CI
 
-Add the signer described in `$ARGUMENTS` to all CI workflow files. If arguments are missing, ask the user for: signer display name, Rust feature name, Rust integration test function name, TypeScript package name, and required environment variable names.
+Prepare CI workflows for a new signer being added via a fork PR. This is a two-phase process because fork PRs can't use repository secrets, so `fork-external-live-manual.yml` (which runs from `main`'s YAML) must be updated on `main` first.
 
-## Files to Update
+If arguments are missing from `$ARGUMENTS`, ask the user for: signer display name, Rust feature name, Rust integration test function name, TypeScript package name (if any), and required environment variable names.
 
-You MUST update all 6 locations below. Read each file first, then make edits that match the existing patterns exactly.
+## Phase 1 — Our Preparatory PR (merged to `main`)
 
-### 1. `.github/workflows/ci.yml` — Rust CI
+This is what YOU do. Read each file first, then make edits matching existing patterns exactly.
 
-**a) Unit test backend matrix** (`rust-test` job → `strategy.matrix.backend`):
-Add the Rust feature name to the backend array, before `all`.
-
-**b) Integration test matrix** (`rust-integration-test` job → `strategy.matrix.test`):
-Add the Rust integration test function name (e.g., `test_<name>_integration`) to the test array.
-
-**c) Integration test env vars** (`rust-integration-test` job → env block):
-Add the signer's env vars after the last existing signer's env vars, before `SOLANA_RPC_URL`.
-
-### 2. `.github/workflows/fork-external-live-manual.yml` — Fork External Live Tests
+### 1. `.github/workflows/fork-external-live-manual.yml`
 
 **a) Rust test step env vars** (`Run Rust external live integration tests` → env block):
 Add the signer's env vars after the last existing signer's env vars, before `SOLANA_RPC_URL`.
@@ -36,7 +27,26 @@ Add the signer's env vars (if the signer has a TypeScript package).
 **d) TypeScript test step packages array** (same step → `packages=()` bash array):
 Add the TypeScript package name (if applicable).
 
-### 3. `.github/workflows/typescript-ci.yml` — TypeScript CI (if TS package exists)
+### 2. `.github/workflows/ci.yml` — env vars ONLY
+
+**Integration test env vars** (`rust-integration-test` job → env block):
+Add the signer's env vars after the last existing signer's env vars, before `SOLANA_RPC_URL`.
+
+**DO NOT** add to the `backend` matrix or `test` matrix. The Rust feature and test don't exist on `main` yet — adding them would break CI. Those go in Phase 2.
+
+## Phase 2 — Fork Contributor Adds to Their PR
+
+Tell the fork contributor (in a PR comment or issue) to add these to their branch alongside the signer code:
+
+### 1. `.github/workflows/ci.yml`
+
+**a) Unit test backend matrix** (`rust-test` job → `strategy.matrix.backend`):
+Add the Rust feature name to the backend array, before `all`.
+
+**b) Integration test matrix** (`rust-integration-test` job → `strategy.matrix.test`):
+Add the integration test function name to the test array.
+
+### 2. `.github/workflows/typescript-ci.yml` (if TS package exists)
 
 **a) Unit test matrix** (`typescript-test-unit` job → `strategy.matrix.package`):
 Add the TypeScript package name.
@@ -47,7 +57,7 @@ Add the TypeScript package name.
 **c) Integration test env vars** (integration test step → env block):
 Add a comment header and the signer's env vars.
 
-### 4. `.github/workflows/typescript-publish.yml` — TypeScript Publish (if TS package exists)
+### 3. `.github/workflows/typescript-publish.yml` (if TS package exists)
 
 **a) `PUBLISH_PACKAGES` env list**:
 Add the package name in dependency order (before `keychain` umbrella).
@@ -58,14 +68,11 @@ Add `@solana/keychain-<name>` to the array.
 **c) Publish summary table**:
 Add a row for the new package.
 
-### 5. `rust/Cargo.toml` — Feature flags
+## Merge Order
 
-**a) Feature declarations**: Add the new signer's feature with its dependencies.
-**b) `all` feature group**: Add the new feature name to the `all` list.
-
-### 6. `rust/src/tests/mod.rs` — Test module
-
-Add a `#[cfg(feature = "<name>")]` gated module declaration for the integration test module.
+1. Merge Phase 1 PR → `main` is ready with secrets wired up
+2. Trigger `Fork External Live Tests` workflow with the fork PR number → integration tests run with secrets
+3. Merge the fork PR (Phase 2 changes included alongside the code)
 
 ## GitHub Secrets Reminder
 
@@ -78,10 +85,7 @@ Both locations need the same secret names configured.
 
 ## Verification
 
-After making all changes:
-1. Confirm the new signer appears in `ci.yml` backend matrix, integration test matrix, and env vars
-2. Confirm the new signer appears in `fork-external-live-manual.yml` env vars and test arrays (both Rust and TS if applicable)
-3. Confirm the new signer appears in `typescript-ci.yml` matrices and env vars (if applicable)
-4. Confirm the new signer appears in `typescript-publish.yml` package lists (if applicable)
-5. Confirm `rust/Cargo.toml` has the feature flag and it's in the `all` group
-6. Confirm `rust/src/tests/mod.rs` has the test module declaration
+After making Phase 1 changes:
+1. Confirm `fork-external-live-manual.yml` has the new env vars and test entries (Rust and TS if applicable)
+2. Confirm `ci.yml` has the new env vars but NOT the matrix additions
+3. Confirm CI passes (no references to nonexistent features)
