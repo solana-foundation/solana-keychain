@@ -93,6 +93,15 @@ jobs:
           PARA_API_KEY: ${{ secrets.PARA_API_KEY }}
           PARA_WALLET_ID: ${{ secrets.PARA_WALLET_ID }}
           PARA_API_BASE_URL: ${{ secrets.PARA_API_BASE_URL }}
+          DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN }}
+          DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID }}
+          DFNS_PRIVATE_KEY_PEM: ${{ secrets.DFNS_PRIVATE_KEY_PEM }}
+          DFNS_WALLET_ID: ${{ secrets.DFNS_WALLET_ID }}
+          DFNS_API_BASE_URL: ${{ secrets.DFNS_API_BASE_URL }}
+          CDP_API_KEY_ID: ${{ secrets.CDP_API_KEY_ID }}
+          CDP_API_KEY_SECRET: ${{ secrets.CDP_API_KEY_SECRET }}
+          CDP_WALLET_SECRET: ${{ secrets.CDP_WALLET_SECRET }}
+          CDP_SOLANA_ADDRESS: ${{ secrets.CDP_SOLANA_ADDRESS }}
           SOLANA_RPC_URL: https://api.devnet.solana.com
         run: |
           set -euo pipefail
@@ -103,6 +112,8 @@ jobs:
             test_fireblocks_integration
             test_aws_kms_integration
             test_para_integration
+            test_dfns_integration
+            test_cdp_integration
           )
 
           for sdk in v2 v3; do
@@ -144,6 +155,15 @@ jobs:
           PARA_API_KEY: ${{ secrets.PARA_API_KEY }}
           PARA_WALLET_ID: ${{ secrets.PARA_WALLET_ID }}
           PARA_API_BASE_URL: ${{ secrets.PARA_API_BASE_URL }}
+          DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN }}
+          DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID }}
+          DFNS_PRIVATE_KEY_PEM: ${{ secrets.DFNS_PRIVATE_KEY_PEM }}
+          DFNS_WALLET_ID: ${{ secrets.DFNS_WALLET_ID }}
+          DFNS_API_BASE_URL: ${{ secrets.DFNS_API_BASE_URL }}
+          CDP_API_KEY_ID: ${{ secrets.CDP_API_KEY_ID }}
+          CDP_API_KEY_SECRET: ${{ secrets.CDP_API_KEY_SECRET }}
+          CDP_WALLET_SECRET: ${{ secrets.CDP_WALLET_SECRET }}
+          CDP_SOLANA_ADDRESS: ${{ secrets.CDP_SOLANA_ADDRESS }}
         run: |
           set -euo pipefail
 
@@ -153,6 +173,8 @@ jobs:
             fireblocks
             aws-kms
             para
+            dfns
+            cdp
           )
 
           for package_name in "${packages[@]}"; do
