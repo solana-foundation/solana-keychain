@@ -14,6 +14,7 @@ on:
           - aws-kms
           - fireblocks
           - gcp-kms
+          - para
           - privy
           - turnkey
           - vault
@@ -46,6 +47,7 @@ env:
     aws-kms
     fireblocks
     gcp-kms
+    para
     privy
     turnkey
     vault
@@ -307,6 +309,7 @@ jobs:
               '@solana/keychain-aws-kms',
               '@solana/keychain-fireblocks',
               '@solana/keychain-gcp-kms',
+              '@solana/keychain-para',
               '@solana/keychain-privy',
               '@solana/keychain-turnkey',
               '@solana/keychain-vault',

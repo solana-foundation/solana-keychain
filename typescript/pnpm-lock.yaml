@@ -222,6 +222,9 @@ importers:
       '@solana/keychain-gcp-kms':
         specifier: workspace:*
         version: link:../gcp-kms
+      '@solana/keychain-para':
+        specifier: workspace:*
+        version: link:../para
       '@solana/keychain-privy':
         specifier: workspace:*
         version: link:../privy
@@ -231,6 +234,34 @@ importers:
       '@solana/keychain-vault':
         specifier: workspace:*
         version: link:../vault
+
+  packages/para:
+    dependencies:
+      '@solana/addresses':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/codecs-strings':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/keychain-core':
+        specifier: workspace:*
+        version: link:../core
+      '@solana/keys':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/signers':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/transactions':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+    devDependencies:
+      '@solana/keychain-test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
 
   packages/privy:
     dependencies:

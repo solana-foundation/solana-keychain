@@ -1,7 +1,7 @@
 //! Framework-agnostic Solana signing abstractions
 //!
 //! This crate provides a unified interface for signing Solana transactions
-//! with multiple backend implementations (memory, Vault, Privy, Turnkey, AWS KMS).
+//! with multiple backend implementations (memory, Vault, Privy, Turnkey, AWS KMS, Para).
 //!
 //! # Features
 //!
@@ -14,6 +14,7 @@
 //! - `fireblocks`: Fireblocks API integration
 //! - `gcp_kms`: GCP KMS integration with EdDSA (Ed25519) signing
 //! - `cdp`: Coinbase Developer Platform integration
+//! - `para`: Para MPC wallet integration
 //! - `all`: Enable all signer backends
 //!
 //! ## SDK Version Selection
@@ -55,6 +56,8 @@ pub mod gcp_kms;
 
 #[cfg(feature = "cdp")]
 pub mod cdp;
+#[cfg(feature = "para")]
+pub mod para;
 
 // Re-export core types
 pub use error::SignerError;
@@ -84,6 +87,8 @@ pub use gcp_kms::GcpKmsSigner;
 
 #[cfg(feature = "cdp")]
 pub use cdp::CdpSigner;
+#[cfg(feature = "para")]
+pub use para::ParaSigner;
 
 use crate::traits::SignedTransaction;
 
@@ -96,10 +101,11 @@ use crate::traits::SignedTransaction;
     feature = "aws_kms",
     feature = "fireblocks",
     feature = "gcp_kms",
-    feature = "cdp"
+    feature = "cdp",
+    feature = "para"
 )))]
 compile_error!(
-    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, or cdp"
+    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, cdp, or para"
 );
 
 /// Unified signer enum supporting multiple backends
@@ -127,6 +133,8 @@ pub enum Signer {
 
     #[cfg(feature = "cdp")]
     Cdp(CdpSigner),
+    #[cfg(feature = "para")]
+    Para(ParaSigner),
 }
 
 impl Signer {
@@ -210,6 +218,18 @@ impl Signer {
         Ok(Self::GcpKms(GcpKmsSigner::new(key_name, public_key).await?))
     }
 
+    /// Create a Para signer (requires initialization)
+    #[cfg(feature = "para")]
+    pub async fn from_para(
+        api_key: String,
+        wallet_id: String,
+        api_base_url: Option<String>,
+    ) -> Result<Self, SignerError> {
+        let mut signer = ParaSigner::new(api_key, wallet_id, api_base_url)?;
+        signer.init().await?;
+        Ok(Self::Para(signer))
+    }
+
     /// Create a CDP signer
     #[cfg(feature = "cdp")]
     pub fn from_cdp(
@@ -254,6 +274,8 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "cdp")]
             Signer::Cdp(s) => s.pubkey(),
+            #[cfg(feature = "para")]
+            Signer::Para(s) => s.pubkey(),
         }
     }
 
@@ -285,6 +307,8 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "cdp")]
             Signer::Cdp(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "para")]
+            Signer::Para(s) => s.sign_transaction(tx).await,
         }
     }
 
@@ -313,6 +337,8 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "cdp")]
             Signer::Cdp(s) => s.sign_message(message).await,
+            #[cfg(feature = "para")]
+            Signer::Para(s) => s.sign_message(message).await,
         }
     }
 
@@ -344,6 +370,8 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "cdp")]
             Signer::Cdp(s) => s.sign_partial_transaction(tx).await,
+            #[cfg(feature = "para")]
+            Signer::Para(s) => s.sign_partial_transaction(tx).await,
         }
     }
 
@@ -372,6 +400,8 @@ impl SolanaSigner for Signer {
 
             #[cfg(feature = "cdp")]
             Signer::Cdp(s) => s.is_available().await,
+            #[cfg(feature = "para")]
+            Signer::Para(s) => s.is_available().await,
         }
     }
 }

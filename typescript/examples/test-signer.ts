@@ -3,6 +3,7 @@
  *
  * Supports multiple signer types via SIGNER_TYPE env var:
  *   - fireblocks
+ *   - para
  *   - privy
  *   - turnkey
  *   - keypair
@@ -10,9 +11,10 @@
  * Usage:
  *   1. Copy .env.example to .env and fill in credentials for your signer
  *   2. SIGNER_TYPE=fireblocks pnpm test:signer
- *   3. SIGNER_TYPE=privy pnpm test:signer
- *   4. SIGNER_TYPE=turnkey pnpm test:signer
- *   5. SIGNER_TYPE=keypair pnpm test:signer
+ *   3. SIGNER_TYPE=para pnpm test:signer
+ *   4. SIGNER_TYPE=privy pnpm test:signer
+ *   5. SIGNER_TYPE=turnkey pnpm test:signer
+ *   6. SIGNER_TYPE=keypair pnpm test:signer
  *
  * Example AWS KMS args (Rust only):
  *   - AWS_KMS_KEY_ID: "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
@@ -22,6 +24,7 @@
 
 import { assertIsSolanaSigner, SolanaSigner } from '@solana/keychain-core';
 import { FireblocksSigner } from '@solana/keychain-fireblocks';
+import { ParaSigner } from '@solana/keychain-para';
 import { PrivySigner } from '@solana/keychain-privy';
 import { TurnkeySigner } from '@solana/keychain-turnkey';
 import {
@@ -54,7 +57,7 @@ import * as dotenv from 'dotenv';
 
 dotenv.config({ path: './.env' });
 
-type SignerType = 'fireblocks' | 'privy' | 'turnkey' | 'keypair';
+type SignerType = 'fireblocks' | 'para' | 'privy' | 'turnkey' | 'keypair';
 
 function getSignerType(): SignerType {
     const signerEnv = process.env.SIGNER_TYPE;
@@ -62,7 +65,7 @@ function getSignerType(): SignerType {
         throw new Error('SIGNER_TYPE is not set');
     }
     const signerType = signerEnv.toLowerCase() as SignerType;
-    if (signerType !== 'fireblocks' && signerType !== 'privy' && signerType !== 'turnkey' && signerType !== 'keypair') {
+    if (signerType !== 'fireblocks' && signerType !== 'para' && signerType !== 'privy' && signerType !== 'turnkey' && signerType !== 'keypair') {
         throw new Error(`Invalid signer type: ${signerType}`);
     }
     return signerType;
@@ -91,6 +94,16 @@ const SIGNER_CONFIGS: Record<SignerType, SignerConfig> = {
             });
             await signer.init();
             return signer;
+        },
+    },
+    para: {
+        requiredEnvVars: ['PARA_API_KEY', 'PARA_WALLET_ID'],
+        create: async () => {
+            return await ParaSigner.create({
+                apiKey: process.env.PARA_API_KEY!,
+                walletId: process.env.PARA_WALLET_ID!,
+                apiBaseUrl: process.env.PARA_API_BASE_URL,
+            });
         },
     },
     privy: {

@@ -7,11 +7,13 @@
     "test:fireblocks": "SIGNER_TYPE=fireblocks tsx test-signer.ts",
     "test:privy": "SIGNER_TYPE=privy tsx test-signer.ts",
     "test:turnkey": "SIGNER_TYPE=turnkey tsx test-signer.ts",
+    "test:para": "SIGNER_TYPE=para tsx test-signer.ts",
     "test:keypair": "SIGNER_TYPE=keypair tsx test-signer.ts"
   },
   "dependencies": {
     "@solana/keychain-core": "workspace:*",
     "@solana/keychain-fireblocks": "workspace:*",
+    "@solana/keychain-para": "workspace:*",
     "@solana/keychain-privy": "workspace:*",
     "@solana/keychain-turnkey": "workspace:*"
   },

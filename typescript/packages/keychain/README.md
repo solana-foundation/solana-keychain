@@ -13,6 +13,7 @@ This installs all signer implementations. For a smaller bundle, install individu
 - `@solana/keychain-aws-kms` - AWS KMS signer
 - `@solana/keychain-cdp` - Coinbase Developer Platform (CDP) signer
 - `@solana/keychain-fireblocks` - Fireblocks signer
+- `@solana/keychain-para` - Para MPC signer
 - `@solana/keychain-privy` - Privy signer
 - `@solana/keychain-turnkey` - Turnkey signer
 - `@solana/keychain-vault` - HashiCorp Vault signer
@@ -27,6 +28,7 @@ The main signer classes are exported directly for convenience:
 import {
     AwsKmsSigner,
     FireblocksSigner,
+    ParaSigner,
     PrivySigner,
     TurnkeySigner,
     VaultSigner,
@@ -46,7 +48,7 @@ const signer = new VaultSigner({
 Each signer package is also available under its namespace for accessing types and utilities:
 
 ```typescript
-import { awsKms, fireblocks, privy, turnkey, vault } from '@solana/keychain';
+import { awsKms, fireblocks, para, privy, turnkey, vault } from '@solana/keychain';
 
 // Access types
 type VaultConfig = vault.VaultSignerConfig;
@@ -79,6 +81,7 @@ try {
 |--------|----------|
 | `AwsKmsSigner` | [@solana/keychain-aws-kms](../aws-kms/README.md) |
 | `FireblocksSigner` | [@solana/keychain-fireblocks](../fireblocks/README.md) |
+| `ParaSigner` | [@solana/keychain-para](../para/README.md) |
 | `PrivySigner` | [@solana/keychain-privy](../privy/README.md) |
 | `TurnkeySigner` | [@solana/keychain-turnkey](../turnkey/README.md) |
 | `VaultSigner` | [@solana/keychain-vault](../vault/README.md) |

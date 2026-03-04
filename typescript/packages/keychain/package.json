@@ -16,7 +16,8 @@
         "kms",
         "fireblocks",
         "cdp",
-        "coinbase"
+        "coinbase",
+        "para"
     ],
     "type": "module",
     "sideEffects": false,
@@ -45,6 +46,7 @@
         "@solana/keychain-cdp": "workspace:*",
         "@solana/keychain-fireblocks": "workspace:*",
         "@solana/keychain-gcp-kms": "workspace:*",
+        "@solana/keychain-para": "workspace:*",
         "@solana/keychain-privy": "workspace:*",
         "@solana/keychain-turnkey": "workspace:*",
         "@solana/keychain-vault": "workspace:*"
