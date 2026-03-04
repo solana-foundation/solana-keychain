@@ -14,7 +14,7 @@ jobs:
         working-directory: typescript
     strategy:
       matrix:
-        package: [vault, privy, turnkey, fireblocks, gcp-kms, para]
+        package: [vault, privy, turnkey, fireblocks, gcp-kms, para, dfns]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,7 +41,7 @@ jobs:
         working-directory: typescript
     strategy:
       matrix:
-        package: [privy, turnkey, fireblocks, aws-kms, gcp-kms, para]
+        package: [privy, turnkey, fireblocks, aws-kms, gcp-kms, para, dfns]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -92,6 +92,12 @@ jobs:
           PARA_API_KEY: ${{ secrets.PARA_API_KEY }}
           PARA_WALLET_ID: ${{ secrets.PARA_WALLET_ID }}
           PARA_API_BASE_URL: ${{ secrets.PARA_API_BASE_URL }}
+          # DFNS
+          DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN }}
+          DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID }}
+          DFNS_PRIVATE_KEY_PEM: ${{ secrets.DFNS_PRIVATE_KEY_PEM }}
+          DFNS_WALLET_ID: ${{ secrets.DFNS_WALLET_ID }}
+          DFNS_API_BASE_URL: ${{ secrets.DFNS_API_BASE_URL }}
         run: pnpm -F @solana/keychain-${{ matrix.package }} run test:integration
 
   typescript-lint:

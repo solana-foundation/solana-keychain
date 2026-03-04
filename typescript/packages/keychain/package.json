@@ -17,7 +17,8 @@
         "fireblocks",
         "cdp",
         "coinbase",
-        "para"
+        "para",
+        "dfns"
     ],
     "type": "module",
     "sideEffects": false,
@@ -44,6 +45,7 @@
         "@solana/keychain-core": "workspace:*",
         "@solana/keychain-aws-kms": "workspace:*",
         "@solana/keychain-cdp": "workspace:*",
+        "@solana/keychain-dfns": "workspace:*",
         "@solana/keychain-fireblocks": "workspace:*",
         "@solana/keychain-gcp-kms": "workspace:*",
         "@solana/keychain-para": "workspace:*",

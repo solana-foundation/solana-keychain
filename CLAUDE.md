@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`solana-keychain` is a Rust library providing a unified interface for signing Solana transactions across multiple backend implementations. The architecture centers around a single `SolanaSigner` trait that abstracts over seven different signing backends: Memory (local keypairs), Vault (HashiCorp), Privy, Turnkey, AWS KMS, Fireblocks, and GCP KMS.
+`solana-keychain` is a Rust library providing a unified interface for signing Solana transactions across multiple backend implementations. The architecture centers around a single `SolanaSigner` trait that abstracts over eight different signing backends: Memory (local keypairs), Vault (HashiCorp), Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, and Dfns.
 
 ## Common Commands
 
@@ -27,6 +27,7 @@ cd rust && cargo test --features turnkey
 cd rust && cargo test --features aws_kms
 cd rust && cargo test --features fireblocks
 cd rust && cargo test --features gcp_kms
+cd rust && cargo test --features dfns
 
 # Run a single test
 cd rust && cargo test test_name --all-features
@@ -156,6 +157,14 @@ All signers follow a consistent pattern but differ in where keys are stored:
    - Automatic credential discovery via ADC
    - Availability checked via `GetCryptoKeyVersion`
 
+8. **DfnsSigner** ([rust/src/dfns/mod.rs](rust/src/dfns/mod.rs))
+     - Uses Dfns API signing
+     - Requires `init()` to fetch wallet public key before use
+     - User Action Signing flow: 3-step challenge/response
+     - Signature returned as r+s hex components, concatenated to 64-byte Ed25519 signature
+     - Authentication via private key in PEM format
+     - Availability checked via wallet GET endpoint
+
 ### Error Handling
 
 All errors are centralized in [rust/src/error.rs](rust/src/error.rs) using `thiserror`. The `SignerError` enum covers key formats, signing failures, remote API errors, serialization, and configuration issues.
@@ -170,13 +179,14 @@ The library uses Cargo features for zero-cost abstraction:
 - `aws_kms` - Adds KmsSigner with aws-sdk-kms
 - `fireblocks` - Adds FireblocksSigner with reqwest, jsonwebtoken
 - `gcp_kms` - Adds GcpKmsSigner with google-cloud-kms-v1, google-cloud-auth
+- `dfns` - Adds DfnsSigner with reqwest, hex, ed25519-dalek
 - `all` - Enables all backends
 
 At least one feature must be enabled (enforced by `compile_error!` in lib.rs).
 
 ## Testing
 
-Tests are co-located with implementation code in each module. Remote signers (Vault, Privy, Turnkey, AWS, Fireblocks, GCP) use `wiremock` to mock HTTP endpoints, avoiding actual API calls during testing. Tests cover:
+Tests are co-located with implementation code in each module. Remote signers (Vault, Privy, Turnkey, AWS, Fireblocks, GCP, DFNS) use `wiremock` to mock HTTP endpoints, avoiding actual API calls during testing. Tests cover:
 - Constructor validation (invalid keys, etc.)
 - Successful signing operations
 - Error cases (unauthorized, malformed responses)
@@ -190,6 +200,7 @@ cd rust && cargo test --features turnkey turnkey::tests
 cd rust && cargo test --features aws_kms aws_kms::tests
 cd rust && cargo test --features fireblocks fireblocks::tests
 cd rust && cargo test --features gcp_kms gcp_kms::tests
+cd rust && cargo test --features dfns dfns::tests
 ```
 
 ## Key Implementation Notes
@@ -198,7 +209,7 @@ cd rust && cargo test --features gcp_kms gcp_kms::tests
 - Privy and Turnkey use Base64 encoding for payloads/responses
 - Vault uses Base64 for both input and output
 - Turnkey requires special handling for signature component padding (see [rust/src/turnkey/mod.rs:125-136](rust/src/turnkey/mod.rs))
-- PrivySigner and FireblocksSigner must call `init()` before use; other signers are ready after construction
+- PrivySigner, FireblocksSigner, and DfnsSigner must call `init()` before use; other signers are ready after construction
 - AWS KMS and GCP KMS use official cloud SDKs with automatic credential discovery
 - GCP KMS operates in PureEdDSA mode with `EC_SIGN_ED25519` algorithm
 - The unified `Signer` enum uses conditional compilation extensively with `#[cfg(feature = "...")]`
