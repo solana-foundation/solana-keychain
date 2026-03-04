@@ -55,15 +55,13 @@ const SIGNER_TYPE = 'dfns';
 const REQUIRED_ENV_VARS = ['DFNS_AUTH_TOKEN', 'DFNS_CRED_ID', 'DFNS_PRIVATE_KEY_PEM', 'DFNS_WALLET_ID'];
 
 async function createDfnsSigner(): Promise<DfnsSigner> {
-    const signer = new DfnsSigner({
+    return await DfnsSigner.create({
         authToken: process.env.DFNS_AUTH_TOKEN!,
         credId: process.env.DFNS_CRED_ID!,
         privateKeyPem: process.env.DFNS_PRIVATE_KEY_PEM!,
         walletId: process.env.DFNS_WALLET_ID!,
         apiBaseUrl: process.env.DFNS_API_BASE_URL,
     });
-    await signer.init();
-    return signer;
 }
 
 const CONFIG: SignerTestConfig<DfnsSigner> = {

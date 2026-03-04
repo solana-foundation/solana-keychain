@@ -22,72 +22,58 @@ const defaultConfig = {
     walletId: TEST_WALLET_ID,
 };
 
+function mockWalletFetch(overrides?: Parameters<typeof createWalletResponse>[0]) {
+    mockFetch.mockResolvedValueOnce({
+        json: async () => createWalletResponse(overrides),
+        ok: true,
+    });
+}
+
 describe('DfnsSigner', () => {
     beforeEach(() => {
         vi.resetAllMocks();
     });
 
-    describe('constructor', () => {
-        it('creates a DfnsSigner with valid config', () => {
-            const signer = new DfnsSigner(defaultConfig);
+    describe('create', () => {
+        it('creates a DfnsSigner with valid config', async () => {
+            mockWalletFetch();
+            const signer = await DfnsSigner.create(defaultConfig);
             expect(signer).toBeDefined();
-        });
-
-        it('throws error for missing authToken', () => {
-            expect(() => {
-                new DfnsSigner({ ...defaultConfig, authToken: '' });
-            }).toThrow('Missing required authToken field');
-        });
-
-        it('throws error for missing credId', () => {
-            expect(() => {
-                new DfnsSigner({ ...defaultConfig, credId: '' });
-            }).toThrow('Missing required credId field');
-        });
-
-        it('throws error for missing privateKeyPem', () => {
-            expect(() => {
-                new DfnsSigner({ ...defaultConfig, privateKeyPem: '' });
-            }).toThrow('Missing required privateKeyPem field');
-        });
-
-        it('throws error for missing walletId', () => {
-            expect(() => {
-                new DfnsSigner({ ...defaultConfig, walletId: '' });
-            }).toThrow('Missing required walletId field');
-        });
-    });
-
-    describe('init', () => {
-        it('initializes signer by fetching wallet', async () => {
-            mockFetch.mockResolvedValueOnce({
-                json: async () => createWalletResponse(),
-                ok: true,
-            });
-
-            const signer = new DfnsSigner(defaultConfig);
-            await signer.init();
             expect(signer.address).toBeDefined();
         });
 
-        it('throws error for inactive wallet', async () => {
-            mockFetch.mockResolvedValueOnce({
-                json: async () => createWalletResponse({ status: 'Inactive' }),
-                ok: true,
-            });
+        it('throws error for missing authToken', async () => {
+            await expect(DfnsSigner.create({ ...defaultConfig, authToken: '' })).rejects.toThrow(
+                'Missing required authToken field',
+            );
+        });
 
-            const signer = new DfnsSigner(defaultConfig);
-            await expect(signer.init()).rejects.toThrow('not active');
+        it('throws error for missing credId', async () => {
+            await expect(DfnsSigner.create({ ...defaultConfig, credId: '' })).rejects.toThrow(
+                'Missing required credId field',
+            );
+        });
+
+        it('throws error for missing privateKeyPem', async () => {
+            await expect(DfnsSigner.create({ ...defaultConfig, privateKeyPem: '' })).rejects.toThrow(
+                'Missing required privateKeyPem field',
+            );
+        });
+
+        it('throws error for missing walletId', async () => {
+            await expect(DfnsSigner.create({ ...defaultConfig, walletId: '' })).rejects.toThrow(
+                'Missing required walletId field',
+            );
+        });
+
+        it('throws error for inactive wallet', async () => {
+            mockWalletFetch({ status: 'Inactive' });
+            await expect(DfnsSigner.create(defaultConfig)).rejects.toThrow('not active');
         });
 
         it('throws error for non-EdDSA scheme', async () => {
-            mockFetch.mockResolvedValueOnce({
-                json: async () => createWalletResponse({ scheme: 'ECDSA' }),
-                ok: true,
-            });
-
-            const signer = new DfnsSigner(defaultConfig);
-            await expect(signer.init()).rejects.toThrow('Unsupported key scheme');
+            mockWalletFetch({ scheme: 'ECDSA' });
+            await expect(DfnsSigner.create(defaultConfig)).rejects.toThrow('Unsupported key scheme');
         });
 
         it('throws error for API failure', async () => {
@@ -95,28 +81,7 @@ describe('DfnsSigner', () => {
                 ok: false,
                 status: 401,
             });
-
-            const signer = new DfnsSigner(defaultConfig);
-            await expect(signer.init()).rejects.toThrow();
-        });
-
-        it('skips re-initialization', async () => {
-            mockFetch.mockResolvedValueOnce({
-                json: async () => createWalletResponse(),
-                ok: true,
-            });
-
-            const signer = new DfnsSigner(defaultConfig);
-            await signer.init();
-            await signer.init();
-            expect(mockFetch).toHaveBeenCalledTimes(1);
-        });
-    });
-
-    describe('address', () => {
-        it('throws when not initialized', () => {
-            const signer = new DfnsSigner(defaultConfig);
-            expect(() => signer.address).toThrow('not initialized');
+            await expect(DfnsSigner.create(defaultConfig)).rejects.toThrow();
         });
     });
 
@@ -125,10 +90,7 @@ describe('DfnsSigner', () => {
             const rHex = '11'.repeat(32);
             const sHex = '22'.repeat(32);
 
-            mockFetch.mockResolvedValueOnce({
-                json: async () => createWalletResponse(),
-                ok: true,
-            });
+            mockWalletFetch();
 
             mockFetch.mockResolvedValueOnce({
                 json: async () => createUserActionInitResponse(),
@@ -145,8 +107,7 @@ describe('DfnsSigner', () => {
                 ok: true,
             });
 
-            const signer = new DfnsSigner(defaultConfig);
-            await signer.init();
+            const signer = await DfnsSigner.create(defaultConfig);
 
             const result = await signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }]);
 
@@ -156,26 +117,58 @@ describe('DfnsSigner', () => {
             const sig = result[0]![signer.address]!;
             expect(sig.length).toBe(64);
         });
+
+        it('left-pads short signature components', async () => {
+            // r is 31 bytes (short by 1), s is 32 bytes
+            const rHex = 'ff'.repeat(31);
+            const sHex = 'aa'.repeat(32);
+
+            mockWalletFetch();
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createUserActionInitResponse(),
+                ok: true,
+            });
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createUserActionResponse(),
+                ok: true,
+            });
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createSignatureResponse(rHex, sHex),
+                ok: true,
+            });
+
+            const signer = await DfnsSigner.create(defaultConfig);
+
+            const result = await signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }]);
+
+            const sig = result[0]![signer.address]!;
+            expect(sig.length).toBe(64);
+            // First byte should be 0x00 (left-pad), then 31 bytes of 0xff
+            expect(sig[0]).toBe(0x00);
+            expect(sig[1]).toBe(0xff);
+        });
     });
 
     describe('isAvailable', () => {
         it('returns true when API responds', async () => {
-            mockFetch.mockResolvedValueOnce({
-                json: async () => createWalletResponse(),
-                ok: true,
-            });
-
-            const signer = new DfnsSigner(defaultConfig);
+            mockWalletFetch();
+            // isAvailable doesn't need create(), but we need a signer instance
+            mockWalletFetch(); // for the isAvailable call
+            const signer = await DfnsSigner.create(defaultConfig);
             expect(await signer.isAvailable()).toBe(true);
         });
 
         it('returns false when API fails', async () => {
+            mockWalletFetch(); // for create()
+            const signer = await DfnsSigner.create(defaultConfig);
+
             mockFetch.mockResolvedValueOnce({
                 ok: false,
                 status: 500,
             });
-
-            const signer = new DfnsSigner(defaultConfig);
             expect(await signer.isAvailable()).toBe(false);
         });
     });

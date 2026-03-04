@@ -11,12 +11,7 @@ import {
 } from '@solana/transactions';
 
 import { signUserAction } from './auth.js';
-import type {
-    DfnsSignerConfig,
-    GenerateSignatureRequest,
-    GenerateSignatureResponse,
-    GetWalletResponse,
-} from './types.js';
+import type { DfnsSignerConfig, GenerateSignatureRequest, GenerateSignatureResponse, GetWalletResponse } from './types.js';
 
 const DEFAULT_API_BASE_URL = 'https://api.dfns.io';
 
@@ -37,33 +32,59 @@ function bytesToBase58(bytes: Uint8Array): string {
 }
 
 /**
- * Dfns-based signer for Solana transactions
+ * Dfns-based signer for Solana transactions.
  *
  * Uses Dfns Keys API to sign Solana transactions and messages.
- * Requires a Dfns account with a Solana wallet.
+ * Requires a Dfns account with an active Ed25519 Solana wallet.
+ *
+ * Use the static `create()` factory to construct an instance — it validates
+ * the wallet status, key scheme, and curve via the Dfns API.
  *
  * @example
  * ```typescript
- * const signer = new DfnsSigner({
+ * const signer = await DfnsSigner.create({
  *   authToken: 'your-service-account-token',
  *   credId: 'your-credential-id',
  *   privateKeyPem: '-----BEGIN PRIVATE KEY-----\n...',
  *   walletId: 'your-wallet-id',
  * });
- * await signer.init();
+ * const signed = await signTransactionMessageWithSigners(transactionMessage, [signer]);
  * ```
  */
 export class DfnsSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
-    private _address: Address<TAddress> | null = null;
+    readonly address: Address<TAddress>;
     private readonly authToken: string;
     private readonly credId: string;
     private readonly privateKeyPem: string;
     private readonly walletId: string;
     private readonly apiBaseUrl: string;
-    private keyId = '';
-    private initialized = false;
+    private readonly keyId: string;
 
-    constructor(config: DfnsSignerConfig) {
+    private constructor(config: {
+        address: Address<TAddress>;
+        apiBaseUrl: string;
+        authToken: string;
+        credId: string;
+        keyId: string;
+        privateKeyPem: string;
+        walletId: string;
+    }) {
+        this.address = config.address;
+        this.authToken = config.authToken;
+        this.credId = config.credId;
+        this.privateKeyPem = config.privateKeyPem;
+        this.walletId = config.walletId;
+        this.apiBaseUrl = config.apiBaseUrl;
+        this.keyId = config.keyId;
+    }
+
+    /**
+     * Create and initialize a DfnsSigner.
+     *
+     * Validates config fields, fetches the wallet from Dfns, and checks that
+     * the wallet is active with an EdDSA/ed25519 signing key.
+     */
+    static async create<TAddress extends string = string>(config: DfnsSignerConfig): Promise<DfnsSigner<TAddress>> {
         if (!config.authToken) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
                 message: 'Missing required authToken field',
@@ -88,35 +109,9 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
             });
         }
 
-        this.authToken = config.authToken;
-        this.credId = config.credId;
-        this.privateKeyPem = config.privateKeyPem;
-        this.walletId = config.walletId;
-        this.apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
-    }
+        const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
 
-    /**
-     * Get the public key address of this signer
-     * @throws {SignerError} If the signer has not been initialized
-     */
-    get address(): Address<TAddress> {
-        if (!this._address) {
-            throwSignerError(SignerErrorCode.SIGNER_NOT_INITIALIZED, {
-                message: 'Signer not initialized. Call init() first.',
-            });
-        }
-        return this._address;
-    }
-
-    /**
-     * Initialize the signer by fetching the wallet and extracting key details from Dfns
-     */
-    async init(): Promise<void> {
-        if (this.initialized) {
-            return;
-        }
-
-        const wallet = await this.getWallet();
+        const wallet = await fetchWallet(apiBaseUrl, config.authToken, config.walletId);
 
         if (wallet.status !== 'Active') {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
@@ -139,25 +134,31 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
         const pubkeyBytes = hexToBytes(wallet.signingKey.publicKey);
         const bs58Address = bytesToBase58(pubkeyBytes);
 
+        let address: Address<TAddress>;
         try {
             assertIsAddress(bs58Address);
-            this._address = bs58Address as Address<TAddress>;
+            address = bs58Address as Address<TAddress>;
         } catch {
             throwSignerError(SignerErrorCode.INVALID_PUBLIC_KEY, {
                 message: 'Invalid public key from Dfns wallet',
             });
         }
 
-        this.keyId = wallet.signingKey.id;
-        this.initialized = true;
+        return new DfnsSigner<TAddress>({
+            address,
+            apiBaseUrl,
+            authToken: config.authToken,
+            credId: config.credId,
+            keyId: wallet.signingKey.id,
+            privateKeyPem: config.privateKeyPem,
+            walletId: config.walletId,
+        });
     }
 
     /**
      * Sign multiple messages using Dfns
      */
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        this.ensureInitialized();
-
         return await Promise.all(
             messages.map(async message => {
                 const messageBytes =
@@ -182,8 +183,6 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
-        this.ensureInitialized();
-
         return await Promise.all(
             transactions.map(async transaction => {
                 const txEncoder = getTransactionEncoder();
@@ -206,38 +205,10 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
      */
     async isAvailable(): Promise<boolean> {
         try {
-            await this.getWallet();
+            await fetchWallet(this.apiBaseUrl, this.authToken, this.walletId);
             return true;
         } catch {
             return false;
-        }
-    }
-
-    /**
-     * Fetch wallet details from Dfns
-     */
-    private async getWallet(): Promise<GetWalletResponse> {
-        const url = `${this.apiBaseUrl}/wallets/${this.walletId}`;
-        const response = await fetch(url, {
-            headers: {
-                Authorization: `Bearer ${this.authToken}`,
-            },
-            method: 'GET',
-        });
-
-        if (!response.ok) {
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Dfns API error: ${response.status}`,
-                status: response.status,
-            });
-        }
-
-        try {
-            return (await response.json()) as GetWalletResponse;
-        } catch {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                message: 'Failed to parse Dfns wallet response',
-            });
         }
     }
 
@@ -303,34 +274,65 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
             });
         }
 
-        return this.combineSignature(sigResponse.signature.r, sigResponse.signature.s);
+        return combineSignature(sigResponse.signature.r, sigResponse.signature.s);
+    }
+}
+
+/**
+ * Fetch wallet details from Dfns
+ */
+async function fetchWallet(apiBaseUrl: string, authToken: string, walletId: string): Promise<GetWalletResponse> {
+    const url = `${apiBaseUrl}/wallets/${walletId}`;
+    const response = await fetch(url, {
+        headers: {
+            Authorization: `Bearer ${authToken}`,
+        },
+        method: 'GET',
+    });
+
+    if (!response.ok) {
+        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+            message: `Dfns API error: ${response.status}`,
+            status: response.status,
+        });
     }
 
-    /**
-     * Combine r and s hex-encoded components into a 64-byte Ed25519 signature
-     */
-    private combineSignature(r: string, s: string): SignatureBytes {
-        const rBytes = hexToBytes(r);
-        const sBytes = hexToBytes(s);
-        if (rBytes.length + sBytes.length !== 64) {
-            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                message: `Invalid signature length: expected 64 bytes, got ${rBytes.length + sBytes.length}`,
-            });
-        }
-        const combined = new Uint8Array(64);
-        combined.set(rBytes, 0);
-        combined.set(sBytes, rBytes.length);
-        return combined as SignatureBytes;
+    try {
+        return (await response.json()) as GetWalletResponse;
+    } catch {
+        throwSignerError(SignerErrorCode.PARSING_ERROR, {
+            message: 'Failed to parse Dfns wallet response',
+        });
+    }
+}
+
+/**
+ * Pad signature component to exactly 32 bytes.
+ * Components from Dfns may be shorter than 32 bytes and need left-padding with zeros.
+ */
+function padSignatureComponent(hex: string): Uint8Array {
+    const bytes = hexToBytes(hex);
+
+    if (bytes.length > 32) {
+        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            message: `Invalid signature component length: ${bytes.length} (max 32)`,
+        });
     }
 
-    /**
-     * Ensure the signer has been initialized
-     */
-    private ensureInitialized(): void {
-        if (!this.initialized) {
-            throwSignerError(SignerErrorCode.SIGNER_NOT_INITIALIZED, {
-                message: 'Signer not initialized. Call init() first.',
-            });
-        }
-    }
+    const padded = new Uint8Array(32);
+    padded.set(bytes, 32 - bytes.length);
+    return padded;
+}
+
+/**
+ * Combine r and s hex-encoded components into a 64-byte Ed25519 signature.
+ * Each component is individually validated and left-padded to 32 bytes.
+ */
+function combineSignature(r: string, s: string): SignatureBytes {
+    const rBytes = padSignatureComponent(r);
+    const sBytes = padSignatureComponent(s);
+    const combined = new Uint8Array(64);
+    combined.set(rBytes, 0);
+    combined.set(sBytes, 32);
+    return combined as SignatureBytes;
 }

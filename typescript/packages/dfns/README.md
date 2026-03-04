@@ -37,17 +37,14 @@ You will need:
 ```typescript
 import { DfnsSigner } from '@solana/keychain-dfns';
 
-const signer = new DfnsSigner({
-authToken: 'your-service-account-token',
-credId: 'your-credential-id',
-privateKeyPem: `-----BEGIN PRIVATE KEY-----
+const signer = await DfnsSigner.create({
+    authToken: 'your-service-account-token',
+    credId: 'your-credential-id',
+    privateKeyPem: `-----BEGIN PRIVATE KEY-----
 ...your private key...
 -----END PRIVATE KEY-----`,
-walletId: 'wa-xxxxx-xxxxx-xxxxx',
+    walletId: 'wa-xxxxx-xxxxx-xxxxx',
 });
-
-// Initialize (fetches wallet and public key from Dfns)
-await signer.init();
 
 console.log('Signer address:', signer.address);
 ```
@@ -56,24 +53,24 @@ console.log('Signer address:', signer.address);
 
 ```typescript
 import {
-appendTransactionMessageInstructions,
-createSolanaRpc,
-createTransactionMessage,
-getBase64EncodedWireTransaction,
-pipe,
-setTransactionMessageFeePayerSigner,
-setTransactionMessageLifetimeUsingBlockhash,
-signTransactionMessageWithSigners,
+    appendTransactionMessageInstructions,
+    createSolanaRpc,
+    createTransactionMessage,
+    getBase64EncodedWireTransaction,
+    pipe,
+    setTransactionMessageFeePayerSigner,
+    setTransactionMessageLifetimeUsingBlockhash,
+    signTransactionMessageWithSigners,
 } from '@solana/kit';
 
 const rpc = createSolanaRpc('https://api.devnet.solana.com');
 const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
 
 const message = pipe(
-createTransactionMessage({ version: 0 }),
-(tx) => setTransactionMessageFeePayerSigner(signer, tx),
-(tx) => appendTransactionMessageInstructions([/* your instructions */], tx),
-(tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
+    createTransactionMessage({ version: 0 }),
+    (tx) => setTransactionMessageFeePayerSigner(signer, tx),
+    (tx) => appendTransactionMessageInstructions([/* your instructions */], tx),
+    (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
 );
 
 const signedTx = await signTransactionMessageWithSigners(message);
@@ -102,7 +99,7 @@ const [signatureDictionary] = await signer.signMessages([{ content: message }]);
 
 ## How It Works
 
-1. **Initialization**: `init()` fetches the wallet from Dfns API and extracts the Ed25519 public key
+1. **Initialization**: `create()` fetches the wallet from Dfns API and validates the Ed25519 public key
 (your Solana address)
 2. **Signing**: Transactions and messages are sent to the Dfns Keys API (`/keys/{keyId}/signatures`)
 which returns Ed25519 signature components (r, s)
@@ -114,7 +111,6 @@ flow — the SDK handles this automatically using your `credId` and `privateKeyP
 The signer throws errors with specific codes from `@solana/keychain-core`:
 
 - `CONFIG_ERROR` — Invalid configuration (missing fields, inactive wallet, unsupported key type)
-- `SIGNER_NOT_INITIALIZED` — `init()` was not called before signing
 - `REMOTE_API_ERROR` — Dfns API returned an error
 - `SIGNING_FAILED` — Signature request failed or requires policy approval
 - `PARSING_ERROR` — Failed to parse Dfns response
@@ -123,11 +119,11 @@ The signer throws errors with specific codes from `@solana/keychain-core`:
 import { SignerErrorCode } from '@solana/keychain-core';
 
 try {
-await signer.signMessages([message]);
+    await signer.signMessages([message]);
 } catch (error) {
-if (error.code === SignerErrorCode.REMOTE_API_ERROR) {
-    console.error('Dfns API error:', error.message);
-}
+    if (error.code === SignerErrorCode.REMOTE_API_ERROR) {
+        console.error('Dfns API error:', error.message);
+    }
 }
 ```
 
