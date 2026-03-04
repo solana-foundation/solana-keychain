@@ -106,6 +106,67 @@ describe('FireblocksSigner', () => {
         });
     });
 
+    describe('create', () => {
+        it('creates and initializes a FireblocksSigner', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ addresses: [{ address: keyPair.address }] }),
+            });
+
+            const signer = await FireblocksSigner.create({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+
+            expect(signer.address).toBe(keyPair.address);
+            assertIsSolanaSigner(signer);
+        });
+
+        it('should throw error on API failure during create', async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: false,
+                status: 401,
+                text: async () => 'Unauthorized',
+            });
+
+            await expect(
+                FireblocksSigner.create({
+                    apiKey: TEST_API_KEY,
+                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                }),
+            ).rejects.toThrow('Fireblocks API error: 401');
+        });
+
+        it('should throw error for missing apiKey', async () => {
+            await expect(
+                FireblocksSigner.create({
+                    apiKey: '',
+                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                }),
+            ).rejects.toThrow('Missing required apiKey field');
+        });
+
+        it('should throw HTTP_ERROR when fetch fails during create', async () => {
+            mockFetch.mockRejectedValueOnce(new Error('Network timeout'));
+
+            await expect(
+                FireblocksSigner.create({
+                    apiKey: TEST_API_KEY,
+                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                }),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_HTTP_ERROR',
+                message: expect.stringContaining('Fireblocks network request failed'),
+            });
+        });
+    });
+
     describe('init', () => {
         it('should initialize signer by fetching public key', async () => {
             const keyPair = await generateKeyPairSigner();
@@ -192,6 +253,34 @@ describe('FireblocksSigner', () => {
     });
 
     describe('signMessages', () => {
+        it('should throw HTTP_ERROR when fetch fails during signing request', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            // Mock init fetch (success)
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ addresses: [{ address: keyPair.address }] }),
+            });
+
+            const signer = await FireblocksSigner.create({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+
+            // Mock signing request to fail with network error
+            mockFetch.mockRejectedValueOnce(new Error('Network timeout'));
+
+            const message = {
+                content: new Uint8Array([1, 2, 3, 4]),
+                signatures: {},
+            };
+            await expect(signer.signMessages([message])).rejects.toMatchObject({
+                code: 'SIGNER_HTTP_ERROR',
+                message: expect.stringContaining('Fireblocks network request failed'),
+            });
+        });
+
         it('should throw error if not initialized', async () => {
             const signer = new FireblocksSigner({
                 apiKey: TEST_API_KEY,

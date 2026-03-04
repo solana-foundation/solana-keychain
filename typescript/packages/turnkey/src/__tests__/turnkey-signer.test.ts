@@ -79,6 +79,30 @@ describe('TurnkeySigner', () => {
         });
     };
 
+    describe('create', () => {
+        it('creates a TurnkeySigner with valid config', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            const signer = TurnkeySigner.create({
+                ...mockConfig,
+                publicKey: keyPair.address,
+            });
+
+            expect(signer.address).toBe(keyPair.address);
+            assertIsSolanaSigner(signer);
+        });
+
+        it('should throw error for missing config fields', () => {
+            expect(() => {
+                TurnkeySigner.create({
+                    ...mockConfig,
+                    publicKey: 'some-key',
+                    organizationId: '',
+                });
+            }).toThrow('Missing required configuration fields');
+        });
+    });
+
     describe('constructor', () => {
         it('creates a TurnkeySigner with valid config', async () => {
             const keyPair = await generateKeyPairSigner();

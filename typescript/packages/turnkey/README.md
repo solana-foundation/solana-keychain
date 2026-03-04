@@ -22,7 +22,7 @@ pnpm add @solana/keychain-turnkey
 ```typescript
 import { TurnkeySigner } from '@solana/keychain-turnkey';
 
-const signer = new TurnkeySigner({
+const signer = TurnkeySigner.create({
     organizationId: 'your-organization-id',
     privateKeyId: 'your-turnkey-private-key-id',
     publicKey: 'your-solana-public-key-base58',

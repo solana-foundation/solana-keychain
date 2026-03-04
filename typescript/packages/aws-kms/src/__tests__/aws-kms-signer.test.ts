@@ -50,6 +50,31 @@ describe('AwsKmsSigner', () => {
         vi.clearAllMocks();
     });
 
+    describe('create', () => {
+        it('creates an AwsKmsSigner with valid config', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            const signer = AwsKmsSigner.create({
+                keyId: TEST_KEY_ID,
+                publicKey: keyPair.address,
+            });
+
+            expect(signer.address).toBe(keyPair.address);
+            assertIsSolanaSigner(signer);
+        });
+
+        it('should throw error for missing keyId', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            expect(() => {
+                AwsKmsSigner.create({
+                    keyId: '',
+                    publicKey: keyPair.address,
+                });
+            }).toThrow('Missing required keyId field');
+        });
+    });
+
     describe('constructor', () => {
         it('creates an AwsKmsSigner with valid config', async () => {
             const keyPair = await generateKeyPairSigner();

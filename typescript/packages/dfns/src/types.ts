@@ -14,6 +14,9 @@ export interface DfnsSignerConfig {
     /** Private key in PEM format for signing user action challenges (Ed25519, P256, or RSA) */
     privateKeyPem: string;
 
+    /** Optional delay in ms between concurrent signing requests to avoid rate limits (default: 0) */
+    requestDelayMs?: number;
+
     /** Dfns wallet ID */
     walletId: string;
 }

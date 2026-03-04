@@ -29,6 +29,10 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
     private readonly client: v1.KeyManagementServiceClient;
     private readonly requestDelayMs: number;
 
+    static create<TAddress extends string = string>(config: GcpKmsSignerConfig): GcpKmsSigner<TAddress> {
+        return new GcpKmsSigner<TAddress>(config);
+    }
+
     constructor(config: GcpKmsSignerConfig) {
         if (!config.keyName) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {

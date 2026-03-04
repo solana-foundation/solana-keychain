@@ -42,6 +42,10 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
     private readonly keyName: string;
     private readonly requestDelayMs: number;
 
+    static create<TAddress extends string = string>(config: VaultSignerConfig): VaultSigner<TAddress> {
+        return new VaultSigner<TAddress>(config);
+    }
+
     constructor(config: VaultSignerConfig) {
         if (!config.vaultAddr || !config.vaultToken || !config.keyName) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {

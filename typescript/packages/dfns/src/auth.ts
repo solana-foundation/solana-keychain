@@ -19,28 +19,48 @@ export async function signUserAction(
     body: string,
 ): Promise<string> {
     // Request a challenge
-    const initResponse = await fetch(`${apiBaseUrl}/auth/action/init`, {
-        body: JSON.stringify({
-            userActionHttpMethod: httpMethod,
-            userActionHttpPath: httpPath,
-            userActionPayload: body,
-            userActionServerKind: 'Api',
-        }),
-        headers: {
-            Authorization: `Bearer ${authToken}`,
-            'Content-Type': 'application/json',
-        },
-        method: 'POST',
-    });
+    const initUrl = `${apiBaseUrl}/auth/action/init`;
+    let initResponse: Response;
+    try {
+        initResponse = await fetch(initUrl, {
+            body: JSON.stringify({
+                userActionHttpMethod: httpMethod,
+                userActionHttpPath: httpPath,
+                userActionPayload: body,
+                userActionServerKind: 'Api',
+            }),
+            headers: {
+                Authorization: `Bearer ${authToken}`,
+                'Content-Type': 'application/json',
+            },
+            method: 'POST',
+        });
+    } catch (error) {
+        throwSignerError(SignerErrorCode.HTTP_ERROR, {
+            cause: error,
+            message: 'Dfns network request failed',
+            url: initUrl,
+        });
+    }
 
     if (!initResponse.ok) {
+        const errorText = await initResponse.text().catch(() => 'Failed to read error response');
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `Dfns auth/action/init failed: ${initResponse.status}`,
+            response: errorText,
             status: initResponse.status,
         });
     }
 
-    const challenge = (await initResponse.json()) as UserActionInitResponse;
+    let challenge: UserActionInitResponse;
+    try {
+        challenge = (await initResponse.json()) as UserActionInitResponse;
+    } catch (error) {
+        throwSignerError(SignerErrorCode.PARSING_ERROR, {
+            cause: error,
+            message: 'Failed to parse Dfns auth challenge response',
+        });
+    }
 
     // Verify credential is allowed
     const allowed = challenge.allowCredentials.key.some(c => c.id === credId);
@@ -64,33 +84,54 @@ export async function signUserAction(
     const signatureB64 = toBase64Url(signature);
 
     // Submit the signed challenge
-    const signResponse = await fetch(`${apiBaseUrl}/auth/action`, {
-        body: JSON.stringify({
-            challengeIdentifier: challenge.challengeIdentifier,
-            firstFactor: {
-                credentialAssertion: {
-                    clientData: clientDataB64,
-                    credId,
-                    signature: signatureB64,
+    const actionUrl = `${apiBaseUrl}/auth/action`;
+    let signResponse: Response;
+    try {
+        signResponse = await fetch(actionUrl, {
+            body: JSON.stringify({
+                challengeIdentifier: challenge.challengeIdentifier,
+                firstFactor: {
+                    credentialAssertion: {
+                        clientData: clientDataB64,
+                        credId,
+                        signature: signatureB64,
+                    },
+                    kind: 'Key',
                 },
-                kind: 'Key',
+            }),
+            headers: {
+                Authorization: `Bearer ${authToken}`,
+                'Content-Type': 'application/json',
             },
-        }),
-        headers: {
-            Authorization: `Bearer ${authToken}`,
-            'Content-Type': 'application/json',
-        },
-        method: 'POST',
-    });
+            method: 'POST',
+        });
+    } catch (error) {
+        throwSignerError(SignerErrorCode.HTTP_ERROR, {
+            cause: error,
+            message: 'Dfns network request failed',
+            url: actionUrl,
+        });
+    }
 
     if (!signResponse.ok) {
+        const errorText = await signResponse.text().catch(() => 'Failed to read error response');
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `Dfns auth/action failed: ${signResponse.status}`,
+            response: errorText,
             status: signResponse.status,
         });
     }
 
-    const actionResponse = (await signResponse.json()) as UserActionResponse;
+    let actionResponse: UserActionResponse;
+    try {
+        actionResponse = (await signResponse.json()) as UserActionResponse;
+    } catch (error) {
+        throwSignerError(SignerErrorCode.PARSING_ERROR, {
+            cause: error,
+            message: 'Failed to parse Dfns auth action response',
+        });
+    }
+
     return actionResponse.userAction;
 }
 

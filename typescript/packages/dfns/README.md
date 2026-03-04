@@ -96,6 +96,7 @@ const [signatureDictionary] = await signer.signMessages([{ content: message }]);
 | `privateKeyPem` | `string` | Yes      | -                       | Private key in PEM format                         |
 | `walletId`      | `string` | Yes      | -                       | Dfns wallet ID (starts with `wa-`)                |
 | `apiBaseUrl`    | `string` | No       | `https://api.dfns.io`   | Custom API base URL                               |
+| `requestDelayMs`| `number` | No       | `0`                     | Delay in ms between concurrent signing requests   |
 
 ## How It Works
 

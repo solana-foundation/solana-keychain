@@ -29,6 +29,27 @@ describe('GcpKmsSigner', () => {
         vi.clearAllMocks();
     });
 
+    describe('create', () => {
+        it('creates a GcpKmsSigner with valid config', () => {
+            const signer = GcpKmsSigner.create({
+                keyName: TEST_KEY_NAME,
+                publicKey: TEST_PUBLIC_KEY,
+            });
+
+            expect(signer.address).toBe(TEST_PUBLIC_KEY);
+            assertIsSolanaSigner(signer);
+        });
+
+        it('should throw error for missing keyName', () => {
+            expect(() => {
+                GcpKmsSigner.create({
+                    keyName: '',
+                    publicKey: TEST_PUBLIC_KEY,
+                });
+            }).toThrow('Missing required keyName field');
+        });
+    });
+
     describe('constructor', () => {
         it('creates a GcpKmsSigner with valid config', () => {
             const config: GcpKmsSignerConfig = {

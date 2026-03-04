@@ -28,6 +28,10 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
     private readonly client: KMSClient;
     private readonly requestDelayMs: number;
 
+    static create<TAddress extends string = string>(config: AwsKmsSignerConfig): AwsKmsSigner<TAddress> {
+        return new AwsKmsSigner<TAddress>(config);
+    }
+
     constructor(config: AwsKmsSignerConfig) {
         if (!config.keyId) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {

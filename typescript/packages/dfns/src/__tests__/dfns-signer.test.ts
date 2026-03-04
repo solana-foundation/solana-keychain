@@ -83,9 +83,46 @@ describe('DfnsSigner', () => {
             });
             await expect(DfnsSigner.create(defaultConfig)).rejects.toThrow();
         });
+
+        it('throws error for negative requestDelayMs', async () => {
+            await expect(DfnsSigner.create({ ...defaultConfig, requestDelayMs: -1 })).rejects.toThrow(
+                'requestDelayMs must not be negative',
+            );
+        });
+
+        it('warns for high requestDelayMs', async () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            mockWalletFetch();
+            await DfnsSigner.create({ ...defaultConfig, requestDelayMs: 5000 });
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
+            warnSpy.mockRestore();
+        });
+
+        it('throws HTTP_ERROR when fetch fails during create', async () => {
+            mockFetch.mockRejectedValueOnce(new Error('Network timeout'));
+            await expect(DfnsSigner.create(defaultConfig)).rejects.toMatchObject({
+                code: 'SIGNER_HTTP_ERROR',
+                message: expect.stringContaining('Dfns network request failed'),
+            });
+        });
     });
 
     describe('signMessages', () => {
+        it('throws HTTP_ERROR when fetch fails during signing', async () => {
+            mockWalletFetch();
+            const signer = await DfnsSigner.create(defaultConfig);
+
+            // The auth flow init request fails with network error
+            mockFetch.mockRejectedValueOnce(new Error('Network timeout'));
+
+            await expect(
+                signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }]),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_HTTP_ERROR',
+                message: expect.stringContaining('Dfns network request failed'),
+            });
+        });
+
         it('signs a message successfully', async () => {
             const rHex = '11'.repeat(32);
             const sHex = '22'.repeat(32);

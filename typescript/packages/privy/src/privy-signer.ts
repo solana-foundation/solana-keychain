@@ -27,6 +27,10 @@ import {
     WalletResponse,
 } from './types.js';
 
+const DEFAULT_API_BASE_URL = 'https://api.privy.io/v1';
+const base64Decoder = getBase64Decoder();
+const utf8Encoder = getUtf8Encoder();
+
 /**
  * Configuration for creating a PrivySigner
  */
@@ -49,24 +53,19 @@ export interface PrivySignerConfig {
  * Note: Must initialize with create() to fetch the public key
  */
 export class PrivySigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
-    readonly address!: Address<TAddress>;
+    readonly address: Address<TAddress>;
     private readonly appId: string;
     private readonly appSecret: string;
     private readonly walletId: string;
     private readonly apiBaseUrl: string;
     private readonly requestDelayMs: number;
-    private initialized: boolean = false;
 
-    private constructor(config: PrivySignerConfig) {
-        if (!config.appId || !config.appSecret || !config.walletId) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'Missing required configuration fields (appId, appSecret, or walletId)',
-            });
-        }
+    private constructor(config: PrivySignerConfig, address: Address<TAddress>) {
+        this.address = address;
         this.appId = config.appId;
         this.appSecret = config.appSecret;
         this.walletId = config.walletId;
-        this.apiBaseUrl = config.apiBaseUrl || 'https://api.privy.io/v1';
+        this.apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
         this.requestDelayMs = config.requestDelayMs ?? 0;
         this.validateRequestDelayMs(this.requestDelayMs);
     }
@@ -76,17 +75,13 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
      * Fetches the public key from Privy API during initialization
      */
     static async create<TAddress extends string = string>(config: PrivySignerConfig): Promise<PrivySigner<TAddress>> {
-        const signer = new PrivySigner<TAddress>(config);
-        const address = await signer.fetchPublicKey();
-        // Use Object.defineProperty to set readonly field after construction
-        Object.defineProperty(signer, 'address', {
-            configurable: false,
-            enumerable: true,
-            value: address,
-            writable: false,
-        });
-        signer.initialized = true;
-        return signer;
+        if (!config.appId || !config.appSecret || !config.walletId) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'Missing required configuration fields (appId, appSecret, or walletId)',
+            });
+        }
+        const address = await fetchPublicKey<TAddress>(config);
+        return new PrivySigner<TAddress>(config, address);
     }
 
     private validateRequestDelayMs(requestDelayMs: number): void {
@@ -106,68 +101,6 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
         if (this.requestDelayMs > 0 && index > 0) {
             await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
         }
-    }
-
-    /**
-     * Get the Basic Auth header value
-     */
-    private getAuthHeader(): string {
-        const credentials = `${this.appId}:${this.appSecret}`;
-        const base64decoder = getBase64Decoder();
-        const credentialsBytes = getUtf8Encoder().encode(credentials);
-        return `Basic ${base64decoder.decode(credentialsBytes)}`;
-    }
-
-    /**
-     * Fetch the public key from Privy API
-     */
-    private async fetchPublicKey(): Promise<Address<TAddress>> {
-        const url = `${this.apiBaseUrl}/wallets/${this.walletId}`;
-
-        let response: Response;
-        try {
-            response = await fetch(url, {
-                headers: {
-                    Authorization: this.getAuthHeader(),
-                    'privy-app-id': this.appId,
-                },
-                method: 'GET',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Privy network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Privy API error: ${response.status}`,
-                response: errorText,
-                status: response.status,
-            });
-        }
-
-        let walletInfo: WalletResponse<TAddress>;
-        try {
-            walletInfo = (await response.json()) as WalletResponse<TAddress>;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Privy response',
-            });
-        }
-
-        if (!walletInfo.address) {
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: 'Missing address in Privy wallet response',
-            });
-        }
-
-        assertIsAddress(walletInfo.address);
-        return walletInfo.address;
     }
 
     /**
@@ -204,7 +137,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
             response = await fetch(url, {
                 body: JSON.stringify(request),
                 headers: {
-                    Authorization: this.getAuthHeader(),
+                    Authorization: getAuthHeader(this.appId, this.appSecret),
                     'Content-Type': 'application/json',
                     'privy-app-id': this.appId,
                 },
@@ -267,7 +200,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
             response = await fetch(url, {
                 body: JSON.stringify(request),
                 headers: {
-                    Authorization: this.getAuthHeader(),
+                    Authorization: getAuthHeader(this.appId, this.appSecret),
                     'Content-Type': 'application/json',
                     'privy-app-id': this.appId,
                 },
@@ -356,15 +289,77 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
      * @returns True if the Privy signer is available, false otherwise
      */
     async isAvailable(): Promise<boolean> {
-        if (!this.initialized) {
-            return false;
-        }
-
         try {
-            await this.fetchPublicKey();
+            await fetchPublicKey({
+                apiBaseUrl: this.apiBaseUrl,
+                appId: this.appId,
+                appSecret: this.appSecret,
+                walletId: this.walletId,
+            });
             return true;
         } catch {
             return false;
         }
     }
+}
+
+function getAuthHeader(appId: string, appSecret: string): string {
+    const credentials = `${appId}:${appSecret}`;
+    const credentialsBytes = utf8Encoder.encode(credentials);
+    return `Basic ${base64Decoder.decode(credentialsBytes)}`;
+}
+
+async function fetchPublicKey<TAddress extends string = string>(config: {
+    apiBaseUrl?: string;
+    appId: string;
+    appSecret: string;
+    walletId: string;
+}): Promise<Address<TAddress>> {
+    const apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
+    const url = `${apiBaseUrl}/wallets/${config.walletId}`;
+
+    let response: Response;
+    try {
+        response = await fetch(url, {
+            headers: {
+                Authorization: getAuthHeader(config.appId, config.appSecret),
+                'privy-app-id': config.appId,
+            },
+            method: 'GET',
+        });
+    } catch (error) {
+        throwSignerError(SignerErrorCode.HTTP_ERROR, {
+            cause: error,
+            message: 'Privy network request failed',
+            url,
+        });
+    }
+
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Failed to read error response');
+        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+            message: `Privy API error: ${response.status}`,
+            response: errorText,
+            status: response.status,
+        });
+    }
+
+    let walletInfo: WalletResponse<TAddress>;
+    try {
+        walletInfo = (await response.json()) as WalletResponse<TAddress>;
+    } catch (error) {
+        throwSignerError(SignerErrorCode.PARSING_ERROR, {
+            cause: error,
+            message: 'Failed to parse Privy response',
+        });
+    }
+
+    if (!walletInfo.address) {
+        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+            message: 'Missing address in Privy wallet response',
+        });
+    }
+
+    assertIsAddress(walletInfo.address);
+    return walletInfo.address;
 }

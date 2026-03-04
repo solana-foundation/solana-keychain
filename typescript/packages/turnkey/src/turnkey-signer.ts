@@ -46,6 +46,10 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
     private readonly stamper: ApiKeyStamper;
     private readonly requestDelayMs: number;
 
+    static create<TAddress extends string = string>(config: TurnkeySignerConfig): TurnkeySigner<TAddress> {
+        return new TurnkeySigner<TAddress>(config);
+    }
+
     constructor(config: TurnkeySignerConfig) {
         if (!config.apiPublicKey || !config.apiPrivateKey || !config.organizationId || !config.privateKeyId) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
