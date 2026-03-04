@@ -11,7 +11,12 @@ import {
 } from '@solana/transactions';
 
 import { signUserAction } from './auth.js';
-import type { DfnsSignerConfig, GenerateSignatureRequest, GenerateSignatureResponse, GetWalletResponse } from './types.js';
+import type {
+    DfnsSignerConfig,
+    GenerateSignatureRequest,
+    GenerateSignatureResponse,
+    GetWalletResponse,
+} from './types.js';
 
 const DEFAULT_API_BASE_URL = 'https://api.dfns.io';
 
