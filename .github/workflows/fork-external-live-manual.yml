@@ -93,6 +93,10 @@ jobs:
           PARA_API_KEY: ${{ secrets.PARA_API_KEY }}
           PARA_WALLET_ID: ${{ secrets.PARA_WALLET_ID }}
           PARA_API_BASE_URL: ${{ secrets.PARA_API_BASE_URL }}
+          CDP_API_KEY_ID: ${{ secrets.CDP_API_KEY_ID }}
+          CDP_API_KEY_SECRET: ${{ secrets.CDP_API_KEY_SECRET }}
+          CDP_WALLET_SECRET: ${{ secrets.CDP_WALLET_SECRET }}
+          CDP_SOLANA_ADDRESS: ${{ secrets.CDP_SOLANA_ADDRESS }}
           SOLANA_RPC_URL: https://api.devnet.solana.com
         run: |
           set -euo pipefail
@@ -103,6 +107,7 @@ jobs:
             test_fireblocks_integration
             test_aws_kms_integration
             test_para_integration
+            test_cdp_integration
           )
 
           for sdk in v2 v3; do
@@ -144,6 +149,10 @@ jobs:
           PARA_API_KEY: ${{ secrets.PARA_API_KEY }}
           PARA_WALLET_ID: ${{ secrets.PARA_WALLET_ID }}
           PARA_API_BASE_URL: ${{ secrets.PARA_API_BASE_URL }}
+          CDP_API_KEY_ID: ${{ secrets.CDP_API_KEY_ID }}
+          CDP_API_KEY_SECRET: ${{ secrets.CDP_API_KEY_SECRET }}
+          CDP_WALLET_SECRET: ${{ secrets.CDP_WALLET_SECRET }}
+          CDP_SOLANA_ADDRESS: ${{ secrets.CDP_SOLANA_ADDRESS }}
         run: |
           set -euo pipefail
 
@@ -153,11 +162,16 @@ jobs:
             fireblocks
             aws-kms
             para
+            cdp
           )
 
           for package_name in "${packages[@]}"; do
-            echo "Running @solana/keychain-${package_name} integration tests"
-            pnpm -F @solana/keychain-${package_name} run test:integration
+            if pnpm -F "@solana/keychain-${package_name}" exec true 2>/dev/null; then
+              echo "Running @solana/keychain-${package_name} integration tests"
+              pnpm -F "@solana/keychain-${package_name}" run test:integration
+            else
+              echo "Skipping @solana/keychain-${package_name} (package not found in workspace)"
+            fi
           done
 
       - name: Verify PR head SHA is unchanged

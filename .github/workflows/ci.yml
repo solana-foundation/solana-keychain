@@ -84,6 +84,10 @@ jobs:
           PARA_API_KEY: ${{ secrets.PARA_API_KEY }}
           PARA_WALLET_ID: ${{ secrets.PARA_WALLET_ID }}
           PARA_API_BASE_URL: ${{ secrets.PARA_API_BASE_URL }}
+          CDP_API_KEY_ID: ${{ secrets.CDP_API_KEY_ID }}
+          CDP_API_KEY_SECRET: ${{ secrets.CDP_API_KEY_SECRET }}
+          CDP_WALLET_SECRET: ${{ secrets.CDP_WALLET_SECRET }}
+          CDP_SOLANA_ADDRESS: ${{ secrets.CDP_SOLANA_ADDRESS }}
           SOLANA_RPC_URL: https://api.devnet.solana.com
         run: |
           if [ "${{ matrix.sdk_version }}" = "v2" ]; then

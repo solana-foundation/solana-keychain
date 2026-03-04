@@ -16,8 +16,14 @@ The library uses a trait-based architecture where all signers implement the `Sol
 - [ ] Implement the `SolanaSigner` trait
 - [ ] Add a feature flag in `Cargo.toml`
 - [ ] Update the `Signer` enum in `src/lib.rs`
-- [ ] Add comprehensive tests
-- [ ] Update documentation
+- [ ] Update `src/error.rs` reqwest `From` impl cfg gate (if your signer uses reqwest)
+- [ ] Add comprehensive unit tests (wiremock-based, in your module)
+- [ ] Add integration test file `rust/src/tests/test_<name>_integration.rs`
+- [ ] Declare integration test module in `rust/src/tests/mod.rs`
+- [ ] Update `.env.example` with all env vars (required + optional with defaults)
+- [ ] Update documentation (README.md)
+- [ ] CI workflow updates (coordinate with maintainers — see [CI Workflow Updates](#ci-workflow-updates-fork-prs))
+- [ ] TypeScript package (see [TypeScript Package](#typescript-package))
 - [ ] Submit PR
 
 ### Step 1: Create Your Signer Module
@@ -381,7 +387,64 @@ mod tests {
 }
 ```
 
-### Step 9: Update Documentation
+### Step 9: Update `error.rs` Reqwest Cfg Gate
+
+If your signer uses `reqwest`, you must add your feature to the `#[cfg(any(...))]` gate on the `From<reqwest::Error>` impl in `rust/src/error.rs`:
+
+```rust
+#[cfg(any(
+    feature = "vault",
+    feature = "privy",
+    feature = "turnkey",
+    feature = "fireblocks",
+    feature = "para",
+    feature = "your_service"  // Add your feature here
+))]
+impl From<reqwest::Error> for SignerError {
+    fn from(err: reqwest::Error) -> Self {
+        SignerError::HttpError(err.to_string())
+    }
+}
+```
+
+Without this, `?` on reqwest calls won't compile when only your feature is enabled.
+
+### Step 10: Add Integration Tests
+
+Create `rust/src/tests/test_<name>_integration.rs`. Integration tests run against the real service API (not wiremock) and are gated behind `#[cfg(feature = "integration-tests")]`. Each file needs:
+
+- `pub const` declarations for env var names
+- A `get_signer()` helper that reads env vars via `dotenvy`
+- Three test functions: `test_<name>_sign_message`, `test_<name>_sign_transaction`, `test_<name>_is_available`
+- Feature gates: `#[cfg(feature = "your_service")]` on the module, `#[cfg(feature = "integration-tests")]` on each test
+
+See [rust/src/tests/test_para_integration.rs](../rust/src/tests/test_para_integration.rs) for a complete reference.
+
+Add your integration test module to `rust/src/tests/mod.rs`:
+
+```rust
+pub mod test_your_service_integration;
+```
+
+### Step 11: Update Environment Variables
+
+Update the root `.env.example` with your signer's env vars, following the existing pattern:
+
+```bash
+# YourService Configuration (for SIGNER_TYPE=your_service)
+YOUR_SERVICE_API_KEY=your-api-key
+YOUR_SERVICE_WALLET_ID=your-wallet-id
+# YOUR_SERVICE_API_BASE_URL=https://api.yourservice.com/v1  # Optional, defaults to this
+```
+
+Rules:
+- Add a comment header identifying the signer
+- List required vars first (uncommented, with placeholder values)
+- List optional vars commented out with their defaults
+- If your signer has a configurable base URL, include it as optional
+- All env vars used in integration tests must appear in `.env.example`
+
+### Step 12: Update Documentation
 
 #### Update README.md
 
@@ -422,6 +485,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 \```
 ```
 
+## CI Workflow Updates (Fork PRs)
+
+CI is a two-phase process. Coordinate with maintainers to prepare `main` before your PR can be tested — they'll update `fork-external-live-manual.yml`, add env vars to `ci.yml`, and configure GitHub Secrets.
+
+**Your PR must include** these Phase 2 CI changes alongside your signer code:
+
+- **`ci.yml`**: add your Rust feature to the `backend` matrix (before `all`) + your integration test function to the `test` matrix
+- **`typescript-ci.yml`**: add your package to the unit + integration test matrices, and add env vars to the integration test step
+- **`typescript-publish.yml`**: add your package to `PUBLISH_PACKAGES`, the GitHub Release `packages` array, and the summary table
+
+## TypeScript Package
+
+Your signer must include a TypeScript SDK. Create `typescript/packages/<name>/`. Key requirements:
+
+- **Unit tests**: vitest with mocks (no real API calls)
+- **Integration tests**: gate with `describe.skipIf` so they only run when env vars are present
+- **Umbrella package**: update `typescript/packages/keychain/` to re-export your signer
+
+See [typescript/packages/para/](../typescript/packages/para/) for a complete reference.
+
 ## Testing Your Integration
 
 ### Unit Tests
@@ -446,7 +529,15 @@ Before submitting your PR:
 - [ ] No hardcoded values or secrets in code
 - [ ] Error messages are helpful and descriptive
 - [ ] Follows Rust naming conventions (snake_case)
+- [ ] `error.rs` reqwest cfg gate updated (if using reqwest)
+- [ ] Integration test file added with 3 standard tests (`sign_message`, `sign_transaction`, `is_available`)
+- [ ] Integration test module declared in `rust/src/tests/mod.rs`
+- [ ] `.env.example` updated (root + TS package)
 - [ ] Added to README.md supported backends table
+- [ ] CI Phase 2 changes included (`ci.yml` backend matrix + test matrix)
+- [ ] TypeScript package with unit + integration tests
+- [ ] `typescript-ci.yml` and `typescript-publish.yml` updated
+- [ ] Coordinated with maintainers on Phase 1 CI preparation
 
 ## Implementation Tips
 
@@ -529,7 +620,13 @@ Adds support for YourService as a signing backend. [Link to YourService Document
 - [X] Add comprehensive tests with wiremock - All tests pass (`just test`)
 - [X] Implemented SolanaSigner trait for YourServiceSigner
 - [X] Added feature flag 'your_service'
+- [X] Updated error.rs reqwest cfg gate
+- [X] Added integration tests (sign_message, sign_transaction, is_available)
+- [X] Updated .env.example
 - [X] Added to README.md supported backends table
+- [X] CI Phase 2 changes included
+- [X] TypeScript package with unit + integration tests
+- [X] Coordinated with maintainers on Phase 1 CI
 
 Closes #1337
 ```
