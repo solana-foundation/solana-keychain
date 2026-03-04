@@ -166,12 +166,8 @@ jobs:
           )
 
           for package_name in "${packages[@]}"; do
-            if pnpm -F "@solana/keychain-${package_name}" exec true 2>/dev/null; then
-              echo "Running @solana/keychain-${package_name} integration tests"
-              pnpm -F "@solana/keychain-${package_name}" run test:integration
-            else
-              echo "Skipping @solana/keychain-${package_name} (package not found in workspace)"
-            fi
+            echo "Running @solana/keychain-${package_name} integration tests"
+            pnpm -F "@solana/keychain-${package_name}" run test:integration
           done
 
       - name: Verify PR head SHA is unchanged
