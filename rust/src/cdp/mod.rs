@@ -431,11 +431,10 @@ impl SolanaSigner for CdpSigner {
 mod tests {
     use super::jwt;
     use super::*;
-    use crate::sdk_adapter::{keypair_from_seed, keypair_pubkey, Keypair};
+    use crate::sdk_adapter::{keypair_from_seed, keypair_pubkey, keypair_sign_message, Keypair};
     use crate::test_util::create_test_transaction;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use serde_json::Value;
-    use solana_sdk::signature::Signer;
     use wiremock::{
         matchers::{method, path_regex},
         Mock, MockServer, ResponseTemplate,
@@ -629,7 +628,7 @@ mod tests {
 
         // Create a valid 64-byte signature
         let test_message = b"test message";
-        let signature = keypair.sign_message(test_message);
+        let signature = keypair_sign_message(&keypair, test_message);
         let sig_base58 = bs58::encode(signature.as_ref()).into_string();
 
         let mut signer = create_test_signer(&mock_server.uri());
@@ -698,7 +697,7 @@ mod tests {
         let pubkey = keypair_pubkey(&keypair);
 
         let mut transaction = create_test_transaction(&pubkey);
-        let signature = keypair.sign_message(&transaction.message_data());
+        let signature = keypair_sign_message(&keypair, &transaction.message_data());
         transaction.signatures = vec![signature];
 
         // Serialize the signed transaction to get the base64 wire format
