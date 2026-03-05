@@ -2,15 +2,19 @@
 
 ## Overview
 
-This guide is for wallet service providers and developers who want to integrate new key management solutions into the `solana-keychain` library. By adding your signer implementation, you'll enable Rust developers to use your service for secure Solana transaction signing through a unified interface.
+This guide is for wallet service providers and developers who want to integrate new key management solutions into the `solana-keychain` library. By adding your signer implementation, you'll enable developers to use your service for secure Solana transaction signing through a unified interface.
 
-## Architecture Overview
+We strongly prefer PRs that include both [Rust](#rust) and [TypeScript](#typescript) implementations — every signer contributed so far has shipped both. If you can only contribute one, that's fine, but expect the other to be required before the signer ships in a release.
 
-The library uses a trait-based architecture where all signers implement the `SolanaSigner` trait defined in [src/traits.rs](../src/traits.rs). The library also provides a unified `Signer` enum that wraps all implementations, allowing runtime selection of signing backends while maintaining a consistent API.
+---
 
-## Step-by-Step Integration Guide
+## Rust
 
-### Quick Integration Checklist
+### Architecture Overview
+
+The library uses a trait-based architecture where all signers implement the `SolanaSigner` trait defined in [src/traits.rs](../rust/src/traits.rs). The library also provides a unified `Signer` enum that wraps all implementations, allowing runtime selection of signing backends while maintaining a consistent API.
+
+### Quick Checklist
 
 - [ ] Create your signer module with implementation
 - [ ] Implement the `SolanaSigner` trait
@@ -23,7 +27,6 @@ The library uses a trait-based architecture where all signers implement the `Sol
 - [ ] Update `.env.example` with all env vars (required + optional with defaults)
 - [ ] Update documentation (README.md)
 - [ ] CI workflow updates (coordinate with maintainers — see [CI Workflow Updates](#ci-workflow-updates-fork-prs))
-- [ ] TypeScript package (see [TypeScript Package](#typescript-package))
 - [ ] Submit PR
 
 ### Step 1: Create Your Signer Module
@@ -485,7 +488,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 \```
 ```
 
-## CI Workflow Updates (Fork PRs)
+### CI Workflow Updates (Fork PRs)
 
 CI is a two-phase process. Coordinate with maintainers to prepare `main` before your PR can be tested — they'll update `fork-external-live-manual.yml`, add env vars to `ci.yml`, and configure GitHub Secrets.
 
@@ -493,31 +496,344 @@ CI is a two-phase process. Coordinate with maintainers to prepare `main` before 
 
 - **`ci.yml`**: add your Rust feature to the `backend` matrix (before `all`) + your integration test function to the `test` matrix
 - **`typescript-ci.yml`**: add your package to the unit + integration test matrices, and add env vars to the integration test step
-- **`typescript-publish.yml`**: add your package to `PUBLISH_PACKAGES`, the GitHub Release `packages` array, and the summary table
+- **`typescript-publish.yml`**: add your package to `PUBLISH_PACKAGES`, GitHub Release `packages` array, and the summary table
 
-## TypeScript Package
+---
 
-Your signer must include a TypeScript SDK. Create `typescript/packages/<name>/`. Key requirements:
+## TypeScript
 
-- **Unit tests**: vitest with mocks (no real API calls)
-- **Integration tests**: gate with `describe.skipIf` so they only run when env vars are present
-- **Umbrella package**: update `typescript/packages/keychain/` to re-export your signer
+### Quick Checklist
 
-See [typescript/packages/para/](../typescript/packages/para/) for a complete reference.
+- [ ] Create package `typescript/packages/<name>/`
+- [ ] Implement `SolanaSigner` interface from `@solana/keychain-core`
+- [ ] Export `createXSigner()` factory function returning `SolanaSigner<TAddress>`
+- [ ] Export `static create()` on the class
+- [ ] Export config interface (`XSignerConfig`)
+- [ ] Unit tests with vitest + mocks
+- [ ] Integration tests using `runSignerIntegrationTest` + `setup.ts`
+- [ ] Update umbrella package `typescript/packages/keychain/` (namespace export, class re-export, dependency)
+- [ ] README with `createXSigner()` as primary usage
+- [ ] `.env.example` with required env vars
+- [ ] CI updates (`typescript-ci.yml`, `typescript-publish.yml`)
 
-## Testing Your Integration
+### Package Structure
+
+```
+typescript/packages/<name>/
+├── package.json
+├── tsconfig.json
+├── README.md
+└── src/
+    ├── index.ts                    # Public exports
+    ├── <name>-signer.ts            # Signer class + factory function
+    ├── types.ts                    # API request/response types
+    └── __tests__/
+        ├── <name>-signer.test.ts              # Unit tests (mocked)
+        ├── <name>-signer.integration.test.ts  # Integration tests
+        └── setup.ts                           # Integration test config
+```
+
+See [`typescript/packages/para/`](../typescript/packages/para/) for a complete reference.
+
+### Signer Implementation
+
+Every signer must implement `SolanaSigner<TAddress>` from `@solana/keychain-core`. The interface requires:
+
+- `readonly address: Address<TAddress>`
+- `signMessages(messages): Promise<readonly SignatureDictionary[]>`
+- `signTransactions(transactions): Promise<readonly SignatureDictionary[]>`
+- `isAvailable(): Promise<boolean>` — health check for the signing backend
+
+#### Config Interface
+
+Define your config interface in the signer file alongside the class. The config shape depends on whether your signer fetches the public key during initialization:
+
+```typescript
+// Async signer — public key fetched during create()
+export interface YourSignerConfig {
+    apiKey: string;
+    walletId: string;
+    apiBaseUrl?: string;
+    requestDelayMs?: number;
+}
+
+// Sync signer — public key provided upfront
+export interface YourSignerConfig {
+    keyId: string;
+    publicKey: string;   // base58-encoded Solana address
+    requestDelayMs?: number;
+}
+```
+
+#### Factory Function + Class
+
+The factory function is the primary public API. It returns `SolanaSigner<TAddress>` (the interface), not the concrete class. Place it above the class definition, after imports.
+
+**Async signer** (fetches public key during init — most common):
+
+```typescript
+import { SolanaSigner, SignerErrorCode, throwSignerError } from '@solana/keychain-core';
+
+export async function createYourSigner<TAddress extends string = string>(
+    config: YourSignerConfig,
+): Promise<SolanaSigner<TAddress>> {
+    return await YourSigner.create(config);
+}
+
+export class YourSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+    readonly address: Address<TAddress>;
+
+    static async create<TAddress extends string = string>(
+        config: YourSignerConfig,
+    ): Promise<YourSigner<TAddress>> {
+        if (!config.apiKey || !config.walletId) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'Missing required configuration fields',
+            });
+        }
+        const address = await fetchPublicKey<TAddress>(config);
+        return new YourSigner<TAddress>(config, address);
+    }
+
+    private constructor(config: YourSignerConfig, address: Address<TAddress>) {
+        this.address = address;
+        // ...
+    }
+
+    // ... implement signMessages, signTransactions, isAvailable
+}
+```
+
+**Sync signer** (public key provided in config):
+
+```typescript
+export function createYourSigner<TAddress extends string = string>(
+    config: YourSignerConfig,
+): SolanaSigner<TAddress> {
+    return YourSigner.create(config);
+}
+
+export class YourSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+    readonly address: Address<TAddress>;
+
+    static create<TAddress extends string = string>(config: YourSignerConfig): YourSigner<TAddress> {
+        return new YourSigner<TAddress>(config);
+    }
+
+    constructor(config: YourSignerConfig) {
+        // validate config, set this.address from config.publicKey
+    }
+
+    // ... implement signMessages, signTransactions, isAvailable
+}
+```
+
+**Key rules:**
+
+- Wrap all `fetch()` calls in try/catch — use `throwSignerError(SignerErrorCode.HTTP_ERROR, { cause: error, ... })` from `@solana/keychain-core`
+- Add `cause` to catch blocks to preserve stack traces
+- Use `requestDelayMs` pattern if your API has rate limits (see any existing signer for the `delay()` + `validateRequestDelayMs()` pattern)
+
+#### Index Exports
+
+```typescript
+// index.ts
+export { YourSigner, createYourSigner } from './your-signer.js';
+export type { YourSignerConfig } from './your-signer.js';
+export type { YourApiResponse, YourApiRequest } from './types.js';
+```
 
 ### Unit Tests
 
-Run tests for your feature:
+Use vitest with mocked `fetch`. Test:
+
+- `create()` with valid config
+- Config validation errors (missing fields, invalid public key)
+- `signMessages` success + error paths
+- `signTransactions` success + error paths
+- `isAvailable` success + failure
+- Network errors (`fetch` throws — `HTTP_ERROR` code)
+- `requestDelayMs` validation and behavior
+
+Run your package's tests during development:
 
 ```bash
-# Test only your signer
-cargo test --features your_service
-
-# Test with all features
-cargo test --all-features
+pnpm --filter @solana/keychain-<name> test:unit
 ```
+
+See any existing `*-signer.test.ts` for the pattern.
+
+### Integration Tests
+
+All integration tests use the shared test runner from `@solana/keychain-test-utils`.
+
+#### setup.ts
+
+```typescript
+import type { SolanaSigner } from '@solana/keychain-core';
+import type { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
+import { createYourSigner } from '../your-signer.js';
+
+const SIGNER_TYPE = 'your-signer';
+const REQUIRED_ENV_VARS = ['YOUR_API_KEY', 'YOUR_WALLET_ID'];
+
+const CONFIG: SignerTestConfig<SolanaSigner> = {
+    signerType: SIGNER_TYPE,
+    requiredEnvVars: REQUIRED_ENV_VARS,
+    createSigner: () =>
+        createYourSigner({
+            apiKey: process.env.YOUR_API_KEY!,
+            walletId: process.env.YOUR_WALLET_ID!,
+            apiBaseUrl: process.env.YOUR_API_BASE_URL,
+        }),
+};
+
+export async function getConfig(scenarios: TestScenario[]): Promise<SignerTestConfig<SolanaSigner>> {
+    return {
+        ...CONFIG,
+        testScenarios: scenarios,
+    };
+}
+```
+
+**Important:** The `createSigner` field must use the `createXSigner()` factory function, not the class directly. For sync factories, wrap in `Promise.resolve()`.
+
+#### Integration Test File
+
+```typescript
+import { runSignerIntegrationTest } from '@solana/keychain-test-utils';
+import { config } from 'dotenv';
+import { describe, it } from 'vitest';
+import { getConfig } from './setup.js';
+
+config();
+
+describe('YourSigner Integration', () => {
+    it.skipIf(!process.env.YOUR_API_KEY)('signs transactions with real API', async () => {
+        await runSignerIntegrationTest(await getConfig(['signTransaction']));
+    });
+    it.skipIf(!process.env.YOUR_API_KEY)('signs messages with real API', async () => {
+        await runSignerIntegrationTest(await getConfig(['signMessage']));
+    });
+    it.skipIf(!process.env.YOUR_API_KEY)('simulates transactions with real API', async () => {
+        await runSignerIntegrationTest(await getConfig(['simulateTransaction']));
+    });
+});
+```
+
+### Umbrella Package
+
+Update `typescript/packages/keychain/` to include your signer:
+
+**`keychain/src/index.ts`** — add two lines:
+
+```typescript
+export * as yourSigner from '@solana/keychain-your-signer';
+
+export { YourSigner } from '@solana/keychain-your-signer';
+```
+
+**`keychain/package.json`** — add to `dependencies`:
+
+```json
+"@solana/keychain-your-signer": "workspace:*"
+```
+
+**`keychain/tsconfig.json`** — add to `references`:
+
+```json
+{ "path": "../your-signer" }
+```
+
+### README
+
+Show `createXSigner()` as the primary usage pattern in all examples:
+
+```typescript
+import { createYourSigner } from '@solana/keychain-your-signer';
+
+const signer = await createYourSigner({
+    apiKey: 'your-api-key',
+    walletId: 'your-wallet-id',
+});
+```
+
+### package.json
+
+Copy `packages/para/package.json` as a starting point and modify. Key fields:
+
+```json
+{
+    "name": "@solana/keychain-<name>",
+    "author": "Solana Foundation",
+    "version": "0.4.0",
+    "description": "Your signer for Solana transactions",
+    "license": "MIT",
+    "repository": "https://github.com/solana-foundation/solana-keychain",
+    "type": "module",
+    "sideEffects": false,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": ["dist", "src"],
+    "scripts": {
+        "build": "tsc --build",
+        "clean": "rm -rf dist *.tsbuildinfo",
+        "prepack": "pnpm run build",
+        "test": "vitest run",
+        "test:unit": "vitest run --config ../../vitest.config.unit.ts",
+        "test:integration": "vitest run --config ../../vitest.config.integration.ts",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@solana/keychain-core": "workspace:*",
+        "@solana/addresses": "^6.0.1",
+        "@solana/codecs-strings": "^6.0.1",
+        "@solana/keys": "^6.0.1",
+        "@solana/signers": "^6.0.1",
+        "@solana/transactions": "^6.0.1"
+    },
+    "devDependencies": {
+        "@solana/keychain-test-utils": "workspace:*",
+        "dotenv": "^17.2.3"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}
+```
+
+### tsconfig.json
+
+```json
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "outDir": "./dist",
+        "rootDir": "./src",
+        "composite": true
+    },
+    "include": ["src/**/*"],
+    "exclude": ["node_modules", "dist"],
+    "references": [{ "path": "../core" }]
+}
+```
+
+New packages are auto-discovered by `pnpm-workspace.yaml` (glob: `packages/*`).
+
+### CI Updates
+
+Your PR must include:
+
+- **`typescript-ci.yml`**: add package to unit + integration test matrices, add env vars to integration test step
+- **`typescript-publish.yml`**: add package to `PUBLISH_PACKAGES`, GitHub Release `packages` array, and summary table
+
+---
 
 ## Submission Checklist
 
@@ -528,22 +844,21 @@ Before submitting your PR:
 - [ ] Code is formatted/linting passes (`just fmt`)
 - [ ] No hardcoded values or secrets in code
 - [ ] Error messages are helpful and descriptive
-- [ ] Follows Rust naming conventions (snake_case)
+- [ ] Follows naming conventions (snake_case for Rust, camelCase for TypeScript)
 - [ ] `error.rs` reqwest cfg gate updated (if using reqwest)
-- [ ] Integration test file added with 3 standard tests (`sign_message`, `sign_transaction`, `is_available`)
-- [ ] Integration test module declared in `rust/src/tests/mod.rs`
+- [ ] Integration test file added with standard test scenarios
 - [ ] `.env.example` updated (root + TS package)
 - [ ] Added to README.md supported backends table
-- [ ] CI Phase 2 changes included (`ci.yml` backend matrix + test matrix)
+- [ ] CI changes included
 - [ ] TypeScript package with unit + integration tests
-- [ ] `typescript-ci.yml` and `typescript-publish.yml` updated
+- [ ] Umbrella package updated (`keychain/src/index.ts`, `keychain/package.json`)
 - [ ] Coordinated with maintainers on Phase 1 CI preparation
 
 ## Implementation Tips
 
 ### Error Handling
 
-Always use the existing `SignerError` variants. If you need a new error type, propose it in your PR:
+Always use the existing error types. If you need a new error type, propose it in your PR:
 
 ```rust
 // Good - uses existing error types
@@ -552,18 +867,6 @@ return Err(SignerError::RemoteApiError(format!("API error: {}", status)));
 // Good - converts from standard errors
 let bytes = base64::decode(data)
     .map_err(|e| SignerError::SerializationError(format!("Failed to decode: {e}")))?;
-```
-
-### Async/Await
-
-All signing operations must be async:
-
-```rust
-async fn sign(&self, message: &[u8]) -> Result<Signature, SignerError> {
-    // Use .await for async operations
-    let response = self.client.post(&url).send().await?;
-    // ...
-}
 ```
 
 ### Security Best Practices
@@ -576,7 +879,7 @@ async fn sign(&self, message: &[u8]) -> Result<Signature, SignerError> {
 
 ### Testing with Mocks
 
-Use `wiremock` for mocking HTTP APIs:
+Use `wiremock` for Rust and mocked `fetch` for TypeScript:
 
 ```rust
 #[cfg(test)]
@@ -596,16 +899,6 @@ mod tests {
     }
 }
 ```
-
-## Getting Help
-
-- Review existing signer implementations for patterns:
-  - [src/memory/mod.rs](../src/memory/mod.rs) - Simple, synchronous
-  - [src/privy/mod.rs](../src/privy/mod.rs) - Requires initialization
-  - [src/turnkey/mod.rs](../src/turnkey/mod.rs) - Complex signature handling
-  - [src/vault/mod.rs](../src/vault/mod.rs) - External client library
-- Open an issue for design discussions before starting work
-- Check the trait definition in [src/traits.rs](../src/traits.rs)
 
 ## Example PR Structure
 
@@ -630,5 +923,16 @@ Adds support for YourService as a signing backend. [Link to YourService Document
 
 Closes #1337
 ```
+
+## Getting Help
+
+- Review existing signer implementations for patterns:
+  - [src/memory/mod.rs](../rust/src/memory/mod.rs) - Simple, synchronous
+  - [src/privy/mod.rs](../rust/src/privy/mod.rs) - Requires initialization
+  - [src/turnkey/mod.rs](../rust/src/turnkey/mod.rs) - Complex signature handling
+  - [src/vault/mod.rs](../rust/src/vault/mod.rs) - External client library
+  - [typescript/packages/para/](../typescript/packages/para/) - Complete TypeScript reference
+- Open an issue for design discussions before starting work
+- Check the trait definition in [src/traits.rs](../rust/src/traits.rs)
 
 Welcome to the solana-keychain ecosystem! We're excited to have your key management solution as part of the library.
