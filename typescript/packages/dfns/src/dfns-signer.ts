@@ -18,6 +18,12 @@ import type {
     GetWalletResponse,
 } from './types.js';
 
+export async function createDfnsSigner<TAddress extends string = string>(
+    config: DfnsSignerConfig,
+): Promise<SolanaSigner<TAddress>> {
+    return await DfnsSigner.create(config);
+}
+
 const DEFAULT_API_BASE_URL = 'https://api.dfns.io';
 
 const base16Encoder = getBase16Encoder();

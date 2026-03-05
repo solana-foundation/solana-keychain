@@ -32,9 +32,9 @@ vault read -field=keys transit/export/signing-key/my-solana-key/1
 ### Basic Setup
 
 ```typescript
-import { VaultSigner } from '@solana/keychain-vault';
+import { createVaultSigner } from '@solana/keychain-vault';
 
-const signer = VaultSigner.create({
+const signer = createVaultSigner({
     vaultAddr: 'https://vault.example.com',
     vaultToken: 'hvs.your-vault-token',
     keyName: 'my-solana-key',
@@ -77,7 +77,7 @@ const signature = await signMessage([signer], message);
 If you're signing multiple transactions/messages concurrently and want to avoid rate limits:
 
 ```typescript
-const signer = VaultSigner.create({
+const signer = createVaultSigner({
     vaultAddr: 'https://vault.example.com',
     vaultToken: 'hvs.your-vault-token',
     keyName: 'my-solana-key',

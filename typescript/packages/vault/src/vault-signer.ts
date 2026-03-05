@@ -13,6 +13,12 @@ import type {
     VaultSignResponse,
 } from './types.js';
 
+export function createVaultSigner<TAddress extends string = string>(
+    config: VaultSignerConfig,
+): SolanaSigner<TAddress> {
+    return VaultSigner.create(config);
+}
+
 /**
  * Configuration for creating a VaultSigner
  */

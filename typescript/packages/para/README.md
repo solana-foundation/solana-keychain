@@ -19,10 +19,10 @@ pnpm add @solana/keychain-para
 ### Create and Initialize
 
 ```typescript
-import { ParaSigner } from '@solana/keychain-para';
+import { createParaSigner } from '@solana/keychain-para';
 
 // Create and initialize the signer (fetches public key from Para API)
-const signer = await ParaSigner.create({
+const signer = await createParaSigner({
     apiKey: 'your-para-secret-key',
     walletId: 'your-para-wallet-id',
 });
@@ -58,7 +58,7 @@ console.log('Para wallet available:', available);
 If you're signing multiple transactions/messages concurrently and want to avoid rate limits:
 
 ```typescript
-const signer = await ParaSigner.create({
+const signer = await createParaSigner({
     apiKey: 'your-para-secret-key',
     walletId: 'your-para-wallet-id',
     requestDelayMs: 100, // 100ms delay between concurrent requests

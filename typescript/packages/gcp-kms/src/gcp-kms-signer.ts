@@ -7,6 +7,12 @@ import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from
 
 import type { GcpKmsSignerConfig } from './types.js';
 
+export function createGcpKmsSigner<TAddress extends string = string>(
+    config: GcpKmsSignerConfig,
+): SolanaSigner<TAddress> {
+    return GcpKmsSigner.create(config);
+}
+
 /**
  * Google Cloud KMS-based signer using EdDSA (Ed25519) signing
  *

@@ -27,6 +27,12 @@ import {
     WalletResponse,
 } from './types.js';
 
+export async function createPrivySigner<TAddress extends string = string>(
+    config: PrivySignerConfig,
+): Promise<SolanaSigner<TAddress>> {
+    return await PrivySigner.create(config);
+}
+
 const DEFAULT_API_BASE_URL = 'https://api.privy.io/v1';
 const base64Decoder = getBase64Decoder();
 const utf8Encoder = getUtf8Encoder();

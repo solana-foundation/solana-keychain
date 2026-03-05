@@ -11,6 +11,12 @@ import {
 } from '@solana/transactions';
 
 import { ApiKeyStamper } from './stamper.js';
+
+export function createTurnkeySigner<TAddress extends string = string>(
+    config: TurnkeySignerConfig,
+): SolanaSigner<TAddress> {
+    return TurnkeySigner.create(config);
+}
 import type { ActivityResponse, SignRequest, SignTransactionRequest, WhoAmIRequest, WhoAmIResponse } from './types.js';
 
 /**

@@ -19,6 +19,12 @@ import {
 
 import type { CdpSignerConfig, SignMessageResponse, SignTransactionResponse } from './types.js';
 
+export async function createCdpSigner<TAddress extends string = string>(
+    config: CdpSignerConfig,
+): Promise<SolanaSigner<TAddress>> {
+    return await CdpSigner.create(config);
+}
+
 // --- Module-level constants ---
 
 const CDP_DEFAULT_BASE_URL = 'https://api.cdp.coinbase.com';

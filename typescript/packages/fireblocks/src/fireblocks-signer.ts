@@ -20,6 +20,12 @@ import type {
 } from './types.js';
 import { FireblocksTransactionStatus, TERMINAL_STATUSES } from './types.js';
 
+export async function createFireblocksSigner<TAddress extends string = string>(
+    config: FireblocksSignerConfig,
+): Promise<SolanaSigner<TAddress>> {
+    return await FireblocksSigner.create(config);
+}
+
 const DEFAULT_API_BASE_URL = 'https://api.fireblocks.io';
 const DEFAULT_ASSET_ID = 'SOL';
 const DEFAULT_POLL_INTERVAL_MS = 1000;

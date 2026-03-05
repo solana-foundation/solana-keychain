@@ -35,9 +35,9 @@ You will need:
 ### Basic Setup
 
 ```typescript
-import { DfnsSigner } from '@solana/keychain-dfns';
+import { createDfnsSigner } from '@solana/keychain-dfns';
 
-const signer = await DfnsSigner.create({
+const signer = await createDfnsSigner({
     authToken: 'your-service-account-token',
     credId: 'your-credential-id',
     privateKeyPem: `-----BEGIN PRIVATE KEY-----

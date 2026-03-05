@@ -62,9 +62,9 @@ gcloud kms keys create "my-key" \
 ### Basic Example
 
 ```typescript
-import { GcpKmsSigner } from '@solana/keychain-gcp-kms';
+import { createGcpKmsSigner } from '@solana/keychain-gcp-kms';
 
-const signer = GcpKmsSigner.create({
+const signer = createGcpKmsSigner({
     keyName: 'projects/my-project/locations/us-east1/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1',
     publicKey: 'YourSolanaPublicKeyBase58',
 });
@@ -84,7 +84,7 @@ const signatures = await signer.signTransactions([transaction]);
 #### Constructor
 
 ```typescript
-GcpKmsSigner.create(config: GcpKmsSignerConfig)
+createGcpKmsSigner(config: GcpKmsSignerConfig)
 ```
 
 **Config Options:**

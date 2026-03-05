@@ -13,10 +13,10 @@ pnpm add @solana/keychain-privy
 ### Create and Initialize
 
 ```typescript
-import { PrivySigner } from '@solana/keychain-privy';
+import { createPrivySigner } from '@solana/keychain-privy';
 
 // Create and initialize the signer (fetches public key from Privy API)
-const signer = await PrivySigner.create({
+const signer = await createPrivySigner({
     appId: 'your-privy-app-id',
     appSecret: 'your-privy-app-secret',
     walletId: 'user-wallet-id',
@@ -50,7 +50,7 @@ console.log('Privy API available:', available);
 
 ## API Reference
 
-### `PrivySigner.create(config)`
+### `createPrivySigner(config)`
 
 Creates and initializes a new PrivySigner instance.
 

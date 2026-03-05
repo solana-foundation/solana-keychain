@@ -13,10 +13,10 @@ pnpm add @solana/keychain-cdp
 ### Create and Initialize
 
 ```typescript
-import { CdpSigner } from '@solana/keychain-cdp';
+import { createCdpSigner } from '@solana/keychain-cdp';
 
 // API keys are created at https://portal.cdp.coinbase.com
-const signer = await CdpSigner.create({
+const signer = await createCdpSigner({
     cdpApiKeyId: process.env.CDP_API_KEY_ID!,
     cdpApiKeySecret: process.env.CDP_API_KEY_SECRET!,
     cdpWalletSecret: process.env.CDP_WALLET_SECRET!,
@@ -63,7 +63,7 @@ console.log('CDP API available:', available);
 
 ## API Reference
 
-### `CdpSigner.create(config)`
+### `createCdpSigner(config)`
 
 Creates and initializes a new CdpSigner instance.
 

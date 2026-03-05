@@ -21,9 +21,9 @@ Follow the [Fireblocks documentation](https://developers.fireblocks.com/docs/cre
 ### Basic Setup
 
 ```typescript
-import { FireblocksSigner } from '@solana/keychain-fireblocks';
+import { createFireblocksSigner } from '@solana/keychain-fireblocks';
 
-const signer = await FireblocksSigner.create({
+const signer = await createFireblocksSigner({
     apiKey: 'your-fireblocks-api-key',
     privateKeyPem: `-----BEGIN PRIVATE KEY-----
 ...your RSA 4096 private key...
@@ -63,7 +63,7 @@ const signature = await signMessage([signer], message);
 By default, the signer uses RAW signing (signs bytes, you broadcast). Enable `useProgramCall` to have Fireblocks broadcast the transaction:
 
 ```typescript
-const signer = await FireblocksSigner.create({
+const signer = await createFireblocksSigner({
     apiKey: 'your-fireblocks-api-key',
     privateKeyPem: '...',
     vaultAccountId: '0',
@@ -74,7 +74,7 @@ const signer = await FireblocksSigner.create({
 ### With Devnet
 
 ```typescript
-const signer = await FireblocksSigner.create({
+const signer = await createFireblocksSigner({
     apiKey: 'your-fireblocks-api-key',
     privateKeyPem: '...',
     vaultAccountId: '0',

@@ -7,6 +7,12 @@ import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from
 
 import type { ParaErrorResponse, ParaSignRawRequest, ParaSignRawResponse, ParaWalletResponse } from './types.js';
 
+export async function createParaSigner<TAddress extends string = string>(
+    config: ParaSignerConfig,
+): Promise<SolanaSigner<TAddress>> {
+    return await ParaSigner.create(config);
+}
+
 const DEFAULT_BASE_URL = 'https://api.getpara.com';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

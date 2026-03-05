@@ -7,6 +7,12 @@ import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from
 
 import type { AwsCredentials, AwsKmsSignerConfig } from './types.js';
 
+export function createAwsKmsSigner<TAddress extends string = string>(
+    config: AwsKmsSignerConfig,
+): SolanaSigner<TAddress> {
+    return AwsKmsSigner.create(config);
+}
+
 /**
  * AWS KMS-based signer using EdDSA (Ed25519) signing
  *

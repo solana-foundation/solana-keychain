@@ -20,9 +20,9 @@ pnpm add @solana/keychain-turnkey
 ### Basic Setup
 
 ```typescript
-import { TurnkeySigner } from '@solana/keychain-turnkey';
+import { createTurnkeySigner } from '@solana/keychain-turnkey';
 
-const signer = TurnkeySigner.create({
+const signer = createTurnkeySigner({
     organizationId: 'your-organization-id',
     privateKeyId: 'your-turnkey-private-key-id',
     publicKey: 'your-solana-public-key-base58',
