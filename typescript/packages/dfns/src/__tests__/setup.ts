@@ -1,5 +1,6 @@
+import type { SolanaSigner } from '@solana/keychain-core';
 import { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
-import { DfnsSigner } from '../dfns-signer.js';
+import { createDfnsSigner } from '../dfns-signer.js';
 
 export const TEST_AUTH_TOKEN = 'test-auth-token';
 export const TEST_CRED_ID = 'test-cred-id';
@@ -54,23 +55,20 @@ export function createSignatureResponse(r: string, s: string) {
 const SIGNER_TYPE = 'dfns';
 const REQUIRED_ENV_VARS = ['DFNS_AUTH_TOKEN', 'DFNS_CRED_ID', 'DFNS_PRIVATE_KEY_PEM', 'DFNS_WALLET_ID'];
 
-async function createDfnsSigner(): Promise<DfnsSigner> {
-    return await DfnsSigner.create({
-        authToken: process.env.DFNS_AUTH_TOKEN!,
-        credId: process.env.DFNS_CRED_ID!,
-        privateKeyPem: process.env.DFNS_PRIVATE_KEY_PEM!,
-        walletId: process.env.DFNS_WALLET_ID!,
-        apiBaseUrl: process.env.DFNS_API_BASE_URL,
-    });
-}
-
-const CONFIG: SignerTestConfig<DfnsSigner> = {
+const CONFIG: SignerTestConfig<SolanaSigner> = {
     signerType: SIGNER_TYPE,
     requiredEnvVars: REQUIRED_ENV_VARS,
-    createSigner: createDfnsSigner,
+    createSigner: () =>
+        createDfnsSigner({
+            authToken: process.env.DFNS_AUTH_TOKEN!,
+            credId: process.env.DFNS_CRED_ID!,
+            privateKeyPem: process.env.DFNS_PRIVATE_KEY_PEM!,
+            walletId: process.env.DFNS_WALLET_ID!,
+            apiBaseUrl: process.env.DFNS_API_BASE_URL,
+        }),
 };
 
-export async function getConfig(scenarios: TestScenario[]): Promise<SignerTestConfig<DfnsSigner>> {
+export async function getConfig(scenarios: TestScenario[]): Promise<SignerTestConfig<SolanaSigner>> {
     return {
         ...CONFIG,
         testScenarios: scenarios,

@@ -1,29 +1,24 @@
+import type { SolanaSigner } from '@solana/keychain-core';
 import { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
-import { FireblocksSigner } from '../fireblocks-signer';
+import { createFireblocksSigner } from '../fireblocks-signer';
 
 const SIGNER_TYPE = 'fireblocks';
 const REQUIRED_ENV_VARS = ['FIREBLOCKS_API_KEY', 'FIREBLOCKS_PRIVATE_KEY_PEM', 'FIREBLOCKS_VAULT_ACCOUNT_ID'];
 
-async function createFireblocksSigner(): Promise<FireblocksSigner> {
-    const signer = new FireblocksSigner({
-        apiKey: process.env.FIREBLOCKS_API_KEY!,
-        assetId: process.env.FIREBLOCKS_ASSET_ID,
-        privateKeyPem: process.env.FIREBLOCKS_PRIVATE_KEY_PEM!,
-        // Use PROGRAM_CALL for transactions (broadcasts to Solana through Fireblocks)
-        useProgramCall: true,
-        vaultAccountId: process.env.FIREBLOCKS_VAULT_ACCOUNT_ID!,
-    });
-    await signer.init();
-    return signer;
-}
-
-const CONFIG: SignerTestConfig<FireblocksSigner> = {
+const CONFIG: SignerTestConfig<SolanaSigner> = {
     signerType: SIGNER_TYPE,
     requiredEnvVars: REQUIRED_ENV_VARS,
-    createSigner: createFireblocksSigner,
+    createSigner: () =>
+        createFireblocksSigner({
+            apiKey: process.env.FIREBLOCKS_API_KEY!,
+            assetId: process.env.FIREBLOCKS_ASSET_ID,
+            privateKeyPem: process.env.FIREBLOCKS_PRIVATE_KEY_PEM!,
+            useProgramCall: true,
+            vaultAccountId: process.env.FIREBLOCKS_VAULT_ACCOUNT_ID!,
+        }),
 };
 
-export async function getConfig(scenarios: TestScenario[]): Promise<SignerTestConfig<FireblocksSigner>> {
+export async function getConfig(scenarios: TestScenario[]): Promise<SignerTestConfig<SolanaSigner>> {
     return {
         ...CONFIG,
         testScenarios: scenarios,

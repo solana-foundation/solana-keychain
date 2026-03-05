@@ -1,19 +1,19 @@
 import type { SolanaSigner } from '@solana/keychain-core';
 import type { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
 
-import { createCdpSigner } from '../cdp-signer.js';
+import { createGcpKmsSigner } from '../gcp-kms-signer.js';
 
-const SIGNER_TYPE = 'cdp';
-const REQUIRED_ENV_VARS = ['CDP_API_KEY_ID', 'CDP_API_KEY_SECRET', 'CDP_WALLET_SECRET', 'CDP_SOLANA_ADDRESS'];
+const SIGNER_TYPE = 'gcp-kms';
+const REQUIRED_ENV_VARS = ['GCP_KMS_KEY_NAME', 'GCP_KMS_SIGNER_PUBKEY'];
 
 const CONFIG: SignerTestConfig<SolanaSigner> = {
     createSigner: () =>
-        createCdpSigner({
-            cdpApiKeyId: process.env.CDP_API_KEY_ID!,
-            cdpApiKeySecret: process.env.CDP_API_KEY_SECRET!,
-            cdpWalletSecret: process.env.CDP_WALLET_SECRET!,
-            address: process.env.CDP_SOLANA_ADDRESS!,
-        }),
+        Promise.resolve(
+            createGcpKmsSigner({
+                keyName: process.env.GCP_KMS_KEY_NAME!,
+                publicKey: process.env.GCP_KMS_SIGNER_PUBKEY!,
+            }),
+        ),
     requiredEnvVars: REQUIRED_ENV_VARS,
     signerType: SIGNER_TYPE,
 };

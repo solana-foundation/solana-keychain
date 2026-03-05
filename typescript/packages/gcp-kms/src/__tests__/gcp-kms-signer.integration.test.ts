@@ -1,82 +1,19 @@
-import {
-    appendTransactionMessageInstructions,
-    createSolanaRpc,
-    createTransactionMessage,
-    pipe,
-    setTransactionMessageFeePayerSigner,
-    setTransactionMessageLifetimeUsingBlockhash,
-    signTransactionMessageWithSigners,
-} from '@solana/kit';
-import { getAddMemoInstruction } from '@solana-program/memo';
+import { runSignerIntegrationTest } from '@solana/keychain-test-utils';
 import { config } from 'dotenv';
-import { describe, expect, it } from 'vitest';
+import { describe, it } from 'vitest';
 
-import { GcpKmsSigner } from '../gcp-kms-signer.js';
+import { getConfig } from './setup.js';
 
 config();
 
-const REQUIRED_ENV_VARS = ['GCP_KMS_KEY_NAME', 'GCP_KMS_SIGNER_PUBKEY'];
-
-function hasRequiredEnvVars(): boolean {
-    return REQUIRED_ENV_VARS.every(v => process.env[v]);
-}
-
-function createGcpKmsSigner(): GcpKmsSigner {
-    return new GcpKmsSigner({
-        keyName: process.env.GCP_KMS_KEY_NAME!,
-        publicKey: process.env.GCP_KMS_SIGNER_PUBKEY!,
-    });
-}
-
 describe('GcpKmsSigner Integration', () => {
-    it.skipIf(!hasRequiredEnvVars())(
-        'signs transactions with GCP KMS',
-        async () => {
-            const signer = createGcpKmsSigner();
-            const rpcUrl = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
-
-            // Get real blockhash from devnet
-            const rpc = createSolanaRpc(rpcUrl);
-            const {
-                value: { blockhash, lastValidBlockHeight },
-            } = await rpc.getLatestBlockhash().send();
-
-            // Create memo transaction (doesn't need funds)
-            const transaction = pipe(
-                createTransactionMessage({ version: 0 }),
-                tx => setTransactionMessageFeePayerSigner(signer, tx),
-                tx => appendTransactionMessageInstructions([getAddMemoInstruction({ memo: 'GCP KMS test' })], tx),
-                tx => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, tx),
-            );
-
-            // Sign via GCP KMS
-            const signed = await signTransactionMessageWithSigners(transaction);
-
-            // Verify signature returned
-            expect(signed.signatures[signer.address]).toBeDefined();
-            expect(signed.signatures[signer.address]?.length).toBe(64);
-        },
-        60_000,
-    ); // 1 minute timeout
-
-    it.skipIf(!hasRequiredEnvVars())('signs messages', async () => {
-        const signer = createGcpKmsSigner();
-
-        const message = {
-            content: new Uint8Array([1, 2, 3, 4, 5]),
-            signatures: {},
-        };
-
-        const result = await signer.signMessages([message]);
-
-        expect(result).toHaveLength(1);
-        expect(result[0]?.[signer.address]).toBeDefined();
-        expect(result[0]?.[signer.address]?.length).toBe(64);
+    it.skipIf(!process.env.GCP_KMS_KEY_NAME)('signs transactions with real API', async () => {
+        await runSignerIntegrationTest(await getConfig(['signTransaction']));
     });
-
-    it.skipIf(!hasRequiredEnvVars())('checks availability', async () => {
-        const signer = createGcpKmsSigner();
-        const available = await signer.isAvailable();
-        expect(available).toBe(true);
+    it.skipIf(!process.env.GCP_KMS_KEY_NAME)('signs messages with real API', async () => {
+        await runSignerIntegrationTest(await getConfig(['signMessage']));
+    });
+    it.skipIf(!process.env.GCP_KMS_KEY_NAME)('simulates transactions with real API', async () => {
+        await runSignerIntegrationTest(await getConfig(['simulateTransaction']));
     });
 });
