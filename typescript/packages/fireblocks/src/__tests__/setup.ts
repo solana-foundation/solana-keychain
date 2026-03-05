@@ -11,7 +11,7 @@ const CONFIG: SignerTestConfig<SolanaSigner> = {
     createSigner: () =>
         createFireblocksSigner({
             apiKey: process.env.FIREBLOCKS_API_KEY!,
-            assetId: process.env.FIREBLOCKS_ASSET_ID,
+            assetId: process.env.FIREBLOCKS_ASSET_ID ?? 'SOL_TEST',
             privateKeyPem: process.env.FIREBLOCKS_PRIVATE_KEY_PEM!,
             useProgramCall: true,
             vaultAccountId: process.env.FIREBLOCKS_VAULT_ACCOUNT_ID!,
