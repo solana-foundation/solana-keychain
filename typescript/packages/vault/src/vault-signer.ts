@@ -13,9 +13,7 @@ import type {
     VaultSignResponse,
 } from './types.js';
 
-export function createVaultSigner<TAddress extends string = string>(
-    config: VaultSignerConfig,
-): SolanaSigner<TAddress> {
+export function createVaultSigner<TAddress extends string = string>(config: VaultSignerConfig): SolanaSigner<TAddress> {
     return VaultSigner.create(config);
 }
 
@@ -40,6 +38,8 @@ export interface VaultSignerConfig {
  *
  * The Vault key must be an ED25519 key created in the transit engine.
  * Example creation: `vault write transit/keys/my-key type=ed25519`
+ *
+ * @deprecated Prefer `createVaultSigner()`. Class export will be removed in a future version.
  */
 export class VaultSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
@@ -48,10 +48,12 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
     private readonly keyName: string;
     private readonly requestDelayMs: number;
 
+    /** @deprecated Use `createVaultSigner()` instead. */
     static create<TAddress extends string = string>(config: VaultSignerConfig): VaultSigner<TAddress> {
         return new VaultSigner<TAddress>(config);
     }
 
+    /** @deprecated Use `createVaultSigner()` instead. Direct construction will be removed in a future version. */
     constructor(config: VaultSignerConfig) {
         if (!config.vaultAddr || !config.vaultToken || !config.keyName) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {

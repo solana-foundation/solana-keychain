@@ -57,6 +57,8 @@ export interface PrivySignerConfig {
  * Privy-based signer using Privy's wallet API
  *
  * Note: Must initialize with create() to fetch the public key
+ *
+ * @deprecated Prefer `createPrivySigner()`. Class export will be removed in a future version.
  */
 export class PrivySigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
@@ -79,6 +81,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
     /**
      * Create and initialize a PrivySigner
      * Fetches the public key from Privy API during initialization
+     * @deprecated Use `createPrivySigner()` instead.
      */
     static async create<TAddress extends string = string>(config: PrivySignerConfig): Promise<PrivySigner<TAddress>> {
         if (!config.appId || !config.appSecret || !config.walletId) {

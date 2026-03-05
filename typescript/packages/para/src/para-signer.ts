@@ -35,6 +35,8 @@ export interface ParaSignerConfig {
  *
  * Uses the /v1/wallets/:walletId/sign-raw endpoint for Ed25519 signing.
  * Raw bytes are signed directly with no hashing or transformation.
+ *
+ * @deprecated Prefer `createParaSigner()`. Class export will be removed in a future version.
  */
 export class ParaSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
@@ -54,6 +56,7 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
 
     /**
      * Create a ParaSigner by fetching the wallet's public key from Para's API
+     * @deprecated Use `createParaSigner()` instead.
      */
     static async create<TAddress extends string = string>(config: ParaSignerConfig): Promise<ParaSigner<TAddress>> {
         if (!config.apiKey || !config.walletId) {

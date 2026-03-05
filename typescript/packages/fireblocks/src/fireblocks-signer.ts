@@ -45,6 +45,8 @@ const DEFAULT_MAX_POLL_ATTEMPTS = 60;
  *     vaultAccountId: '0',
  * });
  * ```
+ *
+ * @deprecated Prefer `createFireblocksSigner()`. Class export will be removed in a future version.
  */
 export class FireblocksSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     private _address: Address<TAddress> | null = null;
@@ -61,6 +63,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
 
     /**
      * Fetches the public key from Fireblocks API during initialization.
+     * @deprecated Use `createFireblocksSigner()` instead.
      */
     static async create<TAddress extends string = string>(
         config: FireblocksSignerConfig,
@@ -71,7 +74,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     }
 
     /**
-     * @deprecated Use `FireblocksSigner.create()` instead. The constructor will be made private in a future version.
+     * @deprecated Use `createFireblocksSigner()` instead. Direct construction will be removed in a future version.
      */
     constructor(config: FireblocksSignerConfig) {
         if (!config.apiKey) {
@@ -120,7 +123,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
 
     /**
      * Initialize the signer by fetching the public key from Fireblocks
-     * @deprecated Use `FireblocksSigner.create()` instead, which handles initialization automatically.
+     * @deprecated Use `createFireblocksSigner()` instead, which handles initialization automatically.
      */
     async init(): Promise<void> {
         if (this.initialized) {

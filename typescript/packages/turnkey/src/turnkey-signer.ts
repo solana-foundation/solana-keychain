@@ -11,13 +11,13 @@ import {
 } from '@solana/transactions';
 
 import { ApiKeyStamper } from './stamper.js';
+import type { ActivityResponse, SignRequest, SignTransactionRequest, WhoAmIRequest, WhoAmIResponse } from './types.js';
 
 export function createTurnkeySigner<TAddress extends string = string>(
     config: TurnkeySignerConfig,
 ): SolanaSigner<TAddress> {
     return TurnkeySigner.create(config);
 }
-import type { ActivityResponse, SignRequest, SignTransactionRequest, WhoAmIRequest, WhoAmIResponse } from './types.js';
 
 /**
  * Configuration for creating a TurnkeySigner
@@ -43,6 +43,8 @@ export interface TurnkeySignerConfig {
  * Turnkey-based signer using Turnkey's API
  *
  * Uses P256 ECDSA for API authentication (X-Stamp header) and Ed25519 for Solana signing
+ *
+ * @deprecated Prefer `createTurnkeySigner()`. Class export will be removed in a future version.
  */
 export class TurnkeySigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
@@ -52,10 +54,12 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
     private readonly stamper: ApiKeyStamper;
     private readonly requestDelayMs: number;
 
+    /** @deprecated Use `createTurnkeySigner()` instead. */
     static create<TAddress extends string = string>(config: TurnkeySignerConfig): TurnkeySigner<TAddress> {
         return new TurnkeySigner<TAddress>(config);
     }
 
+    /** @deprecated Use `createTurnkeySigner()` instead. Direct construction will be removed in a future version. */
     constructor(config: TurnkeySignerConfig) {
         if (!config.apiPublicKey || !config.apiPrivateKey || !config.organizationId || !config.privateKeyId) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {

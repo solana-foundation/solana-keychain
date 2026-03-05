@@ -61,6 +61,8 @@ function bytesToBase58(bytes: Uint8Array): string {
  * });
  * const signed = await signTransactionMessageWithSigners(transactionMessage, [signer]);
  * ```
+ *
+ * @deprecated Prefer `createDfnsSigner()`. Class export will be removed in a future version.
  */
 export class DfnsSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
@@ -98,6 +100,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
      *
      * Validates config fields, fetches the wallet from Dfns, and checks that
      * the wallet is active with an EdDSA/ed25519 signing key.
+     * @deprecated Use `createDfnsSigner()` instead.
      */
     static async create<TAddress extends string = string>(config: DfnsSignerConfig): Promise<DfnsSigner<TAddress>> {
         if (!config.authToken) {

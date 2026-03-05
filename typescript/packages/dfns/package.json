@@ -1,7 +1,7 @@
 {
     "name": "@solana/keychain-dfns",
     "author": "Solana Foundation",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "description": "Dfns-based signer for Solana transactions",
     "license": "MIT",
     "repository": "https://github.com/solana-foundation/solana-keychain",

@@ -284,7 +284,7 @@ release-ts: _check-ts-release
     echo "Updating to $version..."
 
     # Update version in all packages
-    PACKAGES="core aws-kms fireblocks gcp-kms privy turnkey vault keychain test-utils"
+    PACKAGES="core aws-kms cdp dfns fireblocks gcp-kms para privy turnkey vault keychain test-utils"
     for pkg in $PACKAGES; do
         echo "  Updating packages/${pkg}..."
         cd packages/${pkg}

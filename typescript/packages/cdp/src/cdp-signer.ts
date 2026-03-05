@@ -194,6 +194,8 @@ async function loadWalletKey(walletSecret: string): Promise<CryptoKey> {
  * });
  * const signed = await signTransactionMessageWithSigners(transactionMessage, [signer]);
  * ```
+ *
+ * @deprecated Prefer `createCdpSigner()`. Class export will be removed in a future version.
  */
 export class CdpSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
@@ -227,6 +229,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
      *
      * Validates the Ed25519 API key (seed↔pubkey match via `createKeyPairFromBytes`)
      * and loads the P-256 wallet key. Both keys are loaded in parallel.
+     * @deprecated Use `createCdpSigner()` instead.
      */
     static async create<TAddress extends string = string>(config: CdpSignerConfig): Promise<CdpSigner<TAddress>> {
         if (!config.cdpApiKeyId) {
