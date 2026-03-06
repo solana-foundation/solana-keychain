@@ -1,3 +1,19 @@
+## 0.4.0 - 2026-03-06
+
+
+### Bug Fixes
+
+- pin solana-shred-version to =3.0.0 for sdk-v3 feature (#46)
+
+
+### Features
+
+- add DFNS signer integration (#51)
+
+- Add CDP (Coinbase Developer Platform) signer integration (#44)
+
+- add Para MPC signer (#45)
+
 ## 0.3.0 - 2026-01-28
 
 
