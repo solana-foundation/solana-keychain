@@ -31,7 +31,7 @@
         "build": "tsc --build",
         "clean": "rm -rf dist *.tsbuildinfo",
         "prepack": "pnpm run build",
-        "test": "pnpm run typecheck",
+        "test": "vitest run && pnpm run typecheck",
         "typecheck": "tsc --noEmit",
         "test:treeshakability": "agadoo dist/index.js"
     },
@@ -42,6 +42,9 @@
         "@solana/keys": "^6.0.1",
         "@solana/signers": "^6.0.1",
         "@solana/transactions": "^6.0.1"
+    },
+    "devDependencies": {
+        "vitest": "^4.0.10"
     },
     "publishConfig": {
         "access": "public"

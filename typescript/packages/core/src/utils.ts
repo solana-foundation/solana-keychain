@@ -1,11 +1,64 @@
-import { Address, assertIsAddress } from '@solana/addresses';
+import { Address, assertIsAddress, getAddressEncoder } from '@solana/addresses';
+import { ReadonlyUint8Array } from '@solana/codecs-core';
 import { getBase64Encoder } from '@solana/codecs-strings';
-import { SignatureBytes } from '@solana/keys';
+import { SignatureBytes, verifySignature } from '@solana/keys';
 import { isMessagePartialSigner, isTransactionPartialSigner, SignatureDictionary } from '@solana/signers';
 import { Base64EncodedWireTransaction, getTransactionDecoder } from '@solana/transactions';
 
 import { SignerErrorCode, throwSignerError } from './errors.js';
 import { SolanaSigner } from './types.js';
+
+interface AssertSignatureValidOptions {
+    data: ReadonlyUint8Array;
+    signature: SignatureBytes;
+    signerAddress: Address;
+}
+
+/**
+ * Verifies that an Ed25519 signature is valid for the given data and signer address.
+ * Throws a SIGNING_FAILED error if the signature does not match.
+ *
+ * @param signerAddress - The address (public key) of the signer
+ * @param signature - The 64-byte Ed25519 signature to verify
+ * @param data - The original data that was signed
+ * @throws {SignerError} If the signature verification fails
+ */
+export async function assertSignatureValid({
+    data,
+    signature,
+    signerAddress,
+}: AssertSignatureValidOptions): Promise<void> {
+    const addressBytes = getAddressEncoder().encode(signerAddress);
+
+    let publicKey: CryptoKey;
+    try {
+        publicKey = await crypto.subtle.importKey('raw', addressBytes, { name: 'Ed25519' }, false, ['verify']);
+    } catch (error) {
+        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            address: signerAddress,
+            cause: error,
+            message: `Failed to import public key for signature verification: ${error instanceof Error ? error.message : String(error)}`,
+        });
+    }
+
+    let valid: boolean;
+    try {
+        valid = await verifySignature(publicKey, signature, data);
+    } catch (error) {
+        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            address: signerAddress,
+            cause: error,
+            message: `Signature verification threw unexpectedly: ${error instanceof Error ? error.message : String(error)}`,
+        });
+    }
+
+    if (!valid) {
+        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            address: signerAddress,
+            message: 'Signature verification failed: returned signature does not match public key and signed data',
+        });
+    }
+}
 
 interface ExtractSignatureFromWireTransactionOptions {
     base64WireTransaction: Base64EncodedWireTransaction;
