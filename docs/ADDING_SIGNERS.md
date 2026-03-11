@@ -6,6 +6,8 @@ This guide is for wallet service providers and developers who want to integrate 
 
 We strongly prefer PRs that include both [Rust](#rust) and [TypeScript](#typescript) implementations — every signer contributed so far has shipped both. If you can only contribute one, that's fine, but expect the other to be required before the signer ships in a release.
 
+> **Using Claude Code?** This repo includes an `add-signer` skill (`.claude/skills/add-signer/`) that orchestrates the full workflow below — including gotchas and file ordering that this guide doesn't cover.
+
 ---
 
 ## Rust
