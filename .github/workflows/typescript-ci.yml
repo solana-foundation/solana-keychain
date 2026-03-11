@@ -14,7 +14,7 @@ jobs:
         working-directory: typescript
     strategy:
       matrix:
-        package: [vault, privy, turnkey, fireblocks, gcp-kms, para, dfns]
+        package: [vault, privy, turnkey, fireblocks, aws-kms, gcp-kms, para, dfns, cdp]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -49,6 +49,7 @@ jobs:
             aws-kms,
             gcp-kms,
             para,
+            cdp,
             # dfns,  # disabled: DFNS API returns 402
           ]
     steps:
@@ -101,6 +102,11 @@ jobs:
           PARA_API_KEY: ${{ secrets.PARA_API_KEY }}
           PARA_WALLET_ID: ${{ secrets.PARA_WALLET_ID }}
           PARA_API_BASE_URL: ${{ secrets.PARA_API_BASE_URL }}
+          # CDP
+          CDP_API_KEY_ID: ${{ secrets.CDP_API_KEY_ID }}
+          CDP_API_KEY_SECRET: ${{ secrets.CDP_API_KEY_SECRET }}
+          CDP_WALLET_SECRET: ${{ secrets.CDP_WALLET_SECRET }}
+          CDP_SOLANA_ADDRESS: ${{ secrets.CDP_SOLANA_ADDRESS }}
           # DFNS
           DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN }}
           DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID }}
