@@ -48,7 +48,7 @@ jobs:
             test_fireblocks_integration,
             test_aws_kms_integration,
             test_gcp_kms_integration,
-            test_dfns_integration,
+            # test_dfns_integration,  # disabled: DFNS API returns 402
           ]
     steps:
       - uses: actions/checkout@v4

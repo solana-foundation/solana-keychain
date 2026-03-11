@@ -224,4 +224,4 @@ just fmt
 
 ### Adding a New Signer Backend
 
-Interested in adding a new signer backend? Check out our [guide for adding new signers](docs/ADDING_SIGNERS.md).
+Interested in adding a new signer backend? Check out our [guide for adding new signers](docs/ADDING_SIGNERS.md). If you use [Claude Code](https://claude.ai/code), the repo includes an `add-signer` skill that walks you through the full process.

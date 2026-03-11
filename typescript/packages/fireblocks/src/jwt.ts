@@ -1,5 +1,8 @@
+import { getBase16Decoder } from '@solana/codecs-strings';
 import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 import { importPKCS8, SignJWT } from 'jose';
+
+const base16Decoder = getBase16Decoder();
 
 /**
  * Create a JWT for Fireblocks API authentication
@@ -50,9 +53,7 @@ export async function createJwt(apiKey: string, privateKeyPem: string, uri: stri
  * Compute SHA256 hash and return as hex string
  */
 async function sha256Hex(data: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const dataBuffer = encoder.encode(data);
+    const dataBuffer = new TextEncoder().encode(data);
     const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return base16Decoder.decode(new Uint8Array(hashBuffer));
 }

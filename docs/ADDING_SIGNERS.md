@@ -6,6 +6,8 @@ This guide is for wallet service providers and developers who want to integrate 
 
 We strongly prefer PRs that include both [Rust](#rust) and [TypeScript](#typescript) implementations — every signer contributed so far has shipped both. If you can only contribute one, that's fine, but expect the other to be required before the signer ships in a release.
 
+> **Using Claude Code?** This repo includes an `add-signer` skill (`.claude/skills/add-signer/`) that orchestrates the full workflow below — including gotchas and file ordering that this guide doesn't cover.
+
 ---
 
 ## Rust
@@ -47,8 +49,9 @@ In `src/your_service/mod.rs`, define your signer struct:
 ```rust
 //! YourService API signer integration
 
+use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::traits::SignedTransaction;
 use crate::{error::SignerError, traits::SolanaSigner};
-use solana_sdk::{pubkey::Pubkey, signature::Signature, transaction::Transaction};
 use std::str::FromStr;
 
 /// YourService-based signer using YourService's API
@@ -156,18 +159,23 @@ impl SolanaSigner for YourServiceSigner {
         self.public_key
     }
 
-    async fn sign_transaction(&self, tx: &mut Transaction) -> Result<Signature, SignerError> {
-        // Serialize the transaction
-        let serialized = bincode::serialize(tx).map_err(|e| {
-            SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
-        })?;
-
-        // Sign using your service
-        self.sign(&serialized).await
+    async fn sign_transaction(&self, tx: &mut Transaction) -> Result<SignedTransaction, SignerError> {
+        // Sign and serialize the transaction
+        // See rust/src/para/mod.rs for a complete reference implementation
+        todo!("Implement signing and serialization")
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign(message).await
+    }
+
+    async fn sign_partial_transaction(
+        &self,
+        tx: &mut Transaction,
+    ) -> Result<SignedTransaction, SignerError> {
+        // Same as sign_transaction but serializes with requireAllSignatures: false
+        // See rust/src/para/mod.rs for a complete reference implementation
+        todo!("Implement partial signing and serialization")
     }
 
     async fn is_available(&self) -> bool {
@@ -269,7 +277,7 @@ impl Signer {
 // Update trait implementation
 #[async_trait::async_trait]
 impl SolanaSigner for Signer {
-    fn pubkey(&self) -> solana_sdk::pubkey::Pubkey {
+    fn pubkey(&self) -> sdk_adapter::Pubkey {
         match self {
             // ... existing variants
             #[cfg(feature = "your_service")]
@@ -279,8 +287,8 @@ impl SolanaSigner for Signer {
 
     async fn sign_transaction(
         &self,
-        tx: &mut solana_sdk::transaction::Transaction,
-    ) -> Result<solana_sdk::signature::Signature, SignerError> {
+        tx: &mut sdk_adapter::Transaction,
+    ) -> Result<SignedTransaction, SignerError> {
         match self {
             // ... existing variants
             #[cfg(feature = "your_service")]
@@ -291,11 +299,22 @@ impl SolanaSigner for Signer {
     async fn sign_message(
         &self,
         message: &[u8],
-    ) -> Result<solana_sdk::signature::Signature, SignerError> {
+    ) -> Result<sdk_adapter::Signature, SignerError> {
         match self {
             // ... existing variants
             #[cfg(feature = "your_service")]
             Signer::YourService(s) => s.sign_message(message).await,
+        }
+    }
+
+    async fn sign_partial_transaction(
+        &self,
+        tx: &mut sdk_adapter::Transaction,
+    ) -> Result<SignedTransaction, SignerError> {
+        match self {
+            // ... existing variants
+            #[cfg(feature = "your_service")]
+            Signer::YourService(s) => s.sign_partial_transaction(tx).await,
         }
     }
 
@@ -400,6 +419,8 @@ If your signer uses `reqwest`, you must add your feature to the `#[cfg(any(...))
     feature = "privy",
     feature = "turnkey",
     feature = "fireblocks",
+    feature = "cdp",
+    feature = "dfns",
     feature = "para",
     feature = "your_service"  // Add your feature here
 ))]
