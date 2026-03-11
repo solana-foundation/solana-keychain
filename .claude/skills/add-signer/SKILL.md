@@ -60,16 +60,16 @@ Read `docs/ADDING_SIGNERS.md` for detailed code templates. Read `rust/src/para/m
    - `sign_message()`
    - `sign_partial_transaction()`
    - `is_available()`
-6. Add feature to `compile_error!` cfg gate (~line 101)
+6. Add feature to `compile_error!` cfg gate (search for `compile_error!`)
 
 **c) `rust/src/error.rs`** — If signer uses reqwest, add feature to the `#[cfg(any(...))]` gate on `From<reqwest::Error> for SignerError`. Without this, `?` on reqwest calls won't compile.
 
 ### Critical Gotchas
 
-- **4 trait methods, not 3**: `sign_partial_transaction` exists in `rust/src/traits.rs` but `docs/ADDING_SIGNERS.md` omits it. Always read `traits.rs` for the current definition.
-- **Return type**: `sign_transaction` and `sign_partial_transaction` return `SignedTransaction = (String, Signature)` — a tuple of base64-encoded transaction + signature. Not just `Signature`.
-- **SDK adapter**: Import types from `crate::sdk_adapter`, not `solana_sdk` directly. The project supports both SDK v2 and v3 via an adapter layer.
-- **`sign_partial_transaction`**: Serialize with `requireAllSignatures: false`. See existing signers for the pattern — most use `transaction_util::serialize_transaction_partial`.
+- **5 trait methods, not 4**: `sign_partial_transaction` exists in `rust/src/traits.rs` but `docs/ADDING_SIGNERS.md` omits it. Always read `traits.rs` for the current definition.
+- **Return type**: `sign_transaction` and `sign_partial_transaction` return `SignedTransaction = (String, Signature)` — a tuple of base64-encoded transaction + signature. Not just `Signature` (ADDING_SIGNERS.md shows the wrong return type).
+- **SDK adapter**: Import types from `crate::sdk_adapter`, not `solana_sdk` directly (ADDING_SIGNERS.md shows the wrong import). The project supports both SDK v2 and v3 via an adapter layer.
+- **`sign_partial_transaction`**: Serialize with `requireAllSignatures: false`. See existing signers (e.g., `rust/src/para/mod.rs`) for the pattern.
 
 ### Signer Patterns
 
@@ -88,6 +88,11 @@ Factory in lib.rs calls `init()` automatically:
 let mut signer = <Name>Signer::new(config);
 signer.init().await?;
 Ok(Self::<Name>(signer))
+```
+
+**Async constructor** (no separate init step): AWS KMS, GCP KMS
+```
+pub async fn new(...) -> Result<Self, SignerError>  // single async constructor
 ```
 
 **Config struct** (when many params): Fireblocks, Dfns
@@ -111,11 +116,10 @@ Create `rust/src/tests/test_<name>_integration.rs` with:
 - `pub const` env var name declarations
 - `async fn get_signer()` helper reading env vars via `dotenvy`
 - Three test functions: `test_<name>_sign_message`, `test_<name>_sign_transaction`, `test_<name>_is_available`
-- Feature gates: `#[cfg(feature = "<name>")]` on module, `#[cfg(feature = "integration-tests")]` on each test
+- Feature gates: `#[cfg(feature = "<name>")]` inside the test file wrapping the test block, `#[cfg(feature = "integration-tests")]` on each test function
 
-Register in `rust/src/tests/mod.rs`:
+Register in `rust/src/tests/mod.rs` (no feature gate — the gate goes inside the file):
 ```rust
-#[cfg(feature = "<name>")]
 pub mod test_<name>_integration;
 ```
 
@@ -140,7 +144,7 @@ Also create: `package.json`, `tsconfig.json`, `README.md`
 
 ### Update Umbrella Package: `typescript/packages/keychain/`
 
-- `src/index.ts` — Add namespace export + class re-export
+- `src/index.ts` — Add namespace export, factory function re-export, and class re-export
 - `package.json` — Add `@solana/keychain-<name>: "workspace:*"` dependency
 - `tsconfig.json` — Add `{ "path": "../<name>" }` reference
 
