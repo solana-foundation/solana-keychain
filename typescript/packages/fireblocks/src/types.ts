@@ -113,21 +113,22 @@ export interface VaultAddress {
  * Fireblocks transaction status values
  */
 export const FireblocksTransactionStatus = {
-    SUBMITTED: 'SUBMITTED',
-    QUEUED: 'QUEUED',
-    PENDING_SIGNATURE: 'PENDING_SIGNATURE',
-    PENDING_AUTHORIZATION: 'PENDING_AUTHORIZATION',
-    PENDING_3RD_PARTY_MANUAL_APPROVAL: 'PENDING_3RD_PARTY_MANUAL_APPROVAL',
-    PENDING_3RD_PARTY: 'PENDING_3RD_PARTY',
-    BROADCASTING: 'BROADCASTING',
-    CONFIRMING: 'CONFIRMING',
-    COMPLETED: 'COMPLETED',
-    CANCELLED: 'CANCELLED',
-    REJECTED: 'REJECTED',
     BLOCKED: 'BLOCKED',
+    BROADCASTING: 'BROADCASTING',
+    CANCELLED: 'CANCELLED',
+    COMPLETED: 'COMPLETED',
+    CONFIRMING: 'CONFIRMING',
     FAILED: 'FAILED',
+    PENDING_3RD_PARTY: 'PENDING_3RD_PARTY',
+    PENDING_3RD_PARTY_MANUAL_APPROVAL: 'PENDING_3RD_PARTY_MANUAL_APPROVAL',
+    PENDING_AUTHORIZATION: 'PENDING_AUTHORIZATION',
+    PENDING_SIGNATURE: 'PENDING_SIGNATURE',
+    QUEUED: 'QUEUED',
+    REJECTED: 'REJECTED',
+    SUBMITTED: 'SUBMITTED',
 } as const;
-export type FireblocksTransactionStatus = (typeof FireblocksTransactionStatus)[keyof typeof FireblocksTransactionStatus];
+export type FireblocksTransactionStatus =
+    (typeof FireblocksTransactionStatus)[keyof typeof FireblocksTransactionStatus];
 
 /**
  * Terminal transaction statuses (polling should stop)
