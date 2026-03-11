@@ -121,6 +121,12 @@ ts-build:
 ts-test:
     pnpm test:unit
 
+# Tree-shake verification (requires build first)
+[working-directory: 'typescript']
+ts-treeshake: ts-build
+    pnpm test:treeshakability
+    node scripts/test-treeshake-umbrella.mjs
+
 [working-directory: 'typescript']
 ts-test-integration:
     #!/usr/bin/env bash
