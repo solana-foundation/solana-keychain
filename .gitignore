@@ -15,9 +15,10 @@
 .DS_Store
 Thumbs.db
 
-# AI – ignore .claude/ except shared commands
+# AI – ignore .claude/ except shared commands and skills
 .claude/*
 !.claude/commands/
+!.claude/skills/
 
 .env
 test-ledger/
