@@ -131,7 +131,10 @@ export type FireblocksTransactionStatus =
     (typeof FireblocksTransactionStatus)[keyof typeof FireblocksTransactionStatus];
 
 /**
- * Terminal transaction statuses (polling should stop)
+ * Check whether a Fireblocks transaction has reached a terminal state (polling should stop).
+ *
+ * Replaces the previously exported `TERMINAL_STATUSES` Set, which was removed
+ * because module-level `Set` allocation is a side effect that prevents tree-shaking.
  */
 export function isTerminalStatus(status: string): boolean {
     return (

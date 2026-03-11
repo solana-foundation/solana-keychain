@@ -68,6 +68,7 @@ async function bundleImport(importName) {
     });
 
     const result = await bundle.generate({ format: 'esm' });
+    await bundle.close();
     return result.output[0].code;
 }
 

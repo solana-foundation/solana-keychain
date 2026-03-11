@@ -51,7 +51,8 @@ function sortJson(value: unknown): unknown {
 async function computeReqHash(body: unknown): Promise<string> {
     base16Decoder ||= getBase16Decoder();
     const json = JSON.stringify(sortJson(body));
-    const data = new TextEncoder().encode(json);
+    utf8Encoder ||= new TextEncoder();
+    const data = utf8Encoder.encode(json);
     const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', data);
     return base16Decoder.decode(new Uint8Array(hashBuffer));
 }
@@ -66,7 +67,7 @@ async function signJwt(
     const headerB64 = base64UrlDecoder(utf8Encoder.encode(JSON.stringify(header)));
     const payloadB64 = base64UrlDecoder(utf8Encoder.encode(JSON.stringify(payload)));
     const signingInput = `${headerB64}.${payloadB64}`;
-    const inputBytes = new TextEncoder().encode(signingInput);
+    const inputBytes = utf8Encoder.encode(signingInput);
 
     let sigBuffer: ArrayBuffer;
     if (algorithm === 'EdDSA') {
