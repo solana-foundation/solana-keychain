@@ -1,7 +1,7 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase58Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
-    base64UrlEncode,
+    base64UrlDecoder,
     createSignatureDictionary,
     extractSignatureFromWireTransaction,
     SignerErrorCode,
@@ -67,8 +67,8 @@ async function signJwt(
     privateKey: CryptoKey,
     algorithm: 'EdDSA' | 'ES256',
 ): Promise<string> {
-    const headerB64 = base64UrlEncode(utf8Encoder.encode(JSON.stringify(header)));
-    const payloadB64 = base64UrlEncode(utf8Encoder.encode(JSON.stringify(payload)));
+    const headerB64 = base64UrlDecoder(utf8Encoder.encode(JSON.stringify(header)));
+    const payloadB64 = base64UrlDecoder(utf8Encoder.encode(JSON.stringify(payload)));
     const signingInput = `${headerB64}.${payloadB64}`;
     const inputBytes = new TextEncoder().encode(signingInput);
 
@@ -80,7 +80,7 @@ async function signJwt(
         sigBuffer = await globalThis.crypto.subtle.sign({ hash: 'SHA-256', name: 'ECDSA' }, privateKey, inputBytes);
     }
 
-    return `${signingInput}.${base64UrlEncode(new Uint8Array(sigBuffer))}`;
+    return `${signingInput}.${base64UrlDecoder(new Uint8Array(sigBuffer))}`;
 }
 
 async function createAuthJwt(

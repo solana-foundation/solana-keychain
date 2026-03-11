@@ -336,14 +336,13 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                 // Try signedMessages first (RAW signing - hex encoded)
                 const fullSig = txResponse.signedMessages?.[0]?.signature?.fullSig;
                 if (fullSig) {
-                    const cleanHex =
-                        fullSig.startsWith('0x') || fullSig.startsWith('0X') ? fullSig.slice(2) : fullSig;
+                    const cleanHex = fullSig.startsWith('0x') || fullSig.startsWith('0X') ? fullSig.slice(2) : fullSig;
                     if (cleanHex.length % 2 !== 0) {
                         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                             message: `Invalid hex signature: odd length (${cleanHex.length} chars)`,
                         });
                     }
-                    const sigBytes = new Uint8Array(base16Encoder.encode(cleanHex));
+                    const sigBytes = new Uint8Array(base16Encoder.encode(cleanHex.toLowerCase()));
                     if (sigBytes.length !== 64) {
                         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                             message: `Invalid signature length: expected 64 bytes, got ${sigBytes.length}`,

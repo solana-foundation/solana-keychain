@@ -1,6 +1,6 @@
 import * as crypto from 'node:crypto';
 
-import { base64UrlEncode, SignerErrorCode, throwSignerError } from '@solana/keychain-core';
+import { base64UrlDecoder, SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 
 import type { UserActionInitResponse, UserActionResponse } from './types.js';
 
@@ -80,8 +80,8 @@ export async function signUserAction(
 
     const signature = crypto.sign(undefined, clientData, privateKeyPem);
 
-    const clientDataB64 = base64UrlEncode(clientData);
-    const signatureB64 = base64UrlEncode(new Uint8Array(signature));
+    const clientDataB64 = base64UrlDecoder(clientData);
+    const signatureB64 = base64UrlDecoder(new Uint8Array(signature));
 
     // Submit the signed challenge
     const actionUrl = `${apiBaseUrl}/auth/action`;
