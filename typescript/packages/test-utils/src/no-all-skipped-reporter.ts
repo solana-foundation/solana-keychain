@@ -46,9 +46,8 @@ export default class NoAllSkippedReporter implements Reporter {
                 if (allTests.length === 0) continue;
 
                 const hasExecuted = allTests.some(t => {
-                    const result = t.result();
-                    if (!result) return false;
-                    return result.state === 'passed' || result.state === 'failed';
+                    const state = t.result()?.state;
+                    return state === 'passed' || state === 'failed';
                 });
 
                 if (!hasExecuted) {
