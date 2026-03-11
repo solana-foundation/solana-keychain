@@ -140,3 +140,5 @@ jobs:
         run: pnpm format:check
       - name: Tree-shakability check
         run: pnpm test:treeshakability
+      - name: Umbrella tree-shakability check
+        run: pnpm test:treeshakability:umbrella
