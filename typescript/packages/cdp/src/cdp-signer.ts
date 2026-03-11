@@ -31,17 +31,11 @@ export async function createCdpSigner<TAddress extends string = string>(
 const CDP_DEFAULT_BASE_URL = 'https://api.cdp.coinbase.com';
 const CDP_BASE_PATH = '/platform/v2/solana/accounts';
 
-// Cache codec instances at module level — avoids repeated allocation in hot path.
-// Note: in @solana/codecs-strings the naming is from the wire-format perspective:
-//   getBase58Encoder().encode(string)     → Uint8Array     (base58 → bytes)
-const base16Decoder = getBase16Decoder();
-const base58Encoder = getBase58Encoder();
-const base64Encoder = getBase64Encoder();
-const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
-
-// --- JWT helpers ---
-
-const utf8Encoder = new TextEncoder();
+let base16Decoder: ReturnType<typeof getBase16Decoder> | undefined;
+let base58Encoder: ReturnType<typeof getBase58Encoder> | undefined;
+let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
+let utf8Decoder: TextDecoder | undefined;
+let utf8Encoder: TextEncoder | undefined;
 
 function sortJson(value: unknown): unknown {
     if (value === null || typeof value !== 'object') return value;
@@ -55,6 +49,7 @@ function sortJson(value: unknown): unknown {
 }
 
 async function computeReqHash(body: unknown): Promise<string> {
+    base16Decoder ||= getBase16Decoder();
     const json = JSON.stringify(sortJson(body));
     const data = new TextEncoder().encode(json);
     const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', data);
@@ -67,6 +62,7 @@ async function signJwt(
     privateKey: CryptoKey,
     algorithm: 'EdDSA' | 'ES256',
 ): Promise<string> {
+    utf8Encoder ||= new TextEncoder();
     const headerB64 = base64UrlDecoder(utf8Encoder.encode(JSON.stringify(header)));
     const payloadB64 = base64UrlDecoder(utf8Encoder.encode(JSON.stringify(payload)));
     const signingInput = `${headerB64}.${payloadB64}`;
@@ -142,6 +138,7 @@ async function createWalletJwt(
 async function loadApiKey(cdpApiKeySecret: string): Promise<CryptoKey> {
     let keyPair: CryptoKeyPair;
     try {
+        base64Encoder ||= getBase64Encoder();
         const bytes = base64Encoder.encode(cdpApiKeySecret);
         // createKeyPairFromBytes validates:
         //   - input is exactly 64 bytes (seed || pubkey)
@@ -159,6 +156,7 @@ async function loadApiKey(cdpApiKeySecret: string): Promise<CryptoKey> {
 
 async function loadWalletKey(walletSecret: string): Promise<CryptoKey> {
     try {
+        base64Encoder ||= getBase64Encoder();
         const der = base64Encoder.encode(walletSecret);
         return await globalThis.crypto.subtle.importKey('pkcs8', der, { name: 'ECDSA', namedCurve: 'P-256' }, false, [
             'sign',
@@ -315,6 +313,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
 
     private decodeMessageBytes(messageBytes: Uint8Array): string {
         try {
+            utf8Decoder ||= new TextDecoder('utf-8', { fatal: true });
             return utf8Decoder.decode(messageBytes);
         } catch (error) {
             throwSignerError(SignerErrorCode.SERIALIZATION_ERROR, {
@@ -388,6 +387,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         }
 
         // CDP returns a base58-encoded Ed25519 signature
+        base58Encoder ||= getBase58Encoder();
         const signatureBytes = base58Encoder.encode(data.signature) as SignatureBytes;
 
         if (signatureBytes.length !== 64) {

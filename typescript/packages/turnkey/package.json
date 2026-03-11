@@ -37,7 +37,8 @@
         "test:watch": "vitest",
         "test:watch:unit": "vitest --config ../../vitest.config.unit.ts",
         "test:watch:integration": "vitest --config ../../vitest.config.integration.ts",
-        "typecheck": "tsc --noEmit"
+        "typecheck": "tsc --noEmit",
+        "test:treeshakability": "agadoo dist/index.js"
     },
     "dependencies": {
         "@noble/curves": "^2.0.1",

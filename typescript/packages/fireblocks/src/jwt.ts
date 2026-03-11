@@ -2,7 +2,7 @@ import { getBase16Decoder } from '@solana/codecs-strings';
 import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 import { importPKCS8, SignJWT } from 'jose';
 
-const base16Decoder = getBase16Decoder();
+let base16Decoder: ReturnType<typeof getBase16Decoder> | undefined;
 
 /**
  * Create a JWT for Fireblocks API authentication
@@ -55,5 +55,6 @@ export async function createJwt(apiKey: string, privateKeyPem: string, uri: stri
 async function sha256Hex(data: string): Promise<string> {
     const dataBuffer = new TextEncoder().encode(data);
     const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
+    base16Decoder ||= getBase16Decoder();
     return base16Decoder.decode(new Uint8Array(hashBuffer));
 }

@@ -138,3 +138,5 @@ jobs:
         run: pnpm lint
       - name: Format check
         run: pnpm format:check
+      - name: Tree-shakability check
+        run: pnpm test:treeshakability

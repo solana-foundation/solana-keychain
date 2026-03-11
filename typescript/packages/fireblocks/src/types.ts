@@ -112,29 +112,32 @@ export interface VaultAddress {
 /**
  * Fireblocks transaction status values
  */
-export enum FireblocksTransactionStatus {
-    SUBMITTED = 'SUBMITTED',
-    QUEUED = 'QUEUED',
-    PENDING_SIGNATURE = 'PENDING_SIGNATURE',
-    PENDING_AUTHORIZATION = 'PENDING_AUTHORIZATION',
-    PENDING_3RD_PARTY_MANUAL_APPROVAL = 'PENDING_3RD_PARTY_MANUAL_APPROVAL',
-    PENDING_3RD_PARTY = 'PENDING_3RD_PARTY',
-    BROADCASTING = 'BROADCASTING',
-    CONFIRMING = 'CONFIRMING',
-    COMPLETED = 'COMPLETED',
-    CANCELLED = 'CANCELLED',
-    REJECTED = 'REJECTED',
-    BLOCKED = 'BLOCKED',
-    FAILED = 'FAILED',
-}
+export const FireblocksTransactionStatus = {
+    SUBMITTED: 'SUBMITTED',
+    QUEUED: 'QUEUED',
+    PENDING_SIGNATURE: 'PENDING_SIGNATURE',
+    PENDING_AUTHORIZATION: 'PENDING_AUTHORIZATION',
+    PENDING_3RD_PARTY_MANUAL_APPROVAL: 'PENDING_3RD_PARTY_MANUAL_APPROVAL',
+    PENDING_3RD_PARTY: 'PENDING_3RD_PARTY',
+    BROADCASTING: 'BROADCASTING',
+    CONFIRMING: 'CONFIRMING',
+    COMPLETED: 'COMPLETED',
+    CANCELLED: 'CANCELLED',
+    REJECTED: 'REJECTED',
+    BLOCKED: 'BLOCKED',
+    FAILED: 'FAILED',
+} as const;
+export type FireblocksTransactionStatus = (typeof FireblocksTransactionStatus)[keyof typeof FireblocksTransactionStatus];
 
 /**
  * Terminal transaction statuses (polling should stop)
  */
-export const TERMINAL_STATUSES = new Set([
-    FireblocksTransactionStatus.COMPLETED,
-    FireblocksTransactionStatus.CANCELLED,
-    FireblocksTransactionStatus.REJECTED,
-    FireblocksTransactionStatus.BLOCKED,
-    FireblocksTransactionStatus.FAILED,
-]);
+export function isTerminalStatus(status: string): boolean {
+    return (
+        status === FireblocksTransactionStatus.COMPLETED ||
+        status === FireblocksTransactionStatus.CANCELLED ||
+        status === FireblocksTransactionStatus.REJECTED ||
+        status === FireblocksTransactionStatus.BLOCKED ||
+        status === FireblocksTransactionStatus.FAILED
+    );
+}

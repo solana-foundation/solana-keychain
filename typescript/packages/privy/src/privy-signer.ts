@@ -34,8 +34,8 @@ export async function createPrivySigner<TAddress extends string = string>(
 }
 
 const DEFAULT_API_BASE_URL = 'https://api.privy.io/v1';
-const base64Decoder = getBase64Decoder();
-const utf8Encoder = getUtf8Encoder();
+let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
+let utf8Encoder: ReturnType<typeof getUtf8Encoder> | undefined;
 
 /**
  * Configuration for creating a PrivySigner
@@ -313,6 +313,8 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
 }
 
 function getAuthHeader(appId: string, appSecret: string): string {
+    utf8Encoder ||= getUtf8Encoder();
+    base64Decoder ||= getBase64Decoder();
     const credentials = `${appId}:${appSecret}`;
     const credentialsBytes = utf8Encoder.encode(credentials);
     return `Basic ${base64Decoder.decode(credentialsBytes)}`;

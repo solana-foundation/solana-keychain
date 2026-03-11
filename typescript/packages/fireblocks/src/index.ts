@@ -6,4 +6,4 @@ export type {
     TransactionResponse,
     VaultAddressesResponse,
 } from './types.js';
-export { FireblocksTransactionStatus, TERMINAL_STATUSES } from './types.js';
+export { FireblocksTransactionStatus, isTerminalStatus } from './types.js';

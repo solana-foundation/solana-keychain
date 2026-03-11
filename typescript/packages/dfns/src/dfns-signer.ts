@@ -26,19 +26,22 @@ export async function createDfnsSigner<TAddress extends string = string>(
 
 const DEFAULT_API_BASE_URL = 'https://api.dfns.io';
 
-const base16Encoder = getBase16Encoder();
-const base16Decoder = getBase16Decoder();
-const base58Decoder = getBase58Decoder();
+let base16Encoder: ReturnType<typeof getBase16Encoder> | undefined;
+let base16Decoder: ReturnType<typeof getBase16Decoder> | undefined;
+let base58Decoder: ReturnType<typeof getBase58Decoder> | undefined;
 
 function hexToBytes(hex: string): Uint8Array {
+    base16Encoder ||= getBase16Encoder();
     const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
     return new Uint8Array(base16Encoder.encode(clean));
 }
 
 function bytesToHex(bytes: Uint8Array): string {
+    base16Decoder ||= getBase16Decoder();
     return base16Decoder.decode(bytes);
 }
 function bytesToBase58(bytes: Uint8Array): string {
+    base58Decoder ||= getBase58Decoder();
     return base58Decoder.decode(bytes);
 }
 

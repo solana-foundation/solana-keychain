@@ -18,7 +18,7 @@ import type {
     TransactionResponse,
     VaultAddressesResponse,
 } from './types.js';
-import { FireblocksTransactionStatus, TERMINAL_STATUSES } from './types.js';
+import { FireblocksTransactionStatus, isTerminalStatus } from './types.js';
 
 export async function createFireblocksSigner<TAddress extends string = string>(
     config: FireblocksSignerConfig,
@@ -26,8 +26,8 @@ export async function createFireblocksSigner<TAddress extends string = string>(
     return await FireblocksSigner.create(config);
 }
 
-const base16Encoder = getBase16Encoder();
-const base16Decoder = getBase16Decoder();
+let base16Encoder: ReturnType<typeof getBase16Encoder> | undefined;
+let base16Decoder: ReturnType<typeof getBase16Decoder> | undefined;
 
 const DEFAULT_API_BASE_URL = 'https://api.fireblocks.io';
 const DEFAULT_ASSET_ID = 'SOL';
@@ -275,6 +275,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
      * Sign raw bytes using Fireblocks RAW operation
      */
     private async signRawBytes(messageBytes: Uint8Array): Promise<SignatureBytes> {
+        base16Decoder ||= getBase16Decoder();
         const hexContent = base16Decoder.decode(messageBytes);
 
         const request: CreateTransactionRequest = {
@@ -342,6 +343,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                             message: `Invalid hex signature: odd length (${cleanHex.length} chars)`,
                         });
                     }
+                    base16Encoder ||= getBase16Encoder();
                     const sigBytes = new Uint8Array(base16Encoder.encode(cleanHex.toLowerCase()));
                     if (sigBytes.length !== 64) {
                         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
@@ -368,7 +370,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
             }
 
             // Check for terminal failure statuses
-            if (TERMINAL_STATUSES.has(status)) {
+            if (isTerminalStatus(status)) {
                 throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                     message: `Transaction failed with status: ${txResponse.status}`,
                 });
