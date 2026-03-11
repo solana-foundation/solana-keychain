@@ -5,6 +5,11 @@ import { assertIsSolanaSigner } from '@solana/keychain-core';
 import { AwsKmsSigner } from '../aws-kms-signer.js';
 import type { AwsKmsSignerConfig } from '../types.js';
 
+vi.mock('@solana/keychain-core', async importOriginal => {
+    const mod = await importOriginal<typeof import('@solana/keychain-core')>();
+    return { ...mod, assertSignatureValid: vi.fn() };
+});
+
 // Mock AWS SDK
 const mockSend = vi.fn();
 

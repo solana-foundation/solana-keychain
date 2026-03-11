@@ -6,6 +6,11 @@ import { FireblocksSigner } from '../fireblocks-signer.js';
 import type { FireblocksSignerConfig } from '../types.js';
 import { TEST_API_KEY, TEST_RSA_PRIVATE_KEY, TEST_VAULT_ACCOUNT_ID } from './setup.js';
 
+vi.mock('@solana/keychain-core', async importOriginal => {
+    const mod = await importOriginal<typeof import('@solana/keychain-core')>();
+    return { ...mod, assertSignatureValid: vi.fn() };
+});
+
 // Mock fetch globally
 global.fetch = vi.fn();
 

@@ -11,6 +11,11 @@ import {
 } from '@solana/transactions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@solana/keychain-core', async importOriginal => {
+    const mod = await importOriginal<typeof import('@solana/keychain-core')>();
+    return { ...mod, assertSignatureValid: vi.fn() };
+});
+
 import { CdpSigner } from '../cdp-signer.js';
 import type { CdpSignerConfig } from '../types.js';
 

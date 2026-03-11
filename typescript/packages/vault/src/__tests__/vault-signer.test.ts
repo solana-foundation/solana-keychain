@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { VaultSigner } from '../vault-signer.js';
 
+vi.mock('@solana/keychain-core', async importOriginal => {
+    const mod = await importOriginal<typeof import('@solana/keychain-core')>();
+    return { ...mod, assertSignatureValid: vi.fn() };
+});
+
 // Mock fetch globally
 global.fetch = vi.fn();
 

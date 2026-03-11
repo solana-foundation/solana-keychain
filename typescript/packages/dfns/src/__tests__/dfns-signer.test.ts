@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+vi.mock('@solana/keychain-core', async importOriginal => {
+    const mod = await importOriginal<typeof import('@solana/keychain-core')>();
+    return { ...mod, assertSignatureValid: vi.fn() };
+});
+
 import { DfnsSigner } from '../dfns-signer.js';
 import {
     TEST_AUTH_TOKEN,

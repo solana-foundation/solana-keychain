@@ -5,6 +5,11 @@ import { assertIsSolanaSigner } from '@solana/keychain-core';
 import { GcpKmsSigner } from '../gcp-kms-signer.js';
 import type { GcpKmsSignerConfig } from '../types.js';
 
+vi.mock('@solana/keychain-core', async importOriginal => {
+    const mod = await importOriginal<typeof import('@solana/keychain-core')>();
+    return { ...mod, assertSignatureValid: vi.fn() };
+});
+
 // Mock GCP KMS SDK
 const mockAsymmetricSign = vi.fn();
 const mockGetPublicKey = vi.fn();

@@ -11,6 +11,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PrivySigner } from '../privy-signer.js';
 
+vi.mock('@solana/keychain-core', async importOriginal => {
+    const mod = await importOriginal<typeof import('@solana/keychain-core')>();
+    return { ...mod, assertSignatureValid: vi.fn() };
+});
+
 global.fetch = vi.fn();
 
 const MOCK_B64_WIRE_TX =
