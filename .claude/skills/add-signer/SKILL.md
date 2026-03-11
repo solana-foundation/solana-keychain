@@ -66,9 +66,9 @@ Read `docs/ADDING_SIGNERS.md` for detailed code templates. Read `rust/src/para/m
 
 ### Critical Gotchas
 
-- **5 trait methods, not 4**: `sign_partial_transaction` exists in `rust/src/traits.rs` but `docs/ADDING_SIGNERS.md` omits it. Always read `traits.rs` for the current definition.
-- **Return type**: `sign_transaction` and `sign_partial_transaction` return `SignedTransaction = (String, Signature)` — a tuple of base64-encoded transaction + signature. Not just `Signature` (ADDING_SIGNERS.md shows the wrong return type).
-- **SDK adapter**: Import types from `crate::sdk_adapter`, not `solana_sdk` directly (ADDING_SIGNERS.md shows the wrong import). The project supports both SDK v2 and v3 via an adapter layer.
+- **5 trait methods**: Always read `rust/src/traits.rs` for the current trait definition — it is the source of truth.
+- **Return type**: `sign_transaction` and `sign_partial_transaction` return `SignedTransaction = (String, Signature)` — a tuple of base64-encoded transaction + signature.
+- **SDK adapter**: Import types from `crate::sdk_adapter`, not `solana_sdk` directly. The project supports both SDK v2 and v3 via an adapter layer.
 - **`sign_partial_transaction`**: Serialize with `requireAllSignatures: false`. See existing signers (e.g., `rust/src/para/mod.rs`) for the pattern.
 
 ### Signer Patterns
