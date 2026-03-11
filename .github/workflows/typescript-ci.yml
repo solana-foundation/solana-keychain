@@ -41,7 +41,16 @@ jobs:
         working-directory: typescript
     strategy:
       matrix:
-        package: [privy, turnkey, fireblocks, aws-kms, gcp-kms, para, dfns]
+        package:
+          [
+            privy,
+            turnkey,
+            fireblocks,
+            aws-kms,
+            gcp-kms,
+            para,
+            # dfns,  # disabled: DFNS API returns 402
+          ]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
