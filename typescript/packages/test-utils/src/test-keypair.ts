@@ -1,4 +1,4 @@
-import { Address, getAddressDecoder, generateKeyPair, signBytes, SignatureBytes } from '@solana/kit';
+import { Address, generateKeyPair, getAddressDecoder, SignatureBytes, signBytes } from '@solana/kit';
 
 /**
  * A test keypair for unit tests that need valid Ed25519 signatures.
