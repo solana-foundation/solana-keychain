@@ -1,6 +1,7 @@
 import { Address, assertIsAddress } from '@solana/addresses';
-import { getBase58Encoder } from '@solana/codecs-strings';
+import { getBase16Decoder, getBase58Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
+    base64UrlEncode,
     createSignatureDictionary,
     extractSignatureFromWireTransaction,
     SignerErrorCode,
@@ -33,14 +34,14 @@ const CDP_BASE_PATH = '/platform/v2/solana/accounts';
 // Cache codec instances at module level — avoids repeated allocation in hot path.
 // Note: in @solana/codecs-strings the naming is from the wire-format perspective:
 //   getBase58Encoder().encode(string)     → Uint8Array     (base58 → bytes)
+const base16Decoder = getBase16Decoder();
 const base58Encoder = getBase58Encoder();
+const base64Encoder = getBase64Encoder();
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
 // --- JWT helpers ---
 
-function base64urlEncode(data: string): string {
-    return Buffer.from(data).toString('base64url');
-}
+const utf8Encoder = new TextEncoder();
 
 function sortJson(value: unknown): unknown {
     if (value === null || typeof value !== 'object') return value;
@@ -57,7 +58,7 @@ async function computeReqHash(body: unknown): Promise<string> {
     const json = JSON.stringify(sortJson(body));
     const data = new TextEncoder().encode(json);
     const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', data);
-    return Buffer.from(hashBuffer).toString('hex');
+    return base16Decoder.decode(new Uint8Array(hashBuffer));
 }
 
 async function signJwt(
@@ -66,8 +67,8 @@ async function signJwt(
     privateKey: CryptoKey,
     algorithm: 'EdDSA' | 'ES256',
 ): Promise<string> {
-    const headerB64 = base64urlEncode(JSON.stringify(header));
-    const payloadB64 = base64urlEncode(JSON.stringify(payload));
+    const headerB64 = base64UrlEncode(utf8Encoder.encode(JSON.stringify(header)));
+    const payloadB64 = base64UrlEncode(utf8Encoder.encode(JSON.stringify(payload)));
     const signingInput = `${headerB64}.${payloadB64}`;
     const inputBytes = new TextEncoder().encode(signingInput);
 
@@ -79,7 +80,7 @@ async function signJwt(
         sigBuffer = await globalThis.crypto.subtle.sign({ hash: 'SHA-256', name: 'ECDSA' }, privateKey, inputBytes);
     }
 
-    return `${signingInput}.${Buffer.from(sigBuffer).toString('base64url')}`;
+    return `${signingInput}.${base64UrlEncode(new Uint8Array(sigBuffer))}`;
 }
 
 async function createAuthJwt(
@@ -139,13 +140,13 @@ async function createWalletJwt(
  * check. This also ensures all crypto uses the Web Crypto API for cross-runtime support.
  */
 async function loadApiKey(cdpApiKeySecret: string): Promise<CryptoKey> {
-    const bytes = Buffer.from(cdpApiKeySecret, 'base64');
     let keyPair: CryptoKeyPair;
     try {
+        const bytes = base64Encoder.encode(cdpApiKeySecret);
         // createKeyPairFromBytes validates:
         //   - input is exactly 64 bytes (seed || pubkey)
         //   - the public key bytes match the seed (signs test data and verifies)
-        keyPair = await createKeyPairFromBytes(new Uint8Array(bytes));
+        keyPair = await createKeyPairFromBytes(bytes);
     } catch (error) {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
             cause: error,
@@ -157,8 +158,8 @@ async function loadApiKey(cdpApiKeySecret: string): Promise<CryptoKey> {
 }
 
 async function loadWalletKey(walletSecret: string): Promise<CryptoKey> {
-    const der = Buffer.from(walletSecret, 'base64');
     try {
+        const der = base64Encoder.encode(walletSecret);
         return await globalThis.crypto.subtle.importKey('pkcs8', der, { name: 'ECDSA', namedCurve: 'P-256' }, false, [
             'sign',
         ]);

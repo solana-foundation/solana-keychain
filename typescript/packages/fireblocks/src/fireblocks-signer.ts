@@ -1,5 +1,5 @@
 import { Address, assertIsAddress } from '@solana/addresses';
-import { getBase58Encoder } from '@solana/codecs-strings';
+import { getBase16Decoder, getBase16Encoder, getBase58Encoder } from '@solana/codecs-strings';
 import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -25,6 +25,9 @@ export async function createFireblocksSigner<TAddress extends string = string>(
 ): Promise<SolanaSigner<TAddress>> {
     return await FireblocksSigner.create(config);
 }
+
+const base16Encoder = getBase16Encoder();
+const base16Decoder = getBase16Decoder();
 
 const DEFAULT_API_BASE_URL = 'https://api.fireblocks.io';
 const DEFAULT_ASSET_ID = 'SOL';
@@ -272,7 +275,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
      * Sign raw bytes using Fireblocks RAW operation
      */
     private async signRawBytes(messageBytes: Uint8Array): Promise<SignatureBytes> {
-        const hexContent = bytesToHex(messageBytes);
+        const hexContent = base16Decoder.decode(messageBytes);
 
         const request: CreateTransactionRequest = {
             assetId: this.assetId,
@@ -333,7 +336,14 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                 // Try signedMessages first (RAW signing - hex encoded)
                 const fullSig = txResponse.signedMessages?.[0]?.signature?.fullSig;
                 if (fullSig) {
-                    const sigBytes = hexToBytes(fullSig);
+                    const cleanHex =
+                        fullSig.startsWith('0x') || fullSig.startsWith('0X') ? fullSig.slice(2) : fullSig;
+                    if (cleanHex.length % 2 !== 0) {
+                        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                            message: `Invalid hex signature: odd length (${cleanHex.length} chars)`,
+                        });
+                    }
+                    const sigBytes = new Uint8Array(base16Encoder.encode(cleanHex));
                     if (sigBytes.length !== 64) {
                         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                             message: `Invalid signature length: expected 64 bytes, got ${sigBytes.length}`,
@@ -451,25 +461,4 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
             });
         }
     }
-}
-
-/**
- * Convert Uint8Array to hex string
- */
-function bytesToHex(bytes: Uint8Array): string {
-    return Array.from(bytes)
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
-}
-
-/**
- * Convert hex string to Uint8Array
- */
-function hexToBytes(hex: string): Uint8Array {
-    const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex;
-    const bytes = new Uint8Array(cleanHex.length / 2);
-    for (let i = 0; i < bytes.length; i++) {
-        bytes[i] = parseInt(cleanHex.substring(i * 2, i * 2 + 2), 16);
-    }
-    return bytes;
 }
