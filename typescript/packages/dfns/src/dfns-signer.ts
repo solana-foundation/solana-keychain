@@ -1,6 +1,12 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase58Decoder } from '@solana/codecs-strings';
-import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana/keychain-core';
+import {
+    assertSignatureValid,
+    createSignatureDictionary,
+    SignerErrorCode,
+    SolanaSigner,
+    throwSignerError,
+} from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import {
@@ -211,6 +217,11 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
                     kind: 'Message',
                     message: `0x${bytesToHex(messageBytes)}`,
                 });
+                await assertSignatureValid({
+                    data: messageBytes,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
                 return createSignatureDictionary({
                     signature: signatureBytes,
                     signerAddress: this.address,
@@ -234,6 +245,11 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
                     blockchainKind: 'Solana',
                     kind: 'Transaction',
                     transaction: `0x${bytesToHex(new Uint8Array(txBytes))}`,
+                });
+                await assertSignatureValid({
+                    data: transaction.messageBytes,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
                 });
                 return createSignatureDictionary({
                     signature: signatureBytes,

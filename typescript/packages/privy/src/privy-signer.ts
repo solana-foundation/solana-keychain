@@ -1,6 +1,7 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase64Decoder, getBase64Encoder, getUtf8Encoder } from '@solana/codecs-strings';
 import {
+    assertSignatureValid,
     createSignatureDictionary,
     extractSignatureFromWireTransaction,
     SignerErrorCode,
@@ -263,6 +264,11 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
                 base64Decoder ||= getBase64Decoder();
                 const base64EncodedMessage = base64Decoder.decode(message.content) as TransactionMessageBytesBase64;
                 const signatureBytes = await this.signMessage(base64EncodedMessage);
+                await assertSignatureValid({
+                    data: message.content,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
                 return createSignatureDictionary({
                     signature: signatureBytes,
                     signerAddress: this.address,
@@ -284,10 +290,23 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
                 await this.delay(index);
                 const wireTransaction = getBase64EncodedWireTransaction(transaction);
                 const signedTx = await this.signTransaction(wireTransaction);
-                return extractSignatureFromWireTransaction({
+                const sigDict = extractSignatureFromWireTransaction({
                     base64WireTransaction: signedTx,
                     signerAddress: this.address,
                 });
+                const signatureBytes = Object.values(sigDict)[0];
+                if (!signatureBytes) {
+                    throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                        address: this.address,
+                        message: 'No signature bytes found in extracted signature dictionary',
+                    });
+                }
+                await assertSignatureValid({
+                    data: transaction.messageBytes,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
+                return sigDict;
             }),
         );
     }

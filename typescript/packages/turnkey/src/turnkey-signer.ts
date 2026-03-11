@@ -1,6 +1,12 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase64Encoder } from '@solana/codecs-strings';
-import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana/keychain-core';
+import {
+    assertSignatureValid,
+    createSignatureDictionary,
+    SignerErrorCode,
+    SolanaSigner,
+    throwSignerError,
+} from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import {
@@ -236,6 +242,11 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                 const bytesToHex = getBase16Decoder().decode;
                 const hexMessage = bytesToHex(message.content);
                 const signatureBytes = await this.sign(hexMessage);
+                await assertSignatureValid({
+                    data: message.content,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
                 return createSignatureDictionary({
                     signature: signatureBytes,
                     signerAddress: this.address,
@@ -348,6 +359,8 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                 // In Solana, signatures are at the beginning of the serialized transaction
                 // First byte is the signature count, then 64 bytes per signature
                 const signature = signedTxBytes.slice(1, 65) as SignatureBytes;
+
+                await assertSignatureValid({ data: transaction.messageBytes, signature, signerAddress: this.address });
 
                 // Create a signature dictionary from the extracted signature
                 return createSignatureDictionary({

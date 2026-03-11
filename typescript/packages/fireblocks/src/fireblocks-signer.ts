@@ -1,6 +1,12 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase58Encoder } from '@solana/codecs-strings';
-import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana/keychain-core';
+import {
+    assertSignatureValid,
+    createSignatureDictionary,
+    SignerErrorCode,
+    SolanaSigner,
+    throwSignerError,
+} from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import {
@@ -399,6 +405,11 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                         ? message.content
                         : new Uint8Array(Array.from(message.content));
                 const signatureBytes = await this.signRawBytes(messageBytes);
+                await assertSignatureValid({
+                    data: messageBytes,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
                 return createSignatureDictionary({
                     signature: signatureBytes,
                     signerAddress: this.address,
@@ -421,6 +432,15 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                 const signatureBytes = this.useProgramCall
                     ? await this.signWithProgramCall(transaction)
                     : await this.signRawBytes(new Uint8Array(transaction.messageBytes));
+                // Skip verification for PROGRAM_CALL: it broadcasts to Solana and returns
+                // a txHash (on-chain confirmation), not a signature over the message bytes.
+                if (!this.useProgramCall) {
+                    await assertSignatureValid({
+                        data: transaction.messageBytes,
+                        signature: signatureBytes,
+                        signerAddress: this.address,
+                    });
+                }
                 return createSignatureDictionary({
                     signature: signatureBytes,
                     signerAddress: this.address,

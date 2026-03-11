@@ -1,6 +1,12 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder } from '@solana/codecs-strings';
-import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana/keychain-core';
+import {
+    assertSignatureValid,
+    createSignatureDictionary,
+    SignerErrorCode,
+    SolanaSigner,
+    throwSignerError,
+} from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
@@ -186,6 +192,11 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
             messages.map(async (message, index) => {
                 await this.delay(index);
                 const signatureBytes = await this.signBytes(message.content);
+                await assertSignatureValid({
+                    data: message.content,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
                 return createSignatureDictionary({
                     signature: signatureBytes,
                     signerAddress: this.address,
@@ -204,6 +215,11 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
             transactions.map(async (transaction, index) => {
                 await this.delay(index);
                 const signatureBytes = await this.signBytes(transaction.messageBytes);
+                await assertSignatureValid({
+                    data: transaction.messageBytes,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
                 return createSignatureDictionary({
                     signature: signatureBytes,
                     signerAddress: this.address,

@@ -1,6 +1,12 @@
 import { DescribeKeyCommand, KMSClient, MessageType, SignCommand, SigningAlgorithmSpec } from '@aws-sdk/client-kms';
 import { Address, assertIsAddress } from '@solana/addresses';
-import { createSignatureDictionary, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana/keychain-core';
+import {
+    assertSignatureValid,
+    createSignatureDictionary,
+    SignerErrorCode,
+    SolanaSigner,
+    throwSignerError,
+} from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
@@ -173,6 +179,11 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
                         ? message.content
                         : new Uint8Array(Array.from(message.content));
                 const signatureBytes = await this.signBytes(messageBytes);
+                await assertSignatureValid({
+                    data: messageBytes,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
                 return createSignatureDictionary({
                     signature: signatureBytes,
                     signerAddress: this.address,
@@ -191,7 +202,13 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
             transactions.map(async (transaction, index) => {
                 await this.delay(index);
                 // Sign the transaction message bytes
-                const signatureBytes = await this.signBytes(new Uint8Array(transaction.messageBytes));
+                const txMessageBytes = new Uint8Array(transaction.messageBytes);
+                const signatureBytes = await this.signBytes(txMessageBytes);
+                await assertSignatureValid({
+                    data: txMessageBytes,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
                 return createSignatureDictionary({
                     signature: signatureBytes,
                     signerAddress: this.address,

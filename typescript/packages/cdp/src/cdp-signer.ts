@@ -1,6 +1,7 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase58Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
+    assertSignatureValid,
     base64UrlDecoder,
     createSignatureDictionary,
     extractSignatureFromWireTransaction,
@@ -8,7 +9,7 @@ import {
     SolanaSigner,
     throwSignerError,
 } from '@solana/keychain-core';
-import { createKeyPairFromBytes, type SignatureBytes } from '@solana/keys';
+import { createKeyPairFromBytes, SignatureBytes } from '@solana/keys';
 import type { SignableMessage, SignatureDictionary } from '@solana/signers';
 import {
     type Base64EncodedWireTransaction,
@@ -459,6 +460,11 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
                 await this.delay(index);
                 const utf8Message = this.decodeMessageBytes(message.content);
                 const signatureBytes = await this.callSignMessage(utf8Message);
+                await assertSignatureValid({
+                    data: message.content,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
                 return createSignatureDictionary({
                     signature: signatureBytes,
                     signerAddress: this.address,
@@ -479,10 +485,23 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
                 await this.delay(index);
                 const wireTransaction = getBase64EncodedWireTransaction(transaction);
                 const signedWireTx = await this.callSignTransaction(wireTransaction);
-                return extractSignatureFromWireTransaction({
+                const sigDict = extractSignatureFromWireTransaction({
                     base64WireTransaction: signedWireTx,
                     signerAddress: this.address,
                 });
+                const signatureBytes = Object.values(sigDict)[0];
+                if (!signatureBytes) {
+                    throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                        address: this.address,
+                        message: 'No signature bytes found in extracted signature dictionary',
+                    });
+                }
+                await assertSignatureValid({
+                    data: transaction.messageBytes,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
+                return sigDict;
             }),
         );
     }
