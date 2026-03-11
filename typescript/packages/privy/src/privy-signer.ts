@@ -260,7 +260,8 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
         return await Promise.all(
             messages.map(async (message, index) => {
                 await this.delay(index);
-                const base64EncodedMessage = getBase64Decoder().decode(
+                base64Decoder ||= getBase64Decoder();
+                const base64EncodedMessage = base64Decoder.decode(
                     message.content,
                 ) as TransactionMessageBytesBase64;
                 const signatureBytes = await this.signMessage(base64EncodedMessage);
