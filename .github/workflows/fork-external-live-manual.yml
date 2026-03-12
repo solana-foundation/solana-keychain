@@ -113,7 +113,7 @@ jobs:
             test_aws_kms_integration
             test_para_integration
             test_cdp_integration
-            # test_dfns_integration  # disabled: DFNS API returns 402
+            test_dfns_integration
           )
 
           for sdk in v2 v3; do
@@ -174,7 +174,7 @@ jobs:
             aws-kms
             para
             cdp
-            # dfns  # disabled: DFNS API returns 402
+            dfns
           )
 
           for package_name in "${packages[@]}"; do

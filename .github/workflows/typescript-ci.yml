@@ -50,7 +50,7 @@ jobs:
             gcp-kms,
             para,
             cdp,
-            # dfns,  # disabled: DFNS API returns 402
+            dfns,
           ]
     steps:
       - uses: actions/checkout@v4
