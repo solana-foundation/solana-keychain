@@ -178,7 +178,13 @@ impl FireblocksSigner {
         Ok(sig)
     }
 
-    /// Sign a transaction using PROGRAM_CALL operation
+    /// Sign a transaction using PROGRAM_CALL operation.
+    ///
+    /// NOTE: No local signature verification is performed here because Fireblocks
+    /// injects a durable nonce AdvanceNonce instruction into the transaction by
+    /// default, which changes the message that gets signed. The local
+    /// `message_data()` will not match what Fireblocks actually signs.
+    /// See: https://developers.fireblocks.com/reference/interact-with-solana-programs
     async fn sign_with_program_call(
         &self,
         transaction: &Transaction,
@@ -200,15 +206,7 @@ impl FireblocksSigner {
             })),
         };
 
-        let sig = self.request_and_poll_signature(request).await?;
-
-        if !sig.verify(&self.public_key.to_bytes(), &transaction.message_data()) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
-
-        Ok(sig)
+        self.request_and_poll_signature(request).await
     }
 
     /// Request a signature from Fireblocks and poll until complete
@@ -744,14 +742,10 @@ p6B5CCtpBPgD01Vm+bT/JQ==
         use crate::test_util::create_test_transaction;
 
         let mock_server = MockServer::start().await;
-        let keypair = Keypair::new();
+        let signer = create_test_signer_program_call(&mock_server.uri());
 
-        let mut signer = create_test_signer_program_call(&mock_server.uri());
-        signer.public_key = keypair_pubkey(&keypair);
-
-        let mut transaction = create_test_transaction(&signer.pubkey());
-        let signature = keypair.sign_message(&transaction.message_data());
-        let sig_hex = hex::encode(signature.as_ref());
+        let sig_bytes = [0x42u8; 64];
+        let sig_hex = hex::encode(sig_bytes);
 
         // Mock create transaction for PROGRAM_CALL
         Mock::given(method("POST"))
@@ -781,10 +775,11 @@ p6B5CCtpBPgD01Vm+bT/JQ==
             .mount(&mock_server)
             .await;
 
+        let mut transaction = create_test_transaction(&signer.pubkey());
         let result = signer.sign_transaction(&mut transaction).await;
         assert!(result.is_ok());
-        let (_, returned_sig) = result.unwrap();
-        assert_eq!(returned_sig, signature);
+        let (_, signature) = result.unwrap();
+        assert_eq!(signature.as_ref(), &sig_bytes);
     }
 
     #[test]
