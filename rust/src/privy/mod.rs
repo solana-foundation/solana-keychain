@@ -145,10 +145,16 @@ impl PrivySigner {
             .decode(&sign_response.data.signature)
             .expect("Failed to decode response");
 
-        let signature = Signature::try_from(decoded_response.as_slice())
+        let sig = Signature::try_from(decoded_response.as_slice())
             .map_err(|_| SignerError::SigningFailed("Failed to parse signature".to_string()))?;
 
-        Ok(signature)
+        if !sig.verify(&self.public_key.to_bytes(), serialized) {
+            return Err(SignerError::SigningFailed(
+                "Signature verification failed — the returned signature does not match the public key".to_string(),
+            ));
+        }
+
+        Ok(sig)
     }
 
     async fn sign_and_serialize(

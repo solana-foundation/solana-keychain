@@ -119,8 +119,16 @@ impl VaultSigner {
             SignerError::SerializationError("Failed to decode signature".to_string())
         })?;
 
-        Signature::try_from(sig_bytes.as_slice())
-            .map_err(|_| SignerError::SigningFailed("Invalid signature format".to_string()))
+        let sig = Signature::try_from(sig_bytes.as_slice())
+            .map_err(|_| SignerError::SigningFailed("Invalid signature format".to_string()))?;
+
+        if !sig.verify(&self.pubkey.to_bytes(), serialized) {
+            return Err(SignerError::SigningFailed(
+                "Signature verification failed — the returned signature does not match the public key".to_string(),
+            ));
+        }
+
+        Ok(sig)
     }
 
     async fn sign_and_serialize(

@@ -215,7 +215,15 @@ impl DfnsSigner {
         let request = GenerateSignatureRequest::Message {
             message: format!("0x{}", hex::encode(message)),
         };
-        self.send_signature_request(request).await
+        let sig = self.send_signature_request(request).await?;
+
+        if !sig.verify(&self.public_key.to_bytes(), message) {
+            return Err(SignerError::SigningFailed(
+                "Signature verification failed — the returned signature does not match the public key".to_string(),
+            ));
+        }
+
+        Ok(sig)
     }
 
     async fn sign_transaction_bytes(
@@ -229,7 +237,15 @@ impl DfnsSigner {
             transaction: format!("0x{}", hex::encode(&tx_bytes)),
             blockchain_kind: "Solana".to_string(),
         };
-        self.send_signature_request(request).await
+        let sig = self.send_signature_request(request).await?;
+
+        if !sig.verify(&self.public_key.to_bytes(), &transaction.message_data()) {
+            return Err(SignerError::SigningFailed(
+                "Signature verification failed — the returned signature does not match the public key".to_string(),
+            ));
+        }
+
+        Ok(sig)
     }
 
     fn combine_signature(&self, r: &str, s: &str) -> Result<Signature, SignerError> {
@@ -308,6 +324,7 @@ impl SolanaSigner for DfnsSigner {
 mod tests {
     use super::*;
     use crate::dfns::auth::tests::TEST_ED25519_PEM;
+    use crate::sdk_adapter::{keypair_pubkey, Keypair, Signer};
     use std::str::FromStr;
     use wiremock::{
         matchers::{header, method, path},
@@ -436,10 +453,15 @@ mod tests {
     #[tokio::test]
     async fn test_sign_message_success() {
         let mock_server = MockServer::start().await;
-        let signer = create_test_signer(&mock_server.uri());
+        let keypair = Keypair::new();
+        let message = b"test message";
+        let signature = keypair.sign_message(message);
+        let sig_bytes = signature.as_ref();
+        let r_hex = hex::encode(&sig_bytes[0..32]);
+        let s_hex = hex::encode(&sig_bytes[32..64]);
 
-        let r_bytes = [0x11u8; 32];
-        let s_bytes = [0x22u8; 32];
+        let mut signer = create_test_signer(&mock_server.uri());
+        signer.public_key = keypair_pubkey(&keypair);
 
         // Mock user action init
         Mock::given(method("POST"))
@@ -473,19 +495,17 @@ mod tests {
                 "id": "sig-123",
                 "status": "Signed",
                 "signature": {
-                    "r": hex::encode(r_bytes),
-                    "s": hex::encode(s_bytes)
+                    "r": r_hex,
+                    "s": s_hex
                 }
             })))
             .expect(1)
             .mount(&mock_server)
             .await;
 
-        let result = signer.sign_message(b"test message").await;
+        let result = signer.sign_message(message).await;
         assert!(result.is_ok());
-        let sig = result.unwrap();
-        let expected: Vec<u8> = r_bytes.iter().chain(s_bytes.iter()).copied().collect();
-        assert_eq!(sig.as_ref(), expected.as_slice());
+        assert_eq!(result.unwrap(), signature);
     }
 
     #[tokio::test]
@@ -531,10 +551,16 @@ mod tests {
         use crate::test_util::create_test_transaction;
 
         let mock_server = MockServer::start().await;
-        let signer = create_test_signer(&mock_server.uri());
+        let keypair = Keypair::new();
 
-        let r_bytes = [0x33u8; 32];
-        let s_bytes = [0x44u8; 32];
+        let mut signer = create_test_signer(&mock_server.uri());
+        signer.public_key = keypair_pubkey(&keypair);
+
+        let mut transaction = create_test_transaction(&signer.pubkey());
+        let signature = keypair.sign_message(&transaction.message_data());
+        let sig_bytes = signature.as_ref();
+        let r_hex = hex::encode(&sig_bytes[0..32]);
+        let s_hex = hex::encode(&sig_bytes[32..64]);
 
         // Mock user action flow
         Mock::given(method("POST"))
@@ -563,20 +589,18 @@ mod tests {
                 "id": "sig-456",
                 "status": "Signed",
                 "signature": {
-                    "r": hex::encode(r_bytes),
-                    "s": hex::encode(s_bytes)
+                    "r": r_hex,
+                    "s": s_hex
                 }
             })))
             .expect(1)
             .mount(&mock_server)
             .await;
 
-        let mut transaction = create_test_transaction(&signer.pubkey());
         let result = signer.sign_transaction(&mut transaction).await;
         assert!(result.is_ok());
-        let (_, sig) = result.unwrap();
-        let expected: Vec<u8> = r_bytes.iter().chain(s_bytes.iter()).copied().collect();
-        assert_eq!(sig.as_ref(), expected.as_slice());
+        let (_, returned_sig) = result.unwrap();
+        assert_eq!(returned_sig, signature);
     }
 
     #[tokio::test]

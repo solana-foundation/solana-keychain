@@ -329,7 +329,15 @@ impl CdpSigner {
             ))
         })?;
 
-        Ok(Signature::from(sig_array))
+        let sig = Signature::from(sig_array);
+
+        if !sig.verify(&self.public_key.to_bytes(), message) {
+            return Err(SignerError::SigningFailed(
+                "Signature verification failed — the returned signature does not match the public key".to_string(),
+            ));
+        }
+
+        Ok(sig)
     }
 
     /// Sign and serialize a Solana transaction via CDP.
@@ -337,6 +345,8 @@ impl CdpSigner {
         &self,
         transaction: &mut Transaction,
     ) -> Result<SignedTransaction, SignerError> {
+        let message_data = transaction.message_data();
+
         // Serialize the full transaction to bytes (Solana wire format)
         let serialized = bincode::serialize(transaction).map_err(|e| {
             SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
@@ -371,6 +381,12 @@ impl CdpSigner {
                 "Signature not found at expected position in CDP response".to_string(),
             )
         })?;
+
+        if !signature.verify(&self.public_key.to_bytes(), &message_data) {
+            return Err(SignerError::SigningFailed(
+                "Signature verification failed — the returned signature does not match the public key".to_string(),
+            ));
+        }
 
         *transaction = signed_tx;
 
@@ -696,12 +712,14 @@ mod tests {
         let keypair = Keypair::new();
         let pubkey = keypair_pubkey(&keypair);
 
-        let mut transaction = create_test_transaction(&pubkey);
-        let signature = keypair_sign_message(&keypair, &transaction.message_data());
-        transaction.signatures = vec![signature];
+        let mut tx = create_test_transaction(&pubkey);
+        let signature = keypair_sign_message(&keypair, &tx.message_data());
+
+        let mut signed_tx = tx.clone();
+        signed_tx.signatures = vec![signature];
 
         // Serialize the signed transaction to get the base64 wire format
-        let serialized = bincode::serialize(&transaction).unwrap();
+        let serialized = bincode::serialize(&signed_tx).unwrap();
         let base64_signed_tx = STANDARD.encode(&serialized);
 
         let mut signer = create_test_signer(&mock_server.uri());
@@ -716,7 +734,6 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let mut tx = create_test_transaction(&pubkey);
         let result = signer.sign_transaction(&mut tx).await;
         assert!(
             result.is_ok(),

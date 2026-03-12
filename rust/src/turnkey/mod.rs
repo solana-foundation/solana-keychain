@@ -143,7 +143,15 @@ impl TurnkeySigner {
                     SignerError::SigningFailed("Invalid signature length".to_string())
                 })?;
 
-                return Ok(Signature::from(sig_bytes));
+                let sig = Signature::from(sig_bytes);
+
+                if !sig.verify(&self.public_key.to_bytes(), message) {
+                    return Err(SignerError::SigningFailed(
+                        "Signature verification failed — the returned signature does not match the public key".to_string(),
+                    ));
+                }
+
+                return Ok(sig);
             }
         }
 

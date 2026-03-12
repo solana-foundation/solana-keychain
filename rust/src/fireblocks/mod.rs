@@ -167,7 +167,15 @@ impl FireblocksSigner {
             })),
         };
 
-        self.request_and_poll_signature(request).await
+        let sig = self.request_and_poll_signature(request).await?;
+
+        if !sig.verify(&self.public_key.to_bytes(), message) {
+            return Err(SignerError::SigningFailed(
+                "Signature verification failed — the returned signature does not match the public key".to_string(),
+            ));
+        }
+
+        Ok(sig)
     }
 
     /// Sign a transaction using PROGRAM_CALL operation
@@ -192,7 +200,15 @@ impl FireblocksSigner {
             })),
         };
 
-        self.request_and_poll_signature(request).await
+        let sig = self.request_and_poll_signature(request).await?;
+
+        if !sig.verify(&self.public_key.to_bytes(), &transaction.message_data()) {
+            return Err(SignerError::SigningFailed(
+                "Signature verification failed — the returned signature does not match the public key".to_string(),
+            ));
+        }
+
+        Ok(sig)
     }
 
     /// Request a signature from Fireblocks and poll until complete
@@ -461,6 +477,7 @@ impl SolanaSigner for FireblocksSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sdk_adapter::{keypair_pubkey, Keypair, Signer};
     use wiremock::{
         matchers::{header, method, path, path_regex},
         Mock, MockServer, ResponseTemplate,
@@ -602,11 +619,13 @@ p6B5CCtpBPgD01Vm+bT/JQ==
     #[tokio::test]
     async fn test_sign_message_success() {
         let mock_server = MockServer::start().await;
-        let signer = create_test_signer(&mock_server.uri());
+        let keypair = Keypair::new();
+        let message = b"test message";
+        let signature = keypair.sign_message(message);
+        let sig_hex = hex::encode(signature.as_ref());
 
-        // Create a valid 64-byte signature
-        let sig_bytes = [0x42u8; 64];
-        let sig_hex = hex::encode(sig_bytes);
+        let mut signer = create_test_signer(&mock_server.uri());
+        signer.public_key = keypair_pubkey(&keypair);
 
         // Mock create transaction
         Mock::given(method("POST"))
@@ -636,10 +655,9 @@ p6B5CCtpBPgD01Vm+bT/JQ==
             .mount(&mock_server)
             .await;
 
-        let result = signer.sign_message(b"test message").await;
+        let result = signer.sign_message(message).await;
         assert!(result.is_ok());
-        let signature = result.unwrap();
-        assert_eq!(signature.as_ref(), &sig_bytes);
+        assert_eq!(result.unwrap(), signature);
     }
 
     #[tokio::test]
@@ -726,11 +744,14 @@ p6B5CCtpBPgD01Vm+bT/JQ==
         use crate::test_util::create_test_transaction;
 
         let mock_server = MockServer::start().await;
-        let signer = create_test_signer_program_call(&mock_server.uri());
+        let keypair = Keypair::new();
 
-        // Create a valid 64-byte signature
-        let sig_bytes = [0x42u8; 64];
-        let sig_hex = hex::encode(sig_bytes);
+        let mut signer = create_test_signer_program_call(&mock_server.uri());
+        signer.public_key = keypair_pubkey(&keypair);
+
+        let mut transaction = create_test_transaction(&signer.pubkey());
+        let signature = keypair.sign_message(&transaction.message_data());
+        let sig_hex = hex::encode(signature.as_ref());
 
         // Mock create transaction for PROGRAM_CALL
         Mock::given(method("POST"))
@@ -760,11 +781,10 @@ p6B5CCtpBPgD01Vm+bT/JQ==
             .mount(&mock_server)
             .await;
 
-        let mut transaction = create_test_transaction(&signer.pubkey());
         let result = signer.sign_transaction(&mut transaction).await;
         assert!(result.is_ok());
-        let (_, signature) = result.unwrap();
-        assert_eq!(signature.as_ref(), &sig_bytes);
+        let (_, returned_sig) = result.unwrap();
+        assert_eq!(returned_sig, signature);
     }
 
     #[test]
