@@ -15,7 +15,7 @@ jobs:
     strategy:
       matrix:
         sdk_version: [v2, v3]
-        backend: [memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, dfns, all]
+        backend: [memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, dfns, crossmint, all]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -49,6 +49,7 @@ jobs:
             test_aws_kms_integration,
             test_gcp_kms_integration,
             test_dfns_integration,
+            test_crossmint_integration,
           ]
     steps:
       - uses: actions/checkout@v4
@@ -94,6 +95,10 @@ jobs:
           DFNS_PRIVATE_KEY_PEM: ${{ secrets.DFNS_PRIVATE_KEY_PEM }}
           DFNS_WALLET_ID: ${{ secrets.DFNS_WALLET_ID }}
           DFNS_API_BASE_URL: ${{ secrets.DFNS_API_BASE_URL }}
+          CROSSMINT_API_KEY: ${{ secrets.CROSSMINT_API_KEY }}
+          CROSSMINT_WALLET_LOCATOR: ${{ secrets.CROSSMINT_WALLET_LOCATOR }}
+          CROSSMINT_API_BASE_URL: ${{ secrets.CROSSMINT_API_BASE_URL }}
+          CROSSMINT_SIGNER: ${{ secrets.CROSSMINT_SIGNER }}
           SOLANA_RPC_URL: https://api.devnet.solana.com
         run: |
           if [ "${{ matrix.sdk_version }}" = "v2" ]; then

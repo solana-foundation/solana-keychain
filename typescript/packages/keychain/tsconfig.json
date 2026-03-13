@@ -11,6 +11,7 @@
         { "path": "../core" },
         { "path": "../aws-kms" },
         { "path": "../cdp" },
+        { "path": "../crossmint" },
         { "path": "../fireblocks" },
         { "path": "../gcp-kms" },
         { "path": "../para" },

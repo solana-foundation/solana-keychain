@@ -27,6 +27,7 @@
 | **GCP KMS** | Google Cloud Key Management Service with Ed25519 signing | `gcp_kms` |
 | **Para** | MPC wallets with Para infrastructure | `para` |
 | **CDP** | Coinbase Developer Platform managed wallet infrastructure | `cdp` |
+| **Crossmint** | Crossmint managed wallets (`smart` and `mpc`) | `crossmint` |
 
 ## Installation
 
@@ -40,6 +41,9 @@ solana-keychain = { version = "0.3", features = ["cdp"] }
 
 # With Vault support
 solana-keychain = { version = "0.3", features = ["vault"] }
+
+# With Crossmint support
+solana-keychain = { version = "0.3", features = ["crossmint"] }
 
 # All backends
 solana-keychain = { version = "0.3", features = ["all"] }
@@ -188,6 +192,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+### Crossmint Signer
+
+```rust
+use solana_keychain::{CrossmintSigner, CrossmintSignerConfig, SolanaSigner};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut signer = CrossmintSigner::new(CrossmintSignerConfig {
+        api_key: std::env::var("CROSSMINT_API_KEY")?,
+        wallet_locator: std::env::var("CROSSMINT_WALLET_LOCATOR")?,
+        signer: std::env::var("CROSSMINT_SIGNER").ok(), // optional
+        api_base_url: std::env::var("CROSSMINT_API_BASE_URL").ok(), // optional
+        poll_interval_ms: None,
+        max_poll_attempts: None,
+    })?;
+
+    signer.init().await?;
+
+    println!("Public key: {}", signer.pubkey());
+    Ok(())
+}
+```
+
+**Note:** Crossmint `sign_message` is intentionally unsupported in this signer and returns `SigningFailed`.
 
 ## Core API
 

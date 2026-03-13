@@ -12,6 +12,7 @@ on:
           - all
           - core
           - aws-kms
+          - crossmint
           - fireblocks
           - gcp-kms
           - para
@@ -45,6 +46,7 @@ env:
   PUBLISH_PACKAGES: |
     core
     aws-kms
+    crossmint
     fireblocks
     gcp-kms
     para
@@ -307,6 +309,7 @@ jobs:
             const packages = [
               '@solana/keychain-core',
               '@solana/keychain-aws-kms',
+              '@solana/keychain-crossmint',
               '@solana/keychain-fireblocks',
               '@solana/keychain-gcp-kms',
               '@solana/keychain-para',

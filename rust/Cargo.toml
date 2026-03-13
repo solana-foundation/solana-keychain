@@ -25,6 +25,7 @@ fireblocks = [
     "dep:chrono",
 ]
 para = ["dep:reqwest", "dep:hex"]
+crossmint = ["dep:reqwest"]
 gcp_kms = ["dep:google-cloud-kms-v1", "dep:google-cloud-auth", "dep:reqwest"]
 cdp = [
     "dep:reqwest",
@@ -45,6 +46,7 @@ all = [
     "gcp_kms",
     "cdp",
     "para",
+    "crossmint",
     "dfns",
 ]
 

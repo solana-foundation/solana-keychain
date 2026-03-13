@@ -22,6 +22,7 @@ const packagesDir = path.join(__dirname, '..', 'packages');
 const SIGNER_MARKERS = {
     'aws-kms': ['KMSClient', 'aws-sdk'],
     cdp: ['cdp.coinbase.com', 'CDP_BASE_PATH'],
+    crossmint: ['crossmint.com/api', 'Crossmint transaction polling timed out'],
     dfns: ['api.dfns.io', 'signUserAction'],
     fireblocks: ['api.fireblocks.io', 'PENDING_SIGNATURE'],
     'gcp-kms': ['KeyManagementServiceClient', 'google-cloud'],
@@ -34,6 +35,7 @@ const SIGNER_MARKERS = {
 const FACTORIES = [
     { name: 'createAwsKmsSigner', pkg: 'aws-kms' },
     { name: 'createCdpSigner', pkg: 'cdp' },
+    { name: 'createCrossmintSigner', pkg: 'crossmint' },
     { name: 'createDfnsSigner', pkg: 'dfns' },
     { name: 'createFireblocksSigner', pkg: 'fireblocks' },
     { name: 'createGcpKmsSigner', pkg: 'gcp-kms' },

@@ -16,6 +16,7 @@
 //! - `cdp`: Coinbase Developer Platform integration
 //! - `para`: Para MPC wallet integration
 //! - `dfns`: Dfns Wallet API integration
+//! - `crossmint`: Crossmint wallet integration
 //! - `all`: Enable all signer backends
 //!
 //! ## SDK Version Selection
@@ -57,6 +58,8 @@ pub mod gcp_kms;
 
 #[cfg(feature = "cdp")]
 pub mod cdp;
+#[cfg(feature = "crossmint")]
+pub mod crossmint;
 #[cfg(feature = "dfns")]
 pub mod dfns;
 #[cfg(feature = "para")]
@@ -90,6 +93,8 @@ pub use gcp_kms::GcpKmsSigner;
 
 #[cfg(feature = "cdp")]
 pub use cdp::CdpSigner;
+#[cfg(feature = "crossmint")]
+pub use crossmint::{CrossmintSigner, CrossmintSignerConfig};
 #[cfg(feature = "dfns")]
 pub use dfns::{DfnsSigner, DfnsSignerConfig};
 #[cfg(feature = "para")]
@@ -108,10 +113,11 @@ use crate::traits::SignedTransaction;
     feature = "gcp_kms",
     feature = "cdp",
     feature = "dfns",
-    feature = "para"
+    feature = "para",
+    feature = "crossmint"
 )))]
 compile_error!(
-    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, cdp, para, or dfns"
+    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, cdp, para, dfns, or crossmint"
 );
 
 /// Unified signer enum supporting multiple backends
@@ -143,6 +149,8 @@ pub enum Signer {
     Dfns(DfnsSigner),
     #[cfg(feature = "para")]
     Para(ParaSigner),
+    #[cfg(feature = "crossmint")]
+    Crossmint(CrossmintSigner),
 }
 
 impl Signer {
@@ -261,6 +269,14 @@ impl Signer {
         signer.init().await?;
         Ok(Self::Dfns(signer))
     }
+
+    /// Create a Crossmint signer (requires initialization)
+    #[cfg(feature = "crossmint")]
+    pub async fn from_crossmint(config: CrossmintSignerConfig) -> Result<Self, SignerError> {
+        let mut signer = CrossmintSigner::new(config)?;
+        signer.init().await?;
+        Ok(Self::Crossmint(signer))
+    }
 }
 
 #[async_trait::async_trait]
@@ -294,6 +310,8 @@ impl SolanaSigner for Signer {
             Signer::Dfns(s) => s.pubkey(),
             #[cfg(feature = "para")]
             Signer::Para(s) => s.pubkey(),
+            #[cfg(feature = "crossmint")]
+            Signer::Crossmint(s) => s.pubkey(),
         }
     }
 
@@ -329,6 +347,8 @@ impl SolanaSigner for Signer {
             Signer::Dfns(s) => s.sign_transaction(tx).await,
             #[cfg(feature = "para")]
             Signer::Para(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "crossmint")]
+            Signer::Crossmint(s) => s.sign_transaction(tx).await,
         }
     }
 
@@ -361,6 +381,8 @@ impl SolanaSigner for Signer {
             Signer::Dfns(s) => s.sign_message(message).await,
             #[cfg(feature = "para")]
             Signer::Para(s) => s.sign_message(message).await,
+            #[cfg(feature = "crossmint")]
+            Signer::Crossmint(s) => s.sign_message(message).await,
         }
     }
 
@@ -396,6 +418,8 @@ impl SolanaSigner for Signer {
             Signer::Dfns(s) => s.sign_partial_transaction(tx).await,
             #[cfg(feature = "para")]
             Signer::Para(s) => s.sign_partial_transaction(tx).await,
+            #[cfg(feature = "crossmint")]
+            Signer::Crossmint(s) => s.sign_partial_transaction(tx).await,
         }
     }
 
@@ -428,6 +452,8 @@ impl SolanaSigner for Signer {
             Signer::Dfns(s) => s.is_available().await,
             #[cfg(feature = "para")]
             Signer::Para(s) => s.is_available().await,
+            #[cfg(feature = "crossmint")]
+            Signer::Crossmint(s) => s.is_available().await,
         }
     }
 }
