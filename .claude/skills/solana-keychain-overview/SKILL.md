@@ -1,5 +1,5 @@
 ---
-name: sf-solana-keychain-overview
+name: solana-keychain-overview
 description: >
   Architecture, usage, and capabilities of the solana-keychain library
   (Rust crate + TypeScript SDK). Use when someone asks "what is solana-keychain",
@@ -42,7 +42,7 @@ Available as:
 | **Fireblocks** | `fireblocks` | `@solana/keychain-fireblocks` | Async init | Fireblocks vault |
 | **GCP KMS** | `gcp_kms` | `@solana/keychain-gcp-kms` | Async constructor | GCP Cloud KMS EdDSA key |
 | **Dfns** | `dfns` | `@solana/keychain-dfns` | Async init | Dfns wallet infrastructure |
-| **CDP** | N/A | `@solana/keychain-cdp` | Async | Coinbase Developer Platform |
+| **CDP** | `cdp` | `@solana/keychain-cdp` | Async | Coinbase Developer Platform |
 | **Para** | `para` | `@solana/keychain-para` | Async init | Para MPC wallets |
 
 ## Architecture

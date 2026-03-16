@@ -168,14 +168,14 @@ Also create: `package.json`, `tsconfig.json`, `README.md`
 
 ### Update Umbrella Package: `typescript/packages/keychain/`
 
-- `src/index.ts` — Add namespace export and factory function re-export (no class re-export)
+- `src/index.ts` — Add namespace export, factory function re-export, and deprecated class re-export
 - `package.json` — Add `@solana/keychain-<name>: "workspace:*"` dependency
 - `tsconfig.json` — Add `{ "path": "../<name>" }` reference
 
 ### Key TS Patterns
 
-- Factory function `create<Name>Signer()` is the **only** public export (no class export)
-- Class has `static async create()` but is **not exported** — only the factory is public
+- Factory function `create<Name>Signer()` is the preferred API
+- Class `<Name>Signer` is exported with `@deprecated` tag (still needed for umbrella re-exports)
 - Private constructor
 - Use `throwSignerError(SignerErrorCode.*, { cause, message })` from `@solana/keychain-core`
 - Wrap all `fetch()` calls in try/catch
