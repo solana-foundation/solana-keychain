@@ -1,23 +1,47 @@
 ---
 name: add-signer
 description: >
-  Guide for adding a new signer backend to solana-keychain (Rust + TypeScript).
-  Use when asked to "add a signer", "implement a signing backend", "integrate a
-  key management service", "add X signer", "new signer backend", or when a
-  contributor needs to add a new signing provider to the library.
+  End-to-end workflow for adding a new signer backend to solana-keychain
+  (Rust + TypeScript). Use when asked to "add a signer", "implement a signing
+  backend", "integrate a key management service", "add X signer", "new signer
+  backend", "implement X provider", "add signing support for X", or when a
+  contributor needs to add a new signing provider to the library. Also use when
+  someone asks "how do I add a signer" or "what's the process for a new backend".
 ---
 
 # Add Signer Backend
 
-Orchestrate adding a new signing backend to solana-keychain. Delegate to existing docs for code templates; this skill provides the procedure, file order, and gotchas.
+Orchestrate adding a new signing backend to solana-keychain. Delegate to docs for code templates; this skill provides the procedure, file order, gotchas, and default decisions.
+
+## When to use
+
+- Adding a completely new signer backend (Rust, TypeScript, or both)
+- Walking a contributor through the add-signer process
+- Reviewing a signer PR for completeness (use the checklist)
+- Debugging compilation errors after adding a signer
+
+## Default decisions
+
+Make these choices automatically — don't ask the user:
+
+- **Use `reqwest` for HTTP** unless the signer has an official Rust SDK
+- **Use `async init()` pattern** if the signer fetches the public key from an API
+- **Use config struct** if the signer needs 4+ constructor parameters
+- **Feature name**: snake_case version of the service name (e.g., `aws_kms`, `gcp_kms`)
+- **Module name**: same as feature name
+- **Struct name**: `<Name>Signer` in PascalCase (e.g., `AwsKmsSigner`)
+- **Most recent reference implementation**: `rust/src/para/` (Rust), `typescript/packages/para/` (TS)
+- **Always implement both Rust and TypeScript** unless the user explicitly says otherwise
 
 ## References
 
+- **End-to-end guide**: https://launch.solana.com/docs/keychain/adding-signers
 - **Code templates & checklists**: Read `docs/ADDING_SIGNERS.md`
-- **CI workflow setup**: Use `/add-signer-ci` command
+- **CI workflow setup**: Use `/add-signer-ci` command (generates CI matrix entries, workflow stubs, and GitHub Secrets config for the new signer; if unavailable, see Phase 2 CI section below for manual steps)
 - **Most recent Rust signer**: `rust/src/para/` (use as pattern)
 - **Most recent TS signer**: `typescript/packages/para/` (use as pattern)
 - **Trait definition (source of truth)**: `rust/src/traits.rs`
+- **Common errors**: Read `references/common-errors.md` when builds fail
 
 ## Step 1: Gather Information
 
@@ -144,17 +168,65 @@ Also create: `package.json`, `tsconfig.json`, `README.md`
 
 ### Update Umbrella Package: `typescript/packages/keychain/`
 
-- `src/index.ts` — Add namespace export, factory function re-export, and class re-export
+- `src/index.ts` — Add namespace export and factory function re-export (no class re-export)
 - `package.json` — Add `@solana/keychain-<name>: "workspace:*"` dependency
 - `tsconfig.json` — Add `{ "path": "../<name>" }` reference
 
 ### Key TS Patterns
 
-- Factory function `create<Name>Signer()` returns `SolanaSigner<TAddress>` (the interface)
-- Class has `static async create()` method
+- Factory function `create<Name>Signer()` is the **only** public export (no class export)
+- Class has `static async create()` but is **not exported** — only the factory is public
 - Private constructor
 - Use `throwSignerError(SignerErrorCode.*, { cause, message })` from `@solana/keychain-core`
 - Wrap all `fetch()` calls in try/catch
+
+### Signature Verification (required)
+
+Every signer **must** call `assertSignatureValid()` from `@solana/keychain-core` after receiving a signature from the remote API, before returning it. This catches corrupted/malicious signatures client-side.
+
+```typescript
+import { assertSignatureValid } from '@solana/keychain-core';
+
+// In signTransactions, after getting signatureBytes:
+await assertSignatureValid({
+    data: transaction.messageBytes,
+    signature: signatureBytes,
+    signerAddress: this.address,
+});
+
+// In signMessages, after getting signatureBytes:
+await assertSignatureValid({
+    data: messageBytes,
+    signature: signatureBytes,
+    signerAddress: this.address,
+});
+```
+
+Unit tests **must** mock this to avoid needing real crypto with fake sigs:
+```typescript
+vi.mock('@solana/keychain-core', async importOriginal => {
+    const mod = await importOriginal<typeof import('@solana/keychain-core')>();
+    return { ...mod, assertSignatureValid: vi.fn() };
+});
+```
+
+### Encoding (no Buffer)
+
+**Never use `Buffer`** — use `@solana/codecs-strings` for all encoding:
+- `getBase58Encoder().encode(string)` → `Uint8Array` (base58 string → bytes)
+- `getBase58Decoder().decode(Uint8Array)` → `string` (bytes → base58 string)
+- `getBase64Encoder()`/`getBase64Decoder()` — same pattern for base64
+- `getBase16Encoder()`/`getBase16Decoder()` — for hex
+- `base64UrlEncode()`/`base64UrlDecode()` from `@solana/keychain-core` — for JWT/URL-safe base64
+
+### Tree-Shakability (required)
+
+All packages must be tree-shakable:
+- **`"sideEffects": false`** in `package.json`
+- **Lazy-init module-level codec instances** with `||=` (never top-level `const decoder = getBase58Decoder()`)
+- **No enums** — use `as const` objects + derived union types (enums compile to IIFEs)
+- **No module-level `Set`/`Map` allocations** — use functions instead
+- Verify with `pnpm --filter @solana/keychain-<name> test:treeshakability` (runs `agadoo`)
 
 ## Step 5: Environment & Docs
 
@@ -191,3 +263,11 @@ just build
 just test
 just fmt
 ```
+
+## Troubleshooting
+
+If you hit a compilation or test error, read `references/common-errors.md` for diagnosis and fixes. The most frequent issues are:
+- Missing reqwest cfg gate in `error.rs`
+- Incomplete match arms in `lib.rs` (must be all 5)
+- Importing from `solana_sdk` instead of `crate::sdk_adapter`
+- Forgetting to add feature to `compile_error!` gate
