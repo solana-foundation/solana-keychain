@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct WalletResponse {
     pub chain_type: String,
+    #[serde(rename = "type")]
     pub wallet_type: String,
     pub address: String,
 }

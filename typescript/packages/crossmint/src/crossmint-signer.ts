@@ -183,26 +183,40 @@ export class CrossmintSigner<TAddress extends string = string> implements Solana
         let response = await this.createTransaction(transaction);
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
-            switch (response.status) {
-                case 'success':
-                    return this.extractSignature(response);
-                case 'failed':
-                    return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                        message: `Crossmint transaction failed: ${stringifyError(response.error)}`,
-                    });
-                case 'awaiting-approval':
-                    return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                        message: 'Crossmint transaction is awaiting approval; additional signer approvals are required',
-                    });
-                default:
-                    await new Promise(resolve => setTimeout(resolve, this.pollIntervalMs));
-                    response = await this.getTransaction(response.id);
+            const terminalSignature = this.resolveTerminalStatus(response);
+            if (terminalSignature) {
+                return terminalSignature;
             }
+
+            await new Promise(resolve => setTimeout(resolve, this.pollIntervalMs));
+            response = await this.getTransaction(response.id);
+        }
+
+        const terminalSignature = this.resolveTerminalStatus(response);
+        if (terminalSignature) {
+            return terminalSignature;
         }
 
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `Crossmint transaction polling timed out after ${this.maxPollAttempts} attempts`,
         });
+    }
+
+    private resolveTerminalStatus(response: CrossmintTransactionResponse): SignatureBytes | undefined {
+        switch (response.status) {
+            case 'success':
+                return this.extractSignature(response);
+            case 'failed':
+                return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                    message: `Crossmint transaction failed: ${stringifyError(response.error)}`,
+                });
+            case 'awaiting-approval':
+                return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                    message: 'Crossmint transaction is awaiting approval; additional signer approvals are required',
+                });
+            default:
+                return undefined;
+        }
     }
 
     private async createTransaction(
@@ -234,14 +248,18 @@ export class CrossmintSigner<TAddress extends string = string> implements Solana
 
     private async request(path: string, method: 'GET' | 'POST', body?: unknown): Promise<unknown> {
         const url = `${this.apiBaseUrl}${path}`;
+        const headers: Record<string, string> = {
+            'X-API-KEY': this.apiKey,
+        };
+        if (method === 'POST' && body != null) {
+            headers['Content-Type'] = 'application/json';
+        }
+
         let response: Response;
         try {
             response = await fetch(url, {
                 body: body != null ? JSON.stringify(body) : undefined,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-API-KEY': this.apiKey,
-                },
+                headers,
                 method,
             });
         } catch (error) {

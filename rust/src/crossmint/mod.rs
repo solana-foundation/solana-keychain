@@ -142,14 +142,11 @@ impl CrossmintSigner {
     }
 
     async fn fetch_wallet(&self) -> Result<WalletResponse, SignerError> {
-        let url = format!(
-            "{}/2025-06-09/wallets/{}",
-            self.api_base_url, self.wallet_locator
-        );
+        let url = self.build_wallets_api_url(&[])?;
 
         let response = self
             .client
-            .get(&url)
+            .get(url)
             .header("X-API-KEY", &self.api_key)
             .send()
             .await?;
@@ -161,10 +158,7 @@ impl CrossmintSigner {
         &self,
         transaction: String,
     ) -> Result<TransactionResponse, SignerError> {
-        let url = format!(
-            "{}/2025-06-09/wallets/{}/transactions",
-            self.api_base_url, self.wallet_locator
-        );
+        let url = self.build_wallets_api_url(&["transactions"])?;
 
         let request = CreateTransactionRequest {
             params: CreateTransactionParams {
@@ -175,7 +169,7 @@ impl CrossmintSigner {
 
         let response = self
             .client
-            .post(&url)
+            .post(url)
             .header("Content-Type", "application/json")
             .header("X-API-KEY", &self.api_key)
             .json(&request)
@@ -189,19 +183,36 @@ impl CrossmintSigner {
         &self,
         transaction_id: &str,
     ) -> Result<TransactionResponse, SignerError> {
-        let url = format!(
-            "{}/2025-06-09/wallets/{}/transactions/{}",
-            self.api_base_url, self.wallet_locator, transaction_id
-        );
+        let url = self.build_wallets_api_url(&["transactions", transaction_id])?;
 
         let response = self
             .client
-            .get(&url)
+            .get(url)
             .header("X-API-KEY", &self.api_key)
             .send()
             .await?;
 
         Self::parse_response_with_required_field(response, "id", "get_transaction").await
+    }
+
+    fn build_wallets_api_url(&self, segments: &[&str]) -> Result<String, SignerError> {
+        let mut url = reqwest::Url::parse(&self.api_base_url)
+            .map_err(|e| SignerError::ConfigError(format!("Invalid api_base_url: {e}")))?;
+
+        {
+            let mut path_segments = url.path_segments_mut().map_err(|_| {
+                SignerError::ConfigError("api_base_url cannot be used as a base URL".to_string())
+            })?;
+            path_segments.pop_if_empty();
+            path_segments.push("2025-06-09");
+            path_segments.push("wallets");
+            path_segments.push(&self.wallet_locator);
+            for segment in segments {
+                path_segments.push(segment);
+            }
+        }
+
+        Ok(url.to_string())
     }
 
     async fn parse_response_with_required_field<T>(
@@ -288,10 +299,27 @@ impl CrossmintSigner {
             }
         }
 
-        Err(SignerError::RemoteApiError(format!(
-            "Crossmint transaction polling timed out after {} attempts",
-            self.max_poll_attempts
-        )))
+        match response.status.as_str() {
+            "success" => Ok(response),
+            "failed" => {
+                let detail = response
+                    .error
+                    .as_ref()
+                    .map(serde_json::Value::to_string)
+                    .unwrap_or_else(|| "unknown error".to_string());
+                Err(SignerError::SigningFailed(format!(
+                    "Crossmint transaction failed: {detail}"
+                )))
+            }
+            "awaiting-approval" => Err(SignerError::SigningFailed(
+                "Crossmint transaction is awaiting approval; additional signer approvals are required"
+                    .to_string(),
+            )),
+            _ => Err(SignerError::RemoteApiError(format!(
+                "Crossmint transaction polling timed out after {} attempts",
+                self.max_poll_attempts
+            ))),
+        }
     }
 
     fn decode_signature(signature_str: &str) -> Option<Signature> {
@@ -486,6 +514,47 @@ mod tests {
         }))
     }
 
+    /// Helper to create a signer for tests that point to local wiremock HTTP URLs.
+    /// Production URL validation stays enforced in `CrossmintSigner::new`.
+    fn create_test_signer(
+        base_url: &str,
+        poll_interval_ms: u64,
+        max_poll_attempts: u32,
+    ) -> CrossmintSigner {
+        CrossmintSigner {
+            api_key: "test-api-key".to_string(),
+            wallet_locator: "test-wallet".to_string(),
+            signer: None,
+            api_base_url: base_url.trim_end_matches('/').to_string(),
+            client: reqwest::Client::builder()
+                .timeout(CLIENT_TIMEOUT)
+                .build()
+                .unwrap(),
+            public_key: Pubkey::default(),
+            poll_interval_ms,
+            max_poll_attempts,
+        }
+    }
+
+    #[test]
+    fn test_new_rejects_insecure_api_base_url() {
+        let result = CrossmintSigner::new(CrossmintSignerConfig {
+            api_key: "test-api-key".to_string(),
+            wallet_locator: "test-wallet".to_string(),
+            signer: None,
+            api_base_url: Some("http://insecure.example.com".to_string()),
+            poll_interval_ms: None,
+            max_poll_attempts: None,
+        });
+
+        assert!(result.is_err());
+        let err_text = format!("{}", result.unwrap_err());
+        assert!(
+            err_text.contains("must use HTTPS"),
+            "Expected HTTPS validation error, got: {err_text}"
+        );
+    }
+
     #[tokio::test]
     async fn test_init_success() {
         let server = MockServer::start().await;
@@ -499,15 +568,38 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut signer = CrossmintSigner::new(CrossmintSignerConfig {
-            api_key: "test-api-key".to_string(),
-            wallet_locator: "test-wallet".to_string(),
-            signer: None,
-            api_base_url: Some(server.uri()),
-            poll_interval_ms: None,
-            max_poll_attempts: None,
-        })
-        .unwrap();
+        let mut signer = create_test_signer(
+            &server.uri(),
+            DEFAULT_POLL_INTERVAL_MS,
+            DEFAULT_MAX_POLL_ATTEMPTS,
+        );
+
+        signer.init().await.unwrap();
+        assert_eq!(signer.pubkey(), keypair_pubkey(&keypair));
+    }
+
+    #[tokio::test]
+    async fn test_init_url_encodes_wallet_locator() {
+        let server = MockServer::start().await;
+        let keypair = Keypair::new();
+        let address = keypair_pubkey(&keypair).to_string();
+        let locator = "userId:test-user:solana:smart";
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/2025-06-09/wallets/userId%3Atest-user%3Asolana%3Asmart",
+            ))
+            .and(header("x-api-key", "test-api-key"))
+            .respond_with(wallet_response(&address))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(
+            &server.uri(),
+            DEFAULT_POLL_INTERVAL_MS,
+            DEFAULT_MAX_POLL_ATTEMPTS,
+        );
+        signer.wallet_locator = locator.to_string();
 
         signer.init().await.unwrap();
         assert_eq!(signer.pubkey(), keypair_pubkey(&keypair));
@@ -547,15 +639,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut signer = CrossmintSigner::new(CrossmintSignerConfig {
-            api_key: "test-api-key".to_string(),
-            wallet_locator: "test-wallet".to_string(),
-            signer: None,
-            api_base_url: Some(server.uri()),
-            poll_interval_ms: Some(1),
-            max_poll_attempts: Some(2),
-        })
-        .unwrap();
+        let mut signer = create_test_signer(&server.uri(), 1, 2);
         signer.init().await.unwrap();
 
         let mut signed_remote_tx = create_test_transaction(&signer_pubkey);
@@ -617,15 +701,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut signer = CrossmintSigner::new(CrossmintSignerConfig {
-            api_key: "test-api-key".to_string(),
-            wallet_locator: "test-wallet".to_string(),
-            signer: None,
-            api_base_url: Some(server.uri()),
-            poll_interval_ms: Some(1),
-            max_poll_attempts: Some(2),
-        })
-        .unwrap();
+        let mut signer = create_test_signer(&server.uri(), 1, 2);
         signer.init().await.unwrap();
 
         let mut tx = create_test_transaction(&signer.pubkey());
@@ -636,5 +712,57 @@ mod tests {
             format!("{}", result.unwrap_err()).contains("awaiting approval"),
             "Expected awaiting approval error"
         );
+    }
+
+    #[tokio::test]
+    async fn test_sign_transaction_success_on_last_polled_response() {
+        let server = MockServer::start().await;
+        let keypair = Keypair::new();
+        let signer_pubkey = keypair_pubkey(&keypair);
+        let signer_address = signer_pubkey.to_string();
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .and(header("x-api-key", "test-api-key"))
+            .respond_with(wallet_response(&signer_address))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .and(header("x-api-key", "test-api-key"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "tx-123",
+                "status": "pending",
+                "chainType": "solana",
+                "walletType": "smart"
+            })))
+            .mount(&server)
+            .await;
+
+        let mut tx = create_test_transaction(&signer_pubkey);
+        let expected_signature = keypair_sign_message(&keypair, &tx.message_data());
+        let tx_id = bs58::encode(expected_signature.as_ref()).into_string();
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions/tx-123"))
+            .and(header("x-api-key", "test-api-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "tx-123",
+                "status": "success",
+                "chainType": "solana",
+                "walletType": "smart",
+                "onChain": {
+                    "txId": tx_id
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 1);
+        signer.init().await.unwrap();
+
+        let (_serialized, signature) = signer.sign_transaction(&mut tx).await.unwrap();
+        assert_eq!(signature, expected_signature);
     }
 }

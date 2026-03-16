@@ -169,6 +169,40 @@ describe('CrossmintSigner', () => {
                 message: expect.stringContaining('awaiting approval'),
             });
         });
+
+        it('uses the final polled response when maxPollAttempts is 1', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse()) // create()
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-1',
+                            status: 'pending',
+                        }),
+                        { status: 201 },
+                    ),
+                )
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-1',
+                            status: 'success',
+                            onChain: { txId: MOCK_SIGNATURE_B58 },
+                        }),
+                        { status: 200 },
+                    ),
+                );
+
+            const signer = await CrossmintSigner.create({
+                ...mockConfig,
+                maxPollAttempts: 1,
+                pollIntervalMs: 1,
+            });
+
+            const results = await signer.signTransactions([{} as any]);
+            expect(results).toHaveLength(1);
+            expect(results[0]![signer.address]?.length).toBe(64);
+        });
     });
 
     describe('isAvailable', () => {
