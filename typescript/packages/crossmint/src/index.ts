@@ -1,2 +1,2 @@
-export { CrossmintSigner, createCrossmintSigner } from './crossmint-signer.js';
-export type { CrossmintSignerConfig } from './types.js';
+export { createCrossmintSigner } from './crossmint-signer.js';
+export type { CrossmintSignerConfig, CrossmintTransactionStatus } from './types.js';

@@ -28,7 +28,7 @@ export { createVaultSigner } from '@solana/keychain-vault';
 // @deprecated - Prefer createXxxSigner() factory functions. Class exports will be removed in a future version.
 export { AwsKmsSigner } from '@solana/keychain-aws-kms';
 export { CdpSigner } from '@solana/keychain-cdp';
-export { CrossmintSigner } from '@solana/keychain-crossmint';
+
 export { DfnsSigner } from '@solana/keychain-dfns';
 export { FireblocksSigner } from '@solana/keychain-fireblocks';
 export { GcpKmsSigner } from '@solana/keychain-gcp-kms';

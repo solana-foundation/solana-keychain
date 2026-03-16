@@ -3,6 +3,7 @@ export interface CrossmintSignerConfig {
     apiKey: string;
     maxPollAttempts?: number;
     pollIntervalMs?: number;
+    requestDelayMs?: number;
     signer?: string;
     walletLocator: string;
 }
@@ -35,6 +36,8 @@ export interface CrossmintTransactionApprovals {
         signature?: string;
     }>;
 }
+
+export type CrossmintTransactionStatus = 'awaiting-approval' | 'failed' | 'pending' | 'success';
 
 export interface CrossmintTransactionResponse {
     approvals?: CrossmintTransactionApprovals;

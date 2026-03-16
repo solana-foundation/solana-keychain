@@ -1,9 +1,11 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase58Decoder, getBase58Encoder, getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
+    assertSignatureValid,
     createSignatureDictionary,
     createSignerError,
     extractSignatureFromWireTransaction,
+    SignerError,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -23,6 +25,7 @@ import type {
     CrossmintCreateTransactionRequest,
     CrossmintSignerConfig,
     CrossmintTransactionResponse,
+    CrossmintTransactionStatus,
     CrossmintWalletResponse,
 } from './types.js';
 
@@ -32,6 +35,7 @@ export async function createCrossmintSigner<TAddress extends string = string>(
     return await CrossmintSigner.create(config);
 }
 
+const API_VERSION = '2025-06-09';
 const DEFAULT_API_BASE_URL = 'https://www.crossmint.com/api';
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 60;
@@ -41,13 +45,14 @@ let base58Encoder: ReturnType<typeof getBase58Encoder> | undefined;
 let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
 let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
 
-export class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly apiKey: string;
     private readonly walletLocator: string;
     private readonly apiBaseUrl: string;
     private readonly pollIntervalMs: number;
     private readonly maxPollAttempts: number;
+    private readonly requestDelayMs: number;
     private readonly signer?: string;
 
     private constructor(config: {
@@ -56,6 +61,7 @@ export class CrossmintSigner<TAddress extends string = string> implements Solana
         apiKey: string;
         maxPollAttempts: number;
         pollIntervalMs: number;
+        requestDelayMs: number;
         signer?: string;
         walletLocator: string;
     }) {
@@ -65,6 +71,7 @@ export class CrossmintSigner<TAddress extends string = string> implements Solana
         this.apiBaseUrl = config.apiBaseUrl;
         this.pollIntervalMs = config.pollIntervalMs;
         this.maxPollAttempts = config.maxPollAttempts;
+        this.requestDelayMs = config.requestDelayMs;
         this.signer = config.signer;
     }
 
@@ -112,6 +119,18 @@ export class CrossmintSigner<TAddress extends string = string> implements Solana
             });
         }
 
+        const requestDelayMs = config.requestDelayMs ?? 0;
+        if (requestDelayMs < 0) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'requestDelayMs must not be negative',
+            });
+        }
+        if (requestDelayMs > 3000) {
+            console.warn(
+                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
+            );
+        }
+
         const wallet = await fetchWallet(apiBaseUrl, config.apiKey, config.walletLocator);
         if (wallet.chainType.toLowerCase() !== 'solana') {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
@@ -141,6 +160,7 @@ export class CrossmintSigner<TAddress extends string = string> implements Solana
             apiKey: config.apiKey,
             maxPollAttempts,
             pollIntervalMs,
+            requestDelayMs,
             signer: config.signer,
             walletLocator: config.walletLocator,
         });
@@ -158,8 +178,16 @@ export class CrossmintSigner<TAddress extends string = string> implements Solana
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
         return await Promise.all(
-            transactions.map(async transaction => {
+            transactions.map(async (transaction, index) => {
+                if (this.requestDelayMs > 0 && index > 0) {
+                    await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
+                }
                 const signature = await this.signTransactionManaged(transaction);
+                await assertSignatureValid({
+                    data: transaction.messageBytes,
+                    signature,
+                    signerAddress: this.address,
+                });
                 return createSignatureDictionary({
                     signature,
                     signerAddress: this.address,
@@ -203,7 +231,8 @@ export class CrossmintSigner<TAddress extends string = string> implements Solana
     }
 
     private resolveTerminalStatus(response: CrossmintTransactionResponse): SignatureBytes | undefined {
-        switch (response.status) {
+        const status = response.status as CrossmintTransactionStatus;
+        switch (status) {
             case 'success':
                 return this.extractSignature(response);
             case 'failed':
@@ -214,6 +243,7 @@ export class CrossmintSigner<TAddress extends string = string> implements Solana
                 return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                     message: 'Crossmint transaction is awaiting approval; additional signer approvals are required',
                 });
+            case 'pending':
             default:
                 return undefined;
         }
@@ -235,13 +265,13 @@ export class CrossmintSigner<TAddress extends string = string> implements Solana
             },
         };
 
-        const path = `/2025-06-09/wallets/${encodeURIComponent(this.walletLocator)}/transactions`;
+        const path = `/${API_VERSION}/wallets/${encodeURIComponent(this.walletLocator)}/transactions`;
         const response = await this.request(path, 'POST', body);
         return parseTransactionResponse(response, 'create transaction');
     }
 
     private async getTransaction(transactionId: string): Promise<CrossmintTransactionResponse> {
-        const path = `/2025-06-09/wallets/${encodeURIComponent(this.walletLocator)}/transactions/${encodeURIComponent(transactionId)}`;
+        const path = `/${API_VERSION}/wallets/${encodeURIComponent(this.walletLocator)}/transactions/${encodeURIComponent(transactionId)}`;
         const response = await this.request(path, 'GET');
         return parseTransactionResponse(response, 'get transaction');
     }
@@ -328,7 +358,10 @@ export class CrossmintSigner<TAddress extends string = string> implements Solana
             });
 
             return signatureDict[this.address];
-        } catch {
+        } catch (error) {
+            if (error instanceof SignerError) {
+                throw error;
+            }
             return undefined;
         }
     }
@@ -343,7 +376,7 @@ async function fetchWallet(
     apiKey: string,
     walletLocator: string,
 ): Promise<CrossmintWalletResponse> {
-    const url = `${apiBaseUrl}/2025-06-09/wallets/${encodeURIComponent(walletLocator)}`;
+    const url = `${apiBaseUrl}/${API_VERSION}/wallets/${encodeURIComponent(walletLocator)}`;
     let response: Response;
     try {
         response = await fetch(url, {
@@ -378,9 +411,9 @@ async function fetchWallet(
     }
 
     const wallet = payload as Partial<CrossmintWalletResponse>;
-    if (!wallet.address) {
+    if (!wallet.address || !wallet.chainType || !wallet.type) {
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-            message: extractApiErrorMessage(payload, 'Crossmint wallet response missing address'),
+            message: extractApiErrorMessage(payload, 'Crossmint wallet response missing required fields (address, chainType, type)'),
         });
     }
 
