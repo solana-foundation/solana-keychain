@@ -35,7 +35,7 @@
         "@solana-program/system": "^0.11.0",
         "@solana/keychain-core": "workspace:*",
         "@solana/kit": "^6.0.1",
-        "litesvm": "^0.3.3"
+        "litesvm": "^0.6.0"
     },
     "devDependencies": {
         "@types/node": "^24.10.1"

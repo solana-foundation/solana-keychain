@@ -42,7 +42,7 @@
         "test:treeshakability": "agadoo dist/index.js"
     },
     "dependencies": {
-        "@google-cloud/kms": "^5.2.1",
+        "@google-cloud/kms": "^5.4.0",
         "@solana/keychain-core": "workspace:*",
         "@solana/addresses": "^6.0.1",
         "@solana/keys": "^6.0.1",
