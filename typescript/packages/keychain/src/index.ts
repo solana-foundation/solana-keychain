@@ -22,14 +22,3 @@ export { createParaSigner } from '@solana/keychain-para';
 export { createPrivySigner } from '@solana/keychain-privy';
 export { createTurnkeySigner } from '@solana/keychain-turnkey';
 export { createVaultSigner } from '@solana/keychain-vault';
-
-// @deprecated - Prefer createXxxSigner() factory functions. Class exports will be removed in a future version.
-export { AwsKmsSigner } from '@solana/keychain-aws-kms';
-export { CdpSigner } from '@solana/keychain-cdp';
-export { DfnsSigner } from '@solana/keychain-dfns';
-export { FireblocksSigner } from '@solana/keychain-fireblocks';
-export { GcpKmsSigner } from '@solana/keychain-gcp-kms';
-export { ParaSigner } from '@solana/keychain-para';
-export { PrivySigner } from '@solana/keychain-privy';
-export { TurnkeySigner } from '@solana/keychain-turnkey';
-export { VaultSigner } from '@solana/keychain-vault';
