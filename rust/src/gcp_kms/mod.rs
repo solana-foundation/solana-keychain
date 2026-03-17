@@ -2,7 +2,7 @@
 
 use crate::error::SignerError;
 use crate::sdk_adapter::{Pubkey, Signature, Transaction};
-use crate::traits::{SignedTransaction, SolanaSigner};
+use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
 use crate::transaction_util::TransactionUtil;
 use google_cloud_kms_v1::client::KeyManagementService;
 use google_cloud_kms_v1::model::crypto_key_version::CryptoKeyVersionAlgorithm;
@@ -170,19 +170,16 @@ impl SolanaSigner for GcpKmsSigner {
     async fn sign_transaction(
         &self,
         tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
+    ) -> Result<SignTransactionResult, SignerError> {
+        let signed_transaction = self.sign_and_serialize(tx).await?;
+        Ok(TransactionUtil::classify_signed_transaction(
+            tx,
+            signed_transaction,
+        ))
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign_bytes(message).await
-    }
-
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
     }
 
     async fn is_available(&self) -> bool {
@@ -453,7 +450,7 @@ mod tests {
             result.err()
         );
 
-        let (base64_tx, sig) = result.unwrap();
+        let (base64_tx, sig) = result.unwrap().into_signed_transaction();
         assert!(!base64_tx.is_empty());
         assert_eq!(sig.as_ref().len(), 64);
         assert_eq!(sig, signature);

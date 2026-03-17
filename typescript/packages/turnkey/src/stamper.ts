@@ -1,7 +1,6 @@
 import { p256 } from '@noble/curves/nist.js';
-import { numberToBytesBE } from '@noble/curves/utils.js';
-import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
-import * as crypto from 'crypto';
+import { bytesToHex, hexToBytes, numberToBytesBE } from '@noble/curves/utils.js';
+import { base64UrlDecoder, SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 
 /**
  * Configuration for ApiKeyStamper
@@ -29,31 +28,31 @@ export interface StampResult {
 function hexToBase64url(hex: string, paddedLength: number = 32): string {
     // Ensure hex string has even length
     const evenHex = hex.length % 2 === 0 ? hex : '0' + hex;
-    const bytes = Buffer.from(evenHex, 'hex');
+    const bytes = hexToBytes(evenHex);
 
     // Pad with leading zeros if needed
     if (bytes.length < paddedLength) {
-        const padded = Buffer.alloc(paddedLength);
-        bytes.copy(padded, paddedLength - bytes.length);
-        return padded.toString('base64url');
+        const padded = new Uint8Array(paddedLength);
+        padded.set(bytes, paddedLength - bytes.length);
+        return base64UrlDecoder(padded);
     } else if (bytes.length > paddedLength) {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
             message: `API to JWK conversion failed: Hex string too long: ${bytes.length} bytes (max ${paddedLength})`,
         });
     }
 
-    return bytes.toString('base64url');
+    return base64UrlDecoder(bytes);
 }
 
 /**
  * Convert Turnkey API key pair to JWK format
  * Based on Turnkey's official SDK implementation
  */
-function convertTurnkeyApiKeyToJwk(privateKeyHex: string, publicKeyHex: string): crypto.JsonWebKey {
+function convertTurnkeyApiKeyToJwk(privateKeyHex: string, publicKeyHex: string): JsonWebKey {
     const JWK_MEMBER_BYTE_LENGTH = 32; // P-256 uses 32-byte coordinates
 
     // Validate public key length (33 bytes for compressed P-256)
-    const publicKeyBytes = Buffer.from(publicKeyHex, 'hex');
+    const publicKeyBytes = hexToBytes(publicKeyHex);
     if (publicKeyBytes.length !== 33) {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
             message: `API to JWK conversion failed: Public key must be 33 bytes (compressed P-256 format), got ${publicKeyBytes.length}`,
@@ -61,7 +60,7 @@ function convertTurnkeyApiKeyToJwk(privateKeyHex: string, publicKeyHex: string):
     }
 
     // Validate private key length (32 bytes)
-    const privateKeyBytes = Buffer.from(privateKeyHex, 'hex');
+    const privateKeyBytes = hexToBytes(privateKeyHex);
     if (privateKeyBytes.length !== 32) {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
             message: `API to JWK conversion failed: Private key must be 32 bytes, got ${privateKeyBytes.length}`,
@@ -83,8 +82,8 @@ function convertTurnkeyApiKeyToJwk(privateKeyHex: string, publicKeyHex: string):
             d: hexToBase64url(privateKeyHex, JWK_MEMBER_BYTE_LENGTH),
             ext: true,
             kty: 'EC',
-            x: Buffer.from(xBytes).toString('base64url'),
-            y: Buffer.from(yBytes).toString('base64url'),
+            x: base64UrlDecoder(xBytes),
+            y: base64UrlDecoder(yBytes),
         };
     } catch (e) {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
@@ -114,21 +113,17 @@ export class ApiKeyStamper {
      */
     stamp(message: string): StampResult {
         try {
-            // Convert Turnkey API key to JWK format
-            const jwk = convertTurnkeyApiKeyToJwk(this.apiPrivateKey, this.apiPublicKey);
+            // Validate key material with the same constraints as Turnkey's JWK conversion.
+            convertTurnkeyApiKeyToJwk(this.apiPrivateKey, this.apiPublicKey);
 
-            // Create private key object from JWK
-            const privateKeyObject = crypto.createPrivateKey({
-                format: 'jwk',
-                key: jwk,
+            // Sign with P-256 ECDSA + SHA-256 and encode as DER hex.
+            const messageBytes = new TextEncoder().encode(message);
+            const privateKeyBytes = hexToBytes(this.apiPrivateKey);
+            const signatureDerBytes = p256.sign(messageBytes, privateKeyBytes, {
+                format: 'der',
+                prehash: true,
             });
-
-            // Sign the message with SHA-256 (produces DER-encoded signature)
-            const sign = crypto.createSign('SHA256');
-            sign.write(Buffer.from(message));
-            sign.end();
-
-            const signatureHex = sign.sign(privateKeyObject, 'hex');
+            const signatureHex = bytesToHex(signatureDerBytes);
 
             // Create stamp object (same structure as Turnkey SDK)
             const stamp = {
@@ -139,7 +134,7 @@ export class ApiKeyStamper {
 
             // Encode as base64url (RFC 4648 §5)
             const stampJson = JSON.stringify(stamp);
-            const stampBase64url = Buffer.from(stampJson).toString('base64url');
+            const stampBase64url = base64UrlDecoder(new TextEncoder().encode(stampJson));
 
             return {
                 stampHeaderName: 'X-Stamp',

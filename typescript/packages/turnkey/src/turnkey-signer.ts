@@ -3,6 +3,7 @@ import { getBase16Decoder, getBase16Encoder, getBase64Encoder } from '@solana/co
 import {
     assertSignatureValid,
     createSignatureDictionary,
+    sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -19,6 +20,11 @@ import {
 import { ApiKeyStamper } from './stamper.js';
 import type { ActivityResponse, SignRequest, SignTransactionRequest, WhoAmIRequest, WhoAmIResponse } from './types.js';
 
+/**
+ * Create a Turnkey-backed signer.
+ *
+ * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
+ */
 export function createTurnkeySigner<TAddress extends string = string>(
     config: TurnkeySignerConfig,
 ): SolanaSigner<TAddress> {
@@ -92,7 +98,10 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
 
         this.organizationId = config.organizationId;
         this.privateKeyId = config.privateKeyId;
-        this.apiBaseUrl = config.apiBaseUrl || 'https://api.turnkey.com';
+        const apiBaseUrl = config.apiBaseUrl || 'https://api.turnkey.com';
+        validateHttpsApiBaseUrl(apiBaseUrl);
+
+        this.apiBaseUrl = apiBaseUrl;
         this.stamper = new ApiKeyStamper({
             apiPrivateKey: config.apiPrivateKey,
             apiPublicKey: config.apiPublicKey,
@@ -197,7 +206,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
             const errorText = await response.text().catch(() => 'Failed to read error response');
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                 message: `Turnkey API error: ${response.status}`,
-                response: errorText,
+                response: sanitizeRemoteErrorResponse(errorText),
                 status: response.status,
             });
         }
@@ -212,7 +221,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
             });
         }
 
-        const signResult = activityResponse.activity.result?.signRawPayloadResult;
+        const signResult = activityResponse.activity?.result?.signRawPayloadResult;
         if (!signResult || !signResult.r || !signResult.s) {
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                 message: 'Missing signature components in Turnkey response',
@@ -303,7 +312,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
             const errorText = await response.text().catch(() => 'Failed to read error response');
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                 message: `Turnkey API error: ${response.status}`,
-                response: errorText,
+                response: sanitizeRemoteErrorResponse(errorText),
                 status: response.status,
             });
         }
@@ -318,7 +327,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
             });
         }
 
-        const signedTransaction = activityResponse.activity.result?.signTransactionResult?.signedTransaction;
+        const signedTransaction = activityResponse.activity?.result?.signTransactionResult?.signedTransaction;
         if (!signedTransaction) {
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                 message: 'Missing signedTransaction in Turnkey response',
@@ -399,9 +408,26 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
 
             const whoami = (await response.json()) as WhoAmIResponse;
 
-            return whoami.organizationId === this.organizationId;
+            return whoami?.organizationId === this.organizationId;
         } catch {
             return false;
         }
+    }
+}
+
+function validateHttpsApiBaseUrl(apiBaseUrl: string): void {
+    let parsedUrl: URL;
+    try {
+        parsedUrl = new URL(apiBaseUrl);
+    } catch {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'apiBaseUrl is not a valid URL',
+        });
+    }
+
+    if (parsedUrl.protocol !== 'https:') {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'apiBaseUrl must use HTTPS',
+        });
     }
 }

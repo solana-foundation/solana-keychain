@@ -4,9 +4,9 @@ mod jwt;
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, Transaction};
-use crate::traits::SignedTransaction;
+use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
-use crate::{error::SignerError, traits::SolanaSigner};
+use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::Value;
 use std::str::FromStr;
@@ -83,12 +83,24 @@ impl CdpSigner {
         wallet_secret: String,
         address: String,
     ) -> Result<Self, SignerError> {
-        Self::new_with_base_url(
+        Self::new_with_http_client_config(api_key_id, api_key_secret, wallet_secret, address, None)
+    }
+
+    /// Create a new CdpSigner with custom HTTP timeout settings.
+    pub fn new_with_http_client_config(
+        api_key_id: String,
+        api_key_secret: String,
+        wallet_secret: String,
+        address: String,
+        http_client_config: Option<HttpClientConfig>,
+    ) -> Result<Self, SignerError> {
+        Self::new_with_base_url_and_http_client_config(
             api_key_id,
             api_key_secret,
             wallet_secret,
             address,
             format!("https://{CDP_API_HOST}"),
+            http_client_config,
         )
     }
 
@@ -107,6 +119,25 @@ impl CdpSigner {
         wallet_secret: String,
         address: String,
         base_url: String,
+    ) -> Result<Self, SignerError> {
+        Self::new_with_base_url_and_http_client_config(
+            api_key_id,
+            api_key_secret,
+            wallet_secret,
+            address,
+            base_url,
+            None,
+        )
+    }
+
+    /// Create a new CdpSigner with a custom API base URL and HTTP timeout settings.
+    pub fn new_with_base_url_and_http_client_config(
+        api_key_id: String,
+        api_key_secret: String,
+        wallet_secret: String,
+        address: String,
+        base_url: String,
+        http_client_config: Option<HttpClientConfig>,
     ) -> Result<Self, SignerError> {
         if api_key_id.is_empty() {
             return Err(SignerError::ConfigError(
@@ -134,6 +165,16 @@ impl CdpSigner {
         })?;
 
         let api_host = extract_host(&base_url)?;
+        let http_client_config = http_client_config.unwrap_or_default();
+        let builder = reqwest::Client::builder();
+        let builder = builder
+            .timeout(http_client_config.resolved_request_timeout())
+            .connect_timeout(http_client_config.resolved_connect_timeout());
+        #[cfg(not(test))]
+        let builder = builder.https_only(true);
+        let client = builder
+            .build()
+            .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
 
         Ok(Self {
             api_key_id,
@@ -142,7 +183,7 @@ impl CdpSigner {
             public_key,
             api_base_url: base_url,
             api_host,
-            client: reqwest::Client::new(),
+            client,
         })
     }
 
@@ -346,6 +387,8 @@ impl CdpSigner {
         transaction: &mut Transaction,
     ) -> Result<SignedTransaction, SignerError> {
         let message_data = transaction.message_data();
+        let signer_position =
+            TransactionUtil::get_signing_keypair_position(transaction, &self.public_key)?;
 
         // Serialize the full transaction to bytes (Solana wire format)
         let serialized = bincode::serialize(transaction).map_err(|e| {
@@ -374,9 +417,8 @@ impl CdpSigner {
             )
         })?;
 
-        // Extract the signature at our public key's position
-        let pos = TransactionUtil::get_signing_keypair_position(&signed_tx, &self.public_key)?;
-        let signature = *signed_tx.signatures.get(pos).ok_or_else(|| {
+        // Extract only our signature from the response and apply it to the original transaction.
+        let signature = *signed_tx.signatures.get(signer_position).ok_or_else(|| {
             SignerError::SigningFailed(
                 "Signature not found at expected position in CDP response".to_string(),
             )
@@ -388,9 +430,12 @@ impl CdpSigner {
             ));
         }
 
-        *transaction = signed_tx;
+        TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
 
-        Ok((response.signed_transaction, signature))
+        Ok((
+            TransactionUtil::serialize_transaction(transaction)?,
+            signature,
+        ))
     }
 
     /// Check if CDP API is reachable by fetching the account info.
@@ -421,19 +466,16 @@ impl SolanaSigner for CdpSigner {
     async fn sign_transaction(
         &self,
         tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
+    ) -> Result<SignTransactionResult, SignerError> {
+        let signed_transaction = self.sign_and_serialize(tx).await?;
+        Ok(TransactionUtil::classify_signed_transaction(
+            tx,
+            signed_transaction,
+        ))
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign_bytes(message).await
-    }
-
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
     }
 
     async fn is_available(&self) -> bool {
@@ -447,8 +489,10 @@ impl SolanaSigner for CdpSigner {
 mod tests {
     use super::jwt;
     use super::*;
-    use crate::sdk_adapter::{keypair_from_seed, keypair_pubkey, keypair_sign_message, Keypair};
-    use crate::test_util::create_test_transaction;
+    use crate::sdk_adapter::{
+        keypair_from_seed, keypair_pubkey, keypair_sign_message, Keypair, Pubkey,
+    };
+    use crate::test_util::{create_test_transaction, create_test_transaction_with_recipient};
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use serde_json::Value;
     use wiremock::{
@@ -741,9 +785,49 @@ mod tests {
             result.err()
         );
 
-        let (returned_base64, returned_sig) = result.unwrap();
+        let (returned_base64, returned_sig) = result.unwrap().into_signed_transaction();
         assert!(!returned_base64.is_empty());
         assert_eq!(returned_sig.as_ref(), signature.as_ref());
+        assert_eq!(
+            returned_base64,
+            TransactionUtil::serialize_transaction(&tx).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sign_transaction_rejects_tampered_remote_transaction() {
+        let mock_server = MockServer::start().await;
+        let keypair = Keypair::new();
+        let pubkey = keypair_pubkey(&keypair);
+
+        let mut tx = create_test_transaction(&pubkey);
+        let original_message = tx.message.clone();
+
+        // Simulate a compromised API returning a signature over a different transaction.
+        let tampered_recipient = Pubkey::new_unique();
+        let mut tampered_tx = create_test_transaction_with_recipient(&pubkey, &tampered_recipient);
+        let tampered_signature = keypair_sign_message(&keypair, &tampered_tx.message_data());
+        tampered_tx.signatures = vec![tampered_signature];
+
+        let serialized = bincode::serialize(&tampered_tx).unwrap();
+        let base64_signed_tx = STANDARD.encode(&serialized);
+
+        let mut signer = create_test_signer(&mock_server.uri());
+        signer.public_key = pubkey;
+
+        Mock::given(method("POST"))
+            .and(path_regex(r".*/sign/transaction$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "signedTransaction": base64_signed_tx
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = signer.sign_transaction(&mut tx).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+        assert_eq!(tx.message, original_message);
     }
 
     #[tokio::test]

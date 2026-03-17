@@ -35,6 +35,7 @@ mod tests {
             private_key_pem,
             wallet_id,
             api_base_url,
+            http_client_config: None,
         });
 
         signer.init().await.expect("Failed to init DfnsSigner");
@@ -81,7 +82,8 @@ mod tests {
         let (base64_txn, signature) = signer
             .sign_transaction(&mut transaction)
             .await
-            .expect("Failed to sign transaction with Dfns");
+            .expect("Failed to sign transaction with Dfns")
+            .into_signed_transaction();
 
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
         assert!(

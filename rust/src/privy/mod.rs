@@ -3,9 +3,9 @@
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, Transaction};
-use crate::traits::SignedTransaction;
+use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
-use crate::{error::SignerError, traits::SolanaSigner};
+use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::str::FromStr;
 use types::{SignMessageParams, SignMessageRequest, SignMessageResponse, WalletResponse};
@@ -18,7 +18,7 @@ pub struct PrivySigner {
     wallet_id: String,
     api_base_url: String,
     client: reqwest::Client,
-    public_key: Pubkey,
+    public_key: Option<Pubkey>,
 }
 
 impl std::fmt::Debug for PrivySigner {
@@ -38,22 +38,49 @@ impl PrivySigner {
     /// * `app_secret` - Privy application secret
     /// * `wallet_id` - Privy wallet ID
     pub fn new(app_id: String, app_secret: String, wallet_id: String) -> Self {
+        Self::new_with_http_client_config(app_id, app_secret, wallet_id, None)
+    }
+
+    /// Create a new PrivySigner with custom HTTP timeout settings.
+    pub fn new_with_http_client_config(
+        app_id: String,
+        app_secret: String,
+        wallet_id: String,
+        http_client_config: Option<HttpClientConfig>,
+    ) -> Self {
+        let http_client_config = http_client_config.unwrap_or_default();
+        let builder = reqwest::Client::builder();
+        let builder = builder
+            .timeout(http_client_config.resolved_request_timeout())
+            .connect_timeout(http_client_config.resolved_connect_timeout());
+        #[cfg(not(test))]
+        let builder = builder.https_only(true);
+        let client = builder.build().expect("Failed to build HTTP client");
+
         Self {
             app_id,
             app_secret,
             wallet_id,
             api_base_url: "https://api.privy.io/v1".to_string(),
-            client: reqwest::Client::new(),
-            // Set the public key to default to indicate that it's not initialized
-            public_key: Pubkey::default(),
+            client,
+            // Public key is resolved during init().
+            public_key: None,
         }
     }
 
     /// Initialize the signer by fetching the public key
     pub async fn init(&mut self) -> Result<(), SignerError> {
         let pubkey = self.fetch_public_key().await?;
-        self.public_key = pubkey;
+        self.public_key = Some(pubkey);
         Ok(())
+    }
+
+    fn initialized_pubkey(&self) -> Result<Pubkey, SignerError> {
+        self.public_key.ok_or_else(|| {
+            SignerError::ConfigError(
+                "PrivySigner is not initialized; call init() before signing".to_string(),
+            )
+        })
     }
 
     /// Get the Basic Auth header value
@@ -102,6 +129,8 @@ impl PrivySigner {
 
     /// Sign message bytes using Privy API
     async fn sign_bytes(&self, serialized: &[u8]) -> Result<Signature, SignerError> {
+        let public_key = self.initialized_pubkey()?;
+
         let url = format!("{}/wallets/{}/rpc", self.api_base_url, self.wallet_id);
 
         let request = SignMessageRequest {
@@ -143,12 +172,18 @@ impl PrivySigner {
 
         let decoded_response = STANDARD
             .decode(&sign_response.data.signature)
-            .expect("Failed to decode response");
+            .map_err(|_e| {
+                #[cfg(feature = "unsafe-debug")]
+                log::error!("Failed to decode Privy response signature: {_e}");
+                SignerError::SerializationError(
+                    "Failed to decode base64 signature from Privy".to_string(),
+                )
+            })?;
 
         let sig = Signature::try_from(decoded_response.as_slice())
             .map_err(|_| SignerError::SigningFailed("Failed to parse signature".to_string()))?;
 
-        if !sig.verify(&self.public_key.to_bytes(), serialized) {
+        if !sig.verify(&public_key.to_bytes(), serialized) {
             return Err(SignerError::SigningFailed(
                 "Signature verification failed — the returned signature does not match the public key".to_string(),
             ));
@@ -161,9 +196,10 @@ impl PrivySigner {
         &self,
         transaction: &mut Transaction,
     ) -> Result<SignedTransaction, SignerError> {
+        let public_key = self.initialized_pubkey()?;
         let signature = self.sign_bytes(&transaction.message_data()).await?;
 
-        TransactionUtil::add_signature_to_transaction(transaction, &self.pubkey(), signature)?;
+        TransactionUtil::add_signature_to_transaction(transaction, &public_key, signature)?;
 
         Ok((
             TransactionUtil::serialize_transaction(transaction)?,
@@ -175,30 +211,34 @@ impl PrivySigner {
 #[async_trait::async_trait]
 impl SolanaSigner for PrivySigner {
     fn pubkey(&self) -> Pubkey {
-        self.public_key
+        self.public_key.unwrap_or_default()
     }
 
     async fn sign_transaction(
         &self,
         tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
+    ) -> Result<SignTransactionResult, SignerError> {
+        let signed_transaction = self.sign_and_serialize(tx).await?;
+        Ok(TransactionUtil::classify_signed_transaction(
+            tx,
+            signed_transaction,
+        ))
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign_bytes(message).await
     }
 
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
-    }
-
     async fn is_available(&self) -> bool {
-        // Check if public key is initialized
-        self.public_key != Pubkey::default()
+        // Ensure signer was initialized before attempting remote availability check.
+        let Some(public_key) = self.public_key else {
+            return false;
+        };
+
+        match self.fetch_public_key().await {
+            Ok(pubkey) => pubkey == public_key,
+            Err(_) => false,
+        }
     }
 }
 
@@ -226,7 +266,7 @@ mod tests {
 
         assert_eq!(signer.app_id, "test-app-id");
         assert_eq!(signer.wallet_id, "test-wallet-id");
-        assert_eq!(signer.public_key, Pubkey::default());
+        assert_eq!(signer.public_key, None);
     }
 
     #[tokio::test]
@@ -296,11 +336,60 @@ mod tests {
             "test-wallet-id".to_string(),
         );
         signer.api_base_url = mock_server.uri();
-        signer.public_key = keypair.pubkey();
+        signer.public_key = Some(keypair.pubkey());
 
         let result = signer.sign_message(&tx.message_data()).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), signature);
+    }
+
+    #[tokio::test]
+    async fn test_privy_sign_message_invalid_base64_signature() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+
+        let tx = create_test_transaction(&keypair_pubkey(&keypair));
+
+        Mock::given(method("POST"))
+            .and(path("/wallets/test-wallet-id/rpc"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "method": "signMessage",
+                "data": {
+                    "signature": "not-base64###",
+                    "encoding": "base64"
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let mut signer = PrivySigner::new(
+            "test-app-id".to_string(),
+            "test-app-secret".to_string(),
+            "test-wallet-id".to_string(),
+        );
+        signer.api_base_url = mock_server.uri();
+        signer.public_key = Some(keypair.pubkey());
+
+        let result = signer.sign_message(&tx.message_data()).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SignerError::SerializationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_privy_sign_message_requires_init() {
+        let signer = PrivySigner::new(
+            "test-app-id".to_string(),
+            "test-app-secret".to_string(),
+            "test-wallet-id".to_string(),
+        );
+
+        let result = signer.sign_message(b"test").await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
     }
 
     #[tokio::test]
@@ -337,17 +426,33 @@ mod tests {
             "test-wallet-id".to_string(),
         );
         signer.api_base_url = mock_server.uri();
-        signer.public_key = keypair.pubkey();
+        signer.public_key = Some(keypair.pubkey());
 
         let result = signer.sign_transaction(&mut tx).await;
         assert!(result.is_ok());
-        let (serialized_tx, returned_sig) = result.unwrap();
+        let (serialized_tx, returned_sig) = result.unwrap().into_signed_transaction();
 
         // Verify the signature matches
         assert_eq!(returned_sig, signature);
 
         // Verify the transaction is properly serialized
         assert!(!serialized_tx.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_privy_sign_transaction_requires_init() {
+        let keypair = create_test_keypair();
+        let mut tx = create_test_transaction(&keypair_pubkey(&keypair));
+
+        let signer = PrivySigner::new(
+            "test-app-id".to_string(),
+            "test-app-secret".to_string(),
+            "test-wallet-id".to_string(),
+        );
+
+        let result = signer.sign_transaction(&mut tx).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
     }
 
     #[tokio::test]
@@ -358,7 +463,7 @@ mod tests {
             "test-app-secret".to_string(),
             "test-wallet-id".to_string(),
         );
-        signer.public_key = keypair.pubkey();
+        signer.public_key = Some(keypair.pubkey());
 
         assert_eq!(signer.pubkey(), keypair.pubkey());
     }
@@ -444,7 +549,7 @@ mod tests {
             "test-wallet-id".to_string(),
         );
         signer.api_base_url = mock_server.uri();
-        signer.public_key = keypair.pubkey();
+        signer.public_key = Some(keypair.pubkey());
 
         let result = signer.sign_message(b"test").await;
         assert!(result.is_err());
@@ -456,6 +561,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_privy_is_available() {
+        let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
 
         // Not initialized
@@ -466,13 +572,55 @@ mod tests {
         );
         assert!(!signer.is_available().await);
 
-        // Initialized
+        // Initialized and remote API is reachable.
+        Mock::given(method("GET"))
+            .and(path("/wallets/test-wallet-id"))
+            .and(header(
+                "Authorization",
+                "Basic dGVzdC1hcHAtaWQ6dGVzdC1hcHAtc2VjcmV0",
+            ))
+            .and(header("privy-app-id", "test-app-id"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "test-wallet-id",
+                "address": keypair.pubkey().to_string(),
+                "chain_type": "solana"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
         let mut signer = PrivySigner::new(
             "test-app-id".to_string(),
             "test-app-secret".to_string(),
             "test-wallet-id".to_string(),
         );
-        signer.public_key = keypair.pubkey();
+        signer.api_base_url = mock_server.uri();
+        signer.public_key = Some(keypair.pubkey());
         assert!(signer.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_privy_is_available_remote_failure() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+
+        Mock::given(method("GET"))
+            .and(path("/wallets/test-wallet-id"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": "Unauthorized"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let mut signer = PrivySigner::new(
+            "test-app-id".to_string(),
+            "test-app-secret".to_string(),
+            "test-wallet-id".to_string(),
+        );
+        signer.api_base_url = mock_server.uri();
+        signer.public_key = Some(keypair.pubkey());
+
+        assert!(!signer.is_available().await);
     }
 }

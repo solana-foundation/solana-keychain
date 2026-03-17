@@ -3,6 +3,7 @@ import { getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
     createSignatureDictionary,
+    sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -19,6 +20,11 @@ import type {
     VaultSignResponse,
 } from './types.js';
 
+/**
+ * Create a Vault-backed signer.
+ *
+ * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
+ */
 export function createVaultSigner<TAddress extends string = string>(config: VaultSignerConfig): SolanaSigner<TAddress> {
     return VaultSigner.create(config);
 }
@@ -83,7 +89,10 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
             });
         }
 
-        this.vaultAddr = config.vaultAddr.replace(/\/$/, ''); // Remove trailing slash
+        const vaultAddr = config.vaultAddr.replace(/\/$/, ''); // Remove trailing slash
+        validateHttpsVaultAddr(vaultAddr);
+
+        this.vaultAddr = vaultAddr;
         this.vaultToken = config.vaultToken;
         this.keyName = config.keyName;
         this.requestDelayMs = config.requestDelayMs || 0;
@@ -117,13 +126,11 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
 
     /**
      * Extract the base64 signature from Vault's response format
-     * Vault returns signatures in format: "vault:v1:base64_signature"
+     * Vault returns signatures in format: "vault:vN:base64_signature"
      */
     private extractSignatureFromVaultFormat(vaultSignature: string): SignatureBytes {
-        // Remove the version prefix if present, otherwise use the signature as-is
-        const base64Signature = vaultSignature.startsWith('vault:v1:')
-            ? vaultSignature.slice('vault:v1:'.length)
-            : vaultSignature;
+        // Remove any Vault version prefix (vault:v1:, vault:v2:, ...)
+        const base64Signature = vaultSignature.replace(/^vault:v\d+:/, '');
 
         if (!base64Signature) {
             throwSignerError(SignerErrorCode.PARSING_ERROR, {
@@ -169,7 +176,7 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
             try {
                 const errorData = (await response.json()) as VaultErrorResponse;
                 if (errorData.errors && errorData.errors.length > 0) {
-                    errorMessage = `Vault API error: ${errorData.errors.join(', ')}`;
+                    errorMessage = `Vault API error: ${sanitizeRemoteErrorResponse(errorData.errors.join(', '))}`;
                 }
             } catch {
                 // Ignore JSON parsing errors for error response
@@ -279,5 +286,26 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
         } catch {
             return false;
         }
+    }
+}
+
+function validateHttpsVaultAddr(vaultAddr: string): void {
+    let parsedUrl: URL;
+    try {
+        parsedUrl = new URL(vaultAddr);
+    } catch {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'vaultAddr is not a valid URL',
+        });
+    }
+
+    const isLocalhost =
+        parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1' || parsedUrl.hostname === '::1';
+    const allowHttpInTests = process.env.NODE_ENV === 'test' && isLocalhost;
+
+    if (parsedUrl.protocol !== 'https:' && !allowHttpInTests) {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'vaultAddr must use HTTPS',
+        });
     }
 }

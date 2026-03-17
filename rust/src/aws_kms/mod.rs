@@ -1,7 +1,7 @@
 //! AWS KMS signer integration using EdDSA (Ed25519) signing
 
 use crate::sdk_adapter::{Pubkey, Signature, Transaction};
-use crate::traits::SignedTransaction;
+use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::{error::SignerError, traits::SolanaSigner, transaction_util::TransactionUtil};
 use aws_config::Region;
 use aws_sdk_kms::{
@@ -15,6 +15,7 @@ use crate::signature_util::EXPECTED_SIGNATURE_LENGTH;
 
 const AWS_KMS_SIGNING_ALGORITHM: &str = "ED25519_SHA_512";
 const AWS_KMS_KEY_SPEC: &str = "ECC_NIST_EDWARDS25519";
+const AWS_KMS_KEY_USAGE: &str = "SIGN_VERIFY";
 
 /// AWS KMS-based signer using EdDSA (Ed25519) signing
 ///
@@ -194,16 +195,28 @@ impl AwsKmsSigner {
 
         match result {
             Ok(response) => {
-                // Verify the key spec is ECC_NIST_EDWARDS25519
-                if let Some(key_metadata) = response.key_metadata() {
-                    if let Some(key_spec) = key_metadata.key_spec() {
-                        // Check if key spec matches ECC_NIST_EDWARDS25519
-                        // The SDK may represent this as a typed enum or as Unknown("ECC_NIST_EDWARDS25519")
-                        let key_spec_str = key_spec.as_str();
-                        return key_spec_str == AWS_KMS_KEY_SPEC;
-                    }
+                let Some(key_metadata) = response.key_metadata() else {
+                    return false;
+                };
+
+                let Some(key_spec) = key_metadata.key_spec() else {
+                    return false;
+                };
+
+                // The SDK may represent these values as typed enums or Unknown("...") variants.
+                if key_spec.as_str() != AWS_KMS_KEY_SPEC {
+                    return false;
                 }
-                false
+
+                if !key_metadata.enabled() {
+                    return false;
+                }
+
+                let Some(key_usage) = key_metadata.key_usage() else {
+                    return false;
+                };
+
+                key_usage.as_str() == AWS_KMS_KEY_USAGE
             }
             Err(_) => false,
         }
@@ -219,19 +232,16 @@ impl SolanaSigner for AwsKmsSigner {
     async fn sign_transaction(
         &self,
         tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
+    ) -> Result<SignTransactionResult, SignerError> {
+        let signed_transaction = self.sign_and_serialize(tx).await?;
+        Ok(TransactionUtil::classify_signed_transaction(
+            tx,
+            signed_transaction,
+        ))
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign_bytes(message).await
-    }
-
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
     }
 
     async fn is_available(&self) -> bool {
@@ -702,6 +712,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_kms_is_available_wrong_key_usage() {
+        use wiremock::matchers::any;
+
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+
+        // Mock DescribeKey with wrong key usage (not SIGN_VERIFY)
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "KeyMetadata": {
+                    "KeyId": TEST_KEY_ID,
+                    "KeySpec": "ECC_NIST_EDWARDS25519",
+                    "KeyUsage": "ENCRYPT_DECRYPT",
+                    "Enabled": true
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server.uri());
+        let signer = AwsKmsSigner::with_client(
+            client,
+            TEST_KEY_ID.to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .expect("Failed to create AwsKmsSigner");
+
+        assert!(!signer.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_kms_is_available_disabled_key() {
+        use wiremock::matchers::any;
+
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+
+        // Mock DescribeKey with key disabled
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "KeyMetadata": {
+                    "KeyId": TEST_KEY_ID,
+                    "KeySpec": "ECC_NIST_EDWARDS25519",
+                    "KeyUsage": "SIGN_VERIFY",
+                    "Enabled": false
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server.uri());
+        let signer = AwsKmsSigner::with_client(
+            client,
+            TEST_KEY_ID.to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .expect("Failed to create AwsKmsSigner");
+
+        assert!(!signer.is_available().await);
+    }
+
+    #[tokio::test]
     async fn test_kms_sign_transaction_success() {
         use crate::test_util::create_test_transaction;
         use wiremock::matchers::any;
@@ -733,7 +807,7 @@ mod tests {
         let result = signer.sign_transaction(&mut tx).await;
         assert!(result.is_ok());
 
-        let (base64_tx, sig) = result.unwrap();
+        let (base64_tx, sig) = result.unwrap().into_signed_transaction();
         assert!(!base64_tx.is_empty());
         assert_eq!(sig.as_ref().len(), 64);
     }

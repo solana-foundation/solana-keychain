@@ -2,9 +2,11 @@ mod auth;
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::traits::SignTransactionResult;
 pub use crate::traits::SignedTransaction;
 use crate::{
-    error::SignerError, signature_util::EXPECTED_SIGNATURE_LENGTH, traits::SolanaSigner,
+    error::SignerError, http_client_config::HttpClientConfig,
+    signature_util::EXPECTED_SIGNATURE_LENGTH, traits::SolanaSigner,
     transaction_util::TransactionUtil,
 };
 use types::{GenerateSignatureRequest, GenerateSignatureResponse, GetWalletResponse};
@@ -45,6 +47,8 @@ pub struct DfnsSignerConfig {
     pub wallet_id: String,
     /// API base URL (default: "https://api.dfns.io")
     pub api_base_url: Option<String>,
+    /// Optional HTTP client timeout config.
+    pub http_client_config: Option<HttpClientConfig>,
 }
 
 impl DfnsSigner {
@@ -52,6 +56,15 @@ impl DfnsSigner {
     ///
     /// You must call `init()` after construction to fetch the public key from Dfns.
     pub fn new(config: DfnsSignerConfig) -> Self {
+        let http_client_config = config.http_client_config.unwrap_or_default();
+        let builder = reqwest::Client::builder().user_agent("solana-keychain");
+        let builder = builder
+            .timeout(http_client_config.resolved_request_timeout())
+            .connect_timeout(http_client_config.resolved_connect_timeout());
+        #[cfg(not(test))]
+        let builder = builder.https_only(true);
+        let client = builder.build().expect("Failed to build HTTP client");
+
         Self {
             auth_token: config.auth_token,
             cred_id: config.cred_id,
@@ -62,10 +75,7 @@ impl DfnsSigner {
             api_base_url: config
                 .api_base_url
                 .unwrap_or_else(|| "https://api.dfns.io".to_string()),
-            client: reqwest::Client::builder()
-                .user_agent("solana-keychain")
-                .build()
-                .expect("Failed to build HTTP client"),
+            client,
         }
     }
 
@@ -300,19 +310,16 @@ impl SolanaSigner for DfnsSigner {
     async fn sign_transaction(
         &self,
         tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
+    ) -> Result<SignTransactionResult, SignerError> {
+        let signed_transaction = self.sign_and_serialize(tx).await?;
+        Ok(TransactionUtil::classify_signed_transaction(
+            tx,
+            signed_transaction,
+        ))
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign_bytes(message).await
-    }
-
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
     }
 
     async fn is_available(&self) -> bool {
@@ -385,6 +392,7 @@ mod tests {
             private_key_pem: TEST_ED25519_PEM.to_string(),
             wallet_id: "wallet".to_string(),
             api_base_url: None,
+            http_client_config: None,
         });
         assert_eq!(signer.api_base_url, "https://api.dfns.io");
         assert_eq!(signer.public_key, Pubkey::default());
@@ -599,7 +607,7 @@ mod tests {
 
         let result = signer.sign_transaction(&mut transaction).await;
         assert!(result.is_ok());
-        let (_, returned_sig) = result.unwrap();
+        let (_, returned_sig) = result.unwrap().into_signed_transaction();
         assert_eq!(returned_sig, signature);
     }
 

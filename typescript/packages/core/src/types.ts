@@ -24,6 +24,8 @@ export interface SolanaSigner<TAddress extends string = string>
     /**
      * Check if the signer is available and healthy.
      * For remote signers (Vault, Privy, Turnkey), this performs an API health check.
+     *
+     * @throws {SignerError} Some implementations may throw for configuration or initialization errors.
      */
     isAvailable(): Promise<boolean>;
 
@@ -33,6 +35,8 @@ export interface SolanaSigner<TAddress extends string = string>
      *
      * @param messages - Array of signable messages
      * @returns Array of signature dictionaries (address -> signature mapping)
+     * @throws {SignerError} Implementations may throw `SIGNER_CONFIG_ERROR`, `SIGNER_HTTP_ERROR`,
+     * `SIGNER_REMOTE_API_ERROR`, `SIGNER_PARSING_ERROR`, or `SIGNER_SIGNING_FAILED`.
      */
     signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]>;
 
@@ -42,6 +46,8 @@ export interface SolanaSigner<TAddress extends string = string>
      *
      * @param transactions - Array of transactions to sign
      * @returns Array of signature dictionaries (address -> signature mapping)
+     * @throws {SignerError} Implementations may throw `SIGNER_CONFIG_ERROR`, `SIGNER_HTTP_ERROR`,
+     * `SIGNER_REMOTE_API_ERROR`, `SIGNER_PARSING_ERROR`, or `SIGNER_SIGNING_FAILED`.
      */
     signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],

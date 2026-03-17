@@ -77,7 +77,8 @@ mod tests {
         let (base64_txn, signature) = signer
             .sign_transaction(&mut transaction)
             .await
-            .expect("Failed to sign transaction with GCP KMS");
+            .expect("Failed to sign transaction with GCP KMS")
+            .into_signed_transaction();
 
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
         assert!(

@@ -13,6 +13,11 @@ import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from
 
 import type { GcpKmsSignerConfig } from './types.js';
 
+/**
+ * Create a Google Cloud KMS-backed signer.
+ *
+ * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
+ */
 export function createGcpKmsSigner<TAddress extends string = string>(
     config: GcpKmsSignerConfig,
 ): SolanaSigner<TAddress> {

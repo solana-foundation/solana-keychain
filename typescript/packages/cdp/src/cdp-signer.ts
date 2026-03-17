@@ -5,6 +5,7 @@ import {
     base64UrlDecoder,
     createSignatureDictionary,
     extractSignatureFromWireTransaction,
+    sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -21,6 +22,11 @@ import {
 
 import type { CdpSignerConfig, SignMessageResponse, SignTransactionResponse } from './types.js';
 
+/**
+ * Create and initialize a CDP-backed signer.
+ *
+ * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
+ */
 export async function createCdpSigner<TAddress extends string = string>(
     config: CdpSignerConfig,
 ): Promise<SolanaSigner<TAddress>> {
@@ -373,7 +379,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
             const errorText = await response.text().catch(() => 'Failed to read error response');
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                 message: `CDP signMessage API error: ${response.status}`,
-                response: errorText,
+                response: sanitizeRemoteErrorResponse(errorText),
                 status: response.status,
             });
         }
@@ -432,7 +438,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
             const errorText = await response.text().catch(() => 'Failed to read error response');
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                 message: `CDP signTransaction API error: ${response.status}`,
-                response: errorText,
+                response: sanitizeRemoteErrorResponse(errorText),
                 status: response.status,
             });
         }

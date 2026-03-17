@@ -6,11 +6,15 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+const JWT_TTL_SECS: i64 = 120;
+const JWT_SKEW_LEEWAY_SECS: i64 = 60;
+
 #[derive(Serialize)]
 struct FireblocksClaims {
     uri: String,
     nonce: String,
     iat: i64,
+    nbf: i64,
     exp: i64,
     sub: String,
     #[serde(rename = "bodyHash")]
@@ -22,16 +26,17 @@ struct FireblocksClaims {
 /// # Arguments
 ///
 /// * `api_key` - Fireblocks API key (used as subject)
-/// * `private_key_pem` - RSA 4096 private key in PEM format
+/// * `encoding_key` - Parsed RSA encoding key
 /// * `uri` - API endpoint path (e.g., "/v1/transactions")
 /// * `body` - Request body as string (empty string for GET requests)
 pub fn create_jwt(
     api_key: &str,
-    private_key_pem: &str,
+    encoding_key: &EncodingKey,
     uri: &str,
     body: &str,
 ) -> Result<String, SignerError> {
     let now = chrono::Utc::now().timestamp();
+    let issued_at = now - JWT_SKEW_LEEWAY_SECS;
 
     // SHA256 hash of body
     let mut hasher = Sha256::new();
@@ -41,21 +46,15 @@ pub fn create_jwt(
     let claims = FireblocksClaims {
         uri: uri.to_string(),
         nonce: Uuid::new_v4().to_string(),
-        iat: now,
-        exp: now + 30,
+        iat: issued_at,
+        nbf: issued_at,
+        exp: now + JWT_TTL_SECS,
         sub: api_key.to_string(),
         body_hash,
     };
 
-    let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes()).map_err(|_e| {
-        #[cfg(feature = "unsafe-debug")]
-        log::error!("Failed to parse RSA key: {_e}");
-
-        SignerError::InvalidPrivateKey("Failed to parse RSA key".to_string())
-    })?;
-
     let header = Header::new(Algorithm::RS256);
-    encode(&header, &claims, &key).map_err(|_e| {
+    encode(&header, &claims, encoding_key).map_err(|_e| {
         #[cfg(feature = "unsafe-debug")]
         log::error!("Failed to create JWT: {_e}");
 
@@ -63,9 +62,21 @@ pub fn create_jwt(
     })
 }
 
+/// Parse a Fireblocks RSA private key once for token reuse.
+pub fn parse_encoding_key(private_key_pem: &str) -> Result<EncodingKey, SignerError> {
+    EncodingKey::from_rsa_pem(private_key_pem.as_bytes()).map_err(|_e| {
+        #[cfg(feature = "unsafe-debug")]
+        log::error!("Failed to parse RSA key: {_e}");
+
+        SignerError::InvalidPrivateKey("Failed to parse RSA key".to_string())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
+    use serde_json::Value;
 
     // Test RSA key for unit tests only (PKCS#8 format required by jsonwebtoken)
     const TEST_RSA_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
@@ -99,9 +110,10 @@ p6B5CCtpBPgD01Vm+bT/JQ==
 
     #[test]
     fn test_create_jwt() {
+        let encoding_key = parse_encoding_key(TEST_RSA_KEY).expect("failed to parse RSA key");
         let result = create_jwt(
             "test-api-key",
-            TEST_RSA_KEY,
+            &encoding_key,
             "/v1/transactions",
             r#"{"test": "body"}"#,
         );
@@ -110,17 +122,29 @@ p6B5CCtpBPgD01Vm+bT/JQ==
         let jwt = result.unwrap();
         // JWT should have 3 parts separated by dots
         assert_eq!(jwt.split('.').count(), 3);
+
+        let payload = decode_jwt_payload(&jwt);
+        let iat = payload["iat"].as_i64().expect("iat should be present");
+        let nbf = payload["nbf"].as_i64().expect("nbf should be present");
+        let exp = payload["exp"].as_i64().expect("exp should be present");
+
+        assert_eq!(iat, nbf);
+        assert_eq!(exp - iat, JWT_TTL_SECS + JWT_SKEW_LEEWAY_SECS);
     }
 
     #[test]
     fn test_create_jwt_invalid_key() {
-        let result = create_jwt(
-            "test-api-key",
-            "invalid-key",
-            "/v1/transactions",
-            r#"{"test": "body"}"#,
-        );
+        let result = parse_encoding_key("invalid-key");
 
         assert!(result.is_err());
+    }
+
+    fn decode_jwt_payload(jwt: &str) -> Value {
+        let parts: Vec<&str> = jwt.split('.').collect();
+        let payload_b64 = parts.get(1).expect("jwt payload should exist");
+        let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(payload_b64)
+            .expect("payload should be base64url");
+        serde_json::from_slice::<Value>(&payload_bytes).expect("payload should be valid json")
     }
 }

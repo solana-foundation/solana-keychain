@@ -13,7 +13,18 @@ import { TurnkeySigner } from '../turnkey-signer.js';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
-    return { ...mod, assertSignatureValid: vi.fn() };
+    return {
+        ...mod,
+        assertSignatureValid: vi.fn(),
+        sanitizeRemoteErrorResponse:
+            mod.sanitizeRemoteErrorResponse ??
+            ((text: string) =>
+                `${text
+                    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .slice(0, 256)} [truncated]`),
+    };
 });
 
 global.fetch = vi.fn();
@@ -178,6 +189,24 @@ describe('TurnkeySigner', () => {
                 const invalidConfig = { ...mockConfig, publicKey: 'not-a-valid-address' };
 
                 expect(() => new TurnkeySigner(invalidConfig)).toThrow();
+            });
+
+            it('throws CONFIG_ERROR when apiBaseUrl is not a valid URL', async () => {
+                const keyPair = await generateKeyPairSigner();
+                const invalidConfig = { ...mockConfig, apiBaseUrl: 'not-a-url', publicKey: keyPair.address };
+
+                expect(() => new TurnkeySigner(invalidConfig)).toThrow('apiBaseUrl is not a valid URL');
+            });
+
+            it('throws CONFIG_ERROR when apiBaseUrl does not use HTTPS', async () => {
+                const keyPair = await generateKeyPairSigner();
+                const invalidConfig = {
+                    ...mockConfig,
+                    apiBaseUrl: 'http://api.turnkey.test',
+                    publicKey: keyPair.address,
+                };
+
+                expect(() => new TurnkeySigner(invalidConfig)).toThrow('apiBaseUrl must use HTTPS');
             });
         });
     });
@@ -353,6 +382,30 @@ describe('TurnkeySigner', () => {
             });
         });
 
+        it('throws structured SIGNER_REMOTE_API_ERROR for malformed response shape', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            const config = {
+                ...mockConfig,
+                publicKey: keyPair.address,
+            };
+
+            const signer = new TurnkeySigner(config);
+
+            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+                json: () => Promise.resolve({}),
+                ok: true,
+                status: 200,
+            });
+
+            const message = createSignableMessage(new Uint8Array([1, 2, 3, 4]));
+
+            await expect(signer.signMessages([message])).rejects.toMatchObject({
+                code: 'SIGNER_REMOTE_API_ERROR',
+                message: expect.stringContaining('Missing signature components'),
+            });
+        });
+
         it('throws REMOTE_API_ERROR when signature components are missing', async () => {
             const keyPair = await generateKeyPairSigner();
 
@@ -449,6 +502,30 @@ describe('TurnkeySigner', () => {
             await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
                 code: 'SIGNER_PARSING_ERROR',
                 message: expect.stringContaining('Failed to parse Turnkey response'),
+            });
+        });
+
+        it('throws structured SIGNER_REMOTE_API_ERROR for malformed transaction response shape', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            const config = {
+                ...mockConfig,
+                publicKey: keyPair.address,
+            };
+
+            const signer = new TurnkeySigner(config);
+
+            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+                json: () => Promise.resolve({}),
+                ok: true,
+                status: 200,
+            });
+
+            const mockTx = createMockTransaction();
+
+            await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
+                code: 'SIGNER_REMOTE_API_ERROR',
+                message: expect.stringContaining('Missing signedTransaction'),
             });
         });
 

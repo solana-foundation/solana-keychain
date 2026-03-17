@@ -3,6 +3,8 @@ import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 import { importPKCS8, SignJWT } from 'jose';
 
 let base16Decoder: ReturnType<typeof getBase16Decoder> | undefined;
+const JWT_TTL_SECS = 120;
+const JWT_SKEW_LEEWAY_SECS = 60;
 
 /**
  * Create a JWT for Fireblocks API authentication
@@ -25,6 +27,7 @@ export async function createJwt(apiKey: string, privateKeyPem: string, uri: stri
         const nonce = crypto.randomUUID();
 
         const now = Math.floor(Date.now() / 1000);
+        const issuedAt = now - JWT_SKEW_LEEWAY_SECS;
 
         const jwt = await new SignJWT({
             bodyHash,
@@ -33,8 +36,9 @@ export async function createJwt(apiKey: string, privateKeyPem: string, uri: stri
         })
             .setProtectedHeader({ alg: 'RS256' })
             .setSubject(apiKey)
-            .setIssuedAt(now)
-            .setExpirationTime(now + 30)
+            .setIssuedAt(issuedAt)
+            .setNotBefore(issuedAt)
+            .setExpirationTime(now + JWT_TTL_SECS)
             .sign(privateKey);
 
         return jwt;

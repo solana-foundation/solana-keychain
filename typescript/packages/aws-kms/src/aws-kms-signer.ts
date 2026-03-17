@@ -13,6 +13,11 @@ import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from
 
 import type { AwsCredentials, AwsKmsSignerConfig } from './types.js';
 
+/**
+ * Create an AWS KMS-backed signer.
+ *
+ * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
+ */
 export function createAwsKmsSigner<TAddress extends string = string>(
     config: AwsKmsSignerConfig,
 ): SolanaSigner<TAddress> {

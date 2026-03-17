@@ -3,6 +3,7 @@ import { getBase16Decoder, getBase16Encoder, getBase58Encoder } from '@solana/co
 import {
     assertSignatureValid,
     createSignatureDictionary,
+    sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -26,6 +27,13 @@ import type {
 } from './types.js';
 import { FireblocksTransactionStatus, isTerminalStatus } from './types.js';
 
+/**
+ * Create and initialize a Fireblocks-backed signer.
+ *
+ * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
+ * @throws {SignerError} `SIGNER_HTTP_ERROR`, `SIGNER_REMOTE_API_ERROR`, `SIGNER_PARSING_ERROR`,
+ * or `SIGNER_INVALID_PUBLIC_KEY` when signer initialization fails.
+ */
 export async function createFireblocksSigner<TAddress extends string = string>(
     config: FireblocksSignerConfig,
 ): Promise<SolanaSigner<TAddress>> {
@@ -108,7 +116,10 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         this.privateKeyPem = config.privateKeyPem;
         this.vaultAccountId = config.vaultAccountId;
         this.assetId = config.assetId ?? DEFAULT_ASSET_ID;
-        this.apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
+        const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
+        validateHttpsApiBaseUrl(apiBaseUrl);
+
+        this.apiBaseUrl = apiBaseUrl;
         this.pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
         this.maxPollAttempts = config.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS;
         this.requestDelayMs = config.requestDelayMs ?? 0;
@@ -198,7 +209,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
             const errorText = await response.text().catch(() => 'Failed to read error response');
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                 message: `Fireblocks API error: ${response.status}`,
-                response: errorText,
+                response: sanitizeRemoteErrorResponse(errorText),
                 status: response.status,
             });
         }
@@ -213,7 +224,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
             });
         }
 
-        const firstAddress = addressesResponse.addresses[0]?.address;
+        const firstAddress = addressesResponse.addresses?.[0]?.address;
         if (!firstAddress) {
             throwSignerError(SignerErrorCode.INVALID_PUBLIC_KEY, {
                 message: 'No addresses found in Fireblocks vault',
@@ -262,7 +273,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
             const errorText = await response.text().catch(() => 'Failed to read error response');
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                 message: `Fireblocks API error: ${response.status}`,
-                response: errorText,
+                response: sanitizeRemoteErrorResponse(errorText),
                 status: response.status,
             });
         }
@@ -481,5 +492,22 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                 message: 'Signer not initialized. Call init() first.',
             });
         }
+    }
+}
+
+function validateHttpsApiBaseUrl(apiBaseUrl: string): void {
+    let parsedUrl: URL;
+    try {
+        parsedUrl = new URL(apiBaseUrl);
+    } catch {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'apiBaseUrl is not a valid URL',
+        });
+    }
+
+    if (parsedUrl.protocol !== 'https:') {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'apiBaseUrl must use HTTPS',
+        });
     }
 }

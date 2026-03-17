@@ -79,7 +79,8 @@ mod tests {
         let (base64_txn, signature) = signer
             .sign_transaction(&mut transaction)
             .await
-            .expect("Failed to sign transaction with CDP");
+            .expect("Failed to sign transaction with CDP")
+            .into_signed_transaction();
 
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
         assert!(

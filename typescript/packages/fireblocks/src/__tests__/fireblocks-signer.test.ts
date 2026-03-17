@@ -8,7 +8,18 @@ import { TEST_API_KEY, TEST_RSA_PRIVATE_KEY, TEST_VAULT_ACCOUNT_ID } from './set
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
-    return { ...mod, assertSignatureValid: vi.fn() };
+    return {
+        ...mod,
+        assertSignatureValid: vi.fn(),
+        sanitizeRemoteErrorResponse:
+            mod.sanitizeRemoteErrorResponse ??
+            ((text: string) =>
+                `${text
+                    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .slice(0, 256)} [truncated]`),
+    };
 });
 
 // Mock fetch globally
@@ -61,6 +72,28 @@ describe('FireblocksSigner', () => {
                     vaultAccountId: '',
                 });
             }).toThrow('Missing required vaultAccountId field');
+        });
+
+        it('should throw error when apiBaseUrl is not a valid URL', () => {
+            expect(() => {
+                new FireblocksSigner({
+                    apiBaseUrl: 'not-a-url',
+                    apiKey: TEST_API_KEY,
+                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                });
+            }).toThrow('apiBaseUrl is not a valid URL');
+        });
+
+        it('should throw error when apiBaseUrl does not use HTTPS', () => {
+            expect(() => {
+                new FireblocksSigner({
+                    apiBaseUrl: 'http://api.fireblocks.test',
+                    apiKey: TEST_API_KEY,
+                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                });
+            }).toThrow('apiBaseUrl must use HTTPS');
         });
 
         it('should validate requestDelayMs', () => {
@@ -222,6 +255,24 @@ describe('FireblocksSigner', () => {
             });
 
             await expect(signer.init()).rejects.toThrow('Invalid address from Fireblocks');
+        });
+
+        it('should throw structured error on malformed address response shape', async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({}),
+            });
+
+            const signer = new FireblocksSigner({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+
+            await expect(signer.init()).rejects.toMatchObject({
+                code: 'SIGNER_INVALID_PUBLIC_KEY',
+                message: expect.stringContaining('No addresses found in Fireblocks vault'),
+            });
         });
 
         it('should not re-initialize if already initialized', async () => {

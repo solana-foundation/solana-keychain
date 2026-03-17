@@ -4,10 +4,14 @@ mod jwt;
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::traits::SignTransactionResult;
 pub use crate::traits::SignedTransaction;
-use crate::{error::SignerError, traits::SolanaSigner, transaction_util::TransactionUtil};
+use crate::{
+    error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner,
+    transaction_util::TransactionUtil,
+};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 use types::{
     CreateTransactionRequest, CreateTransactionResponse, ExtraParameters,
     ProgramCallExtraParameters, RawExtraParameters, RawMessage, RawMessageData,
@@ -20,10 +24,10 @@ use crate::signature_util::EXPECTED_SIGNATURE_LENGTH;
 #[derive(Clone)]
 pub struct FireblocksSigner {
     api_key: String,
-    private_key_pem: String,
+    signing_key: Option<Arc<jsonwebtoken::EncodingKey>>,
     vault_account_id: String,
     asset_id: String,
-    public_key: Pubkey,
+    public_key: Option<Pubkey>,
     api_base_url: String,
     client: reqwest::Client,
     poll_interval_ms: u64,
@@ -56,6 +60,8 @@ pub struct FireblocksSignerConfig {
     /// Use PROGRAM_CALL operation for transaction signing (auto-broadcasts to Solana).
     /// Default: false (uses RAW signing)
     pub use_program_call: Option<bool>,
+    /// Optional HTTP client timeout config.
+    pub http_client_config: Option<HttpClientConfig>,
 }
 
 impl FireblocksSigner {
@@ -67,16 +73,28 @@ impl FireblocksSigner {
     ///
     /// * `config` - Configuration for the signer
     pub fn new(config: FireblocksSignerConfig) -> Self {
+        let http_client_config = config.http_client_config.unwrap_or_default();
+        let builder = reqwest::Client::builder();
+        let builder = builder
+            .timeout(http_client_config.resolved_request_timeout())
+            .connect_timeout(http_client_config.resolved_connect_timeout());
+        #[cfg(not(test))]
+        let builder = builder.https_only(true);
+        let client = builder.build().expect("Failed to build HTTP client");
+        let signing_key = jwt::parse_encoding_key(&config.private_key_pem)
+            .ok()
+            .map(Arc::new);
+
         Self {
             api_key: config.api_key,
-            private_key_pem: config.private_key_pem,
+            signing_key,
             vault_account_id: config.vault_account_id,
             asset_id: config.asset_id.unwrap_or_else(|| "SOL".to_string()),
-            public_key: Pubkey::default(),
+            public_key: None,
             api_base_url: config
                 .api_base_url
                 .unwrap_or_else(|| "https://api.fireblocks.io".to_string()),
-            client: reqwest::Client::new(),
+            client,
             poll_interval_ms: config.poll_interval_ms.unwrap_or(1000),
             max_poll_attempts: config.max_poll_attempts.unwrap_or(300),
             use_program_call: config.use_program_call.unwrap_or(false),
@@ -86,8 +104,24 @@ impl FireblocksSigner {
     /// Initialize the signer by fetching the public key from Fireblocks
     pub async fn init(&mut self) -> Result<(), SignerError> {
         let pubkey = self.fetch_public_key().await?;
-        self.public_key = pubkey;
+        self.public_key = Some(pubkey);
         Ok(())
+    }
+
+    fn initialized_pubkey(&self) -> Result<Pubkey, SignerError> {
+        self.public_key.ok_or_else(|| {
+            SignerError::ConfigError(
+                "FireblocksSigner is not initialized; call init() before signing".to_string(),
+            )
+        })
+    }
+
+    fn create_auth_token(&self, uri: &str, body: &str) -> Result<String, SignerError> {
+        let signing_key = self
+            .signing_key
+            .as_ref()
+            .ok_or_else(|| SignerError::InvalidPrivateKey("Failed to parse RSA key".to_string()))?;
+        jwt::create_jwt(&self.api_key, signing_key, uri, body)
     }
 
     /// Fetch the public key from Fireblocks vault account addresses
@@ -96,7 +130,7 @@ impl FireblocksSigner {
             "/v1/vault/accounts/{}/{}/addresses_paginated",
             self.vault_account_id, self.asset_id
         );
-        let token = jwt::create_jwt(&self.api_key, &self.private_key_pem, &uri, "")?;
+        let token = self.create_auth_token(&uri, "")?;
 
         let url = format!("{}{}", self.api_base_url, uri);
         let response = self
@@ -149,6 +183,8 @@ impl FireblocksSigner {
 
     /// Sign raw bytes using RAW operation
     async fn sign_raw_bytes(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        let public_key = self.initialized_pubkey()?;
+
         let hex_message = hex::encode(message);
 
         let request = CreateTransactionRequest {
@@ -169,7 +205,7 @@ impl FireblocksSigner {
 
         let sig = self.request_and_poll_signature(request).await?;
 
-        if !sig.verify(&self.public_key.to_bytes(), message) {
+        if !sig.verify(&public_key.to_bytes(), message) {
             return Err(SignerError::SigningFailed(
                 "Signature verification failed — the returned signature does not match the public key".to_string(),
             ));
@@ -189,6 +225,8 @@ impl FireblocksSigner {
         &self,
         transaction: &Transaction,
     ) -> Result<Signature, SignerError> {
+        self.initialized_pubkey()?;
+
         let serialized = bincode::serialize(transaction).map_err(|e| {
             SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
         })?;
@@ -227,7 +265,7 @@ impl FireblocksSigner {
     ) -> Result<CreateTransactionResponse, SignerError> {
         let uri = "/v1/transactions";
         let body = serde_json::to_string(&request)?;
-        let token = jwt::create_jwt(&self.api_key, &self.private_key_pem, uri, &body)?;
+        let token = self.create_auth_token(uri, &body)?;
 
         let url = format!("{}{}", self.api_base_url, uri);
         let response = self
@@ -300,7 +338,7 @@ impl FireblocksSigner {
     /// Get transaction status
     async fn get_transaction(&self, tx_id: &str) -> Result<TransactionResponse, SignerError> {
         let uri = format!("/v1/transactions/{}", tx_id);
-        let token = jwt::create_jwt(&self.api_key, &self.private_key_pem, &uri, "")?;
+        let token = self.create_auth_token(&uri, "")?;
 
         let url = format!("{}{}", self.api_base_url, uri);
         let response = self
@@ -402,6 +440,7 @@ impl FireblocksSigner {
         &self,
         transaction: &mut Transaction,
     ) -> Result<SignedTransaction, SignerError> {
+        let public_key = self.initialized_pubkey()?;
         let signature = if self.use_program_call {
             // PROGRAM_CALL: signs and auto-broadcasts to Solana
             self.sign_with_program_call(transaction).await?
@@ -411,7 +450,7 @@ impl FireblocksSigner {
             self.sign_raw_bytes(&message_bytes).await?
         };
 
-        TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
+        TransactionUtil::add_signature_to_transaction(transaction, &public_key, signature)?;
 
         Ok((
             TransactionUtil::serialize_transaction(transaction)?,
@@ -421,8 +460,12 @@ impl FireblocksSigner {
 
     /// Check if Fireblocks API is available
     async fn check_availability(&self) -> bool {
+        if self.public_key.is_none() {
+            return false;
+        }
+
         let uri = format!("/v1/vault/accounts/{}", self.vault_account_id);
-        let token = match jwt::create_jwt(&self.api_key, &self.private_key_pem, &uri, "") {
+        let token = match self.create_auth_token(&uri, "") {
             Ok(t) => t,
             Err(_) => return false,
         };
@@ -446,25 +489,22 @@ impl FireblocksSigner {
 #[async_trait::async_trait]
 impl SolanaSigner for FireblocksSigner {
     fn pubkey(&self) -> Pubkey {
-        self.public_key
+        self.public_key.unwrap_or_default()
     }
 
     async fn sign_transaction(
         &self,
         tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
+    ) -> Result<SignTransactionResult, SignerError> {
+        let signed_transaction = self.sign_and_serialize(tx).await?;
+        Ok(TransactionUtil::classify_signed_transaction(
+            tx,
+            signed_transaction,
+        ))
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign_raw_bytes(message).await
-    }
-
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
     }
 
     async fn is_available(&self) -> bool {
@@ -513,13 +553,17 @@ p6B5CCtpBPgD01Vm+bT/JQ==
 
     const TEST_PUBKEY: &str = "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV";
 
+    fn test_signing_key() -> Arc<jsonwebtoken::EncodingKey> {
+        Arc::new(jwt::parse_encoding_key(TEST_RSA_KEY).expect("failed to parse test RSA key"))
+    }
+
     fn create_test_signer_uninit(base_url: &str) -> FireblocksSigner {
         FireblocksSigner {
             api_key: "test-api-key".to_string(),
-            private_key_pem: TEST_RSA_KEY.to_string(),
+            signing_key: Some(test_signing_key()),
             vault_account_id: "test-vault-id".to_string(),
             asset_id: "SOL".to_string(),
-            public_key: Pubkey::default(),
+            public_key: None,
             api_base_url: base_url.to_string(),
             client: reqwest::Client::new(),
             poll_interval_ms: 10,
@@ -531,10 +575,10 @@ p6B5CCtpBPgD01Vm+bT/JQ==
     fn create_test_signer(base_url: &str) -> FireblocksSigner {
         FireblocksSigner {
             api_key: "test-api-key".to_string(),
-            private_key_pem: TEST_RSA_KEY.to_string(),
+            signing_key: Some(test_signing_key()),
             vault_account_id: "test-vault-id".to_string(),
             asset_id: "SOL".to_string(),
-            public_key: Pubkey::from_str(TEST_PUBKEY).unwrap(),
+            public_key: Some(Pubkey::from_str(TEST_PUBKEY).unwrap()),
             api_base_url: base_url.to_string(),
             client: reqwest::Client::new(),
             poll_interval_ms: 10,
@@ -546,10 +590,10 @@ p6B5CCtpBPgD01Vm+bT/JQ==
     fn create_test_signer_program_call(base_url: &str) -> FireblocksSigner {
         FireblocksSigner {
             api_key: "test-api-key".to_string(),
-            private_key_pem: TEST_RSA_KEY.to_string(),
+            signing_key: Some(test_signing_key()),
             vault_account_id: "test-vault-id".to_string(),
             asset_id: "SOL".to_string(),
-            public_key: Pubkey::from_str(TEST_PUBKEY).unwrap(),
+            public_key: Some(Pubkey::from_str(TEST_PUBKEY).unwrap()),
             api_base_url: base_url.to_string(),
             client: reqwest::Client::new(),
             poll_interval_ms: 10,
@@ -569,9 +613,10 @@ p6B5CCtpBPgD01Vm+bT/JQ==
             poll_interval_ms: None,
             max_poll_attempts: None,
             use_program_call: None,
+            http_client_config: None,
         });
         assert_eq!(signer.asset_id, "SOL");
-        assert_eq!(signer.public_key, Pubkey::default());
+        assert_eq!(signer.public_key, None);
         assert!(!signer.use_program_call); // Default is RAW (matching other signers)
     }
 
@@ -623,7 +668,7 @@ p6B5CCtpBPgD01Vm+bT/JQ==
         let sig_hex = hex::encode(signature.as_ref());
 
         let mut signer = create_test_signer(&mock_server.uri());
-        signer.public_key = keypair_pubkey(&keypair);
+        signer.public_key = Some(keypair_pubkey(&keypair));
 
         // Mock create transaction
         Mock::given(method("POST"))
@@ -672,6 +717,14 @@ p6B5CCtpBPgD01Vm+bT/JQ==
 
         let result = signer.sign_message(b"test").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_sign_message_requires_init() {
+        let signer = create_test_signer_uninit("http://localhost");
+        let result = signer.sign_message(b"test").await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
     }
 
     #[tokio::test]
@@ -738,6 +791,12 @@ p6B5CCtpBPgD01Vm+bT/JQ==
     }
 
     #[tokio::test]
+    async fn test_is_available_uninitialized_false() {
+        let signer = create_test_signer_uninit("http://localhost");
+        assert!(!signer.is_available().await);
+    }
+
+    #[tokio::test]
     async fn test_sign_transaction_program_call() {
         use crate::test_util::create_test_transaction;
 
@@ -778,8 +837,20 @@ p6B5CCtpBPgD01Vm+bT/JQ==
         let mut transaction = create_test_transaction(&signer.pubkey());
         let result = signer.sign_transaction(&mut transaction).await;
         assert!(result.is_ok());
-        let (_, signature) = result.unwrap();
+        let (_, signature) = result.unwrap().into_signed_transaction();
         assert_eq!(signature.as_ref(), &sig_bytes);
+    }
+
+    #[tokio::test]
+    async fn test_sign_transaction_requires_init() {
+        use crate::test_util::create_test_transaction;
+
+        let signer = create_test_signer_uninit("http://localhost");
+        let mut transaction = create_test_transaction(&Pubkey::new_unique());
+
+        let result = signer.sign_transaction(&mut transaction).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
     }
 
     #[test]
@@ -794,6 +865,7 @@ p6B5CCtpBPgD01Vm+bT/JQ==
             poll_interval_ms: None,
             max_poll_attempts: None,
             use_program_call: Some(true),
+            http_client_config: None,
         });
         assert!(signer_program_call.use_program_call);
 
@@ -807,6 +879,7 @@ p6B5CCtpBPgD01Vm+bT/JQ==
             poll_interval_ms: None,
             max_poll_attempts: None,
             use_program_call: Some(false),
+            http_client_config: None,
         });
         assert!(!signer_raw.use_program_call);
     }

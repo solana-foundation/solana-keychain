@@ -13,7 +13,18 @@ import { PrivySigner } from '../privy-signer.js';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
-    return { ...mod, assertSignatureValid: vi.fn() };
+    return {
+        ...mod,
+        assertSignatureValid: vi.fn(),
+        sanitizeRemoteErrorResponse:
+            mod.sanitizeRemoteErrorResponse ??
+            ((text: string) =>
+                `${text
+                    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .slice(0, 256)} [truncated]`),
+    };
 });
 
 global.fetch = vi.fn();
@@ -136,6 +147,22 @@ describe('PrivySigner', () => {
                 await expect(PrivySigner.create(invalidConfig)).rejects.toMatchObject({
                     code: 'SIGNER_CONFIG_ERROR',
                     message: expect.stringContaining('Missing required configuration fields'),
+                });
+            });
+
+            it('throws CONFIG_ERROR when apiBaseUrl is not a valid URL', async () => {
+                const invalidConfig = { ...mockConfig, apiBaseUrl: 'not-a-url' };
+                await expect(PrivySigner.create(invalidConfig)).rejects.toMatchObject({
+                    code: 'SIGNER_CONFIG_ERROR',
+                    message: expect.stringContaining('apiBaseUrl is not a valid URL'),
+                });
+            });
+
+            it('throws CONFIG_ERROR when apiBaseUrl does not use HTTPS', async () => {
+                const invalidConfig = { ...mockConfig, apiBaseUrl: 'http://api.privy.test' };
+                await expect(PrivySigner.create(invalidConfig)).rejects.toMatchObject({
+                    code: 'SIGNER_CONFIG_ERROR',
+                    message: expect.stringContaining('apiBaseUrl must use HTTPS'),
                 });
             });
         });
@@ -284,6 +311,35 @@ describe('PrivySigner', () => {
             const mockTx = createMockTransaction();
 
             await expect(signer.signTransactions([mockTx])).rejects.toThrow();
+        });
+
+        it('sanitizes remote API error text in error context', async () => {
+            const keyPair = await generateKeyPairSigner();
+            setupMockWalletResponse(keyPair.address);
+            const signer = await PrivySigner.create(mockConfig);
+
+            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+                ok: false,
+                status: 500,
+                text: () => Promise.resolve(`topsecret\n\n${'x'.repeat(600)}\u0000`),
+            });
+
+            const mockTx = createMockTransaction();
+
+            try {
+                await signer.signTransactions([mockTx]);
+                throw new Error('Expected signTransactions to throw');
+            } catch (error) {
+                if (!error || typeof error !== 'object' || !('code' in error) || !('context' in error)) {
+                    throw error;
+                }
+
+                const signerError = error as { code: string; context?: { response?: string } };
+                expect(signerError.code).toBe('SIGNER_REMOTE_API_ERROR');
+                expect(signerError.context?.response).toContain('[truncated]');
+                expect(signerError.context?.response).not.toContain('\n');
+                expect(signerError.context?.response).not.toContain('\u0000');
+            }
         });
 
         it('throws HTTP_ERROR when fetch fails during transaction signing', async () => {

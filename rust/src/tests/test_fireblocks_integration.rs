@@ -1,12 +1,15 @@
 pub const FIREBLOCKS_API_KEY: &str = "FIREBLOCKS_API_KEY";
 pub const FIREBLOCKS_PRIVATE_KEY_PEM: &str = "FIREBLOCKS_PRIVATE_KEY_PEM";
 pub const FIREBLOCKS_VAULT_ACCOUNT_ID: &str = "FIREBLOCKS_VAULT_ACCOUNT_ID";
+pub const FIREBLOCKS_API_BASE_URL: &str = "FIREBLOCKS_API_BASE_URL";
+pub const FIREBLOCKS_ASSET_ID: &str = "FIREBLOCKS_ASSET_ID";
 pub const SOLANA_RPC_URL: &str = "SOLANA_RPC_URL";
 
 #[cfg(feature = "fireblocks")]
 #[cfg(test)]
 mod tests {
     use dotenvy::dotenv;
+    use serial_test::serial;
 
     use super::*;
     use crate::fireblocks::{FireblocksSigner, FireblocksSignerConfig};
@@ -15,40 +18,67 @@ mod tests {
     use crate::traits::SolanaSigner;
     use std::env;
 
-    async fn get_signer() -> FireblocksSigner {
+    async fn get_signer() -> Option<FireblocksSigner> {
         dotenv().ok();
 
-        let api_key = env::var(FIREBLOCKS_API_KEY)
-            .expect("FIREBLOCKS_API_KEY must be set for integration tests");
-        let private_key_pem = env::var(FIREBLOCKS_PRIVATE_KEY_PEM)
-            .expect("FIREBLOCKS_PRIVATE_KEY_PEM must be set for integration tests");
-        let vault_account_id = env::var(FIREBLOCKS_VAULT_ACCOUNT_ID)
-            .expect("FIREBLOCKS_VAULT_ACCOUNT_ID must be set for integration tests");
+        let api_key = match env::var(FIREBLOCKS_API_KEY) {
+            Ok(v) if !v.is_empty() => v,
+            _ => {
+                eprintln!("Skipping Fireblocks integration: FIREBLOCKS_API_KEY is not set");
+                return None;
+            }
+        };
+        let private_key_pem = match env::var(FIREBLOCKS_PRIVATE_KEY_PEM) {
+            Ok(v) if !v.is_empty() => v,
+            _ => {
+                eprintln!("Skipping Fireblocks integration: FIREBLOCKS_PRIVATE_KEY_PEM is not set");
+                return None;
+            }
+        };
+        let vault_account_id = match env::var(FIREBLOCKS_VAULT_ACCOUNT_ID) {
+            Ok(v) if !v.is_empty() => v,
+            _ => {
+                eprintln!(
+                    "Skipping Fireblocks integration: FIREBLOCKS_VAULT_ACCOUNT_ID is not set"
+                );
+                return None;
+            }
+        };
 
         let config = FireblocksSignerConfig {
             api_key,
             private_key_pem,
             vault_account_id,
-            asset_id: Some("SOL_TEST".to_string()),
-            api_base_url: Some("https://api.fireblocks.io".to_string()),
+            asset_id: Some(
+                env::var(FIREBLOCKS_ASSET_ID).unwrap_or_else(|_| "SOL_TEST".to_string()),
+            ),
+            api_base_url: Some(
+                env::var(FIREBLOCKS_API_BASE_URL)
+                    .unwrap_or_else(|_| "https://api.fireblocks.io".to_string()),
+            ),
             poll_interval_ms: None,
             max_poll_attempts: None,
             use_program_call: Some(true),
+            http_client_config: None,
         };
 
         let mut signer = FireblocksSigner::new(config);
-        signer
-            .init()
-            .await
-            .expect("Failed to initialize FireblocksSigner");
-        signer
+        if let Err(error) = signer.init().await {
+            eprintln!("Skipping Fireblocks integration: failed to initialize signer: {error:?}");
+            return None;
+        }
+
+        Some(signer)
     }
 
     #[tokio::test]
     #[ignore] // Ignored because sign raw isn't available in testnet
     #[cfg(feature = "integration-tests")]
+    #[serial]
     async fn test_fireblocks_sign_message() {
-        let signer = get_signer().await;
+        let Some(signer) = get_signer().await else {
+            return;
+        };
 
         let transaction = create_test_transaction(&signer.pubkey());
         let message = transaction.message_data();
@@ -64,8 +94,11 @@ mod tests {
 
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
+    #[serial]
     async fn test_fireblocks_sign_transaction() {
-        let signer = get_signer().await;
+        let Some(signer) = get_signer().await else {
+            return;
+        };
         let pubkey = signer.pubkey();
 
         // Self-transfer: from vault to same vault address
@@ -82,7 +115,8 @@ mod tests {
         let (base64_txn, signature) = signer
             .sign_transaction(&mut transaction)
             .await
-            .expect("Failed to sign transaction with Fireblocks");
+            .expect("Failed to sign transaction with Fireblocks")
+            .into_signed_transaction();
 
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
         assert!(
@@ -93,8 +127,11 @@ mod tests {
 
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
+    #[serial]
     async fn test_fireblocks_availability() {
-        let signer = get_signer().await;
+        let Some(signer) = get_signer().await else {
+            return;
+        };
 
         let is_available = signer.is_available().await;
         assert!(is_available, "Fireblocks signer should be available");

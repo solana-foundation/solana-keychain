@@ -3,6 +3,7 @@ import { getBase16Decoder, getBase16Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
     createSignatureDictionary,
+    sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -13,6 +14,13 @@ import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from
 
 import type { ParaErrorResponse, ParaSignRawRequest, ParaSignRawResponse, ParaWalletResponse } from './types.js';
 
+/**
+ * Create and initialize a Para-backed signer.
+ *
+ * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
+ * @throws {SignerError} `SIGNER_HTTP_ERROR`, `SIGNER_REMOTE_API_ERROR`, or `SIGNER_PARSING_ERROR`
+ * when initialization fails.
+ */
 export async function createParaSigner<TAddress extends string = string>(
     config: ParaSignerConfig,
 ): Promise<SolanaSigner<TAddress>> {
@@ -334,7 +342,7 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
         try {
             const errorData = (await response.json()) as ParaErrorResponse;
             if (errorData.message) {
-                errorMessage = `${fallback}: ${errorData.message}`;
+                errorMessage = `${fallback}: ${sanitizeRemoteErrorResponse(errorData.message)}`;
             }
         } catch {
             // Ignore JSON parsing errors for error response

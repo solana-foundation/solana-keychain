@@ -7,43 +7,43 @@ use thiserror::Error;
 #[derive(Error)]
 pub enum SignerError {
     /// Invalid private key format
-    #[error("Invalid private key format: {0}")]
+    #[error("Invalid private key format")]
     InvalidPrivateKey(String),
 
     /// Invalid public key format
-    #[error("Invalid public key: {0}")]
+    #[error("Invalid public key")]
     InvalidPublicKey(String),
 
     /// Signing operation failed
-    #[error("Signing failed: {0}")]
+    #[error("Signing failed")]
     SigningFailed(String),
 
     /// Remote API error (Vault, Privy, Turnkey)
-    #[error("Remote API error: {0}")]
+    #[error("Remote API error")]
     RemoteApiError(String),
 
     /// HTTP request error
-    #[error("HTTP request failed: {0}")]
+    #[error("HTTP request failed")]
     HttpError(String),
 
     /// Serialization/deserialization error
-    #[error("Serialization error: {0}")]
+    #[error("Serialization error")]
     SerializationError(String),
 
     /// Configuration error
-    #[error("Configuration error: {0}")]
+    #[error("Configuration error")]
     ConfigError(String),
 
     /// Signer not available
-    #[error("Signer not available: {0}")]
+    #[error("Signer not available")]
     NotAvailable(String),
 
     /// IO error (file operations)
-    #[error("IO error: {0}")]
+    #[error("IO error")]
     IoError(String),
 
     /// Generic error
-    #[error("{0}")]
+    #[error("Signer error")]
     Other(String),
 }
 
@@ -97,5 +97,79 @@ impl fmt::Debug for SignerError {
             SignerError::IoError(_) => write!(f, "SignerError::IoError([REDACTED])"),
             SignerError::Other(_) => write!(f, "SignerError::Other([REDACTED])"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SignerError;
+
+    #[test]
+    fn test_display_is_redacted_for_all_variants() {
+        let secret = "sensitive-secret-material";
+        let cases = [
+            SignerError::InvalidPrivateKey(secret.to_string()),
+            SignerError::InvalidPublicKey(secret.to_string()),
+            SignerError::SigningFailed(secret.to_string()),
+            SignerError::RemoteApiError(secret.to_string()),
+            SignerError::HttpError(secret.to_string()),
+            SignerError::SerializationError(secret.to_string()),
+            SignerError::ConfigError(secret.to_string()),
+            SignerError::NotAvailable(secret.to_string()),
+            SignerError::IoError(secret.to_string()),
+            SignerError::Other(secret.to_string()),
+        ];
+
+        for err in cases {
+            let display = format!("{err}");
+            assert!(
+                !display.contains(secret),
+                "display output leaked sensitive content: {display}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_display_messages_are_stable_and_generic() {
+        assert_eq!(
+            format!("{}", SignerError::InvalidPrivateKey("x".to_string())),
+            "Invalid private key format"
+        );
+        assert_eq!(
+            format!("{}", SignerError::InvalidPublicKey("x".to_string())),
+            "Invalid public key"
+        );
+        assert_eq!(
+            format!("{}", SignerError::SigningFailed("x".to_string())),
+            "Signing failed"
+        );
+        assert_eq!(
+            format!("{}", SignerError::RemoteApiError("x".to_string())),
+            "Remote API error"
+        );
+        assert_eq!(
+            format!("{}", SignerError::HttpError("x".to_string())),
+            "HTTP request failed"
+        );
+        assert_eq!(
+            format!("{}", SignerError::SerializationError("x".to_string())),
+            "Serialization error"
+        );
+        assert_eq!(
+            format!("{}", SignerError::ConfigError("x".to_string())),
+            "Configuration error"
+        );
+        assert_eq!(
+            format!("{}", SignerError::NotAvailable("x".to_string())),
+            "Signer not available"
+        );
+        assert_eq!(
+            format!("{}", SignerError::IoError("x".to_string())),
+            "IO error"
+        );
+        assert_eq!(
+            format!("{}", SignerError::Other("x".to_string())),
+            "Signer error"
+        );
     }
 }

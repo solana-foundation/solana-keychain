@@ -4,6 +4,7 @@ import {
     assertSignatureValid,
     createSignatureDictionary,
     extractSignatureFromWireTransaction,
+    sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -28,6 +29,13 @@ import {
     WalletResponse,
 } from './types.js';
 
+/**
+ * Create and initialize a Privy-backed signer.
+ *
+ * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
+ * @throws {SignerError} `SIGNER_HTTP_ERROR`, `SIGNER_REMOTE_API_ERROR`, or `SIGNER_PARSING_ERROR`
+ * when the Privy initialization request fails.
+ */
 export async function createPrivySigner<TAddress extends string = string>(
     config: PrivySignerConfig,
 ): Promise<SolanaSigner<TAddress>> {
@@ -90,8 +98,21 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
                 message: 'Missing required configuration fields (appId, appSecret, or walletId)',
             });
         }
-        const address = await fetchPublicKey<TAddress>(config);
-        return new PrivySigner<TAddress>(config, address);
+        const apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
+        validateHttpsApiBaseUrl(apiBaseUrl);
+
+        const address = await fetchPublicKey<TAddress>({
+            ...config,
+            apiBaseUrl,
+        });
+
+        return new PrivySigner<TAddress>(
+            {
+                ...config,
+                apiBaseUrl,
+            },
+            address,
+        );
     }
 
     private validateRequestDelayMs(requestDelayMs: number): void {
@@ -165,7 +186,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
             const errorText = await response.text().catch(() => 'Failed to read error response');
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                 message: `Privy API signing error: ${response.status}`,
-                response: errorText,
+                response: sanitizeRemoteErrorResponse(errorText),
                 status: response.status,
             });
         }
@@ -228,7 +249,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
             const errorText = await response.text().catch(() => 'Failed to read error response');
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                 message: `Privy API signing error: ${response.status}`,
-                response: errorText,
+                response: sanitizeRemoteErrorResponse(errorText),
                 status: response.status,
             });
         }
@@ -338,6 +359,23 @@ function getAuthHeader(appId: string, appSecret: string): string {
     return `Basic ${base64Decoder.decode(credentialsBytes)}`;
 }
 
+function validateHttpsApiBaseUrl(apiBaseUrl: string): void {
+    let parsedUrl: URL;
+    try {
+        parsedUrl = new URL(apiBaseUrl);
+    } catch {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'apiBaseUrl is not a valid URL',
+        });
+    }
+
+    if (parsedUrl.protocol !== 'https:') {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'apiBaseUrl must use HTTPS',
+        });
+    }
+}
+
 async function fetchPublicKey<TAddress extends string = string>(config: {
     apiBaseUrl?: string;
     appId: string;
@@ -368,7 +406,7 @@ async function fetchPublicKey<TAddress extends string = string>(config: {
         const errorText = await response.text().catch(() => 'Failed to read error response');
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `Privy API error: ${response.status}`,
-            response: errorText,
+            response: sanitizeRemoteErrorResponse(errorText),
             status: response.status,
         });
     }

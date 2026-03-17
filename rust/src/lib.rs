@@ -25,6 +25,7 @@
 //! **Note**: Only one SDK version can be enabled at a time.
 
 pub mod error;
+pub mod http_client_config;
 mod sdk_adapter;
 pub mod signature_util;
 #[cfg(test)]
@@ -64,7 +65,8 @@ pub mod para;
 
 // Re-export core types
 pub use error::SignerError;
-pub use traits::SolanaSigner;
+pub use http_client_config::HttpClientConfig;
+pub use traits::{SignTransactionResult, SolanaSigner};
 
 // Re-export signer types
 #[cfg(feature = "memory")]
@@ -94,8 +96,6 @@ pub use cdp::CdpSigner;
 pub use dfns::{DfnsSigner, DfnsSignerConfig};
 #[cfg(feature = "para")]
 pub use para::ParaSigner;
-
-use crate::traits::SignedTransaction;
 
 // Ensure at least one signer backend is enabled
 #[cfg(not(any(
@@ -154,6 +154,12 @@ impl Signer {
         )?))
     }
 
+    /// Create a memory signer from a JSON keypair file path
+    #[cfg(feature = "memory")]
+    pub fn from_memory_file(path: &str) -> Result<Self, SignerError> {
+        Ok(Self::Memory(MemorySigner::from_private_key_file(path)?))
+    }
+
     /// Create a Vault signer
     #[cfg(feature = "vault")]
     pub fn from_vault(
@@ -162,11 +168,24 @@ impl Signer {
         key_name: String,
         pubkey: String,
     ) -> Result<Self, SignerError> {
-        Ok(Self::Vault(VaultSigner::new(
+        Self::from_vault_with_http_client_config(vault_addr, vault_token, key_name, pubkey, None)
+    }
+
+    /// Create a Vault signer with custom HTTP timeout settings.
+    #[cfg(feature = "vault")]
+    pub fn from_vault_with_http_client_config(
+        vault_addr: String,
+        vault_token: String,
+        key_name: String,
+        pubkey: String,
+        http_client_config: Option<HttpClientConfig>,
+    ) -> Result<Self, SignerError> {
+        Ok(Self::Vault(VaultSigner::new_with_http_client_config(
             vault_addr,
             vault_token,
             key_name,
             pubkey,
+            http_client_config,
         )?))
     }
 
@@ -177,7 +196,23 @@ impl Signer {
         app_secret: String,
         wallet_id: String,
     ) -> Result<Self, SignerError> {
-        let mut signer = PrivySigner::new(app_id, app_secret, wallet_id);
+        Self::from_privy_with_http_client_config(app_id, app_secret, wallet_id, None).await
+    }
+
+    /// Create a Privy signer with custom HTTP timeout settings (requires initialization).
+    #[cfg(feature = "privy")]
+    pub async fn from_privy_with_http_client_config(
+        app_id: String,
+        app_secret: String,
+        wallet_id: String,
+        http_client_config: Option<HttpClientConfig>,
+    ) -> Result<Self, SignerError> {
+        let mut signer = PrivySigner::new_with_http_client_config(
+            app_id,
+            app_secret,
+            wallet_id,
+            http_client_config,
+        );
         signer.init().await?;
         Ok(Self::Privy(signer))
     }
@@ -191,12 +226,33 @@ impl Signer {
         private_key_id: String,
         public_key: String,
     ) -> Result<Self, SignerError> {
-        Ok(Self::Turnkey(TurnkeySigner::new(
+        Self::from_turnkey_with_http_client_config(
             api_public_key,
             api_private_key,
             organization_id,
             private_key_id,
             public_key,
+            None,
+        )
+    }
+
+    /// Create a Turnkey signer with custom HTTP timeout settings.
+    #[cfg(feature = "turnkey")]
+    pub fn from_turnkey_with_http_client_config(
+        api_public_key: String,
+        api_private_key: String,
+        organization_id: String,
+        private_key_id: String,
+        public_key: String,
+        http_client_config: Option<HttpClientConfig>,
+    ) -> Result<Self, SignerError> {
+        Ok(Self::Turnkey(TurnkeySigner::new_with_http_client_config(
+            api_public_key,
+            api_private_key,
+            organization_id,
+            private_key_id,
+            public_key,
+            http_client_config,
         )?))
     }
 
@@ -246,11 +302,30 @@ impl Signer {
         wallet_secret: String,
         address: String,
     ) -> Result<Self, SignerError> {
-        Ok(Self::Cdp(CdpSigner::new(
+        Self::from_cdp_with_http_client_config(
             api_key_id,
             api_key_secret,
             wallet_secret,
             address,
+            None,
+        )
+    }
+
+    /// Create a CDP signer with custom HTTP timeout settings.
+    #[cfg(feature = "cdp")]
+    pub fn from_cdp_with_http_client_config(
+        api_key_id: String,
+        api_key_secret: String,
+        wallet_secret: String,
+        address: String,
+        http_client_config: Option<HttpClientConfig>,
+    ) -> Result<Self, SignerError> {
+        Ok(Self::Cdp(CdpSigner::new_with_http_client_config(
+            api_key_id,
+            api_key_secret,
+            wallet_secret,
+            address,
+            http_client_config,
         )?))
     }
 
@@ -300,7 +375,7 @@ impl SolanaSigner for Signer {
     async fn sign_transaction(
         &self,
         tx: &mut sdk_adapter::Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
+    ) -> Result<SignTransactionResult, SignerError> {
         match self {
             #[cfg(feature = "memory")]
             Signer::Memory(s) => s.sign_transaction(tx).await,
@@ -361,41 +436,6 @@ impl SolanaSigner for Signer {
             Signer::Dfns(s) => s.sign_message(message).await,
             #[cfg(feature = "para")]
             Signer::Para(s) => s.sign_message(message).await,
-        }
-    }
-
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut sdk_adapter::Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        match self {
-            #[cfg(feature = "memory")]
-            Signer::Memory(s) => s.sign_partial_transaction(tx).await,
-
-            #[cfg(feature = "vault")]
-            Signer::Vault(s) => s.sign_partial_transaction(tx).await,
-
-            #[cfg(feature = "privy")]
-            Signer::Privy(s) => s.sign_partial_transaction(tx).await,
-
-            #[cfg(feature = "turnkey")]
-            Signer::Turnkey(s) => s.sign_partial_transaction(tx).await,
-
-            #[cfg(feature = "aws_kms")]
-            Signer::AwsKms(s) => s.sign_partial_transaction(tx).await,
-
-            #[cfg(feature = "fireblocks")]
-            Signer::Fireblocks(s) => s.sign_partial_transaction(tx).await,
-
-            #[cfg(feature = "gcp_kms")]
-            Signer::GcpKms(s) => s.sign_partial_transaction(tx).await,
-
-            #[cfg(feature = "cdp")]
-            Signer::Cdp(s) => s.sign_partial_transaction(tx).await,
-            #[cfg(feature = "dfns")]
-            Signer::Dfns(s) => s.sign_partial_transaction(tx).await,
-            #[cfg(feature = "para")]
-            Signer::Para(s) => s.sign_partial_transaction(tx).await,
         }
     }
 

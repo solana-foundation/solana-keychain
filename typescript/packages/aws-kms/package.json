@@ -42,7 +42,7 @@
         "test:treeshakability": "agadoo dist/index.js"
     },
     "dependencies": {
-        "@aws-sdk/client-kms": "^3.991.0",
+        "@aws-sdk/client-kms": "^3.1009.0",
         "@solana/keychain-core": "workspace:*",
         "@solana/addresses": "^6.0.1",
         "@solana/codecs-strings": "^6.0.1",

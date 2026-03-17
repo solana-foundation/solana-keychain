@@ -4,7 +4,18 @@ import { VaultSigner } from '../vault-signer.js';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
-    return { ...mod, assertSignatureValid: vi.fn() };
+    return {
+        ...mod,
+        assertSignatureValid: vi.fn(),
+        sanitizeRemoteErrorResponse:
+            mod.sanitizeRemoteErrorResponse ??
+            ((text: string) =>
+                `${text
+                    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .slice(0, 256)} [truncated]`),
+    };
 });
 
 // Mock fetch globally
@@ -75,6 +86,40 @@ describe('VaultSigner', () => {
                     publicKey: 'invalid-key',
                 });
             }).toThrow('Invalid Solana public key format');
+        });
+
+        it('should throw error for invalid vaultAddr URL', () => {
+            expect(() => {
+                new VaultSigner({
+                    ...mockConfig,
+                    vaultAddr: 'not-a-url',
+                });
+            }).toThrow('vaultAddr is not a valid URL');
+        });
+
+        it('should throw error for non-HTTPS vaultAddr', () => {
+            expect(() => {
+                new VaultSigner({
+                    ...mockConfig,
+                    vaultAddr: 'http://vault.example.com',
+                });
+            }).toThrow('vaultAddr must use HTTPS');
+        });
+
+        it('should allow localhost http vaultAddr in test environment', () => {
+            const previousNodeEnv = process.env.NODE_ENV;
+            try {
+                process.env.NODE_ENV = 'test';
+
+                expect(() => {
+                    new VaultSigner({
+                        ...mockConfig,
+                        vaultAddr: 'http://127.0.0.1:8200',
+                    });
+                }).not.toThrow();
+            } finally {
+                process.env.NODE_ENV = previousNodeEnv;
+            }
         });
 
         it('should remove trailing slash from vaultAddr', () => {
@@ -309,6 +354,42 @@ describe('VaultSigner', () => {
 
             const [result] = await signer.signMessages([message]);
             expect(result).toHaveProperty(mockConfig.publicKey);
+        });
+
+        it('should handle signature with higher vault version prefixes', async () => {
+            const mockResponses = [
+                { data: { signature: `vault:v2:${'a'.repeat(86)}` } },
+                { data: { signature: `vault:v3:${'a'.repeat(86)}` } },
+            ];
+
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(
+                    new Response(JSON.stringify(mockResponses[0]), {
+                        status: 200,
+                    }),
+                )
+                .mockResolvedValueOnce(
+                    new Response(JSON.stringify(mockResponses[1]), {
+                        status: 200,
+                    }),
+                );
+
+            const signer = new VaultSigner(mockConfig);
+            const messages = [
+                {
+                    content: new Uint8Array([1, 2, 3, 4]),
+                    signatures: {},
+                },
+                {
+                    content: new Uint8Array([5, 6, 7, 8]),
+                    signatures: {},
+                },
+            ];
+
+            const results = await signer.signMessages(messages);
+            expect(results).toHaveLength(2);
+            expect(results[0]).toHaveProperty(mockConfig.publicKey);
+            expect(results[1]).toHaveProperty(mockConfig.publicKey);
         });
 
         it('should apply request delay for multiple messages', async () => {

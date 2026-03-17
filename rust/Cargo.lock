@@ -6089,6 +6089,7 @@ dependencies = [
  "tokio",
  "uuid",
  "wiremock",
+ "zeroize",
 ]
 
 [[package]]

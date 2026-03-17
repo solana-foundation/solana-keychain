@@ -17,6 +17,29 @@ export const SignerErrorCode = {
 } as const;
 export type SignerErrorCode = (typeof SignerErrorCode)[keyof typeof SignerErrorCode];
 
+const DEFAULT_REMOTE_ERROR_RESPONSE_MAX_LENGTH = 256;
+
+function isDisallowedAsciiControl(codePoint: number): boolean {
+    return (
+        codePoint <= 0x08 ||
+        codePoint === 0x0b ||
+        codePoint === 0x0c ||
+        (codePoint >= 0x0e && codePoint <= 0x1f) ||
+        codePoint === 0x7f
+    );
+}
+
+function replaceDisallowedControlChars(input: string): string {
+    let result = '';
+
+    for (const char of input) {
+        const codePoint = char.charCodeAt(0);
+        result += isDisallowedAsciiControl(codePoint) ? ' ' : char;
+    }
+
+    return result;
+}
+
 /**
  * Custom error class for signer-specific errors
  * Extends Error with code and context properties
@@ -47,4 +70,27 @@ export function createSignerError(code: SignerErrorCode, context?: Record<string
  */
 export function throwSignerError(code: SignerErrorCode, context?: Record<string, unknown>): never {
     throw createSignerError(code, context);
+}
+
+/**
+ * Sanitize remote API error text before attaching it to error context/logs.
+ * - Strips control characters.
+ * - Collapses whitespace.
+ * - Truncates long payloads.
+ */
+export function sanitizeRemoteErrorResponse(
+    responseText: string,
+    maxLength: number = DEFAULT_REMOTE_ERROR_RESPONSE_MAX_LENGTH,
+): string {
+    const normalized = replaceDisallowedControlChars(responseText).replace(/\s+/g, ' ').trim();
+
+    if (!normalized) {
+        return '[empty remote response]';
+    }
+
+    if (normalized.length <= maxLength) {
+        return normalized;
+    }
+
+    return `${normalized.slice(0, maxLength)} [truncated]`;
 }

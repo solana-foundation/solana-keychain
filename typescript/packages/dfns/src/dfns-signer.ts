@@ -3,6 +3,7 @@ import { getBase16Decoder, getBase16Encoder, getBase58Decoder } from '@solana/co
 import {
     assertSignatureValid,
     createSignatureDictionary,
+    sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -24,6 +25,13 @@ import type {
     GetWalletResponse,
 } from './types.js';
 
+/**
+ * Create and initialize a Dfns-backed signer.
+ *
+ * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
+ * @throws {SignerError} `SIGNER_HTTP_ERROR`, `SIGNER_REMOTE_API_ERROR`, `SIGNER_PARSING_ERROR`,
+ * or `SIGNER_INVALID_PUBLIC_KEY` when initialization fails.
+ */
 export async function createDfnsSigner<TAddress extends string = string>(
     config: DfnsSignerConfig,
 ): Promise<SolanaSigner<TAddress>> {
@@ -137,6 +145,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
         }
 
         const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
+        validateHttpsApiBaseUrl(apiBaseUrl);
         const requestDelayMs = config.requestDelayMs ?? 0;
 
         if (requestDelayMs < 0) {
@@ -312,20 +321,22 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
             const errorText = await response.text().catch(() => 'Failed to read error response');
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                 message: `Dfns signing API error: ${response.status}`,
-                response: errorText,
+                response: sanitizeRemoteErrorResponse(errorText),
                 status: response.status,
             });
         }
 
-        let sigResponse: GenerateSignatureResponse;
+        let rawSigResponse: unknown;
         try {
-            sigResponse = (await response.json()) as GenerateSignatureResponse;
+            rawSigResponse = await response.json();
         } catch (error) {
             throwSignerError(SignerErrorCode.PARSING_ERROR, {
                 cause: error,
                 message: 'Failed to parse Dfns signature response',
             });
         }
+
+        const sigResponse = parseSignatureResponse(rawSigResponse);
 
         if (sigResponse.status === 'Failed') {
             throwSignerError(SignerErrorCode.SIGNING_FAILED, {
@@ -374,19 +385,82 @@ async function fetchWallet(apiBaseUrl: string, authToken: string, walletId: stri
         const errorText = await response.text().catch(() => 'Failed to read error response');
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `Dfns API error: ${response.status}`,
-            response: errorText,
+            response: sanitizeRemoteErrorResponse(errorText),
             status: response.status,
         });
     }
 
+    let rawWalletResponse: unknown;
     try {
-        return (await response.json()) as GetWalletResponse;
+        rawWalletResponse = await response.json();
     } catch (error) {
         throwSignerError(SignerErrorCode.PARSING_ERROR, {
             cause: error,
             message: 'Failed to parse Dfns wallet response',
         });
     }
+
+    return parseWalletResponse(rawWalletResponse);
+}
+
+function validateHttpsApiBaseUrl(apiBaseUrl: string): void {
+    let parsedUrl: URL;
+    try {
+        parsedUrl = new URL(apiBaseUrl);
+    } catch {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'apiBaseUrl is not a valid URL',
+        });
+    }
+
+    if (parsedUrl.protocol !== 'https:') {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'apiBaseUrl must use HTTPS',
+        });
+    }
+}
+
+function parseSignatureResponse(raw: unknown): GenerateSignatureResponse {
+    if (!isObject(raw) || typeof raw.status !== 'string') {
+        throwSignerError(SignerErrorCode.PARSING_ERROR, {
+            message: 'Unexpected Dfns signature response shape',
+        });
+    }
+
+    if (raw.signature !== undefined) {
+        if (!isObject(raw.signature) || typeof raw.signature.r !== 'string' || typeof raw.signature.s !== 'string') {
+            throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                message: 'Unexpected Dfns signature components shape',
+            });
+        }
+    }
+
+    return raw as unknown as GenerateSignatureResponse;
+}
+
+function parseWalletResponse(raw: unknown): GetWalletResponse {
+    if (!isObject(raw) || typeof raw.status !== 'string' || !isObject(raw.signingKey)) {
+        throwSignerError(SignerErrorCode.PARSING_ERROR, {
+            message: 'Unexpected Dfns wallet response shape',
+        });
+    }
+
+    if (
+        typeof raw.signingKey.id !== 'string' ||
+        typeof raw.signingKey.scheme !== 'string' ||
+        typeof raw.signingKey.curve !== 'string' ||
+        typeof raw.signingKey.publicKey !== 'string'
+    ) {
+        throwSignerError(SignerErrorCode.PARSING_ERROR, {
+            message: 'Unexpected Dfns wallet signing key shape',
+        });
+    }
+
+    return raw as unknown as GetWalletResponse;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
 }
 
 /**

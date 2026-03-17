@@ -2,7 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
-    return { ...mod, assertSignatureValid: vi.fn() };
+    return {
+        ...mod,
+        assertSignatureValid: vi.fn(),
+        sanitizeRemoteErrorResponse:
+            mod.sanitizeRemoteErrorResponse ??
+            ((text: string) =>
+                `${text
+                    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .slice(0, 256)} [truncated]`),
+    };
 });
 
 import { DfnsSigner } from '../dfns-signer.js';
@@ -71,6 +82,25 @@ describe('DfnsSigner', () => {
             );
         });
 
+        it('throws CONFIG_ERROR when apiBaseUrl is not a valid URL', async () => {
+            await expect(DfnsSigner.create({ ...defaultConfig, apiBaseUrl: 'not-a-url' })).rejects.toMatchObject({
+                code: 'SIGNER_CONFIG_ERROR',
+                message: expect.stringContaining('apiBaseUrl is not a valid URL'),
+            });
+        });
+
+        it('throws CONFIG_ERROR when apiBaseUrl does not use HTTPS', async () => {
+            await expect(
+                DfnsSigner.create({
+                    ...defaultConfig,
+                    apiBaseUrl: 'http://api.dfns.test',
+                }),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_CONFIG_ERROR',
+                message: expect.stringContaining('apiBaseUrl must use HTTPS'),
+            });
+        });
+
         it('throws error for inactive wallet', async () => {
             mockWalletFetch({ status: 'Inactive' });
             await expect(DfnsSigner.create(defaultConfig)).rejects.toThrow('not active');
@@ -87,6 +117,18 @@ describe('DfnsSigner', () => {
                 status: 401,
             });
             await expect(DfnsSigner.create(defaultConfig)).rejects.toThrow();
+        });
+
+        it('throws PARSING_ERROR for malformed wallet response shape', async () => {
+            mockFetch.mockResolvedValueOnce({
+                json: async () => ({}),
+                ok: true,
+            });
+
+            await expect(DfnsSigner.create(defaultConfig)).rejects.toMatchObject({
+                code: 'SIGNER_PARSING_ERROR',
+                message: expect.stringContaining('Unexpected Dfns wallet response shape'),
+            });
         });
 
         it('throws error for negative requestDelayMs', async () => {
@@ -191,6 +233,75 @@ describe('DfnsSigner', () => {
             // First byte should be 0x00 (left-pad), then 31 bytes of 0xff
             expect(sig[0]).toBe(0x00);
             expect(sig[1]).toBe(0xff);
+        });
+
+        it('throws PARSING_ERROR for malformed auth challenge response shape', async () => {
+            mockWalletFetch();
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => ({}),
+                ok: true,
+            });
+
+            const signer = await DfnsSigner.create(defaultConfig);
+
+            await expect(
+                signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }]),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_PARSING_ERROR',
+                message: expect.stringContaining('Unexpected Dfns auth challenge response shape'),
+            });
+        });
+
+        it('throws PARSING_ERROR for malformed signature response shape', async () => {
+            mockWalletFetch();
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createUserActionInitResponse(),
+                ok: true,
+            });
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createUserActionResponse(),
+                ok: true,
+            });
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => ({}),
+                ok: true,
+            });
+
+            const signer = await DfnsSigner.create(defaultConfig);
+
+            await expect(
+                signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }]),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_PARSING_ERROR',
+                message: expect.stringContaining('Unexpected Dfns signature response shape'),
+            });
+        });
+
+        it('throws PARSING_ERROR for malformed auth action response shape', async () => {
+            mockWalletFetch();
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createUserActionInitResponse(),
+                ok: true,
+            });
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => ({}),
+                ok: true,
+            });
+
+            const signer = await DfnsSigner.create(defaultConfig);
+
+            await expect(
+                signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }]),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_PARSING_ERROR',
+                message: expect.stringContaining('Unexpected Dfns auth action response shape'),
+            });
         });
     });
 

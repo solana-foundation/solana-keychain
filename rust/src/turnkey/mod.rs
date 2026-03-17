@@ -3,8 +3,12 @@
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::traits::SignTransactionResult;
 pub use crate::traits::SignedTransaction;
-use crate::{error::SignerError, traits::SolanaSigner, transaction_util::TransactionUtil};
+use crate::{
+    error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner,
+    transaction_util::TransactionUtil,
+};
 use base64::Engine;
 use p256::ecdsa::signature::Signer as P256Signer;
 use std::str::FromStr;
@@ -47,8 +51,37 @@ impl TurnkeySigner {
         private_key_id: String,
         public_key: String,
     ) -> Result<Self, SignerError> {
+        Self::new_with_http_client_config(
+            api_public_key,
+            api_private_key,
+            organization_id,
+            private_key_id,
+            public_key,
+            None,
+        )
+    }
+
+    /// Create a new TurnkeySigner with custom HTTP timeout settings.
+    pub fn new_with_http_client_config(
+        api_public_key: String,
+        api_private_key: String,
+        organization_id: String,
+        private_key_id: String,
+        public_key: String,
+        http_client_config: Option<HttpClientConfig>,
+    ) -> Result<Self, SignerError> {
+        let http_client_config = http_client_config.unwrap_or_default();
         let pubkey = Pubkey::from_str(&public_key)
             .map_err(|e| SignerError::InvalidPublicKey(format!("Invalid public key: {e}")))?;
+        let builder = reqwest::Client::builder();
+        let builder = builder
+            .timeout(http_client_config.resolved_request_timeout())
+            .connect_timeout(http_client_config.resolved_connect_timeout());
+        #[cfg(not(test))]
+        let builder = builder.https_only(true);
+        let client = builder
+            .build()
+            .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
 
         Ok(Self {
             api_public_key,
@@ -57,7 +90,7 @@ impl TurnkeySigner {
             private_key_id,
             public_key: pubkey,
             api_base_url: "https://api.turnkey.com".to_string(),
-            client: reqwest::Client::new(),
+            client,
         })
     }
 
@@ -244,19 +277,16 @@ impl SolanaSigner for TurnkeySigner {
     async fn sign_transaction(
         &self,
         tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
+    ) -> Result<SignTransactionResult, SignerError> {
+        let signed_transaction = self.sign_and_serialize(tx).await?;
+        Ok(TransactionUtil::classify_signed_transaction(
+            tx,
+            signed_transaction,
+        ))
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign_bytes(message).await
-    }
-
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        self.sign_and_serialize(tx).await
     }
 
     async fn is_available(&self) -> bool {
@@ -437,7 +467,7 @@ mod tests {
 
         let result = signer.sign_transaction(&mut tx).await;
         assert!(result.is_ok());
-        let (serialized_tx, returned_sig) = result.unwrap();
+        let (serialized_tx, returned_sig) = result.unwrap().into_signed_transaction();
 
         // Verify the signature matches
         assert_eq!(returned_sig, signature);

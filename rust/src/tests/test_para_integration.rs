@@ -74,7 +74,8 @@ mod tests {
         let (base64_txn, signature) = signer
             .sign_transaction(&mut transaction)
             .await
-            .expect("Failed to sign transaction with Para");
+            .expect("Failed to sign transaction with Para")
+            .into_signed_transaction();
 
         // Validate the signature
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");

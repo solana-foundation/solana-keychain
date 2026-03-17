@@ -3,6 +3,7 @@
 use crate::error::SignerError;
 use crate::sdk_adapter::{keypair_from_bytes, Keypair};
 use std::fs;
+use zeroize::Zeroizing;
 
 const PRIVATE_KEY_LENGTH: usize = 64;
 
@@ -13,13 +14,7 @@ impl KeypairUtil {
     /// Creates a new keypair from a private key string that can be in multiple formats:
     /// - Base58 encoded string (current format)
     /// - U8Array format: "[0, 1, 2, ...]"
-    /// - File path to a JSON keypair file
     pub fn from_private_key_string(private_key: &str) -> Result<Keypair, SignerError> {
-        // Try to parse as a file path first
-        if let Ok(file_content) = fs::read_to_string(private_key) {
-            return Self::from_json_keypair(&file_content);
-        }
-
         // Try to parse as U8Array format
         if private_key.trim().starts_with('[') && private_key.trim().ends_with(']') {
             return Self::from_u8_array_string(private_key);
@@ -29,12 +24,21 @@ impl KeypairUtil {
         Self::from_base58_safe(private_key)
     }
 
+    /// Creates a new keypair by reading a JSON keypair file from disk.
+    pub fn from_private_key_file(path: &str) -> Result<Keypair, SignerError> {
+        let file_content_raw = fs::read_to_string(path)
+            .map_err(|e| SignerError::IoError(format!("Failed to read private key file: {e}")))?;
+        let file_content = Zeroizing::new(file_content_raw);
+        Self::from_json_keypair(&file_content)
+    }
+
     /// Creates a new keypair from a base58-encoded private key string with proper error handling
     pub fn from_base58_safe(private_key: &str) -> Result<Keypair, SignerError> {
         // Try to decode as base58 first
-        let decoded = bs58::decode(private_key)
-            .into_vec()
-            .map_err(|e| SignerError::InvalidPrivateKey(format!("Invalid base58 string: {e}")))?;
+        let decoded =
+            Zeroizing::new(bs58::decode(private_key).into_vec().map_err(|e| {
+                SignerError::InvalidPrivateKey(format!("Invalid base58 string: {e}"))
+            })?);
 
         if decoded.len() != PRIVATE_KEY_LENGTH {
             return Err(SignerError::InvalidPrivateKey(format!(
@@ -73,6 +77,7 @@ impl KeypairUtil {
 
         match bytes {
             Ok(byte_array) => {
+                let byte_array = Zeroizing::new(byte_array);
                 if byte_array.len() != PRIVATE_KEY_LENGTH {
                     return Err(SignerError::InvalidPrivateKey(format!(
                         "Private key must be exactly {} bytes, got {}",
@@ -94,6 +99,7 @@ impl KeypairUtil {
     pub fn from_json_keypair(json_content: &str) -> Result<Keypair, SignerError> {
         // Try to parse as a simple JSON array first
         if let Ok(byte_array) = serde_json::from_str::<Vec<u8>>(json_content) {
+            let byte_array = Zeroizing::new(byte_array);
             if byte_array.len() != PRIVATE_KEY_LENGTH {
                 return Err(SignerError::InvalidPrivateKey(format!(
                     "JSON keypair must be exactly {} bytes, got {}",
@@ -184,5 +190,50 @@ mod tests {
     fn test_from_private_key_string_invalid() {
         let result = KeypairUtil::from_private_key_string("clearly-not-a-valid-key");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_private_key_string_does_not_read_file_path() {
+        let tmp_dir = std::env::temp_dir();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos();
+        let file_path = tmp_dir.join(format!("solana-keychain-private-key-{unique}.json"));
+
+        std::fs::write(&file_path, TEST_KEYPAIR_BYTES).expect("failed to write temp keypair file");
+        let path_str = file_path.to_string_lossy().to_string();
+
+        let result = KeypairUtil::from_private_key_string(&path_str);
+        assert!(result.is_err());
+
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    #[test]
+    fn test_from_private_key_file_json_keypair() {
+        let tmp_dir = std::env::temp_dir();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos();
+        let file_path = tmp_dir.join(format!("solana-keychain-private-key-{unique}.json"));
+
+        std::fs::write(&file_path, TEST_KEYPAIR_BYTES).expect("failed to write temp keypair file");
+        let path_str = file_path.to_string_lossy().to_string();
+
+        let result = KeypairUtil::from_private_key_file(&path_str);
+        assert!(result.is_ok());
+        assert_eq!(keypair_pubkey(&result.unwrap()).to_string(), TEST_PUBKEY);
+
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    #[test]
+    fn test_from_private_key_file_missing_file() {
+        let result =
+            KeypairUtil::from_private_key_file("/tmp/definitely-missing-keypair-file.json");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::IoError(_)));
     }
 }

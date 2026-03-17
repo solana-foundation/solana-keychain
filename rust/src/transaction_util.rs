@@ -1,5 +1,6 @@
 use crate::error::SignerError;
 use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::traits::{SignTransactionResult, SignedTransaction};
 use base64::{engine::general_purpose::STANDARD, Engine};
 
 pub struct TransactionUtil;
@@ -58,5 +59,31 @@ impl TransactionUtil {
         transaction.signatures[position] = signature;
 
         Ok(())
+    }
+
+    /// Returns true when all required signature slots are populated with non-default values.
+    pub fn has_all_required_signatures(transaction: &Transaction) -> bool {
+        let num_required_signatures = transaction.message.header.num_required_signatures as usize;
+        if transaction.signatures.len() < num_required_signatures {
+            return false;
+        }
+
+        transaction
+            .signatures
+            .iter()
+            .take(num_required_signatures)
+            .all(|sig| *sig != Signature::default())
+    }
+
+    /// Classify a signed transaction result based on whether all required signatures are present.
+    pub fn classify_signed_transaction(
+        transaction: &Transaction,
+        signed_transaction: SignedTransaction,
+    ) -> SignTransactionResult {
+        if Self::has_all_required_signatures(transaction) {
+            SignTransactionResult::Complete(signed_transaction)
+        } else {
+            SignTransactionResult::Partial(signed_transaction)
+        }
     }
 }

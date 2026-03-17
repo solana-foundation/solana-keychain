@@ -1,8 +1,14 @@
-import * as crypto from 'node:crypto';
-
-import { base64UrlDecoder, SignerErrorCode, throwSignerError } from '@solana/keychain-core';
+import { getBase64Encoder } from '@solana/codecs-strings';
+import {
+    base64UrlDecoder,
+    sanitizeRemoteErrorResponse,
+    SignerErrorCode,
+    throwSignerError,
+} from '@solana/keychain-core';
 
 import type { UserActionInitResponse, UserActionResponse } from './types.js';
+
+let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
 
 /**
  * Perform the Dfns User Action Signing flow. For more details, see https://docs.dfns.co/api-reference/auth/signing-flows#asymetric-keys-signing-flow
@@ -47,14 +53,14 @@ export async function signUserAction(
         const errorText = await initResponse.text().catch(() => 'Failed to read error response');
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `Dfns auth/action/init failed: ${initResponse.status}`,
-            response: errorText,
+            response: sanitizeRemoteErrorResponse(errorText),
             status: initResponse.status,
         });
     }
 
-    let challenge: UserActionInitResponse;
+    let rawChallenge: unknown;
     try {
-        challenge = (await initResponse.json()) as UserActionInitResponse;
+        rawChallenge = await initResponse.json();
     } catch (error) {
         throwSignerError(SignerErrorCode.PARSING_ERROR, {
             cause: error,
@@ -62,8 +68,12 @@ export async function signUserAction(
         });
     }
 
+    const challenge = parseUserActionInitResponse(rawChallenge);
+
     // Verify credential is allowed
-    const allowed = challenge.allowCredentials.key.some(c => c.id === credId);
+    const allowed = challenge.allowCredentials.key.some(
+        c => isObject(c) && typeof c.id === 'string' && c.id === credId,
+    );
     if (!allowed) {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
             message: `Credential ${credId} not in allowed credentials`,
@@ -78,10 +88,8 @@ export async function signUserAction(
         }),
     );
 
-    const signature = crypto.sign(undefined, clientData, privateKeyPem);
-
     const clientDataB64 = base64UrlDecoder(clientData);
-    const signatureB64 = base64UrlDecoder(new Uint8Array(signature));
+    const signatureB64 = base64UrlDecoder(await signClientData(clientData, privateKeyPem));
 
     // Submit the signed challenge
     const actionUrl = `${apiBaseUrl}/auth/action`;
@@ -117,14 +125,14 @@ export async function signUserAction(
         const errorText = await signResponse.text().catch(() => 'Failed to read error response');
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `Dfns auth/action failed: ${signResponse.status}`,
-            response: errorText,
+            response: sanitizeRemoteErrorResponse(errorText),
             status: signResponse.status,
         });
     }
 
-    let actionResponse: UserActionResponse;
+    let rawActionResponse: unknown;
     try {
-        actionResponse = (await signResponse.json()) as UserActionResponse;
+        rawActionResponse = await signResponse.json();
     } catch (error) {
         throwSignerError(SignerErrorCode.PARSING_ERROR, {
             cause: error,
@@ -132,5 +140,87 @@ export async function signUserAction(
         });
     }
 
+    const actionResponse = parseUserActionResponse(rawActionResponse);
+
     return actionResponse.userAction;
+}
+
+function parseUserActionInitResponse(raw: unknown): UserActionInitResponse {
+    if (!isObject(raw) || !isObject(raw.allowCredentials) || !Array.isArray(raw.allowCredentials.key)) {
+        throwSignerError(SignerErrorCode.PARSING_ERROR, {
+            message: 'Unexpected Dfns auth challenge response shape',
+        });
+    }
+
+    if (typeof raw.challenge !== 'string' || typeof raw.challengeIdentifier !== 'string') {
+        throwSignerError(SignerErrorCode.PARSING_ERROR, {
+            message: 'Unexpected Dfns auth challenge response shape',
+        });
+    }
+
+    return raw as unknown as UserActionInitResponse;
+}
+
+function parseUserActionResponse(raw: unknown): UserActionResponse {
+    if (!isObject(raw) || typeof raw.userAction !== 'string') {
+        throwSignerError(SignerErrorCode.PARSING_ERROR, {
+            message: 'Unexpected Dfns auth action response shape',
+        });
+    }
+
+    return raw as unknown as UserActionResponse;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+async function signClientData(clientData: Uint8Array, privateKeyPem: string): Promise<Uint8Array> {
+    const subtle = globalThis.crypto?.subtle;
+    if (!subtle) {
+        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            message: 'Web Crypto API is not available in this runtime',
+        });
+    }
+
+    try {
+        const privateKey = await subtle.importKey('pkcs8', toArrayBuffer(pemToPkcs8(privateKeyPem)), 'Ed25519', false, [
+            'sign',
+        ]);
+        const signature = await subtle.sign('Ed25519', privateKey, toArrayBuffer(clientData));
+        return new Uint8Array(signature);
+    } catch (error) {
+        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            cause: error,
+            message: 'Failed to sign Dfns auth challenge',
+        });
+    }
+}
+
+function pemToPkcs8(privateKeyPem: string): Uint8Array {
+    const normalizedPem = privateKeyPem.replace(/\r/g, '').trim();
+    const pemBody = normalizedPem
+        .replace('-----BEGIN PRIVATE KEY-----', '')
+        .replace('-----END PRIVATE KEY-----', '')
+        .replace(/\s+/g, '');
+
+    if (!pemBody) {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'privateKeyPem must be a non-empty PKCS#8 PEM key',
+        });
+    }
+
+    try {
+        base64Encoder ||= getBase64Encoder();
+        return new Uint8Array(base64Encoder.encode(pemBody));
+    } catch (error) {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            cause: error,
+            message: 'privateKeyPem must be a valid PKCS#8 PEM key',
+        });
+    }
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+    return new Uint8Array(bytes).buffer;
 }
