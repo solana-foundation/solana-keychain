@@ -115,6 +115,24 @@ jobs:
           DFNS_API_BASE_URL: ${{ secrets.DFNS_API_BASE_URL }}
         run: pnpm -F @solana/keychain-${{ matrix.package }} run test:integration
 
+  typescript-audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 10.14.0
+      - name: Install dependencies
+        run: pnpm install
+      - name: Audit production dependencies
+        run: pnpm audit --production
+
   typescript-lint:
     runs-on: ubuntu-latest
     defaults:
