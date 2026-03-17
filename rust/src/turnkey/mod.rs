@@ -26,6 +26,18 @@ pub struct TurnkeySigner {
     client: reqwest::Client,
 }
 
+/// Configuration for creating a TurnkeySigner.
+#[derive(Clone)]
+pub struct TurnkeySignerConfig {
+    pub api_public_key: String,
+    pub api_private_key: String,
+    pub organization_id: String,
+    pub private_key_id: String,
+    pub public_key: String,
+    pub api_base_url: Option<String>,
+    pub http_client_config: Option<HttpClientConfig>,
+}
+
 impl std::fmt::Debug for TurnkeySigner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TurnkeySigner")
@@ -51,27 +63,21 @@ impl TurnkeySigner {
         private_key_id: String,
         public_key: String,
     ) -> Result<Self, SignerError> {
-        Self::new_with_http_client_config(
+        Self::from_config(TurnkeySignerConfig {
             api_public_key,
             api_private_key,
             organization_id,
             private_key_id,
             public_key,
-            None,
-        )
+            api_base_url: None,
+            http_client_config: None,
+        })
     }
 
-    /// Create a new TurnkeySigner with custom HTTP timeout settings.
-    pub fn new_with_http_client_config(
-        api_public_key: String,
-        api_private_key: String,
-        organization_id: String,
-        private_key_id: String,
-        public_key: String,
-        http_client_config: Option<HttpClientConfig>,
-    ) -> Result<Self, SignerError> {
-        let http_client_config = http_client_config.unwrap_or_default();
-        let pubkey = Pubkey::from_str(&public_key)
+    /// Create a new TurnkeySigner from a configuration object.
+    pub fn from_config(config: TurnkeySignerConfig) -> Result<Self, SignerError> {
+        let http_client_config = config.http_client_config.unwrap_or_default();
+        let pubkey = Pubkey::from_str(&config.public_key)
             .map_err(|e| SignerError::InvalidPublicKey(format!("Invalid public key: {e}")))?;
         let builder = reqwest::Client::builder();
         let builder = builder
@@ -83,12 +89,14 @@ impl TurnkeySigner {
             .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
 
         Ok(Self {
-            api_public_key,
-            api_private_key,
-            organization_id,
-            private_key_id,
+            api_public_key: config.api_public_key,
+            api_private_key: config.api_private_key,
+            organization_id: config.organization_id,
+            private_key_id: config.private_key_id,
             public_key: pubkey,
-            api_base_url: "https://api.turnkey.com".to_string(),
+            api_base_url: config
+                .api_base_url
+                .unwrap_or_else(|| "https://api.turnkey.com".to_string()),
             client,
         })
     }

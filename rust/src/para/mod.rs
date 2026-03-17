@@ -23,6 +23,14 @@ pub struct ParaSigner {
     public_key: Pubkey,
 }
 
+/// Configuration for creating a ParaSigner.
+#[derive(Clone)]
+pub struct ParaSignerConfig {
+    pub api_key: String,
+    pub wallet_id: String,
+    pub api_base_url: Option<String>,
+}
+
 impl std::fmt::Debug for ParaSigner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ParaSigner")
@@ -47,25 +55,34 @@ impl ParaSigner {
         wallet_id: String,
         api_base_url: Option<String>,
     ) -> Result<Self, SignerError> {
-        if api_key.is_empty() || wallet_id.is_empty() {
+        Self::from_config(ParaSignerConfig {
+            api_key,
+            wallet_id,
+            api_base_url,
+        })
+    }
+
+    /// Create a new ParaSigner from a configuration object.
+    pub fn from_config(config: ParaSignerConfig) -> Result<Self, SignerError> {
+        if config.api_key.is_empty() || config.wallet_id.is_empty() {
             return Err(SignerError::ConfigError(
                 "apiKey and walletId must not be empty".to_string(),
             ));
         }
 
-        if !api_key.starts_with("sk_") {
+        if !config.api_key.starts_with("sk_") {
             return Err(SignerError::ConfigError(
                 "apiKey must be a Para secret key (starts with sk_)".to_string(),
             ));
         }
 
-        if !Self::is_valid_uuid(&wallet_id) {
+        if !Self::is_valid_uuid(&config.wallet_id) {
             return Err(SignerError::ConfigError(
                 "walletId must be a valid UUID".to_string(),
             ));
         }
 
-        if let Some(ref url) = api_base_url {
+        if let Some(ref url) = config.api_base_url {
             if !url.starts_with("https://") {
                 return Err(SignerError::ConfigError(
                     "apiBaseUrl must use HTTPS".to_string(),
@@ -81,9 +98,10 @@ impl ParaSigner {
             .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
 
         Ok(Self {
-            api_key,
-            wallet_id,
-            api_base_url: api_base_url
+            api_key: config.api_key,
+            wallet_id: config.wallet_id,
+            api_base_url: config
+                .api_base_url
                 .unwrap_or_else(|| DEFAULT_BASE_URL.to_string())
                 .trim_end_matches('/')
                 .to_string(),

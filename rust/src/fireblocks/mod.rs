@@ -73,6 +73,11 @@ impl FireblocksSigner {
     ///
     /// * `config` - Configuration for the signer
     pub fn new(config: FireblocksSignerConfig) -> Self {
+        Self::from_config(config)
+    }
+
+    /// Create a new FireblocksSigner from a configuration object.
+    pub fn from_config(config: FireblocksSignerConfig) -> Self {
         let http_client_config = config.http_client_config.unwrap_or_default();
         let builder = reqwest::Client::builder();
         let builder = builder

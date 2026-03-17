@@ -27,6 +27,13 @@ pub struct GcpKmsSigner {
     public_key: Pubkey,
 }
 
+/// Configuration for creating a GcpKmsSigner.
+#[derive(Clone)]
+pub struct GcpKmsSignerConfig {
+    pub key_name: String,
+    pub public_key: String,
+}
+
 impl std::fmt::Debug for GcpKmsSigner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GcpKmsSigner")
@@ -44,11 +51,20 @@ impl GcpKmsSigner {
     /// * `key_name` - Full resource name of the crypto key version
     /// * `public_key` - Solana public key (base58-encoded)
     pub async fn new(key_name: String, public_key: String) -> Result<Self, SignerError> {
+        Self::from_config(GcpKmsSignerConfig {
+            key_name,
+            public_key,
+        })
+        .await
+    }
+
+    /// Create a new GcpKmsSigner from a configuration object.
+    pub async fn from_config(config: GcpKmsSignerConfig) -> Result<Self, SignerError> {
         let client = KeyManagementService::builder().build().await.map_err(|e| {
             SignerError::RemoteApiError(format!("Failed to create KMS client: {e}"))
         })?;
 
-        Self::with_client(client, key_name, public_key)
+        Self::with_client(client, config.key_name, config.public_key)
     }
 
     /// Create a new GcpKmsSigner with a pre-configured client

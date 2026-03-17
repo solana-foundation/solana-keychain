@@ -59,6 +59,17 @@ pub struct CdpSigner {
     client: reqwest::Client,
 }
 
+/// Configuration for creating a CdpSigner.
+#[derive(Clone)]
+pub struct CdpSignerConfig {
+    pub api_key_id: String,
+    pub api_key_secret: String,
+    pub wallet_secret: String,
+    pub address: String,
+    pub api_base_url: Option<String>,
+    pub http_client_config: Option<HttpClientConfig>,
+}
+
 impl std::fmt::Debug for CdpSigner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CdpSigner")
@@ -83,89 +94,48 @@ impl CdpSigner {
         wallet_secret: String,
         address: String,
     ) -> Result<Self, SignerError> {
-        Self::new_with_http_client_config(api_key_id, api_key_secret, wallet_secret, address, None)
-    }
-
-    /// Create a new CdpSigner with custom HTTP timeout settings.
-    pub fn new_with_http_client_config(
-        api_key_id: String,
-        api_key_secret: String,
-        wallet_secret: String,
-        address: String,
-        http_client_config: Option<HttpClientConfig>,
-    ) -> Result<Self, SignerError> {
-        Self::new_with_base_url_and_http_client_config(
+        Self::from_config(CdpSignerConfig {
             api_key_id,
             api_key_secret,
             wallet_secret,
             address,
-            format!("https://{CDP_API_HOST}"),
-            http_client_config,
-        )
+            api_base_url: None,
+            http_client_config: None,
+        })
     }
 
-    /// Create a new CdpSigner with a custom API base URL.
-    ///
-    /// # Arguments
-    ///
-    /// * `api_key_id` - CDP API key name / ID
-    /// * `api_key_secret` - CDP API private key (base64 Ed25519)
-    /// * `wallet_secret` - CDP wallet secret (base64 PKCS#8 DER for ES256)
-    /// * `address` - Solana account address managed by CDP (base58 pubkey)
-    /// * `base_url` - CDP API base URL (e.g., https://api.cdp.coinbase.com)
-    pub fn new_with_base_url(
-        api_key_id: String,
-        api_key_secret: String,
-        wallet_secret: String,
-        address: String,
-        base_url: String,
-    ) -> Result<Self, SignerError> {
-        Self::new_with_base_url_and_http_client_config(
-            api_key_id,
-            api_key_secret,
-            wallet_secret,
-            address,
-            base_url,
-            None,
-        )
-    }
-
-    /// Create a new CdpSigner with a custom API base URL and HTTP timeout settings.
-    pub fn new_with_base_url_and_http_client_config(
-        api_key_id: String,
-        api_key_secret: String,
-        wallet_secret: String,
-        address: String,
-        base_url: String,
-        http_client_config: Option<HttpClientConfig>,
-    ) -> Result<Self, SignerError> {
-        if api_key_id.is_empty() {
+    /// Create a new CdpSigner from a configuration object.
+    pub fn from_config(config: CdpSignerConfig) -> Result<Self, SignerError> {
+        if config.api_key_id.is_empty() {
             return Err(SignerError::ConfigError(
                 "api_key_id must not be empty".to_string(),
             ));
         }
-        if api_key_secret.is_empty() {
+        if config.api_key_secret.is_empty() {
             return Err(SignerError::ConfigError(
                 "api_key_secret must not be empty".to_string(),
             ));
         }
-        if wallet_secret.is_empty() {
+        if config.wallet_secret.is_empty() {
             return Err(SignerError::ConfigError(
                 "wallet_secret must not be empty".to_string(),
             ));
         }
-        if address.is_empty() {
+        if config.address.is_empty() {
             return Err(SignerError::ConfigError(
                 "address must not be empty".to_string(),
             ));
         }
 
-        let public_key = Pubkey::from_str(&address).map_err(|_| {
-            SignerError::InvalidPublicKey(format!("Invalid Solana address: {address}"))
+        let public_key = Pubkey::from_str(&config.address).map_err(|_| {
+            SignerError::InvalidPublicKey(format!("Invalid Solana address: {}", config.address))
         })?;
 
+        let base_url = config
+            .api_base_url
+            .unwrap_or_else(|| format!("https://{CDP_API_HOST}"));
         let api_host = extract_host(&base_url)?;
-        let http_client_config = http_client_config.unwrap_or_default();
+        let http_client_config = config.http_client_config.unwrap_or_default();
         let builder = reqwest::Client::builder();
         let builder = builder
             .timeout(http_client_config.resolved_request_timeout())
@@ -176,9 +146,9 @@ impl CdpSigner {
             .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
 
         Ok(Self {
-            api_key_id,
-            api_key_secret,
-            wallet_secret,
+            api_key_id: config.api_key_id,
+            api_key_secret: config.api_key_secret,
+            wallet_secret: config.wallet_secret,
             public_key,
             api_base_url: base_url,
             api_host,

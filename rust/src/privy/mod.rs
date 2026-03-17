@@ -21,6 +21,16 @@ pub struct PrivySigner {
     public_key: Option<Pubkey>,
 }
 
+/// Configuration for creating a PrivySigner.
+#[derive(Clone)]
+pub struct PrivySignerConfig {
+    pub app_id: String,
+    pub app_secret: String,
+    pub wallet_id: String,
+    pub api_base_url: Option<String>,
+    pub http_client_config: Option<HttpClientConfig>,
+}
+
 impl std::fmt::Debug for PrivySigner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PrivySigner")
@@ -38,17 +48,18 @@ impl PrivySigner {
     /// * `app_secret` - Privy application secret
     /// * `wallet_id` - Privy wallet ID
     pub fn new(app_id: String, app_secret: String, wallet_id: String) -> Self {
-        Self::new_with_http_client_config(app_id, app_secret, wallet_id, None)
+        Self::from_config(PrivySignerConfig {
+            app_id,
+            app_secret,
+            wallet_id,
+            api_base_url: None,
+            http_client_config: None,
+        })
     }
 
-    /// Create a new PrivySigner with custom HTTP timeout settings.
-    pub fn new_with_http_client_config(
-        app_id: String,
-        app_secret: String,
-        wallet_id: String,
-        http_client_config: Option<HttpClientConfig>,
-    ) -> Self {
-        let http_client_config = http_client_config.unwrap_or_default();
+    /// Create a new PrivySigner from a configuration object.
+    pub fn from_config(config: PrivySignerConfig) -> Self {
+        let http_client_config = config.http_client_config.unwrap_or_default();
         let builder = reqwest::Client::builder();
         let builder = builder
             .timeout(http_client_config.resolved_request_timeout())
@@ -57,10 +68,12 @@ impl PrivySigner {
         let client = builder.build().expect("Failed to build HTTP client");
 
         Self {
-            app_id,
-            app_secret,
-            wallet_id,
-            api_base_url: "https://api.privy.io/v1".to_string(),
+            app_id: config.app_id,
+            app_secret: config.app_secret,
+            wallet_id: config.wallet_id,
+            api_base_url: config
+                .api_base_url
+                .unwrap_or_else(|| "https://api.privy.io/v1".to_string()),
             client,
             // Public key is resolved during init().
             public_key: None,

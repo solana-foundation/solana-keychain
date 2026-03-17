@@ -70,32 +70,32 @@ pub use traits::{SignTransactionResult, SolanaSigner};
 
 // Re-export signer types
 #[cfg(feature = "memory")]
-pub use memory::MemorySigner;
+pub use memory::{MemorySigner, MemorySignerConfig};
 
 #[cfg(feature = "vault")]
-pub use vault::VaultSigner;
+pub use vault::{VaultSigner, VaultSignerConfig};
 
 #[cfg(feature = "privy")]
-pub use privy::PrivySigner;
+pub use privy::{PrivySigner, PrivySignerConfig};
 
 #[cfg(feature = "turnkey")]
-pub use turnkey::TurnkeySigner;
+pub use turnkey::{TurnkeySigner, TurnkeySignerConfig};
 
 #[cfg(feature = "aws_kms")]
-pub use aws_kms::AwsKmsSigner;
+pub use aws_kms::{AwsKmsSigner, AwsKmsSignerConfig};
 
 #[cfg(feature = "fireblocks")]
 pub use fireblocks::{FireblocksSigner, FireblocksSignerConfig};
 
 #[cfg(feature = "gcp_kms")]
-pub use gcp_kms::GcpKmsSigner;
+pub use gcp_kms::{GcpKmsSigner, GcpKmsSignerConfig};
 
 #[cfg(feature = "cdp")]
-pub use cdp::CdpSigner;
+pub use cdp::{CdpSigner, CdpSignerConfig};
 #[cfg(feature = "dfns")]
 pub use dfns::{DfnsSigner, DfnsSignerConfig};
 #[cfg(feature = "para")]
-pub use para::ParaSigner;
+pub use para::{ParaSigner, ParaSignerConfig};
 
 // Ensure at least one signer backend is enabled
 #[cfg(not(any(
@@ -168,7 +168,13 @@ impl Signer {
         key_name: String,
         pubkey: String,
     ) -> Result<Self, SignerError> {
-        Self::from_vault_with_http_client_config(vault_addr, vault_token, key_name, pubkey, None)
+        Ok(Self::Vault(VaultSigner::from_config(VaultSignerConfig {
+            vault_addr,
+            token: vault_token,
+            key_name,
+            pubkey,
+            http_client_config: None,
+        })?))
     }
 
     /// Create a Vault signer with custom HTTP timeout settings.
@@ -180,13 +186,13 @@ impl Signer {
         pubkey: String,
         http_client_config: Option<HttpClientConfig>,
     ) -> Result<Self, SignerError> {
-        Ok(Self::Vault(VaultSigner::new_with_http_client_config(
+        Ok(Self::Vault(VaultSigner::from_config(VaultSignerConfig {
             vault_addr,
-            vault_token,
+            token: vault_token,
             key_name,
             pubkey,
             http_client_config,
-        )?))
+        })?))
     }
 
     /// Create a Privy signer (requires initialization)
@@ -207,12 +213,13 @@ impl Signer {
         wallet_id: String,
         http_client_config: Option<HttpClientConfig>,
     ) -> Result<Self, SignerError> {
-        let mut signer = PrivySigner::new_with_http_client_config(
+        let mut signer = PrivySigner::from_config(PrivySignerConfig {
             app_id,
             app_secret,
             wallet_id,
+            api_base_url: None,
             http_client_config,
-        );
+        });
         signer.init().await?;
         Ok(Self::Privy(signer))
     }
@@ -246,13 +253,16 @@ impl Signer {
         public_key: String,
         http_client_config: Option<HttpClientConfig>,
     ) -> Result<Self, SignerError> {
-        Ok(Self::Turnkey(TurnkeySigner::new_with_http_client_config(
-            api_public_key,
-            api_private_key,
-            organization_id,
-            private_key_id,
-            public_key,
-            http_client_config,
+        Ok(Self::Turnkey(TurnkeySigner::from_config(
+            TurnkeySignerConfig {
+                api_public_key,
+                api_private_key,
+                organization_id,
+                private_key_id,
+                public_key,
+                api_base_url: None,
+                http_client_config,
+            },
         )?))
     }
 
@@ -264,7 +274,12 @@ impl Signer {
         region: Option<String>,
     ) -> Result<Self, SignerError> {
         Ok(Self::AwsKms(
-            AwsKmsSigner::new(key_id, public_key, region).await?,
+            AwsKmsSigner::from_config(AwsKmsSignerConfig {
+                key_id,
+                public_key,
+                region,
+            })
+            .await?,
         ))
     }
 
@@ -279,7 +294,13 @@ impl Signer {
     /// Create a GCP KMS signer (requires initialization)
     #[cfg(feature = "gcp_kms")]
     pub async fn from_gcp_kms(key_name: String, public_key: String) -> Result<Self, SignerError> {
-        Ok(Self::GcpKms(GcpKmsSigner::new(key_name, public_key).await?))
+        Ok(Self::GcpKms(
+            GcpKmsSigner::from_config(GcpKmsSignerConfig {
+                key_name,
+                public_key,
+            })
+            .await?,
+        ))
     }
 
     /// Create a Para signer (requires initialization)
@@ -289,7 +310,11 @@ impl Signer {
         wallet_id: String,
         api_base_url: Option<String>,
     ) -> Result<Self, SignerError> {
-        let mut signer = ParaSigner::new(api_key, wallet_id, api_base_url)?;
+        let mut signer = ParaSigner::from_config(ParaSignerConfig {
+            api_key,
+            wallet_id,
+            api_base_url,
+        })?;
         signer.init().await?;
         Ok(Self::Para(signer))
     }
@@ -320,13 +345,14 @@ impl Signer {
         address: String,
         http_client_config: Option<HttpClientConfig>,
     ) -> Result<Self, SignerError> {
-        Ok(Self::Cdp(CdpSigner::new_with_http_client_config(
+        Ok(Self::Cdp(CdpSigner::from_config(CdpSignerConfig {
             api_key_id,
             api_key_secret,
             wallet_secret,
             address,
+            api_base_url: None,
             http_client_config,
-        )?))
+        })?))
     }
 
     /// Create a Dfns signer (requires initialization)

@@ -19,6 +19,11 @@ pub struct MemorySigner {
     keypair: Keypair,
 }
 
+/// Configuration for creating a MemorySigner.
+pub struct MemorySignerConfig {
+    pub keypair: Keypair,
+}
+
 impl std::fmt::Debug for MemorySigner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MemorySigner")
@@ -30,7 +35,14 @@ impl std::fmt::Debug for MemorySigner {
 impl MemorySigner {
     /// Creates a new signer from a Solana keypair
     pub fn new(keypair: Keypair) -> Self {
-        Self { keypair }
+        Self::from_config(MemorySignerConfig { keypair })
+    }
+
+    /// Creates a new signer from a configuration object.
+    pub fn from_config(config: MemorySignerConfig) -> Self {
+        Self {
+            keypair: config.keypair,
+        }
     }
 
     /// Creates a new signer from a private key byte array

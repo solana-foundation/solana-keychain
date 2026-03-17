@@ -37,6 +37,16 @@ pub struct VaultSigner {
     pubkey: Pubkey,
 }
 
+/// Configuration for creating a VaultSigner.
+#[derive(Clone)]
+pub struct VaultSignerConfig {
+    pub vault_addr: String,
+    pub token: String,
+    pub key_name: String,
+    pub pubkey: String,
+    pub http_client_config: Option<HttpClientConfig>,
+}
+
 impl std::fmt::Debug for VaultSigner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VaultSigner")
@@ -60,18 +70,18 @@ impl VaultSigner {
         key_name: String,
         pubkey: String,
     ) -> Result<Self, SignerError> {
-        Self::new_with_http_client_config(vault_addr, token, key_name, pubkey, None)
+        Self::from_config(VaultSignerConfig {
+            vault_addr,
+            token,
+            key_name,
+            pubkey,
+            http_client_config: None,
+        })
     }
 
-    /// Creates a new Vault signer with custom HTTP timeout settings.
-    pub fn new_with_http_client_config(
-        vault_addr: String,
-        token: String,
-        key_name: String,
-        pubkey: String,
-        http_client_config: Option<HttpClientConfig>,
-    ) -> Result<Self, SignerError> {
-        let http_client_config = http_client_config.unwrap_or_default();
+    /// Creates a new Vault signer from a configuration object.
+    pub fn from_config(config: VaultSignerConfig) -> Result<Self, SignerError> {
+        let http_client_config = config.http_client_config.unwrap_or_default();
         let builder = Client::builder();
         let builder = builder
             .timeout(http_client_config.resolved_request_timeout())
@@ -82,7 +92,7 @@ impl VaultSigner {
             .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
 
         let pubkey = Pubkey::try_from(
-            bs58::decode(pubkey)
+            bs58::decode(&config.pubkey)
                 .into_vec()
                 .map_err(|e| {
                     SignerError::InvalidPublicKey(format!(
@@ -95,9 +105,9 @@ impl VaultSigner {
 
         Ok(Self {
             client: Arc::new(client),
-            vault_addr,
-            token,
-            key_name,
+            vault_addr: config.vault_addr,
+            token: config.token,
+            key_name: config.key_name,
             pubkey,
         })
     }

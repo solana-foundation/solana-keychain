@@ -56,6 +56,11 @@ impl DfnsSigner {
     ///
     /// You must call `init()` after construction to fetch the public key from Dfns.
     pub fn new(config: DfnsSignerConfig) -> Self {
+        Self::from_config(config)
+    }
+
+    /// Create a new DfnsSigner from a configuration object.
+    pub fn from_config(config: DfnsSignerConfig) -> Self {
         let http_client_config = config.http_client_config.unwrap_or_default();
         let builder = reqwest::Client::builder().user_agent("solana-keychain");
         let builder = builder

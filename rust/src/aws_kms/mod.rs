@@ -38,6 +38,14 @@ pub struct AwsKmsSigner {
     region: Option<String>,
 }
 
+/// Configuration for creating an AwsKmsSigner.
+#[derive(Clone)]
+pub struct AwsKmsSignerConfig {
+    pub key_id: String,
+    pub public_key: String,
+    pub region: Option<String>,
+}
+
 impl std::fmt::Debug for AwsKmsSigner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AwsKmsSigner")
@@ -65,24 +73,34 @@ impl AwsKmsSigner {
         public_key: String,
         region: Option<String>,
     ) -> Result<Self, SignerError> {
-        let pubkey = Pubkey::from_str(&public_key)
+        Self::from_config(AwsKmsSignerConfig {
+            key_id,
+            public_key,
+            region,
+        })
+        .await
+    }
+
+    /// Create a new AwsKmsSigner from a configuration object.
+    pub async fn from_config(config: AwsKmsSignerConfig) -> Result<Self, SignerError> {
+        let pubkey = Pubkey::from_str(&config.public_key)
             .map_err(|e| SignerError::InvalidPublicKey(format!("Invalid public key: {e}")))?;
 
         // Build AWS config
         let mut config_builder = aws_config::defaults(aws_config::BehaviorVersion::latest());
 
-        if let Some(region_str) = &region {
+        if let Some(region_str) = &config.region {
             config_builder = config_builder.region(Region::new(region_str.clone()));
         }
 
-        let config = config_builder.load().await;
-        let client = KmsClient::new(&config);
+        let aws_config = config_builder.load().await;
+        let client = KmsClient::new(&aws_config);
 
         Ok(Self {
             client,
-            key_id,
+            key_id: config.key_id,
             public_key: pubkey,
-            region,
+            region: config.region,
         })
     }
 
