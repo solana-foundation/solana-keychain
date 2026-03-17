@@ -102,6 +102,9 @@ export class ApiKeyStamper {
     private readonly apiPublicKey: string;
 
     constructor(config: ApiKeyStamperConfig) {
+        // Validate key material eagerly so config errors surface at construction, not first use.
+        convertTurnkeyApiKeyToJwk(config.apiPrivateKey, config.apiPublicKey);
+
         this.apiPrivateKey = config.apiPrivateKey;
         this.apiPublicKey = config.apiPublicKey;
     }
@@ -113,9 +116,6 @@ export class ApiKeyStamper {
      */
     stamp(message: string): StampResult {
         try {
-            // Validate key material with the same constraints as Turnkey's JWK conversion.
-            convertTurnkeyApiKeyToJwk(this.apiPrivateKey, this.apiPublicKey);
-
             // Sign with P-256 ECDSA + SHA-256 and encode as DER hex.
             const messageBytes = new TextEncoder().encode(message);
             const privateKeyBytes = hexToBytes(this.apiPrivateKey);

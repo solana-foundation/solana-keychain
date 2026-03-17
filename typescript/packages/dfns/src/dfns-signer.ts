@@ -7,6 +7,7 @@ import {
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateHttpsUrl,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -145,7 +146,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
         }
 
         const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
-        validateHttpsApiBaseUrl(apiBaseUrl);
+        validateHttpsUrl(apiBaseUrl, 'apiBaseUrl');
         const requestDelayMs = config.requestDelayMs ?? 0;
 
         if (requestDelayMs < 0) {
@@ -401,23 +402,6 @@ async function fetchWallet(apiBaseUrl: string, authToken: string, walletId: stri
     }
 
     return parseWalletResponse(rawWalletResponse);
-}
-
-function validateHttpsApiBaseUrl(apiBaseUrl: string): void {
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(apiBaseUrl);
-    } catch {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'apiBaseUrl is not a valid URL',
-        });
-    }
-
-    if (parsedUrl.protocol !== 'https:') {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'apiBaseUrl must use HTTPS',
-        });
-    }
 }
 
 function parseSignatureResponse(raw: unknown): GenerateSignatureResponse {

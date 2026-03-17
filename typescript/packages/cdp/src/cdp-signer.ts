@@ -9,6 +9,7 @@ import {
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateHttpsUrl,
 } from '@solana/keychain-core';
 import { createKeyPairFromBytes, SignatureBytes } from '@solana/keys';
 import type { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -275,7 +276,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         }
 
         const baseUrl = normalizeBaseUrl(config.baseUrl ?? CDP_DEFAULT_BASE_URL);
-        const parsedBaseUrl = parseAndValidateHttpsBaseUrl(baseUrl);
+        const parsedBaseUrl = validateHttpsUrl(baseUrl, 'baseUrl');
         const apiHost = parsedBaseUrl.host;
 
         const requestDelayMs = config.requestDelayMs ?? 0;
@@ -534,26 +535,6 @@ function normalizeBaseUrl(baseUrl: string): string {
         normalized = normalized.slice(0, -1);
     }
     return normalized;
-}
-
-function parseAndValidateHttpsBaseUrl(baseUrl: string): URL {
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(baseUrl);
-    } catch (error) {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            cause: error,
-            message: 'baseUrl is not a valid URL',
-        });
-    }
-
-    if (parsedUrl.protocol !== 'https:') {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'baseUrl must use HTTPS',
-        });
-    }
-
-    return parsedUrl;
 }
 
 function shouldIncludeReqHash(body: unknown): boolean {

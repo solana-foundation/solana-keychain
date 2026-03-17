@@ -106,20 +106,14 @@ describe('VaultSigner', () => {
             }).toThrow('vaultAddr must use HTTPS');
         });
 
-        it('should allow localhost http vaultAddr in test environment', () => {
-            const previousNodeEnv = process.env.NODE_ENV;
-            try {
-                process.env.NODE_ENV = 'test';
-
-                expect(() => {
-                    new VaultSigner({
-                        ...mockConfig,
-                        vaultAddr: 'http://127.0.0.1:8200',
-                    });
-                }).not.toThrow();
-            } finally {
-                process.env.NODE_ENV = previousNodeEnv;
-            }
+        it('should allow http vaultAddr when allowHttp is true', () => {
+            expect(() => {
+                new VaultSigner({
+                    ...mockConfig,
+                    allowHttp: true,
+                    vaultAddr: 'http://127.0.0.1:8200',
+                });
+            }).not.toThrow();
         });
 
         it('should remove trailing slash from vaultAddr', () => {

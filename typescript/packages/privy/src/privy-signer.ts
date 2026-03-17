@@ -8,6 +8,7 @@ import {
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateHttpsUrl,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -99,7 +100,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
             });
         }
         const apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
-        validateHttpsApiBaseUrl(apiBaseUrl);
+        validateHttpsUrl(apiBaseUrl, 'apiBaseUrl');
 
         const address = await fetchPublicKey<TAddress>({
             ...config,
@@ -357,23 +358,6 @@ function getAuthHeader(appId: string, appSecret: string): string {
     const credentials = `${appId}:${appSecret}`;
     const credentialsBytes = utf8Encoder.encode(credentials);
     return `Basic ${base64Decoder.decode(credentialsBytes)}`;
-}
-
-function validateHttpsApiBaseUrl(apiBaseUrl: string): void {
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(apiBaseUrl);
-    } catch {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'apiBaseUrl is not a valid URL',
-        });
-    }
-
-    if (parsedUrl.protocol !== 'https:') {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'apiBaseUrl must use HTTPS',
-        });
-    }
 }
 
 async function fetchPublicKey<TAddress extends string = string>(config: {

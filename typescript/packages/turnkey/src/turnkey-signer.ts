@@ -7,6 +7,7 @@ import {
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateHttpsUrl,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -99,7 +100,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
         this.organizationId = config.organizationId;
         this.privateKeyId = config.privateKeyId;
         const apiBaseUrl = config.apiBaseUrl || 'https://api.turnkey.com';
-        validateHttpsApiBaseUrl(apiBaseUrl);
+        validateHttpsUrl(apiBaseUrl, 'apiBaseUrl');
 
         this.apiBaseUrl = apiBaseUrl;
         this.stamper = new ApiKeyStamper({
@@ -412,22 +413,5 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
         } catch {
             return false;
         }
-    }
-}
-
-function validateHttpsApiBaseUrl(apiBaseUrl: string): void {
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(apiBaseUrl);
-    } catch {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'apiBaseUrl is not a valid URL',
-        });
-    }
-
-    if (parsedUrl.protocol !== 'https:') {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'apiBaseUrl must use HTTPS',
-        });
     }
 }

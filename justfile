@@ -108,6 +108,17 @@ rust-test-integration:
 # ======================== TypeScript =======================
 # ===========================================================
 
+# TypeScript: install, format, build, typecheck, test
+ts-precommit: ts-install ts-fmt ts-build ts-typecheck ts-test
+
+[working-directory: 'typescript']
+ts-install:
+    pnpm install
+
+[working-directory: 'typescript']
+ts-typecheck:
+    pnpm typecheck
+
 [working-directory: 'typescript']
 ts-fmt:
     pnpm lint:fix

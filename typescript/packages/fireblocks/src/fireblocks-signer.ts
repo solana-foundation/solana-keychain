@@ -7,6 +7,7 @@ import {
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateHttpsUrl,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -117,7 +118,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         this.vaultAccountId = config.vaultAccountId;
         this.assetId = config.assetId ?? DEFAULT_ASSET_ID;
         const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
-        validateHttpsApiBaseUrl(apiBaseUrl);
+        validateHttpsUrl(apiBaseUrl, 'apiBaseUrl');
 
         this.apiBaseUrl = apiBaseUrl;
         this.pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -492,22 +493,5 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                 message: 'Signer not initialized. Call init() first.',
             });
         }
-    }
-}
-
-function validateHttpsApiBaseUrl(apiBaseUrl: string): void {
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(apiBaseUrl);
-    } catch {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'apiBaseUrl is not a valid URL',
-        });
-    }
-
-    if (parsedUrl.protocol !== 'https:') {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'apiBaseUrl must use HTTPS',
-        });
     }
 }

@@ -178,7 +178,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
 async function signClientData(clientData: Uint8Array, privateKeyPem: string): Promise<Uint8Array> {
     const normalizedPem = normalizePrivateKeyPem(privateKeyPem);
 
-    let latestError: unknown;
+    let webCryptoError: unknown;
+    let nodeCryptoError: unknown;
     const subtle = globalThis.crypto?.subtle;
     if (subtle) {
         try {
@@ -187,7 +188,7 @@ async function signClientData(clientData: Uint8Array, privateKeyPem: string): Pr
                 return signature;
             }
         } catch (error) {
-            latestError = error;
+            webCryptoError = error;
         }
     }
 
@@ -197,12 +198,14 @@ async function signClientData(clientData: Uint8Array, privateKeyPem: string): Pr
             return signature;
         }
     } catch (error) {
-        latestError = error;
+        nodeCryptoError = error;
     }
 
     throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-        cause: latestError,
-        message: 'Failed to sign Dfns auth challenge',
+        cause: nodeCryptoError ?? webCryptoError,
+        message: 'Failed to sign Dfns auth challenge: no supported crypto backend could sign the key',
+        nodeCryptoError: nodeCryptoError instanceof Error ? nodeCryptoError.message : undefined,
+        webCryptoError: webCryptoError instanceof Error ? webCryptoError.message : undefined,
     });
 }
 

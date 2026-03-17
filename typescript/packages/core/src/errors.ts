@@ -73,6 +73,33 @@ export function throwSignerError(code: SignerErrorCode, context?: Record<string,
 }
 
 /**
+ * Validate that a URL string is well-formed and uses HTTPS.
+ *
+ * @param url - The URL string to validate.
+ * @param fieldName - Config field name for error messages (e.g. "apiBaseUrl", "vaultAddr").
+ * @returns The parsed URL object.
+ * @throws {SignerError} `SIGNER_CONFIG_ERROR` when the URL is invalid or does not use HTTPS.
+ */
+export function validateHttpsUrl(url: string, fieldName: string): URL {
+    let parsedUrl: URL;
+    try {
+        parsedUrl = new URL(url);
+    } catch {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: `${fieldName} is not a valid URL`,
+        });
+    }
+
+    if (parsedUrl.protocol !== 'https:') {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: `${fieldName} must use HTTPS`,
+        });
+    }
+
+    return parsedUrl;
+}
+
+/**
  * Sanitize remote API error text before attaching it to error context/logs.
  * - Strips control characters.
  * - Collapses whitespace.

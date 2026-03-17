@@ -11,6 +11,7 @@ const CONFIG: SignerTestConfig<SolanaSigner> = {
     createSigner: () =>
         Promise.resolve(
             createVaultSigner({
+                allowHttp: process.env.VAULT_ADDR?.startsWith('http://'),
                 vaultAddr: process.env.VAULT_ADDR!,
                 vaultToken: process.env.VAULT_TOKEN!,
                 keyName: process.env.VAULT_KEY_NAME!,

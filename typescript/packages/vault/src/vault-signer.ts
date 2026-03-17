@@ -7,6 +7,7 @@ import {
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateHttpsUrl,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -33,6 +34,8 @@ export function createVaultSigner<TAddress extends string = string>(config: Vaul
  * Configuration for creating a VaultSigner
  */
 export interface VaultSignerConfig {
+    /** Allow plain HTTP for local development (e.g. Vault dev server on localhost). Default: false. */
+    allowHttp?: boolean;
     /** Name of the transit key in Vault */
     keyName: string;
     /** Solana public key (base58) corresponding to the Vault key */
@@ -90,7 +93,9 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
         }
 
         const vaultAddr = config.vaultAddr.replace(/\/$/, ''); // Remove trailing slash
-        validateHttpsVaultAddr(vaultAddr);
+        if (!config.allowHttp) {
+            validateHttpsUrl(vaultAddr, 'vaultAddr');
+        }
 
         this.vaultAddr = vaultAddr;
         this.vaultToken = config.vaultToken;
@@ -286,26 +291,5 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
         } catch {
             return false;
         }
-    }
-}
-
-function validateHttpsVaultAddr(vaultAddr: string): void {
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(vaultAddr);
-    } catch {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'vaultAddr is not a valid URL',
-        });
-    }
-
-    const isLocalhost =
-        parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1' || parsedUrl.hostname === '::1';
-    const allowHttpInTests = process.env.NODE_ENV === 'test' && isLocalhost;
-
-    if (parsedUrl.protocol !== 'https:' && !allowHttpInTests) {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'vaultAddr must use HTTPS',
-        });
     }
 }
