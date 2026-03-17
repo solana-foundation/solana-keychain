@@ -2,8 +2,8 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase58Decoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
+    batchSign,
     createBatchDelay,
-    createSignatureDictionary,
     fetchWithSignerErrors,
     SignerErrorCode,
     SolanaSigner,
@@ -202,28 +202,21 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
      * Sign multiple messages using Dfns
      */
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
+        return await batchSign({
+            delay: this.delay,
+            items: messages,
+            signFn: async m => {
                 const messageBytes =
-                    message.content instanceof Uint8Array
-                        ? message.content
-                        : new Uint8Array(Array.from(message.content));
-                const signatureBytes = await this.sendSignatureRequest({
+                    m.content instanceof Uint8Array ? m.content : new Uint8Array(Array.from(m.content));
+                const sig = await this.sendSignatureRequest({
                     kind: 'Message',
                     message: `0x${bytesToHex(messageBytes)}`,
                 });
-                await assertSignatureValid({
-                    data: messageBytes,
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-                return createSignatureDictionary({
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-            }),
-        );
+                await assertSignatureValid({ data: messageBytes, signature: sig, signerAddress: this.address });
+                return sig;
+            },
+            signerAddress: this.address,
+        });
     }
 
     /**
@@ -233,26 +226,21 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
         const txEncoder = getTransactionEncoder();
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                await this.delay(index);
-                const txBytes = txEncoder.encode(transaction);
-                const signatureBytes = await this.sendSignatureRequest({
+        return await batchSign({
+            delay: this.delay,
+            items: transactions,
+            signFn: async tx => {
+                const txBytes = txEncoder.encode(tx);
+                const sig = await this.sendSignatureRequest({
                     blockchainKind: 'Solana',
                     kind: 'Transaction',
                     transaction: `0x${bytesToHex(new Uint8Array(txBytes))}`,
                 });
-                await assertSignatureValid({
-                    data: transaction.messageBytes,
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-                return createSignatureDictionary({
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-            }),
-        );
+                await assertSignatureValid({ data: tx.messageBytes, signature: sig, signerAddress: this.address });
+                return sig;
+            },
+            signerAddress: this.address,
+        });
     }
 
     /**

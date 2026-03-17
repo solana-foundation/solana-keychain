@@ -2,8 +2,8 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase64Decoder, getBase64Encoder, getUtf8Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
+    batchSign,
     createBatchDelay,
-    createSignatureDictionary,
     extractSignatureFromWireTransaction,
     fetchWithSignerErrors,
     SignerErrorCode,
@@ -216,23 +216,18 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
      * @returns The signature dictionaries
      */
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
+        return await batchSign({
+            delay: this.delay,
+            items: messages,
+            signFn: async m => {
                 base64Decoder ||= getBase64Decoder();
-                const base64EncodedMessage = base64Decoder.decode(message.content) as TransactionMessageBytesBase64;
-                const signatureBytes = await this.signMessage(base64EncodedMessage);
-                await assertSignatureValid({
-                    data: message.content,
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-                return createSignatureDictionary({
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-            }),
-        );
+                const base64EncodedMessage = base64Decoder.decode(m.content) as TransactionMessageBytesBase64;
+                const sig = await this.signMessage(base64EncodedMessage);
+                await assertSignatureValid({ data: m.content, signature: sig, signerAddress: this.address });
+                return sig;
+            },
+            signerAddress: this.address,
+        });
     }
 
     /**

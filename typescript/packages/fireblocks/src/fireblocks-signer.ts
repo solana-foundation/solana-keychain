@@ -2,6 +2,7 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase58Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
+    batchSign,
     createBatchDelay,
     createSignatureDictionary,
     fetchWithSignerErrors,
@@ -340,25 +341,18 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
         this.ensureInitialized();
 
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
+        return await batchSign({
+            delay: this.delay,
+            items: messages,
+            signFn: async m => {
                 const messageBytes =
-                    message.content instanceof Uint8Array
-                        ? message.content
-                        : new Uint8Array(Array.from(message.content));
-                const signatureBytes = await this.signRawBytes(messageBytes);
-                await assertSignatureValid({
-                    data: messageBytes,
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-                return createSignatureDictionary({
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-            }),
-        );
+                    m.content instanceof Uint8Array ? m.content : new Uint8Array(Array.from(m.content));
+                const sig = await this.signRawBytes(messageBytes);
+                await assertSignatureValid({ data: messageBytes, signature: sig, signerAddress: this.address });
+                return sig;
+            },
+            signerAddress: this.address,
+        });
     }
 
     /**

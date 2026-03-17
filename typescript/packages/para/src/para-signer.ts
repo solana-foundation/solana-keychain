@@ -2,8 +2,8 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
+    batchSign,
     createBatchDelay,
-    createSignatureDictionary,
     fetchWithSignerErrors,
     SignerErrorCode,
     SolanaSigner,
@@ -176,21 +176,16 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
      * Sign multiple messages using Para
      */
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
-                const signatureBytes = await this.signBytes(message.content);
-                await assertSignatureValid({
-                    data: message.content,
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-                return createSignatureDictionary({
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-            }),
-        );
+        return await batchSign({
+            delay: this.delay,
+            items: messages,
+            signFn: async m => {
+                const sig = await this.signBytes(m.content);
+                await assertSignatureValid({ data: m.content, signature: sig, signerAddress: this.address });
+                return sig;
+            },
+            signerAddress: this.address,
+        });
     }
 
     /**
@@ -199,21 +194,16 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                await this.delay(index);
-                const signatureBytes = await this.signBytes(transaction.messageBytes);
-                await assertSignatureValid({
-                    data: transaction.messageBytes,
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-                return createSignatureDictionary({
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-            }),
-        );
+        return await batchSign({
+            delay: this.delay,
+            items: transactions,
+            signFn: async tx => {
+                const sig = await this.signBytes(tx.messageBytes);
+                await assertSignatureValid({ data: tx.messageBytes, signature: sig, signerAddress: this.address });
+                return sig;
+            },
+            signerAddress: this.address,
+        });
     }
 
     /**

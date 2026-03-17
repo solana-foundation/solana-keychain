@@ -3,8 +3,8 @@ import { getBase16Decoder, getBase58Encoder, getBase64Encoder } from '@solana/co
 import {
     assertSignatureValid,
     base64UrlDecoder,
+    batchSign,
     createBatchDelay,
-    createSignatureDictionary,
     extractSignatureFromWireTransaction,
     fetchWithSignerErrors,
     SignerErrorCode,
@@ -394,22 +394,17 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
      * Message bytes are decoded as UTF-8 before sending to the CDP signMessage endpoint.
      */
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
-                const utf8Message = this.decodeMessageBytes(message.content);
-                const signatureBytes = await this.callSignMessage(utf8Message);
-                await assertSignatureValid({
-                    data: message.content,
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-                return createSignatureDictionary({
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-            }),
-        );
+        return await batchSign({
+            delay: this.delay,
+            items: messages,
+            signFn: async m => {
+                const utf8Message = this.decodeMessageBytes(m.content);
+                const sig = await this.callSignMessage(utf8Message);
+                await assertSignatureValid({ data: m.content, signature: sig, signerAddress: this.address });
+                return sig;
+            },
+            signerAddress: this.address,
+        });
     }
 
     /**

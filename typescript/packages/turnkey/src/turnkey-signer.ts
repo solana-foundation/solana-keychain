@@ -2,8 +2,8 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
+    batchSign,
     createBatchDelay,
-    createSignatureDictionary,
     fetchWithSignerErrors,
     SignerErrorCode,
     SolanaSigner,
@@ -197,24 +197,18 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
      * Sign multiple messages using Turnkey API
      */
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
-                // Convert message bytes to hex for Turnkey
+        return await batchSign({
+            delay: this.delay,
+            items: messages,
+            signFn: async m => {
                 const bytesToHex = getBase16Decoder().decode;
-                const hexMessage = bytesToHex(message.content);
-                const signatureBytes = await this.sign(hexMessage);
-                await assertSignatureValid({
-                    data: message.content,
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-                return createSignatureDictionary({
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-            }),
-        );
+                const hexMessage = bytesToHex(m.content);
+                const sig = await this.sign(hexMessage);
+                await assertSignatureValid({ data: m.content, signature: sig, signerAddress: this.address });
+                return sig;
+            },
+            signerAddress: this.address,
+        });
     }
 
     /**
@@ -275,10 +269,11 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                await this.delay(index);
-                const wireTransaction = getBase64EncodedWireTransaction(transaction);
+        return await batchSign({
+            delay: this.delay,
+            items: transactions,
+            signFn: async tx => {
+                const wireTransaction = getBase64EncodedWireTransaction(tx);
 
                 // Convert base64 wire transaction to bytes, then to hex for Turnkey
                 const base64ToBytes = getBase64Encoder().encode;
@@ -294,19 +289,13 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                 const signedTxBytes = hexToBytes(signedTransactionHex);
 
                 // Extract the signature from the signed transaction
-                // In Solana, signatures are at the beginning of the serialized transaction
-                // First byte is the signature count, then 64 bytes per signature
-                const signature = signedTxBytes.slice(1, 65) as SignatureBytes;
+                const sig = signedTxBytes.slice(1, 65) as SignatureBytes;
 
-                await assertSignatureValid({ data: transaction.messageBytes, signature, signerAddress: this.address });
-
-                // Create a signature dictionary from the extracted signature
-                return createSignatureDictionary({
-                    signature,
-                    signerAddress: this.address,
-                });
-            }),
-        );
+                await assertSignatureValid({ data: tx.messageBytes, signature: sig, signerAddress: this.address });
+                return sig;
+            },
+            signerAddress: this.address,
+        });
     }
 
     /**

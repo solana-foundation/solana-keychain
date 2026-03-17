@@ -2,8 +2,8 @@ import { DescribeKeyCommand, KMSClient, MessageType, SignCommand, SigningAlgorit
 import { Address, assertIsAddress } from '@solana/addresses';
 import {
     assertSignatureValid,
+    batchSign,
     createBatchDelay,
-    createSignatureDictionary,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -154,25 +154,18 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
      * Sign multiple messages using AWS KMS
      */
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
+        return await batchSign({
+            delay: this.delay,
+            items: messages,
+            signFn: async m => {
                 const messageBytes =
-                    message.content instanceof Uint8Array
-                        ? message.content
-                        : new Uint8Array(Array.from(message.content));
-                const signatureBytes = await this.signBytes(messageBytes);
-                await assertSignatureValid({
-                    data: messageBytes,
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-                return createSignatureDictionary({
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-            }),
-        );
+                    m.content instanceof Uint8Array ? m.content : new Uint8Array(Array.from(m.content));
+                const sig = await this.signBytes(messageBytes);
+                await assertSignatureValid({ data: messageBytes, signature: sig, signerAddress: this.address });
+                return sig;
+            },
+            signerAddress: this.address,
+        });
     }
 
     /**
@@ -181,23 +174,17 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                await this.delay(index);
-                // Sign the transaction message bytes
-                const txMessageBytes = new Uint8Array(transaction.messageBytes);
-                const signatureBytes = await this.signBytes(txMessageBytes);
-                await assertSignatureValid({
-                    data: txMessageBytes,
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-                return createSignatureDictionary({
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-            }),
-        );
+        return await batchSign({
+            delay: this.delay,
+            items: transactions,
+            signFn: async tx => {
+                const txMessageBytes = new Uint8Array(tx.messageBytes);
+                const sig = await this.signBytes(txMessageBytes);
+                await assertSignatureValid({ data: txMessageBytes, signature: sig, signerAddress: this.address });
+                return sig;
+            },
+            signerAddress: this.address,
+        });
     }
 
     /**
