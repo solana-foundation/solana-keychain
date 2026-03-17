@@ -10,7 +10,13 @@ describe('validateRequestDelayMs', () => {
 
     it('accepts positive values', () => {
         expect(() => validateRequestDelayMs(100)).not.toThrow();
-        expect(() => validateRequestDelayMs(5000)).not.toThrow();
+    });
+
+    it('warns when requestDelayMs exceeds 3000ms', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        validateRequestDelayMs(5000);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is 5000ms'));
+        warnSpy.mockRestore();
     });
 
     it('throws CONFIG_ERROR for negative values', () => {

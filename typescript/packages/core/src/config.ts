@@ -11,6 +11,11 @@ export function validateRequestDelayMs(requestDelayMs: number): void {
             message: 'requestDelayMs must not be negative',
         });
     }
+    if (requestDelayMs > 3000) {
+        console.warn(
+            `[solana-keychain] requestDelayMs is ${requestDelayMs}ms. High values may cause transaction blockhash expiration.`,
+        );
+    }
 }
 
 /**
