@@ -709,6 +709,49 @@ p6B5CCtpBPgD01Vm+bT/JQ==
     }
 
     #[tokio::test]
+    async fn test_sign_message_signature_verification_failure() {
+        let mock_server = MockServer::start().await;
+        let signing_keypair = Keypair::new();
+        let different_keypair = Keypair::new();
+        let message = b"test message";
+        let signature = signing_keypair.sign_message(message);
+        let sig_hex = hex::encode(signature.as_ref());
+
+        let mut signer = create_test_signer(&mock_server.uri());
+        signer.public_key = Some(keypair_pubkey(&different_keypair));
+
+        Mock::given(method("POST"))
+            .and(path("/v1/transactions"))
+            .and(header("X-API-Key", "test-api-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "tx-123",
+                "status": "SUBMITTED"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/transactions/tx-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "tx-123",
+                "status": "COMPLETED",
+                "signedMessages": [{
+                    "signature": {
+                        "fullSig": sig_hex
+                    }
+                }]
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = signer.sign_message(message).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    #[tokio::test]
     async fn test_sign_message_api_error() {
         let mock_server = MockServer::start().await;
         let signer = create_test_signer(&mock_server.uri());

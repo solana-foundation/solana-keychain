@@ -568,6 +568,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_kms_sign_message_signature_verification_failure() {
+        let mock_server = MockServer::start().await;
+        let signing_keypair = create_test_keypair();
+        let different_keypair = create_test_keypair();
+        let message = b"test message";
+        let signature = signing_keypair.sign_message(message);
+
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "KeyId": TEST_KEY_ID,
+                "Signature": STANDARD.encode(signature.as_ref()),
+                "SigningAlgorithm": "ED25519_SHA_512"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server.uri());
+        let signer = AwsKmsSigner::with_client(
+            client,
+            TEST_KEY_ID.to_string(),
+            different_keypair.pubkey().to_string(),
+        );
+        assert!(signer.is_ok());
+        let signer = signer.unwrap();
+
+        let result = signer.sign_message(message).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    #[tokio::test]
     async fn test_kms_sign_message_invalid_signature_length() {
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();

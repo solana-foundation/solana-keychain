@@ -678,6 +678,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_sign_message_signature_verification_failure() {
+        let mock_server = MockServer::start().await;
+        let signing_keypair = Keypair::new();
+        let different_keypair = Keypair::new();
+        let test_message = b"test message";
+        let signature = keypair_sign_message(&signing_keypair, test_message);
+        let sig_base58 = bs58::encode(signature.as_ref()).into_string();
+
+        let mut signer = create_test_signer(&mock_server.uri());
+        signer.public_key = keypair_pubkey(&different_keypair);
+
+        Mock::given(method("POST"))
+            .and(path_regex(r".*/sign/message$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "signature": sig_base58
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = signer.sign_message(test_message).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    #[tokio::test]
     async fn test_sign_message_api_error() {
         let mock_server = MockServer::start().await;
         let signer = create_test_signer(&mock_server.uri());

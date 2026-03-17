@@ -431,6 +431,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_turnkey_sign_message_signature_verification_failure() {
+        let mock_server = MockServer::start().await;
+        let signing_keypair = create_test_keypair();
+        let different_keypair = create_test_keypair();
+        let (api_public_key, api_private_key) = create_test_api_keys();
+        let message = b"test message";
+        let signature = signing_keypair.sign_message(message);
+        let sig_bytes = signature.as_ref();
+
+        let r_hex = hex::encode(&sig_bytes[0..32]);
+        let s_hex = hex::encode(&sig_bytes[32..64]);
+
+        Mock::given(method("POST"))
+            .and(path("/public/v1/submit/sign_raw_payload"))
+            .and(header("Content-Type", "application/json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "activity": {
+                    "result": {
+                        "signRawPayloadResult": {
+                            "r": r_hex,
+                            "s": s_hex
+                        }
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let mut signer = TurnkeySigner::new(
+            api_public_key,
+            api_private_key,
+            "test-org-id".to_string(),
+            "test-key-id".to_string(),
+            different_keypair.pubkey().to_string(),
+        )
+        .unwrap();
+        signer.client = reqwest::Client::new();
+        signer.api_base_url = mock_server.uri();
+
+        let result = signer.sign_message(message).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    #[tokio::test]
     async fn test_turnkey_sign_transaction() {
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();

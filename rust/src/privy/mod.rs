@@ -358,6 +358,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_privy_sign_message_signature_verification_failure() {
+        let mock_server = MockServer::start().await;
+        let signing_keypair = create_test_keypair();
+        let different_keypair = create_test_keypair();
+        let message = b"test message";
+        let signature = signing_keypair.sign_message(message);
+
+        Mock::given(method("POST"))
+            .and(path("/wallets/test-wallet-id/rpc"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "method": "signMessage",
+                "data": {
+                    "signature": STANDARD.encode(signature),
+                    "encoding": "base64"
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let mut signer = PrivySigner::new(
+            "test-app-id".to_string(),
+            "test-app-secret".to_string(),
+            "test-wallet-id".to_string(),
+        );
+        signer.client = reqwest::Client::new();
+        signer.api_base_url = mock_server.uri();
+        signer.public_key = Some(different_keypair.pubkey());
+
+        let result = signer.sign_message(message).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    #[tokio::test]
     async fn test_privy_sign_message_invalid_base64_signature() {
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();

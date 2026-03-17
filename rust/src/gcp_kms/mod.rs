@@ -413,6 +413,58 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn test_gcp_kms_sign_message_signature_verification_failure() {
+        let mock_server = MockServer::start().await;
+        let signing_keypair = create_test_keypair();
+        let different_keypair = create_test_keypair();
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/computeMetadata/v1/instance/service-accounts/default/token",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
+                {
+                    "access_token": "mock-token",
+                    "expires_in": 3600,
+                    "token_type": "Bearer"
+                }
+            )))
+            .mount(&mock_server)
+            .await;
+
+        let metadata_host = mock_server.address().to_string();
+        let _env = ScopedEnv::set("GCE_METADATA_HOST", &metadata_host);
+
+        let client = create_test_client(&mock_server.uri()).await;
+        let signer = GcpKmsSigner::with_client(
+            client,
+            TEST_KEY_NAME.to_string(),
+            different_keypair.pubkey().to_string(),
+        );
+        assert!(signer.is_ok());
+        let signer = signer.unwrap();
+
+        let message = b"test message";
+        let signature = signing_keypair.sign_message(message);
+
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
+                {
+                    "signature": STANDARD.encode(signature.as_ref()),
+                    "verified_data_crc32c": true
+                }
+            )))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = signer.sign_message(message).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn test_gcp_kms_sign_transaction_success() {
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
