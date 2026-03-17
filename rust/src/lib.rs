@@ -160,26 +160,11 @@ impl Signer {
         Ok(Self::Memory(MemorySigner::from_private_key_file(path)?))
     }
 
-    /// Create a Vault signer
+    /// Create a Vault signer.
+    ///
+    /// Pass `None` for `http_client_config` to use default timeout settings.
     #[cfg(feature = "vault")]
     pub fn from_vault(
-        vault_addr: String,
-        vault_token: String,
-        key_name: String,
-        pubkey: String,
-    ) -> Result<Self, SignerError> {
-        Ok(Self::Vault(VaultSigner::from_config(VaultSignerConfig {
-            vault_addr,
-            token: vault_token,
-            key_name,
-            pubkey,
-            http_client_config: None,
-        })?))
-    }
-
-    /// Create a Vault signer with custom HTTP timeout settings.
-    #[cfg(feature = "vault")]
-    pub fn from_vault_with_http_client_config(
         vault_addr: String,
         vault_token: String,
         key_name: String,
@@ -195,19 +180,11 @@ impl Signer {
         })?))
     }
 
-    /// Create a Privy signer (requires initialization)
+    /// Create a Privy signer (requires initialization).
+    ///
+    /// Pass `None` for `http_client_config` to use default timeout settings.
     #[cfg(feature = "privy")]
     pub async fn from_privy(
-        app_id: String,
-        app_secret: String,
-        wallet_id: String,
-    ) -> Result<Self, SignerError> {
-        Self::from_privy_with_http_client_config(app_id, app_secret, wallet_id, None).await
-    }
-
-    /// Create a Privy signer with custom HTTP timeout settings (requires initialization).
-    #[cfg(feature = "privy")]
-    pub async fn from_privy_with_http_client_config(
         app_id: String,
         app_secret: String,
         wallet_id: String,
@@ -224,28 +201,11 @@ impl Signer {
         Ok(Self::Privy(signer))
     }
 
-    /// Create a Turnkey signer
+    /// Create a Turnkey signer.
+    ///
+    /// Pass `None` for `http_client_config` to use default timeout settings.
     #[cfg(feature = "turnkey")]
     pub fn from_turnkey(
-        api_public_key: String,
-        api_private_key: String,
-        organization_id: String,
-        private_key_id: String,
-        public_key: String,
-    ) -> Result<Self, SignerError> {
-        Self::from_turnkey_with_http_client_config(
-            api_public_key,
-            api_private_key,
-            organization_id,
-            private_key_id,
-            public_key,
-            None,
-        )
-    }
-
-    /// Create a Turnkey signer with custom HTTP timeout settings.
-    #[cfg(feature = "turnkey")]
-    pub fn from_turnkey_with_http_client_config(
         api_public_key: String,
         api_private_key: String,
         organization_id: String,
@@ -319,26 +279,11 @@ impl Signer {
         Ok(Self::Para(signer))
     }
 
-    /// Create a CDP signer
+    /// Create a CDP signer.
+    ///
+    /// Pass `None` for `http_client_config` to use default timeout settings.
     #[cfg(feature = "cdp")]
     pub fn from_cdp(
-        api_key_id: String,
-        api_key_secret: String,
-        wallet_secret: String,
-        address: String,
-    ) -> Result<Self, SignerError> {
-        Self::from_cdp_with_http_client_config(
-            api_key_id,
-            api_key_secret,
-            wallet_secret,
-            address,
-            None,
-        )
-    }
-
-    /// Create a CDP signer with custom HTTP timeout settings.
-    #[cfg(feature = "cdp")]
-    pub fn from_cdp_with_http_client_config(
         api_key_id: String,
         api_key_secret: String,
         wallet_secret: String,
