@@ -208,14 +208,32 @@ vi.mock('@solana/keychain-core', async importOriginal => {
 });
 ```
 
-### Encoding (no Buffer)
+### Encoding — No `Buffer`, No `node:crypto`
 
-**Never use `Buffer`** — use `@solana/codecs-strings` for all encoding:
-- `getBase58Encoder().encode(string)` → `Uint8Array` (base58 string → bytes)
-- `getBase58Decoder().decode(Uint8Array)` → `string` (bytes → base58 string)
-- `getBase64Encoder()`/`getBase64Decoder()` — same pattern for base64
-- `getBase16Encoder()`/`getBase16Decoder()` — for hex
-- `base64UrlEncode()`/`base64UrlDecode()` from `@solana/keychain-core` — for JWT/URL-safe base64
+**Never use `Buffer` or `node:crypto`** in signer packages — they break browsers and edge runtimes.
+
+- **Byte encoding**: `@solana/codecs-strings` for all encoding:
+  - `getBase58Encoder().encode(string)` → `Uint8Array` (base58 string → bytes)
+  - `getBase58Decoder().decode(Uint8Array)` → `string` (bytes → base58 string)
+  - `getBase64Encoder()`/`getBase64Decoder()` — same pattern for base64
+  - `getBase16Encoder()`/`getBase16Decoder()` — for hex
+  - `base64UrlEncode()`/`base64UrlDecode()` from `@solana/keychain-core` — for JWT/URL-safe base64
+- **ECDSA (P-256)**: Use `@noble/curves/nist.js` directly (see Turnkey stamper)
+- **Multi-algorithm signing (Ed25519, P-256, RSA)**: Use WebCrypto (`globalThis.crypto.subtle`) first, dynamic `import('node:crypto')` fallback for Node-only (see Dfns auth module)
+- **Hex/byte conversions**: `@noble/curves/utils.js` (`hexToBytes`, `bytesToHex`)
+- **String-to-bytes**: `new TextEncoder().encode()` instead of `Buffer.from(string)`
+
+### Security Requirements (audit-derived)
+
+These are mandatory for all new signer implementations:
+
+- **HTTPS enforcement**: Any signer accepting a user-configurable URL (`apiBaseUrl`, `baseUrl`, etc.) must parse with `new URL()` and reject non-`https:` protocols with `SIGNER_CONFIG_ERROR`. Exception: Vault allows `http://localhost` when `NODE_ENV=test`.
+- **Sanitize remote errors**: Never pass raw remote API error text into `SignerError` context (could echo back tokens). Use `sanitizeRemoteErrorResponse()` from `@solana/keychain-core` on all remote error text before including in error context.
+- **Validate response shapes**: Never bare `as TypeCast` a `.json()` result. Use optional chaining (`?.`) for shallow responses, explicit type guards for deeply nested ones. Throw `SIGNER_PARSING_ERROR` for unexpected shapes.
+- **`@throws` JSDoc**: Every public factory function (`createXSigner`) and public method must have `@throws {SignerError}` JSDoc listing specific error codes.
+- **JWT/token timing**: Use reasonable TTL (120s+), backdate `iat`/`nbf` by a skew leeway (e.g. 60s), use named constants for timing values — no magic numbers.
+- **Versioned response formats**: Parse with regex/flexible parsers, not hardcoded version strings (e.g. Vault's `vault:vN:` prefix).
+- **Dependency hygiene**: Check production-facing transitive dependencies for known advisories before release. Run `pnpm audit --production`.
 
 ### Tree-Shakability (required)
 
@@ -266,6 +284,6 @@ just fmt
 
 If you hit a compilation or test error, read `references/common-errors.md` for diagnosis and fixes. The most frequent issues are:
 - Missing reqwest cfg gate in `error.rs`
-- Incomplete match arms in `lib.rs` (must be all 5)
+- Incomplete match arms in `lib.rs` (must be all 4)
 - Importing from `solana_sdk` instead of `crate::sdk_adapter`
 - Forgetting to add feature to `compile_error!` gate

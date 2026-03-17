@@ -54,6 +54,24 @@
 **Cause:** The `it.skipIf(!process.env.YOUR_VAR)` guard found the env var missing.
 **Fix:** Create `typescript/packages/<name>/.env` with real credentials (not committed). Or run with env vars exported.
 
+## Audit / Security Review Errors
+
+### Raw remote error text in `SignerError` context
+**Cause:** Passing `response.text()` directly into error messages. A malicious server could echo back tokens.
+**Fix:** Use `sanitizeRemoteErrorResponse()` from `@solana/keychain-core` on all remote error text before including in error context.
+
+### Bare `as TypeCast` on `.json()` result
+**Cause:** Casting `await response.json()` directly to a type and accessing nested properties. A malformed response (`{}`) throws a raw `TypeError`.
+**Fix:** Use optional chaining (`?.`) for shallow responses. For deeply nested responses, parse into `unknown` first, then validate shape with type guards. Throw `SIGNER_PARSING_ERROR` for unexpected shapes.
+
+### `Buffer` or `node:crypto` usage in signer package
+**Cause:** Using Node.js builtins that break in browsers and edge runtimes.
+**Fix:** Replace `Buffer.from()` with `new TextEncoder().encode()`. Replace `node:crypto` with `@noble/curves` (ECDSA) or WebCrypto (`globalThis.crypto.subtle`). Use `@solana/codecs-strings` for base58/base64/hex encoding.
+
+### Missing HTTPS enforcement on configurable URL
+**Cause:** Signer accepts a `baseUrl`/`apiBaseUrl` config but doesn't validate the protocol.
+**Fix:** Parse with `new URL(url)` and reject non-`https:` protocols with `SIGNER_CONFIG_ERROR`. Allow `http://localhost` only when `NODE_ENV=test`.
+
 ## CI Errors
 
 ### `Error: Process completed with exit code 101` on a feature you didn't touch
