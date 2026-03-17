@@ -214,20 +214,33 @@ impl SolanaSigner for VaultSigner {
     }
 
     async fn is_available(&self) -> bool {
-        // Check if we can read the key metadata as a health check
+        // Check if we can read and validate key metadata as a health check.
         let url = format!("{}/v1/transit/keys/{}", self.vault_addr, self.key_name);
 
-        let response = self
+        let response = match self
             .client
             .get(&url)
             .header("X-Vault-Token", &self.token)
             .send()
-            .await;
+            .await
+        {
+            Ok(resp) => resp,
+            Err(_) => return false,
+        };
 
-        match response {
-            Ok(resp) => resp.status().is_success(),
-            Err(_) => false,
+        if !response.status().is_success() {
+            return false;
         }
+
+        let body: serde_json::Value = match response.json().await {
+            Ok(value) => value,
+            Err(_) => return false,
+        };
+
+        let supports_signing = body["data"]["supports_signing"].as_bool() == Some(true);
+        let key_type_is_ed25519 = body["data"]["type"].as_str() == Some("ed25519");
+
+        supports_signing && key_type_is_ed25519
     }
 }
 
@@ -441,13 +454,61 @@ mod tests {
             .and(path("/v1/transit/keys/test-key"))
             .and(header("X-Vault-Token", TEST_VAULT_TOKEN))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "data": { "name": "test-key" }
+                "data": {
+                    "name": "test-key",
+                    "supports_signing": true,
+                    "type": "ed25519"
+                }
             })))
             .expect(1)
             .mount(&mock_server)
             .await;
 
         assert!(signer.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_is_available_false_for_unsupported_key_type() {
+        let mock_server = MockServer::start().await;
+        let signer = create_test_signer_with_pubkey(&mock_server.uri(), TEST_PUBKEY.to_string());
+
+        Mock::given(method("GET"))
+            .and(path("/v1/transit/keys/test-key"))
+            .and(header("X-Vault-Token", TEST_VAULT_TOKEN))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "name": "test-key",
+                    "supports_signing": true,
+                    "type": "rsa-2048"
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        assert!(!signer.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_is_available_false_when_key_does_not_support_signing() {
+        let mock_server = MockServer::start().await;
+        let signer = create_test_signer_with_pubkey(&mock_server.uri(), TEST_PUBKEY.to_string());
+
+        Mock::given(method("GET"))
+            .and(path("/v1/transit/keys/test-key"))
+            .and(header("X-Vault-Token", TEST_VAULT_TOKEN))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "name": "test-key",
+                    "supports_signing": false,
+                    "type": "ed25519"
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        assert!(!signer.is_available().await);
     }
 
     #[tokio::test]

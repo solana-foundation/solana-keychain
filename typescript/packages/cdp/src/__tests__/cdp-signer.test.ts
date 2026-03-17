@@ -166,6 +166,22 @@ describe('CdpSigner', () => {
             expect(signer).toBeDefined();
         });
 
+        it('throws CONFIG_ERROR when baseUrl is not a valid URL', async () => {
+            await expect(CdpSigner.create(makeConfig({ baseUrl: 'not-a-url' }))).rejects.toMatchObject({
+                code: 'SIGNER_CONFIG_ERROR',
+                message: expect.stringContaining('baseUrl is not a valid URL'),
+            });
+        });
+
+        it('throws CONFIG_ERROR when baseUrl does not use HTTPS', async () => {
+            await expect(CdpSigner.create(makeConfig({ baseUrl: 'http://api.cdp.coinbase.com' }))).rejects.toMatchObject(
+                {
+                    code: 'SIGNER_CONFIG_ERROR',
+                    message: expect.stringContaining('baseUrl must use HTTPS'),
+                },
+            );
+        });
+
         it('accepts requestDelayMs of 0', async () => {
             const signer = await CdpSigner.create(makeConfig({ requestDelayMs: 0 }));
             expect(signer).toBeDefined();
@@ -343,6 +359,19 @@ describe('CdpSigner', () => {
             const available = await signer.isAvailable();
 
             expect(available).toBe(false);
+        });
+
+        it('returns false when auth header generation fails', async () => {
+            const signer = await CdpSigner.create(makeConfig());
+            const subtleSignSpy = vi
+                .spyOn(globalThis.crypto.subtle, 'sign')
+                .mockRejectedValueOnce(new Error('sign failed'));
+
+            const available = await signer.isAvailable();
+
+            expect(available).toBe(false);
+            expect(mockFetch).not.toHaveBeenCalled();
+            subtleSignSpy.mockRestore();
         });
     });
 });

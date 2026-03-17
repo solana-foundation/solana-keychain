@@ -176,37 +176,106 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 async function signClientData(clientData: Uint8Array, privateKeyPem: string): Promise<Uint8Array> {
+    const normalizedPem = normalizePrivateKeyPem(privateKeyPem);
+
+    let latestError: unknown;
     const subtle = globalThis.crypto?.subtle;
-    if (!subtle) {
-        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-            message: 'Web Crypto API is not available in this runtime',
-        });
+    if (subtle) {
+        try {
+            const signature = await signClientDataWithWebCrypto(subtle, clientData, normalizedPem);
+            if (signature) {
+                return signature;
+            }
+        } catch (error) {
+            latestError = error;
+        }
     }
 
     try {
-        const privateKey = await subtle.importKey('pkcs8', toArrayBuffer(pemToPkcs8(privateKeyPem)), 'Ed25519', false, [
-            'sign',
-        ]);
-        const signature = await subtle.sign('Ed25519', privateKey, toArrayBuffer(clientData));
-        return new Uint8Array(signature);
+        const signature = await signClientDataWithNodeCrypto(clientData, normalizedPem);
+        if (signature) {
+            return signature;
+        }
     } catch (error) {
-        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-            cause: error,
-            message: 'Failed to sign Dfns auth challenge',
-        });
+        latestError = error;
+    }
+
+    throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+        cause: latestError,
+        message: 'Failed to sign Dfns auth challenge',
+    });
+}
+
+function normalizePrivateKeyPem(privateKeyPem: string): string {
+    // CI secrets are often stored as single-line values with escaped newlines.
+    return privateKeyPem.replace(/\\n/g, '\n').replace(/\r/g, '').trim();
+}
+
+async function signClientDataWithWebCrypto(
+    subtle: SubtleCrypto,
+    clientData: Uint8Array,
+    privateKeyPem: string,
+): Promise<Uint8Array | undefined> {
+    const privateKeyDer = toArrayBuffer(pemToDer(privateKeyPem));
+    const input = toArrayBuffer(clientData);
+
+    const attempts: ReadonlyArray<{
+        importAlgorithm: AlgorithmIdentifier | EcKeyImportParams | RsaHashedImportParams;
+        signAlgorithm: AlgorithmIdentifier | EcdsaParams;
+    }> = [
+        { importAlgorithm: 'Ed25519', signAlgorithm: 'Ed25519' },
+        {
+            importAlgorithm: { name: 'ECDSA', namedCurve: 'P-256' },
+            signAlgorithm: { hash: 'SHA-256', name: 'ECDSA' },
+        },
+        {
+            importAlgorithm: { hash: 'SHA-256', name: 'RSASSA-PKCS1-v1_5' },
+            signAlgorithm: 'RSASSA-PKCS1-v1_5',
+        },
+    ];
+
+    for (const attempt of attempts) {
+        try {
+            const privateKey = await subtle.importKey(
+                'pkcs8',
+                privateKeyDer,
+                attempt.importAlgorithm,
+                false,
+                ['sign'],
+            );
+            const signature = await subtle.sign(attempt.signAlgorithm, privateKey, input);
+            return new Uint8Array(signature);
+        } catch {
+            // Try the next key algorithm.
+        }
+    }
+
+    return undefined;
+}
+
+async function signClientDataWithNodeCrypto(
+    clientData: Uint8Array,
+    privateKeyPem: string,
+): Promise<Uint8Array | undefined> {
+    try {
+        const nodeCrypto = await import('node:crypto');
+        const signature = nodeCrypto.sign(undefined, clientData, privateKeyPem);
+        return new Uint8Array(signature);
+    } catch {
+        return undefined;
     }
 }
 
-function pemToPkcs8(privateKeyPem: string): Uint8Array {
-    const normalizedPem = privateKeyPem.replace(/\r/g, '').trim();
+function pemToDer(privateKeyPem: string): Uint8Array {
+    const normalizedPem = normalizePrivateKeyPem(privateKeyPem);
     const pemBody = normalizedPem
-        .replace('-----BEGIN PRIVATE KEY-----', '')
-        .replace('-----END PRIVATE KEY-----', '')
+        .replace(/-----BEGIN [^-]+-----/g, '')
+        .replace(/-----END [^-]+-----/g, '')
         .replace(/\s+/g, '');
 
     if (!pemBody) {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'privateKeyPem must be a non-empty PKCS#8 PEM key',
+            message: 'privateKeyPem must be a non-empty PEM key',
         });
     }
 
@@ -216,11 +285,11 @@ function pemToPkcs8(privateKeyPem: string): Uint8Array {
     } catch (error) {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
             cause: error,
-            message: 'privateKeyPem must be a valid PKCS#8 PEM key',
+            message: 'privateKeyPem must be a valid PEM key',
         });
     }
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-    return new Uint8Array(bytes).buffer;
+    return Uint8Array.from(bytes).buffer;
 }

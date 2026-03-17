@@ -275,15 +275,8 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         }
 
         const baseUrl = normalizeBaseUrl(config.baseUrl ?? CDP_DEFAULT_BASE_URL);
-        let apiHost: string;
-        try {
-            apiHost = new URL(baseUrl).host;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                cause: error,
-                message: `Invalid baseUrl: ${baseUrl}`,
-            });
-        }
+        const parsedBaseUrl = parseAndValidateHttpsBaseUrl(baseUrl);
+        const apiHost = parsedBaseUrl.host;
 
         const requestDelayMs = config.requestDelayMs ?? 0;
         if (requestDelayMs < 0) {
@@ -516,20 +509,17 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
      * Check if the CDP API is reachable and this specific account is accessible.
      */
     async isAvailable(): Promise<boolean> {
-        const path = `${CDP_BASE_PATH}/${this.address}`;
-        const headers = await this.buildGetHeaders(path);
-
-        let response: Response;
         try {
-            response = await fetch(`${this.baseUrl}${path}`, {
+            const path = `${CDP_BASE_PATH}/${this.address}`;
+            const headers = await this.buildGetHeaders(path);
+            const response = await fetch(`${this.baseUrl}${path}`, {
                 headers,
                 method: 'GET',
             });
+            return response.ok;
         } catch {
             return false;
         }
-
-        return response.ok;
     }
 }
 
@@ -544,6 +534,26 @@ function normalizeBaseUrl(baseUrl: string): string {
         normalized = normalized.slice(0, -1);
     }
     return normalized;
+}
+
+function parseAndValidateHttpsBaseUrl(baseUrl: string): URL {
+    let parsedUrl: URL;
+    try {
+        parsedUrl = new URL(baseUrl);
+    } catch (error) {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            cause: error,
+            message: 'baseUrl is not a valid URL',
+        });
+    }
+
+    if (parsedUrl.protocol !== 'https:') {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'baseUrl must use HTTPS',
+        });
+    }
+
+    return parsedUrl;
 }
 
 function shouldIncludeReqHash(body: unknown): boolean {

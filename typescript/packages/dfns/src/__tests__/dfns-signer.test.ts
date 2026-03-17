@@ -1,3 +1,5 @@
+import * as nodeCrypto from 'node:crypto';
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
@@ -198,6 +200,74 @@ describe('DfnsSigner', () => {
             expect(result).toHaveLength(1);
             expect(result[0]?.[signer.address]).toBeDefined();
 
+            const sig = result[0]![signer.address]!;
+            expect(sig.length).toBe(64);
+        });
+
+        it('accepts escaped-newline PEM keys for auth challenge signing', async () => {
+            const rHex = '11'.repeat(32);
+            const sHex = '22'.repeat(32);
+
+            mockWalletFetch();
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createUserActionInitResponse(),
+                ok: true,
+            });
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createUserActionResponse(),
+                ok: true,
+            });
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createSignatureResponse(rHex, sHex),
+                ok: true,
+            });
+
+            const signer = await DfnsSigner.create({
+                ...defaultConfig,
+                privateKeyPem: TEST_ED25519_PEM.replace(/\n/g, '\\n'),
+            });
+
+            const result = await signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }]);
+
+            expect(result).toHaveLength(1);
+            const sig = result[0]![signer.address]!;
+            expect(sig.length).toBe(64);
+        });
+
+        it('supports SEC1 PEM keys for auth challenge signing', async () => {
+            const { privateKey } = nodeCrypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+            const sec1Pem = privateKey.export({ format: 'pem', type: 'sec1' }).toString();
+            const rHex = '11'.repeat(32);
+            const sHex = '22'.repeat(32);
+
+            mockWalletFetch();
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createUserActionInitResponse(),
+                ok: true,
+            });
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createUserActionResponse(),
+                ok: true,
+            });
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createSignatureResponse(rHex, sHex),
+                ok: true,
+            });
+
+            const signer = await DfnsSigner.create({
+                ...defaultConfig,
+                privateKeyPem: sec1Pem,
+            });
+
+            const result = await signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }]);
+
+            expect(result).toHaveLength(1);
             const sig = result[0]![signer.address]!;
             expect(sig.length).toBe(64);
         });
