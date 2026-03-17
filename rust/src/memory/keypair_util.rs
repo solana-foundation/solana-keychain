@@ -26,8 +26,11 @@ impl KeypairUtil {
 
     /// Creates a new keypair by reading a JSON keypair file from disk.
     pub fn from_private_key_file(path: &str) -> Result<Keypair, SignerError> {
-        let file_content_raw = fs::read_to_string(path)
-            .map_err(|e| SignerError::IoError(format!("Failed to read private key file: {e}")))?;
+        let file_content_raw = fs::read_to_string(path).map_err(|_e| {
+            #[cfg(feature = "unsafe-debug")]
+            log::error!("Failed to read private key file from disk: {_e}");
+            SignerError::IoError("Failed to read private key file".to_string())
+        })?;
         let file_content = Zeroizing::new(file_content_raw);
         Self::from_json_keypair(&file_content)
     }
