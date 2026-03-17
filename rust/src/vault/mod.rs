@@ -391,6 +391,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_sign_message_signature_verification_failure() {
+        let mock_server = MockServer::start().await;
+        let signing_keypair = Keypair::new();
+        let different_keypair = Keypair::new();
+        let message = b"vault-message";
+        let signature = signing_keypair.sign_message(message);
+        let signature_b64 = STANDARD.encode(signature.as_ref());
+
+        Mock::given(method("POST"))
+            .and(path("/v1/transit/sign/test-key"))
+            .and(header("X-Vault-Token", TEST_VAULT_TOKEN))
+            .and(body_json(serde_json::json!({
+                "input": STANDARD.encode(message),
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "signature": format!("vault:v1:{signature_b64}")
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let signer = create_test_signer_with_pubkey(
+            &mock_server.uri(),
+            different_keypair.pubkey().to_string(),
+        );
+        let result = signer.sign_message(message).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    #[tokio::test]
     async fn test_sign_message_api_error() {
         let mock_server = MockServer::start().await;
         let signer = create_test_signer_with_pubkey(&mock_server.uri(), TEST_PUBKEY.to_string());
