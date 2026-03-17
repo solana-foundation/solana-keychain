@@ -159,23 +159,15 @@ impl SolanaSigner for YourServiceSigner {
         self.public_key
     }
 
-    async fn sign_transaction(&self, tx: &mut Transaction) -> Result<SignedTransaction, SignerError> {
+    async fn sign_transaction(&self, tx: &mut Transaction) -> Result<SignTransactionResult, SignerError> {
         // Sign and serialize the transaction
+        // Return SignTransactionResult::Complete or SignTransactionResult::Partial
         // See rust/src/para/mod.rs for a complete reference implementation
         todo!("Implement signing and serialization")
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign(message).await
-    }
-
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        // Same as sign_transaction but serializes with requireAllSignatures: false
-        // See rust/src/para/mod.rs for a complete reference implementation
-        todo!("Implement partial signing and serialization")
     }
 
     async fn is_available(&self) -> bool {
@@ -288,7 +280,7 @@ impl SolanaSigner for Signer {
     async fn sign_transaction(
         &self,
         tx: &mut sdk_adapter::Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
+    ) -> Result<SignTransactionResult, SignerError> {
         match self {
             // ... existing variants
             #[cfg(feature = "your_service")]
@@ -304,17 +296,6 @@ impl SolanaSigner for Signer {
             // ... existing variants
             #[cfg(feature = "your_service")]
             Signer::YourService(s) => s.sign_message(message).await,
-        }
-    }
-
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut sdk_adapter::Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        match self {
-            // ... existing variants
-            #[cfg(feature = "your_service")]
-            Signer::YourService(s) => s.sign_partial_transaction(tx).await,
         }
     }
 
@@ -530,6 +511,14 @@ CI is a two-phase process. Coordinate with maintainers to prepare `main` before 
 - [ ] Export `createXSigner()` factory function returning `SolanaSigner<TAddress>`
 - [ ] Export `static create()` on the class
 - [ ] Export config interface (`XSignerConfig`)
+- [ ] No `node:crypto` or `Buffer` usage — use `@noble/curves`, WebCrypto, `@solana/codecs-strings`, `TextEncoder`
+- [ ] HTTPS enforced on all user-configurable URLs (`new URL()` + protocol check)
+- [ ] Remote error text sanitized via `sanitizeRemoteErrorResponse()` before attaching to `SignerError` context
+- [ ] Response shapes validated before property access — no bare `as TypeCast` on `.json()` results
+- [ ] `@throws {SignerError}` JSDoc on factory function and all public methods with specific error codes
+- [ ] JWT/token timing uses reasonable TTL and clock-skew leeway with named constants
+- [ ] Versioned response formats parsed with regex/flexible parsers, not hardcoded strings
+- [ ] Production-facing transitive dependencies checked for known advisories before release
 - [ ] Unit tests with vitest + mocks
 - [ ] Integration tests using `runSignerIntegrationTest` + `setup.ts`
 - [ ] Update umbrella package `typescript/packages/keychain/` (namespace export, class re-export, dependency)
@@ -864,6 +853,11 @@ Before submitting your PR:
 - [ ] All tests pass (`just test`)
 - [ ] Code is formatted/linting passes (`just fmt`)
 - [ ] No hardcoded values or secrets in code
+- [ ] No `node:crypto` or `Buffer` usage in TypeScript packages
+- [ ] HTTPS enforced on user-configurable URLs
+- [ ] Remote error text sanitized via `sanitizeRemoteErrorResponse()`
+- [ ] Response shapes validated — no bare `as TypeCast` on `.json()` results
+- [ ] `@throws {SignerError}` JSDoc on all public APIs
 - [ ] Error messages are helpful and descriptive
 - [ ] Follows naming conventions (snake_case for Rust, camelCase for TypeScript)
 - [ ] `error.rs` reqwest cfg gate updated (if using reqwest)
@@ -895,7 +889,14 @@ let bytes = base64::decode(data)
 - Never log sensitive data (private keys, API secrets)
 - Use `Debug` impl that hides sensitive fields
 - Validate all inputs (public keys, signatures)
-- Use HTTPS for API calls
+- **HTTPS enforcement**: Any signer accepting a user-configurable URL (`apiBaseUrl`, `baseUrl`, etc.) must parse with `new URL()` and reject non-`https:` protocols. Exception: `http://localhost` is allowed when `NODE_ENV=test` for local dev servers. Signers using official cloud SDKs (AWS KMS, GCP KMS) handle TLS internally and don't need this check.
+- **Sanitize remote errors**: Never pass raw remote API error text into `SignerError` context — a malicious or misconfigured server could echo back tokens or key material. Use `sanitizeRemoteErrorResponse()` from `@solana/keychain-core` on all remote error text.
+- **Validate response shapes**: Never bare `as TypeCast` a `.json()` result. Use optional chaining for shallow responses, explicit type guards for deeply nested ones. Throw `SIGNER_PARSING_ERROR` for unexpected shapes.
+- **No `node:crypto` or `Buffer`**: Use `@noble/curves`, WebCrypto, `@solana/codecs-strings`, and `TextEncoder` instead. See the [Encoding section in the add-signer skill](../.claude/skills/add-signer/SKILL.md) for the full list of alternatives.
+- **`@throws` JSDoc**: Every public factory function and method must document specific `SignerError` codes it can produce.
+- **JWT/token timing**: Use TTL of 120s+, backdate `iat`/`nbf` by a clock-skew leeway (e.g. 60s), use named constants — no magic numbers.
+- **Versioned response formats**: Parse with regex/flexible parsers, not hardcoded version strings.
+- **Dependency hygiene**: Check production-facing transitive dependencies for known advisories before release (`pnpm audit --production`).
 - Consider rate limiting and retry logic
 
 ### Testing with Mocks

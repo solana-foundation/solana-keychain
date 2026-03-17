@@ -19,6 +19,7 @@ Thumbs.db
 .claude/*
 !.claude/commands/
 !.claude/skills/
+.claude/skills/sf-*
 
 .env
 test-ledger/
