@@ -223,8 +223,7 @@ impl PrivySigner {
 #[async_trait::async_trait]
 impl SolanaSigner for PrivySigner {
     fn pubkey(&self) -> Pubkey {
-        self.public_key
-            .expect("PrivySigner is not initialized; call init() before using pubkey()")
+        self.public_key.unwrap_or_default()
     }
 
     async fn sign_transaction(
@@ -483,18 +482,6 @@ mod tests {
         signer.public_key = Some(keypair.pubkey());
 
         assert_eq!(signer.pubkey(), keypair.pubkey());
-    }
-
-    #[test]
-    #[should_panic(expected = "PrivySigner is not initialized; call init() before using pubkey()")]
-    fn test_privy_pubkey_panics_when_uninitialized() {
-        let signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-
-        let _ = signer.pubkey();
     }
 
     #[tokio::test]
