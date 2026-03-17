@@ -18,32 +18,20 @@ mod tests {
     use crate::traits::SolanaSigner;
     use std::env;
 
-    async fn get_signer() -> Option<FireblocksSigner> {
+    fn required_env(name: &str) -> String {
+        match env::var(name) {
+            Ok(v) if !v.is_empty() => v,
+            Ok(_) => panic!("{name} must be non-empty for integration tests"),
+            Err(_) => panic!("{name} must be set for integration tests"),
+        }
+    }
+
+    async fn get_signer() -> FireblocksSigner {
         dotenv().ok();
 
-        let api_key = match env::var(FIREBLOCKS_API_KEY) {
-            Ok(v) if !v.is_empty() => v,
-            _ => {
-                eprintln!("Skipping Fireblocks integration: FIREBLOCKS_API_KEY is not set");
-                return None;
-            }
-        };
-        let private_key_pem = match env::var(FIREBLOCKS_PRIVATE_KEY_PEM) {
-            Ok(v) if !v.is_empty() => v,
-            _ => {
-                eprintln!("Skipping Fireblocks integration: FIREBLOCKS_PRIVATE_KEY_PEM is not set");
-                return None;
-            }
-        };
-        let vault_account_id = match env::var(FIREBLOCKS_VAULT_ACCOUNT_ID) {
-            Ok(v) if !v.is_empty() => v,
-            _ => {
-                eprintln!(
-                    "Skipping Fireblocks integration: FIREBLOCKS_VAULT_ACCOUNT_ID is not set"
-                );
-                return None;
-            }
-        };
+        let api_key = required_env(FIREBLOCKS_API_KEY);
+        let private_key_pem = required_env(FIREBLOCKS_PRIVATE_KEY_PEM);
+        let vault_account_id = required_env(FIREBLOCKS_VAULT_ACCOUNT_ID);
 
         let config = FireblocksSignerConfig {
             api_key,
@@ -63,12 +51,11 @@ mod tests {
         };
 
         let mut signer = FireblocksSigner::new(config);
-        if let Err(error) = signer.init().await {
-            eprintln!("Skipping Fireblocks integration: failed to initialize signer: {error:?}");
-            return None;
-        }
-
-        Some(signer)
+        signer
+            .init()
+            .await
+            .expect("Failed to initialize Fireblocks signer");
+        signer
     }
 
     #[tokio::test]
@@ -76,9 +63,7 @@ mod tests {
     #[cfg(feature = "integration-tests")]
     #[serial]
     async fn test_fireblocks_sign_message() {
-        let Some(signer) = get_signer().await else {
-            return;
-        };
+        let signer = get_signer().await;
 
         let transaction = create_test_transaction(&signer.pubkey());
         let message = transaction.message_data();
@@ -96,9 +81,7 @@ mod tests {
     #[cfg(feature = "integration-tests")]
     #[serial]
     async fn test_fireblocks_sign_transaction() {
-        let Some(signer) = get_signer().await else {
-            return;
-        };
+        let signer = get_signer().await;
         let pubkey = signer.pubkey();
 
         // Self-transfer: from vault to same vault address
@@ -129,9 +112,7 @@ mod tests {
     #[cfg(feature = "integration-tests")]
     #[serial]
     async fn test_fireblocks_availability() {
-        let Some(signer) = get_signer().await else {
-            return;
-        };
+        let signer = get_signer().await;
 
         let is_available = signer.is_available().await;
         assert!(is_available, "Fireblocks signer should be available");
