@@ -236,13 +236,7 @@ async function signClientDataWithWebCrypto(
 
     for (const attempt of attempts) {
         try {
-            const privateKey = await subtle.importKey(
-                'pkcs8',
-                privateKeyDer,
-                attempt.importAlgorithm,
-                false,
-                ['sign'],
-            );
+            const privateKey = await subtle.importKey('pkcs8', privateKeyDer, attempt.importAlgorithm, false, ['sign']);
             const signature = await subtle.sign(attempt.signAlgorithm, privateKey, input);
             return new Uint8Array(signature);
         } catch {

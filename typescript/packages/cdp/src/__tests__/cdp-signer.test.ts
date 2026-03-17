@@ -174,12 +174,12 @@ describe('CdpSigner', () => {
         });
 
         it('throws CONFIG_ERROR when baseUrl does not use HTTPS', async () => {
-            await expect(CdpSigner.create(makeConfig({ baseUrl: 'http://api.cdp.coinbase.com' }))).rejects.toMatchObject(
-                {
-                    code: 'SIGNER_CONFIG_ERROR',
-                    message: expect.stringContaining('baseUrl must use HTTPS'),
-                },
-            );
+            await expect(
+                CdpSigner.create(makeConfig({ baseUrl: 'http://api.cdp.coinbase.com' })),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_CONFIG_ERROR',
+                message: expect.stringContaining('baseUrl must use HTTPS'),
+            });
         });
 
         it('accepts requestDelayMs of 0', async () => {
