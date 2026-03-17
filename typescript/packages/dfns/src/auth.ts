@@ -36,7 +36,7 @@ export async function signUserAction(
             },
             method: 'POST',
         },
-        'Dfns',
+        'Dfns auth/init',
     );
 
     const challenge = parseUserActionInitResponse(rawChallenge);
@@ -84,7 +84,7 @@ export async function signUserAction(
             },
             method: 'POST',
         },
-        'Dfns',
+        'Dfns auth/action',
     );
 
     const actionResponse = parseUserActionResponse(rawActionResponse);

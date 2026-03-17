@@ -138,7 +138,7 @@ describe('DfnsSigner', () => {
             mockFetch.mockRejectedValueOnce(new Error('Network timeout'));
             await expect(DfnsSigner.create(defaultConfig)).rejects.toMatchObject({
                 code: 'SIGNER_HTTP_ERROR',
-                message: expect.stringContaining('Dfns network request failed'),
+                message: expect.stringContaining('network request failed'),
             });
         });
     });
@@ -155,7 +155,7 @@ describe('DfnsSigner', () => {
                 signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }]),
             ).rejects.toMatchObject({
                 code: 'SIGNER_HTTP_ERROR',
-                message: expect.stringContaining('Dfns network request failed'),
+                message: expect.stringContaining('network request failed'),
             });
         });
 
