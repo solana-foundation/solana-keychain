@@ -11,22 +11,6 @@ use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
 
-fn strip_vault_signature_prefix(signature: &str) -> &str {
-    let Some(rest) = signature.strip_prefix("vault:v") else {
-        return signature;
-    };
-
-    let Some((version, encoded_signature)) = rest.split_once(':') else {
-        return signature;
-    };
-
-    if version.is_empty() || !version.chars().all(|c| c.is_ascii_digit()) {
-        return signature;
-    }
-
-    encoded_signature
-}
-
 /// Vault-based signer using HashiCorp Vault transit engine
 #[derive(Clone)]
 pub struct VaultSigner {
@@ -56,6 +40,22 @@ impl std::fmt::Debug for VaultSigner {
 }
 
 impl VaultSigner {
+    fn strip_vault_signature_prefix(signature: &str) -> &str {
+        let Some(rest) = signature.strip_prefix("vault:v") else {
+            return signature;
+        };
+
+        let Some((version, encoded_signature)) = rest.split_once(':') else {
+            return signature;
+        };
+
+        if version.is_empty() || !version.chars().all(|c| c.is_ascii_digit()) {
+            return signature;
+        }
+
+        encoded_signature
+    }
+
     /// Creates a new Vault signer
     ///
     /// # Arguments
@@ -159,7 +159,7 @@ impl VaultSigner {
         })?;
 
         // Remove a versioned Vault transit prefix (e.g., "vault:v1:", "vault:v2:", ...).
-        let signature_b64 = strip_vault_signature_prefix(signature_b64);
+        let signature_b64 = Self::strip_vault_signature_prefix(signature_b64);
 
         let sig_bytes = STANDARD.decode(signature_b64).map_err(|_| {
             SignerError::SerializationError("Failed to decode signature".to_string())
@@ -313,27 +313,36 @@ mod tests {
 
     #[test]
     fn test_strip_vault_signature_prefix_v1() {
-        assert_eq!(strip_vault_signature_prefix("vault:v1:abc123"), "abc123");
+        assert_eq!(
+            VaultSigner::strip_vault_signature_prefix("vault:v1:abc123"),
+            "abc123"
+        );
     }
 
     #[test]
     fn test_strip_vault_signature_prefix_higher_version() {
-        assert_eq!(strip_vault_signature_prefix("vault:v27:abc123"), "abc123");
+        assert_eq!(
+            VaultSigner::strip_vault_signature_prefix("vault:v27:abc123"),
+            "abc123"
+        );
     }
 
     #[test]
     fn test_strip_vault_signature_prefix_no_prefix() {
-        assert_eq!(strip_vault_signature_prefix("abc123"), "abc123");
+        assert_eq!(
+            VaultSigner::strip_vault_signature_prefix("abc123"),
+            "abc123"
+        );
     }
 
     #[test]
     fn test_strip_vault_signature_prefix_invalid_version_segment() {
         assert_eq!(
-            strip_vault_signature_prefix("vault:vx:abc123"),
+            VaultSigner::strip_vault_signature_prefix("vault:vx:abc123"),
             "vault:vx:abc123"
         );
         assert_eq!(
-            strip_vault_signature_prefix("vault:v:abc123"),
+            VaultSigner::strip_vault_signature_prefix("vault:v:abc123"),
             "vault:v:abc123"
         );
     }
