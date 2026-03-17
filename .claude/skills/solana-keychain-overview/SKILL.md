@@ -55,12 +55,13 @@ The core abstraction is the `SolanaSigner` trait in `rust/src/traits.rs`:
 #[async_trait]
 pub trait SolanaSigner: Send + Sync {
     fn pubkey(&self) -> Pubkey;
-    async fn sign_transaction(&self, tx: &mut Transaction) -> Result<SignedTransaction, SignerError>;
+    async fn sign_transaction(&self, tx: &mut Transaction) -> Result<SignTransactionResult, SignerError>;
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError>;
-    async fn sign_partial_transaction(&self, tx: &mut Transaction) -> Result<SignedTransaction, SignerError>;
     async fn is_available(&self) -> bool;
 }
 ```
+
+`SignTransactionResult` is an enum with `Complete(SignedTransaction)` and `Partial(SignedTransaction)` variants, replacing the old separate `sign_partial_transaction` method.
 
 A unified `Signer` enum in `rust/src/lib.rs` wraps all backends, enabling runtime backend selection:
 

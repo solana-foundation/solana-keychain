@@ -159,23 +159,15 @@ impl SolanaSigner for YourServiceSigner {
         self.public_key
     }
 
-    async fn sign_transaction(&self, tx: &mut Transaction) -> Result<SignedTransaction, SignerError> {
+    async fn sign_transaction(&self, tx: &mut Transaction) -> Result<SignTransactionResult, SignerError> {
         // Sign and serialize the transaction
+        // Return SignTransactionResult::Complete or SignTransactionResult::Partial
         // See rust/src/para/mod.rs for a complete reference implementation
         todo!("Implement signing and serialization")
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign(message).await
-    }
-
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        // Same as sign_transaction but serializes with requireAllSignatures: false
-        // See rust/src/para/mod.rs for a complete reference implementation
-        todo!("Implement partial signing and serialization")
     }
 
     async fn is_available(&self) -> bool {
@@ -288,7 +280,7 @@ impl SolanaSigner for Signer {
     async fn sign_transaction(
         &self,
         tx: &mut sdk_adapter::Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
+    ) -> Result<SignTransactionResult, SignerError> {
         match self {
             // ... existing variants
             #[cfg(feature = "your_service")]
@@ -304,17 +296,6 @@ impl SolanaSigner for Signer {
             // ... existing variants
             #[cfg(feature = "your_service")]
             Signer::YourService(s) => s.sign_message(message).await,
-        }
-    }
-
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut sdk_adapter::Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        match self {
-            // ... existing variants
-            #[cfg(feature = "your_service")]
-            Signer::YourService(s) => s.sign_partial_transaction(tx).await,
         }
     }
 

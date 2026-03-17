@@ -10,9 +10,9 @@
 **Cause:** Missing or mismatched `#[cfg(feature = "<name>")]` gate on the enum variant in `lib.rs`.
 **Fix:** Ensure the feature name in `#[cfg(feature = "...")]` matches exactly what's in `Cargo.toml [features]`.
 
-### `not all trait items implemented: missing sign_partial_transaction`
-**Cause:** The `SolanaSigner` trait has 5 methods. Easy to miss `sign_partial_transaction`.
-**Fix:** Read `rust/src/traits.rs` for the current trait definition. Implement all 5 methods: `pubkey`, `sign_transaction`, `sign_message`, `sign_partial_transaction`, `is_available`.
+### `not all trait items implemented`
+**Cause:** The `SolanaSigner` trait has 4 methods. Missing one of them.
+**Fix:** Read `rust/src/traits.rs` for the current trait definition. Implement all 4 methods: `pubkey`, `sign_transaction`, `sign_message`, `is_available`.
 
 ### `unused import` or `dead_code` warnings with `cargo clippy`
 **Cause:** Code that's only used behind a feature gate but not properly gated.
@@ -28,7 +28,7 @@
 
 ### Missing match arm in `impl SolanaSigner for Signer`
 **Cause:** Added the enum variant but forgot to add the match arm in one or more trait method implementations.
-**Fix:** There are 5 match blocks in `lib.rs` (one per trait method). Add your variant to ALL 5.
+**Fix:** There are 4 match blocks in `lib.rs` (one per trait method). Add your variant to ALL 4.
 
 ## Rust Test Errors
 

@@ -78,11 +78,10 @@ Read `docs/ADDING_SIGNERS.md` for detailed code templates. Read `rust/src/para/m
 2. Re-export signer type (`pub use <name>::<Name>Signer`)
 3. `Signer` enum variant
 4. Factory method on `impl Signer` (`from_<name>`)
-5. **All 5 match arms** in `impl SolanaSigner for Signer`:
+5. **All 4 match arms** in `impl SolanaSigner for Signer`:
    - `pubkey()`
    - `sign_transaction()`
    - `sign_message()`
-   - `sign_partial_transaction()`
    - `is_available()`
 6. Add feature to `compile_error!` cfg gate (search for `compile_error!`)
 
@@ -90,10 +89,9 @@ Read `docs/ADDING_SIGNERS.md` for detailed code templates. Read `rust/src/para/m
 
 ### Critical Gotchas
 
-- **5 trait methods**: Always read `rust/src/traits.rs` for the current trait definition — it is the source of truth.
-- **Return type**: `sign_transaction` and `sign_partial_transaction` return `SignedTransaction = (String, Signature)` — a tuple of base64-encoded transaction + signature.
+- **4 trait methods**: Always read `rust/src/traits.rs` for the current trait definition — it is the source of truth.
+- **Return type**: `sign_transaction` returns `SignTransactionResult` — an enum with `Complete(SignedTransaction)` and `Partial(SignedTransaction)` variants. `SignedTransaction = (String, Signature)` is a tuple of base64-encoded transaction + signature.
 - **SDK adapter**: Import types from `crate::sdk_adapter`, not `solana_sdk` directly. The project supports both SDK v2 and v3 via an adapter layer.
-- **`sign_partial_transaction`**: Serialize with `requireAllSignatures: false`. See existing signers (e.g., `rust/src/para/mod.rs`) for the pattern.
 
 ### Signer Patterns
 
