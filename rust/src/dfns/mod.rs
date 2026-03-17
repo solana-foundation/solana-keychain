@@ -60,9 +60,8 @@ impl DfnsSigner {
         let builder = reqwest::Client::builder().user_agent("solana-keychain");
         let builder = builder
             .timeout(http_client_config.resolved_request_timeout())
-            .connect_timeout(http_client_config.resolved_connect_timeout());
-        #[cfg(not(test))]
-        let builder = builder.https_only(true);
+            .connect_timeout(http_client_config.resolved_connect_timeout())
+            .https_only(true);
         let client = builder.build().expect("Failed to build HTTP client");
 
         Self {

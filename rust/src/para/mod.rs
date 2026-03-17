@@ -73,9 +73,9 @@ impl ParaSigner {
             }
         }
 
-        let builder = reqwest::Client::builder().timeout(CLIENT_TIMEOUT);
-        #[cfg(not(test))]
-        let builder = builder.https_only(true);
+        let builder = reqwest::Client::builder()
+            .timeout(CLIENT_TIMEOUT)
+            .https_only(true);
         let client = builder
             .build()
             .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;

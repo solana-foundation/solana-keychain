@@ -76,9 +76,8 @@ impl TurnkeySigner {
         let builder = reqwest::Client::builder();
         let builder = builder
             .timeout(http_client_config.resolved_request_timeout())
-            .connect_timeout(http_client_config.resolved_connect_timeout());
-        #[cfg(not(test))]
-        let builder = builder.https_only(true);
+            .connect_timeout(http_client_config.resolved_connect_timeout())
+            .https_only(true);
         let client = builder
             .build()
             .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
@@ -415,6 +414,7 @@ mod tests {
             keypair.pubkey().to_string(),
         )
         .unwrap();
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
 
         let result = signer.sign_message(message).await;
@@ -463,6 +463,7 @@ mod tests {
             keypair.pubkey().to_string(),
         )
         .unwrap();
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
 
         let result = signer.sign_transaction(&mut tx).await;
@@ -500,6 +501,7 @@ mod tests {
             keypair.pubkey().to_string(),
         )
         .unwrap();
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
 
         let result = signer.sign_message(b"test").await;
@@ -534,6 +536,7 @@ mod tests {
             keypair.pubkey().to_string(),
         )
         .unwrap();
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
 
         let result = signer.sign_message(b"test").await;
@@ -572,6 +575,7 @@ mod tests {
             keypair.pubkey().to_string(),
         )
         .unwrap();
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
 
         let result = signer.sign_message(b"test").await;
@@ -609,6 +613,7 @@ mod tests {
             keypair.pubkey().to_string(),
         )
         .unwrap();
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
 
         assert!(signer.is_available().await);
@@ -636,6 +641,7 @@ mod tests {
             keypair.pubkey().to_string(),
         )
         .unwrap();
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
 
         assert!(!signer.is_available().await);
@@ -706,6 +712,7 @@ mod tests {
             keypair.pubkey().to_string(),
         )
         .unwrap();
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
 
         let result = signer.sign_message(b"test").await;

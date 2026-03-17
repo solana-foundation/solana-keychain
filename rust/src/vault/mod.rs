@@ -75,9 +75,8 @@ impl VaultSigner {
         let builder = Client::builder();
         let builder = builder
             .timeout(http_client_config.resolved_request_timeout())
-            .connect_timeout(http_client_config.resolved_connect_timeout());
-        #[cfg(not(test))]
-        let builder = builder.https_only(true);
+            .connect_timeout(http_client_config.resolved_connect_timeout())
+            .https_only(true);
         let client = builder
             .build()
             .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
@@ -237,24 +236,32 @@ mod tests {
     const TEST_KEY_NAME: &str = "test-key";
     const TEST_PUBKEY: &str = "2vfDxWYbhRt7GXiRYKf1Dr5Z8y7zVQCSERbDTKyBaAqQ";
 
+    fn create_test_http_client() -> Arc<Client> {
+        Arc::new(Client::new())
+    }
+
     fn create_test_signer() -> VaultSigner {
-        VaultSigner::new(
+        let mut signer = VaultSigner::new(
             TEST_VAULT_ADDR.to_string(),
             TEST_VAULT_TOKEN.to_string(),
             TEST_KEY_NAME.to_string(),
             TEST_PUBKEY.to_string(),
         )
-        .expect("Failed to create test signer")
+        .expect("Failed to create test signer");
+        signer.client = create_test_http_client();
+        signer
     }
 
     fn create_test_signer_with_pubkey(vault_addr: &str, pubkey: String) -> VaultSigner {
-        VaultSigner::new(
+        let mut signer = VaultSigner::new(
             vault_addr.to_string(),
             TEST_VAULT_TOKEN.to_string(),
             TEST_KEY_NAME.to_string(),
             pubkey,
         )
-        .expect("Failed to create test signer")
+        .expect("Failed to create test signer");
+        signer.client = create_test_http_client();
+        signer
     }
 
     #[test]

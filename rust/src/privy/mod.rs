@@ -52,9 +52,8 @@ impl PrivySigner {
         let builder = reqwest::Client::builder();
         let builder = builder
             .timeout(http_client_config.resolved_request_timeout())
-            .connect_timeout(http_client_config.resolved_connect_timeout());
-        #[cfg(not(test))]
-        let builder = builder.https_only(true);
+            .connect_timeout(http_client_config.resolved_connect_timeout())
+            .https_only(true);
         let client = builder.build().expect("Failed to build HTTP client");
 
         Self {
@@ -297,6 +296,7 @@ mod tests {
             "test-app-secret".to_string(),
             "test-wallet-id".to_string(),
         );
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
 
         let result = signer.init().await;
@@ -335,6 +335,7 @@ mod tests {
             "test-app-secret".to_string(),
             "test-wallet-id".to_string(),
         );
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
         signer.public_key = Some(keypair.pubkey());
 
@@ -368,6 +369,7 @@ mod tests {
             "test-app-secret".to_string(),
             "test-wallet-id".to_string(),
         );
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
         signer.public_key = Some(keypair.pubkey());
 
@@ -425,6 +427,7 @@ mod tests {
             "test-app-secret".to_string(),
             "test-wallet-id".to_string(),
         );
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
         signer.public_key = Some(keypair.pubkey());
 
@@ -487,6 +490,7 @@ mod tests {
             "bad-secret".to_string(),
             "test-wallet-id".to_string(),
         );
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
 
         let result = signer.init().await;
@@ -518,6 +522,7 @@ mod tests {
             "test-app-secret".to_string(),
             "test-wallet-id".to_string(),
         );
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
 
         let result = signer.init().await;
@@ -548,6 +553,7 @@ mod tests {
             "bad-secret".to_string(),
             "test-wallet-id".to_string(),
         );
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
         signer.public_key = Some(keypair.pubkey());
 
@@ -594,6 +600,7 @@ mod tests {
             "test-app-secret".to_string(),
             "test-wallet-id".to_string(),
         );
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
         signer.public_key = Some(keypair.pubkey());
         assert!(signer.is_available().await);
@@ -618,6 +625,7 @@ mod tests {
             "test-app-secret".to_string(),
             "test-wallet-id".to_string(),
         );
+        signer.client = reqwest::Client::new();
         signer.api_base_url = mock_server.uri();
         signer.public_key = Some(keypair.pubkey());
 
