@@ -39,8 +39,8 @@ export type SignerErrorContextMap = {
 };
 
 /** Context type for a given error code, with optional extra fields. */
-export type SignerErrorContext<C extends SignerErrorCode = SignerErrorCode> = SignerErrorContextMap[C] &
-    Record<string, unknown>;
+export type SignerErrorContext<C extends SignerErrorCode = SignerErrorCode> = Record<string, unknown> &
+    SignerErrorContextMap[C];
 
 const DEFAULT_REMOTE_ERROR_RESPONSE_MAX_LENGTH = 256;
 

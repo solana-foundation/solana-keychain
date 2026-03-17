@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { isSignerError, SignerError, SignerErrorCode, sanitizeRemoteErrorResponse, throwSignerError } from '../errors.js';
+import {
+    isSignerError,
+    SignerError,
+    SignerErrorCode,
+    sanitizeRemoteErrorResponse,
+    throwSignerError,
+} from '../errors.js';
 
 describe('sanitizeRemoteErrorResponse', () => {
     it('removes control characters and collapses whitespace', () => {
