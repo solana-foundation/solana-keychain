@@ -331,6 +331,7 @@ mod tests {
     use super::*;
     use crate::dfns::auth::tests::TEST_ED25519_PEM;
     use crate::sdk_adapter::{keypair_pubkey, Keypair, Signer};
+    use crate::test_util::create_test_transaction;
     use std::str::FromStr;
     use wiremock::{
         matchers::{header, method, path},
@@ -555,8 +556,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_sign_transaction_success() {
-        use crate::test_util::create_test_transaction;
-
         let mock_server = MockServer::start().await;
         let keypair = Keypair::new();
 

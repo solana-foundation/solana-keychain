@@ -253,7 +253,11 @@ impl SolanaSigner for AwsKmsSigner {
 mod tests {
     use super::*;
     use crate::sdk_adapter::{Keypair, Signer};
+    use crate::test_util::create_test_transaction;
+    use aws_config::Region;
+    use aws_sdk_kms::config::{BehaviorVersion, Credentials};
     use base64::{engine::general_purpose::STANDARD, Engine};
+    use wiremock::matchers::any;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn create_test_keypair() -> Keypair {
@@ -502,9 +506,6 @@ mod tests {
 
     /// Helper to create a KMS client configured for testing with wiremock
     fn create_test_client(endpoint_url: &str) -> KmsClient {
-        use aws_config::Region;
-        use aws_sdk_kms::config::{BehaviorVersion, Credentials};
-
         let credentials = Credentials::new("test", "test", None, None, "test");
         let config = aws_sdk_kms::config::Builder::new()
             .behavior_version(BehaviorVersion::latest())
@@ -517,8 +518,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_kms_sign_message_success() {
-        use wiremock::matchers::any;
-
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
 
@@ -552,8 +551,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_kms_sign_message_invalid_signature_length() {
-        use wiremock::matchers::any;
-
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
 
@@ -583,8 +580,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_kms_sign_api_error() {
-        use wiremock::matchers::any;
-
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
 
@@ -616,8 +611,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_kms_sign_unauthorized() {
-        use wiremock::matchers::any;
-
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
 
@@ -649,8 +642,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_kms_is_available_success() {
-        use wiremock::matchers::any;
-
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
 
@@ -681,8 +672,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_kms_is_available_wrong_key_spec() {
-        use wiremock::matchers::any;
-
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
 
@@ -713,8 +702,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_kms_is_available_wrong_key_usage() {
-        use wiremock::matchers::any;
-
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
 
@@ -745,8 +732,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_kms_is_available_disabled_key() {
-        use wiremock::matchers::any;
-
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
 
@@ -777,9 +762,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_kms_sign_transaction_success() {
-        use crate::test_util::create_test_transaction;
-        use wiremock::matchers::any;
-
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
 

@@ -515,6 +515,7 @@ impl SolanaSigner for FireblocksSigner {
 mod tests {
     use super::*;
     use crate::sdk_adapter::{keypair_pubkey, Keypair, Signer};
+    use crate::test_util::create_test_transaction;
     use wiremock::{
         matchers::{header, method, path, path_regex},
         Mock, MockServer, ResponseTemplate,
@@ -797,8 +798,6 @@ p6B5CCtpBPgD01Vm+bT/JQ==
 
     #[tokio::test]
     async fn test_sign_transaction_program_call() {
-        use crate::test_util::create_test_transaction;
-
         let mock_server = MockServer::start().await;
         let signer = create_test_signer_program_call(&mock_server.uri());
 
@@ -842,8 +841,6 @@ p6B5CCtpBPgD01Vm+bT/JQ==
 
     #[tokio::test]
     async fn test_sign_transaction_requires_init() {
-        use crate::test_util::create_test_transaction;
-
         let signer = create_test_signer_uninit("http://localhost");
         let mut transaction = create_test_transaction(&Pubkey::new_unique());
 
