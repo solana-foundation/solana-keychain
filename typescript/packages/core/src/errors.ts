@@ -17,6 +17,31 @@ export const SignerErrorCode = {
 } as const;
 export type SignerErrorCode = (typeof SignerErrorCode)[keyof typeof SignerErrorCode];
 
+/**
+ * Typed context fields per error code.
+ *
+ * When catching a `SignerError`, use `isSignerError(e, SignerErrorCode.REMOTE_API_ERROR)`
+ * to narrow the `context` type and get typed access to code-specific fields.
+ */
+export type SignerErrorContextMap = {
+    [SignerErrorCode.CONFIG_ERROR]: { cause?: unknown; message: string };
+    [SignerErrorCode.EXPECTED_SOLANA_SIGNER]: { address?: string; message?: string };
+    [SignerErrorCode.HTTP_ERROR]: { cause?: unknown; message: string; url?: string };
+    [SignerErrorCode.INVALID_PRIVATE_KEY]: { cause?: unknown; message: string };
+    [SignerErrorCode.INVALID_PUBLIC_KEY]: { cause?: unknown; message: string };
+    [SignerErrorCode.IO_ERROR]: { cause?: unknown; message: string };
+    [SignerErrorCode.NOT_AVAILABLE]: { cause?: unknown; message?: string };
+    [SignerErrorCode.PARSING_ERROR]: { cause?: unknown; message: string };
+    [SignerErrorCode.REMOTE_API_ERROR]: { message: string; response?: string; status?: number };
+    [SignerErrorCode.SERIALIZATION_ERROR]: { cause?: unknown; message: string };
+    [SignerErrorCode.SIGNER_NOT_INITIALIZED]: { message: string };
+    [SignerErrorCode.SIGNING_FAILED]: { address?: string; cause?: unknown; message: string };
+};
+
+/** Context type for a given error code, with optional extra fields. */
+export type SignerErrorContext<C extends SignerErrorCode = SignerErrorCode> = SignerErrorContextMap[C] &
+    Record<string, unknown>;
+
 const DEFAULT_REMOTE_ERROR_RESPONSE_MAX_LENGTH = 256;
 
 function isDisallowedAsciiControl(codePoint: number): boolean {
@@ -41,14 +66,16 @@ function replaceDisallowedControlChars(input: string): string {
 }
 
 /**
- * Custom error class for signer-specific errors
- * Extends Error with code and context properties
+ * Custom error class for signer-specific errors.
+ * Extends Error with code and context properties.
+ *
+ * Use `isSignerError()` to narrow the type and get typed `context` access.
  */
-export class SignerError extends Error {
-    readonly code: SignerErrorCode;
-    readonly context?: Record<string, unknown>;
+export class SignerError<C extends SignerErrorCode = SignerErrorCode> extends Error {
+    readonly code: C;
+    readonly context?: SignerErrorContext<C>;
 
-    constructor(code: SignerErrorCode, context?: Record<string, unknown>) {
+    constructor(code: C, context?: SignerErrorContext<C>) {
         const message =
             context?.message && typeof context.message === 'string' ? context.message : `Signer error: ${code}`;
         super(message);
@@ -61,15 +88,33 @@ export class SignerError extends Error {
 /**
  * Helper function to create signer-specific errors
  */
-export function createSignerError(code: SignerErrorCode, context?: Record<string, unknown>): SignerError {
+export function createSignerError<C extends SignerErrorCode>(code: C, context?: SignerErrorContext<C>): SignerError<C> {
     return new SignerError(code, context);
 }
 
 /**
  * Helper function to throw signer-specific errors
  */
-export function throwSignerError(code: SignerErrorCode, context?: Record<string, unknown>): never {
+export function throwSignerError<C extends SignerErrorCode>(code: C, context?: SignerErrorContext<C>): never {
     throw createSignerError(code, context);
+}
+
+/**
+ * Type guard that narrows a caught error to a `SignerError` with a specific code.
+ *
+ * @example
+ * ```typescript
+ * try { await signer.signMessages([msg]); }
+ * catch (e) {
+ *   if (isSignerError(e, SignerErrorCode.REMOTE_API_ERROR)) {
+ *     console.log(e.context?.status);   // number | undefined
+ *     console.log(e.context?.response); // string | undefined
+ *   }
+ * }
+ * ```
+ */
+export function isSignerError<C extends SignerErrorCode>(error: unknown, code: C): error is SignerError<C> {
+    return error instanceof SignerError && error.code === code;
 }
 
 /**
