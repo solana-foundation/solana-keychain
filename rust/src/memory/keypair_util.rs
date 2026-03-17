@@ -35,10 +35,11 @@ impl KeypairUtil {
     /// Creates a new keypair from a base58-encoded private key string with proper error handling
     pub fn from_base58_safe(private_key: &str) -> Result<Keypair, SignerError> {
         // Try to decode as base58 first
-        let decoded =
-            Zeroizing::new(bs58::decode(private_key).into_vec().map_err(|e| {
-                SignerError::InvalidPrivateKey(format!("Invalid base58 string: {e}"))
-            })?);
+        let decoded = Zeroizing::new(bs58::decode(private_key).into_vec().map_err(|_e| {
+            #[cfg(feature = "unsafe-debug")]
+            log::error!("Failed to decode base58 private key: {_e}");
+            SignerError::InvalidPrivateKey("Invalid private key format".to_string())
+        })?);
 
         if decoded.len() != PRIVATE_KEY_LENGTH {
             return Err(SignerError::InvalidPrivateKey(format!(
@@ -48,8 +49,10 @@ impl KeypairUtil {
             )));
         }
 
-        let keypair = keypair_from_bytes(&decoded[..]).map_err(|e| {
-            SignerError::InvalidPrivateKey(format!("Invalid private key bytes: {e}"))
+        let keypair = keypair_from_bytes(&decoded[..]).map_err(|_e| {
+            #[cfg(feature = "unsafe-debug")]
+            log::error!("Failed to build keypair from decoded private key bytes: {_e}");
+            SignerError::InvalidPrivateKey("Invalid private key bytes".to_string())
         })?;
 
         Ok(keypair)
@@ -85,13 +88,19 @@ impl KeypairUtil {
                         byte_array.len()
                     )));
                 }
-                keypair_from_bytes(&byte_array[..]).map_err(|e| {
-                    SignerError::InvalidPrivateKey(format!("Invalid private key bytes: {e}"))
+                keypair_from_bytes(&byte_array[..]).map_err(|_e| {
+                    #[cfg(feature = "unsafe-debug")]
+                    log::error!("Failed to build keypair from U8Array private key bytes: {_e}");
+                    SignerError::InvalidPrivateKey("Invalid private key bytes".to_string())
                 })
             }
-            Err(e) => Err(SignerError::InvalidPrivateKey(format!(
-                "Failed to parse U8Array: {e}"
-            ))),
+            Err(_e) => {
+                #[cfg(feature = "unsafe-debug")]
+                log::error!("Failed to parse U8Array private key: {_e}");
+                Err(SignerError::InvalidPrivateKey(
+                    "Invalid U8Array private key format".to_string(),
+                ))
+            }
         }
     }
 
@@ -107,8 +116,10 @@ impl KeypairUtil {
                     byte_array.len()
                 )));
             }
-            return keypair_from_bytes(&byte_array[..]).map_err(|e| {
-                SignerError::InvalidPrivateKey(format!("Invalid private key bytes: {e}"))
+            return keypair_from_bytes(&byte_array[..]).map_err(|_e| {
+                #[cfg(feature = "unsafe-debug")]
+                log::error!("Failed to build keypair from JSON private key bytes: {_e}");
+                SignerError::InvalidPrivateKey("Invalid private key bytes".to_string())
             });
         }
 

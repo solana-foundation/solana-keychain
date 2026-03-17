@@ -47,8 +47,10 @@ impl MemorySigner {
 
     /// Creates a new signer from a private key byte array
     pub fn from_bytes(private_key: &[u8]) -> Result<Self, SignerError> {
-        let keypair = keypair_from_bytes(private_key).map_err(|e| {
-            SignerError::InvalidPrivateKey(format!("Invalid private key bytes: {e}"))
+        let keypair = keypair_from_bytes(private_key).map_err(|_e| {
+            #[cfg(feature = "unsafe-debug")]
+            log::error!("Failed to build keypair from private key bytes: {_e}");
+            SignerError::InvalidPrivateKey("Invalid private key bytes".to_string())
         })?;
         Ok(Self { keypair })
     }
