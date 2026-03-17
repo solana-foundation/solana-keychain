@@ -2,12 +2,14 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase58Decoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
+    createBatchDelay,
     createSignatureDictionary,
-    sanitizeRemoteErrorResponse,
+    fetchWithSignerErrors,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
     validateHttpsUrl,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -91,7 +93,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     private readonly apiBaseUrl: string;
     private readonly keyId: string;
 
-    private readonly requestDelayMs: number;
+    private readonly delay: (index: number) => Promise<void>;
 
     private constructor(config: {
         address: Address<TAddress>;
@@ -110,7 +112,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
         this.walletId = config.walletId;
         this.apiBaseUrl = config.apiBaseUrl;
         this.keyId = config.keyId;
-        this.requestDelayMs = config.requestDelayMs;
+        this.delay = createBatchDelay(config.requestDelayMs);
     }
 
     /**
@@ -148,17 +150,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
         const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
         validateHttpsUrl(apiBaseUrl, 'apiBaseUrl');
         const requestDelayMs = config.requestDelayMs ?? 0;
-
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
+        validateRequestDelayMs(requestDelayMs);
 
         const wallet = await fetchWallet(apiBaseUrl, config.authToken, config.walletId);
 
@@ -204,12 +196,6 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
             requestDelayMs,
             walletId: config.walletId,
         });
-    }
-
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
     }
 
     /**
@@ -299,9 +285,9 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
         );
 
         const url = `${this.apiBaseUrl}${httpPath}`;
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const rawSigResponse = await fetchWithSignerErrors<unknown>(
+            url,
+            {
                 body: requestBody,
                 headers: {
                     Authorization: `Bearer ${this.authToken}`,
@@ -309,33 +295,9 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
                     'x-dfns-useraction': userAction,
                 },
                 method: 'POST',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Dfns network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Dfns signing API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let rawSigResponse: unknown;
-        try {
-            rawSigResponse = await response.json();
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Dfns signature response',
-            });
-        }
+            },
+            'Dfns',
+        );
 
         const sigResponse = parseSignatureResponse(rawSigResponse);
 
@@ -366,40 +328,16 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
  */
 async function fetchWallet(apiBaseUrl: string, authToken: string, walletId: string): Promise<GetWalletResponse> {
     const url = `${apiBaseUrl}/wallets/${walletId}`;
-    let response: Response;
-    try {
-        response = await fetch(url, {
+    const rawWalletResponse = await fetchWithSignerErrors<unknown>(
+        url,
+        {
             headers: {
                 Authorization: `Bearer ${authToken}`,
             },
             method: 'GET',
-        });
-    } catch (error) {
-        throwSignerError(SignerErrorCode.HTTP_ERROR, {
-            cause: error,
-            message: 'Dfns network request failed',
-            url,
-        });
-    }
-
-    if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Failed to read error response');
-        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-            message: `Dfns API error: ${response.status}`,
-            response: sanitizeRemoteErrorResponse(errorText),
-            status: response.status,
-        });
-    }
-
-    let rawWalletResponse: unknown;
-    try {
-        rawWalletResponse = await response.json();
-    } catch (error) {
-        throwSignerError(SignerErrorCode.PARSING_ERROR, {
-            cause: error,
-            message: 'Failed to parse Dfns wallet response',
-        });
-    }
+        },
+        'Dfns',
+    );
 
     return parseWalletResponse(rawWalletResponse);
 }

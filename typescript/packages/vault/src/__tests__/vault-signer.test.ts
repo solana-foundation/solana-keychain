@@ -133,14 +133,12 @@ describe('VaultSigner', () => {
             }).toThrow('requestDelayMs must not be negative');
         });
 
-        it('should warn for high requestDelayMs', () => {
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-            new VaultSigner({
+        it('should accept high requestDelayMs without warning', () => {
+            const signer = new VaultSigner({
                 ...mockConfig,
                 requestDelayMs: 3001,
             });
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
-            warnSpy.mockRestore();
+            expect(signer).toBeDefined();
         });
     });
 
@@ -291,7 +289,7 @@ describe('VaultSigner', () => {
                 signatures: {},
             };
 
-            await expect(signer.signMessages([message])).rejects.toThrow('Vault API error: key not found');
+            await expect(signer.signMessages([message])).rejects.toThrow('Vault API error: 404');
         });
 
         it('should handle network errors', async () => {

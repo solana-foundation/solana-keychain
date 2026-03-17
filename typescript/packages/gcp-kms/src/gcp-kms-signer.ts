@@ -2,10 +2,12 @@ import { v1 } from '@google-cloud/kms';
 import { Address, assertIsAddress } from '@solana/addresses';
 import {
     assertSignatureValid,
+    createBatchDelay,
     createSignatureDictionary,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -46,7 +48,7 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
     readonly address: Address<TAddress>;
     private readonly keyName: string;
     private readonly client: v1.KeyManagementServiceClient;
-    private readonly requestDelayMs: number;
+    private readonly delay: (index: number) => Promise<void>;
 
     /** @deprecated Use `createGcpKmsSigner()` instead. */
     static create<TAddress extends string = string>(config: GcpKmsSignerConfig): GcpKmsSigner<TAddress> {
@@ -78,34 +80,10 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
         }
 
         this.keyName = config.keyName;
-        this.requestDelayMs = config.requestDelayMs || 0;
-        this.validateRequestDelayMs(this.requestDelayMs);
+        const requestDelayMs = config.requestDelayMs || 0;
+        validateRequestDelayMs(requestDelayMs);
+        this.delay = createBatchDelay(requestDelayMs);
         this.client = new v1.KeyManagementServiceClient();
-    }
-
-    /**
-     * Validate request delay ms
-     */
-    private validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
-    }
-
-    /**
-     * Add delay between concurrent requests
-     */
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
     }
 
     /**

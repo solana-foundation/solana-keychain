@@ -1,10 +1,5 @@
 import { getBase64Encoder } from '@solana/codecs-strings';
-import {
-    base64UrlDecoder,
-    sanitizeRemoteErrorResponse,
-    SignerErrorCode,
-    throwSignerError,
-} from '@solana/keychain-core';
+import { base64UrlDecoder, fetchWithSignerErrors, SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 
 import type { UserActionInitResponse, UserActionResponse } from './types.js';
 
@@ -26,9 +21,9 @@ export async function signUserAction(
 ): Promise<string> {
     // Request a challenge
     const initUrl = `${apiBaseUrl}/auth/action/init`;
-    let initResponse: Response;
-    try {
-        initResponse = await fetch(initUrl, {
+    const rawChallenge = await fetchWithSignerErrors<unknown>(
+        initUrl,
+        {
             body: JSON.stringify({
                 userActionHttpMethod: httpMethod,
                 userActionHttpPath: httpPath,
@@ -40,33 +35,9 @@ export async function signUserAction(
                 'Content-Type': 'application/json',
             },
             method: 'POST',
-        });
-    } catch (error) {
-        throwSignerError(SignerErrorCode.HTTP_ERROR, {
-            cause: error,
-            message: 'Dfns network request failed',
-            url: initUrl,
-        });
-    }
-
-    if (!initResponse.ok) {
-        const errorText = await initResponse.text().catch(() => 'Failed to read error response');
-        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-            message: `Dfns auth/action/init failed: ${initResponse.status}`,
-            response: sanitizeRemoteErrorResponse(errorText),
-            status: initResponse.status,
-        });
-    }
-
-    let rawChallenge: unknown;
-    try {
-        rawChallenge = await initResponse.json();
-    } catch (error) {
-        throwSignerError(SignerErrorCode.PARSING_ERROR, {
-            cause: error,
-            message: 'Failed to parse Dfns auth challenge response',
-        });
-    }
+        },
+        'Dfns',
+    );
 
     const challenge = parseUserActionInitResponse(rawChallenge);
 
@@ -93,9 +64,9 @@ export async function signUserAction(
 
     // Submit the signed challenge
     const actionUrl = `${apiBaseUrl}/auth/action`;
-    let signResponse: Response;
-    try {
-        signResponse = await fetch(actionUrl, {
+    const rawActionResponse = await fetchWithSignerErrors<unknown>(
+        actionUrl,
+        {
             body: JSON.stringify({
                 challengeIdentifier: challenge.challengeIdentifier,
                 firstFactor: {
@@ -112,33 +83,9 @@ export async function signUserAction(
                 'Content-Type': 'application/json',
             },
             method: 'POST',
-        });
-    } catch (error) {
-        throwSignerError(SignerErrorCode.HTTP_ERROR, {
-            cause: error,
-            message: 'Dfns network request failed',
-            url: actionUrl,
-        });
-    }
-
-    if (!signResponse.ok) {
-        const errorText = await signResponse.text().catch(() => 'Failed to read error response');
-        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-            message: `Dfns auth/action failed: ${signResponse.status}`,
-            response: sanitizeRemoteErrorResponse(errorText),
-            status: signResponse.status,
-        });
-    }
-
-    let rawActionResponse: unknown;
-    try {
-        rawActionResponse = await signResponse.json();
-    } catch (error) {
-        throwSignerError(SignerErrorCode.PARSING_ERROR, {
-            cause: error,
-            message: 'Failed to parse Dfns auth action response',
-        });
-    }
+        },
+        'Dfns',
+    );
 
     const actionResponse = parseUserActionResponse(rawActionResponse);
 

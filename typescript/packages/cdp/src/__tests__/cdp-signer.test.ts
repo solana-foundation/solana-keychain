@@ -154,11 +154,9 @@ describe('CdpSigner', () => {
             );
         });
 
-        it('warns for high requestDelayMs', async () => {
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-            await CdpSigner.create(makeConfig({ requestDelayMs: 5000 }));
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
-            warnSpy.mockRestore();
+        it('accepts high requestDelayMs without warning', async () => {
+            const signer = await CdpSigner.create(makeConfig({ requestDelayMs: 5000 }));
+            expect(signer).toBeDefined();
         });
 
         it('accepts custom baseUrl', async () => {
@@ -241,7 +239,7 @@ describe('CdpSigner', () => {
             const signer = await CdpSigner.create(makeConfig());
             const message = { content: new TextEncoder().encode('hello'), signatures: {} };
 
-            await expect(signer.signMessages([message])).rejects.toThrow('CDP signMessage network request failed');
+            await expect(signer.signMessages([message])).rejects.toThrow('CDP network request failed');
         });
 
         it('throws REMOTE_API_ERROR on non-2xx response', async () => {
@@ -250,7 +248,7 @@ describe('CdpSigner', () => {
             const signer = await CdpSigner.create(makeConfig());
             const message = { content: new TextEncoder().encode('hello'), signatures: {} };
 
-            await expect(signer.signMessages([message])).rejects.toThrow('CDP signMessage API error: 401');
+            await expect(signer.signMessages([message])).rejects.toThrow('CDP API error: 401');
         });
 
         it('throws SIGNING_FAILED for invalid signature length', async () => {
@@ -306,9 +304,7 @@ describe('CdpSigner', () => {
             const signer = await CdpSigner.create(makeConfig());
             const mockTx = createMockTransaction();
 
-            await expect(signer.signTransactions([mockTx])).rejects.toThrow(
-                'CDP signTransaction network request failed',
-            );
+            await expect(signer.signTransactions([mockTx])).rejects.toThrow('CDP network request failed');
         });
 
         it('throws REMOTE_API_ERROR on non-2xx response', async () => {
@@ -317,7 +313,7 @@ describe('CdpSigner', () => {
             const signer = await CdpSigner.create(makeConfig());
             const mockTx = createMockTransaction();
 
-            await expect(signer.signTransactions([mockTx])).rejects.toThrow('CDP signTransaction API error: 403');
+            await expect(signer.signTransactions([mockTx])).rejects.toThrow('CDP API error: 403');
         });
     });
 

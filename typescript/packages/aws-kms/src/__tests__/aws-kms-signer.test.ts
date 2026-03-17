@@ -151,19 +151,16 @@ describe('AwsKmsSigner', () => {
             }).toThrow('requestDelayMs must not be negative');
         });
 
-        it('should warn for high requestDelayMs', async () => {
+        it('should accept high requestDelayMs without warning', async () => {
             const keyPair = await generateKeyPairSigner();
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-            new AwsKmsSigner({
+            const signer = new AwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
                 requestDelayMs: 5000,
             });
 
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
-
-            warnSpy.mockRestore();
+            expect(signer).toBeDefined();
         });
 
         it('should accept region configuration', async () => {

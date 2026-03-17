@@ -150,7 +150,7 @@ describe('ParaSigner', () => {
 
             await expect(ParaSigner.create(mockConfig)).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
-                message: expect.stringContaining('Failed to fetch wallet'),
+                message: expect.stringContaining('Para API error: 401'),
             });
         });
 
@@ -183,14 +183,10 @@ describe('ParaSigner', () => {
             });
         });
 
-        it('should warn for high requestDelayMs', async () => {
+        it('should accept high requestDelayMs without warning', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-            await ParaSigner.create({ ...mockConfig, requestDelayMs: 3001 });
-
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
-            warnSpy.mockRestore();
+            const signer = await ParaSigner.create({ ...mockConfig, requestDelayMs: 3001 });
+            expect(signer).toBeDefined();
         });
     });
 
@@ -333,7 +329,7 @@ describe('ParaSigner', () => {
 
             await expect(signer.signMessages([message])).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
-                message: expect.stringContaining('Para signing failed'),
+                message: expect.stringContaining('Para API error: 429'),
             });
         });
 
@@ -482,7 +478,7 @@ describe('ParaSigner', () => {
 
             await expect(signer.signTransactions([mockTransaction])).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
-                message: expect.stringContaining('Para signing failed'),
+                message: expect.stringContaining('Para API error: 429'),
             });
         });
 

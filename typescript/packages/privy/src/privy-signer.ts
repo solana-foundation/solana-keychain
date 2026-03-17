@@ -2,13 +2,15 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase64Decoder, getBase64Encoder, getUtf8Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
+    createBatchDelay,
     createSignatureDictionary,
     extractSignatureFromWireTransaction,
-    sanitizeRemoteErrorResponse,
+    fetchWithSignerErrors,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
     validateHttpsUrl,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -76,7 +78,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
     private readonly appSecret: string;
     private readonly walletId: string;
     private readonly apiBaseUrl: string;
-    private readonly requestDelayMs: number;
+    private readonly delay: (index: number) => Promise<void>;
 
     private constructor(config: PrivySignerConfig, address: Address<TAddress>) {
         this.address = address;
@@ -84,8 +86,9 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
         this.appSecret = config.appSecret;
         this.walletId = config.walletId;
         this.apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
-        this.requestDelayMs = config.requestDelayMs ?? 0;
-        this.validateRequestDelayMs(this.requestDelayMs);
+        const requestDelayMs = config.requestDelayMs ?? 0;
+        validateRequestDelayMs(requestDelayMs);
+        this.delay = createBatchDelay(requestDelayMs);
     }
 
     /**
@@ -114,25 +117,6 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
             },
             address,
         );
-    }
-
-    private validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
-    }
-
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
     }
 
     /**
@@ -164,9 +148,9 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
             },
         };
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const signResponse = await fetchWithSignerErrors<SignTransactionResponse>(
+            url,
+            {
                 body: JSON.stringify(request),
                 headers: {
                     Authorization: getAuthHeader(this.appId, this.appSecret),
@@ -174,33 +158,9 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
                     'privy-app-id': this.appId,
                 },
                 method: 'POST',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Privy network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Privy API signing error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let signResponse: SignTransactionResponse;
-        try {
-            signResponse = (await response.json()) as SignTransactionResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Privy signing response',
-            });
-        }
+            },
+            'Privy',
+        );
 
         if (!signResponse.data?.signed_transaction) {
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
@@ -227,9 +187,9 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
             },
         };
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const signResponse = await fetchWithSignerErrors<SignMessageResponse>(
+            url,
+            {
                 body: JSON.stringify(request),
                 headers: {
                     Authorization: getAuthHeader(this.appId, this.appSecret),
@@ -237,33 +197,9 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
                     'privy-app-id': this.appId,
                 },
                 method: 'POST',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Privy network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Privy API signing error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let signResponse: SignMessageResponse;
-        try {
-            signResponse = (await response.json()) as SignMessageResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Privy signing response',
-            });
-        }
+            },
+            'Privy',
+        );
 
         if (!signResponse.data?.signature) {
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
@@ -369,41 +305,17 @@ async function fetchPublicKey<TAddress extends string = string>(config: {
     const apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
     const url = `${apiBaseUrl}/wallets/${config.walletId}`;
 
-    let response: Response;
-    try {
-        response = await fetch(url, {
+    const walletInfo = await fetchWithSignerErrors<WalletResponse<TAddress>>(
+        url,
+        {
             headers: {
                 Authorization: getAuthHeader(config.appId, config.appSecret),
                 'privy-app-id': config.appId,
             },
             method: 'GET',
-        });
-    } catch (error) {
-        throwSignerError(SignerErrorCode.HTTP_ERROR, {
-            cause: error,
-            message: 'Privy network request failed',
-            url,
-        });
-    }
-
-    if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Failed to read error response');
-        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-            message: `Privy API error: ${response.status}`,
-            response: sanitizeRemoteErrorResponse(errorText),
-            status: response.status,
-        });
-    }
-
-    let walletInfo: WalletResponse<TAddress>;
-    try {
-        walletInfo = (await response.json()) as WalletResponse<TAddress>;
-    } catch (error) {
-        throwSignerError(SignerErrorCode.PARSING_ERROR, {
-            cause: error,
-            message: 'Failed to parse Privy response',
-        });
-    }
+        },
+        'Privy',
+    );
 
     if (!walletInfo.address) {
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {

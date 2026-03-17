@@ -3,13 +3,15 @@ import { getBase16Decoder, getBase58Encoder, getBase64Encoder } from '@solana/co
 import {
     assertSignatureValid,
     base64UrlDecoder,
+    createBatchDelay,
     createSignatureDictionary,
     extractSignatureFromWireTransaction,
-    sanitizeRemoteErrorResponse,
+    fetchWithSignerErrors,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
     validateHttpsUrl,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { createKeyPairFromBytes, SignatureBytes } from '@solana/keys';
 import type { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -212,7 +214,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
     private readonly walletKey: CryptoKey;
     private readonly apiHost: string;
     private readonly baseUrl: string;
-    private readonly requestDelayMs: number;
+    private readonly delay: (index: number) => Promise<void>;
 
     private constructor(config: {
         address: Address<TAddress>;
@@ -229,7 +231,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         this.walletKey = config.walletKey;
         this.baseUrl = config.baseUrl;
         this.apiHost = config.apiHost;
-        this.requestDelayMs = config.requestDelayMs;
+        this.delay = createBatchDelay(config.requestDelayMs);
     }
 
     /**
@@ -280,16 +282,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         const apiHost = parsedBaseUrl.host;
 
         const requestDelayMs = config.requestDelayMs ?? 0;
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
+        validateRequestDelayMs(requestDelayMs);
 
         const [apiKey, walletKey] = await Promise.all([
             loadApiKey(config.cdpApiKeySecret),
@@ -305,12 +298,6 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
             requestDelayMs,
             walletKey,
         });
-    }
-
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
     }
 
     private decodeMessageBytes(messageBytes: Uint8Array): string {
@@ -354,39 +341,15 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         const body = { message };
         const headers = await this.buildPostHeaders(path, body);
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const data = await fetchWithSignerErrors<SignMessageResponse>(
+            url,
+            {
                 body: JSON.stringify(body),
                 headers,
                 method: 'POST',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'CDP signMessage network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `CDP signMessage API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let data: SignMessageResponse;
-        try {
-            data = (await response.json()) as SignMessageResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse CDP signMessage response',
-            });
-        }
+            },
+            'CDP',
+        );
 
         // CDP returns a base58-encoded Ed25519 signature
         base58Encoder ||= getBase58Encoder();
@@ -413,39 +376,15 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         const body = { transaction: wireTransaction };
         const headers = await this.buildPostHeaders(path, body);
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const data = await fetchWithSignerErrors<SignTransactionResponse>(
+            url,
+            {
                 body: JSON.stringify(body),
                 headers,
                 method: 'POST',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'CDP signTransaction network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `CDP signTransaction API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let data: SignTransactionResponse;
-        try {
-            data = (await response.json()) as SignTransactionResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse CDP signTransaction response',
-            });
-        }
+            },
+            'CDP',
+        );
 
         return data.signedTransaction as Base64EncodedWireTransaction;
     }

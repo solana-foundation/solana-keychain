@@ -2,10 +2,12 @@ import { DescribeKeyCommand, KMSClient, MessageType, SignCommand, SigningAlgorit
 import { Address, assertIsAddress } from '@solana/addresses';
 import {
     assertSignatureValid,
+    createBatchDelay,
     createSignatureDictionary,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -45,7 +47,7 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
     readonly address: Address<TAddress>;
     private readonly keyId: string;
     private readonly client: KMSClient;
-    private readonly requestDelayMs: number;
+    private readonly delay: (index: number) => Promise<void>;
 
     /** @deprecated Use `createAwsKmsSigner()` instead. */
     static create<TAddress extends string = string>(config: AwsKmsSignerConfig): AwsKmsSigner<TAddress> {
@@ -77,8 +79,9 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
         }
 
         this.keyId = config.keyId;
-        this.requestDelayMs = config.requestDelayMs || 0;
-        this.validateRequestDelayMs(this.requestDelayMs);
+        const requestDelayMs = config.requestDelayMs || 0;
+        validateRequestDelayMs(requestDelayMs);
+        this.delay = createBatchDelay(requestDelayMs);
 
         // Create AWS KMS client
         const clientConfig: {
@@ -95,31 +98,6 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
         }
 
         this.client = new KMSClient(clientConfig);
-    }
-
-    /**
-     * Validate request delay ms
-     */
-    private validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
-    }
-
-    /**
-     * Add delay between concurrent requests
-     */
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
     }
 
     /**

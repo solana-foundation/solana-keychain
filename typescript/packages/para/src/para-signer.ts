@@ -2,17 +2,19 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
+    createBatchDelay,
     createSignatureDictionary,
-    sanitizeRemoteErrorResponse,
+    fetchWithSignerErrors,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
 
-import type { ParaErrorResponse, ParaSignRawRequest, ParaSignRawResponse, ParaWalletResponse } from './types.js';
+import type { ParaSignRawRequest, ParaSignRawResponse, ParaWalletResponse } from './types.js';
 
 /**
  * Create and initialize a Para-backed signer.
@@ -56,16 +58,17 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
     readonly address: Address<TAddress>;
     private readonly apiKey: string;
     private readonly apiBaseUrl: string;
-    private readonly requestDelayMs: number;
+    private readonly delay: (index: number) => Promise<void>;
     private readonly walletId: string;
 
     private constructor(config: ParaSignerConfig, address: Address<TAddress>) {
         this.apiKey = config.apiKey;
         this.apiBaseUrl = (config.apiBaseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
         this.walletId = config.walletId;
-        this.requestDelayMs = config.requestDelayMs ?? 0;
         this.address = address;
-        this.validateRequestDelayMs(this.requestDelayMs);
+        const requestDelayMs = config.requestDelayMs ?? 0;
+        validateRequestDelayMs(requestDelayMs);
+        this.delay = createBatchDelay(requestDelayMs);
     }
 
     /**
@@ -108,39 +111,16 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
         }
         const url = `${apiBaseUrl}/v1/wallets/${config.walletId}`;
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const wallet = await fetchWithSignerErrors<ParaWalletResponse>(
+            url,
+            {
                 headers: {
                     'X-API-Key': config.apiKey,
                 },
                 method: 'GET',
-            });
-        } catch (error) {
-            return throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Para network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorMessage = await ParaSigner.extractErrorMessage(response, 'Failed to fetch wallet');
-            return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: errorMessage,
-                status: response.status,
-            });
-        }
-
-        let wallet: ParaWalletResponse;
-        try {
-            wallet = (await response.json()) as ParaWalletResponse;
-        } catch (error) {
-            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Para wallet response',
-            });
-        }
+            },
+            'Para',
+        );
 
         if (wallet.type?.toUpperCase() !== 'SOLANA') {
             return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
@@ -249,41 +229,18 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
             encoding: 'hex',
         };
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const signResponse = await fetchWithSignerErrors<ParaSignRawResponse>(
+            url,
+            {
                 body: JSON.stringify(request),
                 headers: {
                     'Content-Type': 'application/json',
                     'X-API-Key': this.apiKey,
                 },
                 method: 'POST',
-            });
-        } catch (error) {
-            return throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Para network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorMessage = await ParaSigner.extractErrorMessage(response, 'Para signing failed');
-            return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: errorMessage,
-                status: response.status,
-            });
-        }
-
-        let signResponse: ParaSignRawResponse;
-        try {
-            signResponse = (await response.json()) as ParaSignRawResponse;
-        } catch (error) {
-            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Para signing response',
-            });
-        }
+            },
+            'Para',
+        );
 
         if (!signResponse.signature) {
             return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
@@ -313,40 +270,5 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
         }
 
         return getBase16Encoder().encode(cleaned) as SignatureBytes;
-    }
-
-    private validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
-    }
-
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
-    }
-
-    /**
-     * Extract error message from a Para API error response
-     */
-    private static async extractErrorMessage(response: Response, fallback: string): Promise<string> {
-        let errorMessage = `${fallback}: ${response.status}`;
-        try {
-            const errorData = (await response.json()) as ParaErrorResponse;
-            if (errorData.message) {
-                errorMessage = `${fallback}: ${sanitizeRemoteErrorResponse(errorData.message)}`;
-            }
-        } catch {
-            // Ignore JSON parsing errors for error response
-        }
-        return errorMessage;
     }
 }

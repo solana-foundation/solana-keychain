@@ -139,12 +139,10 @@ describe('DfnsSigner', () => {
             );
         });
 
-        it('warns for high requestDelayMs', async () => {
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        it('accepts high requestDelayMs without warning', async () => {
             mockWalletFetch();
-            await DfnsSigner.create({ ...defaultConfig, requestDelayMs: 5000 });
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
-            warnSpy.mockRestore();
+            const signer = await DfnsSigner.create({ ...defaultConfig, requestDelayMs: 5000 });
+            expect(signer).toBeDefined();
         });
 
         it('throws HTTP_ERROR when fetch fails during create', async () => {

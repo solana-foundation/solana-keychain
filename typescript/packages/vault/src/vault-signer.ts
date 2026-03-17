@@ -2,24 +2,20 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
+    createBatchDelay,
     createSignatureDictionary,
-    sanitizeRemoteErrorResponse,
+    fetchWithSignerErrors,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
     validateHttpsUrl,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
 
-import type {
-    VaultErrorResponse,
-    VaultKeyReadResponse,
-    VaultPayloadBase64,
-    VaultSignRequest,
-    VaultSignResponse,
-} from './types.js';
+import type { VaultKeyReadResponse, VaultPayloadBase64, VaultSignRequest, VaultSignResponse } from './types.js';
 
 /**
  * Create a Vault-backed signer.
@@ -61,7 +57,7 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
     private readonly vaultAddr: string;
     private readonly vaultToken: string;
     private readonly keyName: string;
-    private readonly requestDelayMs: number;
+    private readonly delay: (index: number) => Promise<void>;
 
     /** @deprecated Use `createVaultSigner()` instead. */
     static create<TAddress extends string = string>(config: VaultSignerConfig): VaultSigner<TAddress> {
@@ -100,33 +96,9 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
         this.vaultAddr = vaultAddr;
         this.vaultToken = config.vaultToken;
         this.keyName = config.keyName;
-        this.requestDelayMs = config.requestDelayMs || 0;
-        this.validateRequestDelayMs(this.requestDelayMs);
-    }
-
-    /**
-     * Validate request delay ms
-     */
-    private validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
-    }
-
-    /**
-     * Add delay between concurrent requests
-     */
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
+        const requestDelayMs = config.requestDelayMs || 0;
+        validateRequestDelayMs(requestDelayMs);
+        this.delay = createBatchDelay(requestDelayMs);
     }
 
     /**
@@ -158,50 +130,18 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
             input: base64Data as VaultPayloadBase64,
         };
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const signResponse = await fetchWithSignerErrors<VaultSignResponse>(
+            url,
+            {
                 body: JSON.stringify(request),
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Vault-Token': this.vaultToken,
                 },
                 method: 'POST',
-            });
-        } catch (error) {
-            return throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Vault network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            let errorMessage = `Vault API error: ${response.status}`;
-            try {
-                const errorData = (await response.json()) as VaultErrorResponse;
-                if (errorData.errors && errorData.errors.length > 0) {
-                    errorMessage = `Vault API error: ${sanitizeRemoteErrorResponse(errorData.errors.join(', '))}`;
-                }
-            } catch {
-                // Ignore JSON parsing errors for error response
-            }
-
-            return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: errorMessage,
-                status: response.status,
-            });
-        }
-
-        let signResponse: VaultSignResponse;
-        try {
-            signResponse = (await response.json()) as VaultSignResponse;
-        } catch (error) {
-            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Vault signing response',
-            });
-        }
+            },
+            'Vault',
+        );
 
         if (!signResponse.data?.signature) {
             return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {

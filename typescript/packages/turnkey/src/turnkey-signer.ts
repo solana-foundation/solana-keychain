@@ -2,12 +2,14 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
+    createBatchDelay,
     createSignatureDictionary,
-    sanitizeRemoteErrorResponse,
+    fetchWithSignerErrors,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
     validateHttpsUrl,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -65,7 +67,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
     private readonly organizationId: string;
     private readonly privateKeyId: string;
     private readonly stamper: ApiKeyStamper;
-    private readonly requestDelayMs: number;
+    private readonly delay: (index: number) => Promise<void>;
 
     /** @deprecated Use `createTurnkeySigner()` instead. */
     static create<TAddress extends string = string>(config: TurnkeySignerConfig): TurnkeySigner<TAddress> {
@@ -107,35 +109,9 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
             apiPrivateKey: config.apiPrivateKey,
             apiPublicKey: config.apiPublicKey,
         });
-        this.requestDelayMs = config.requestDelayMs || 0;
-        this.validateRequestDelayMs(this.requestDelayMs);
-    }
-
-    /**
-     * Validate request delay ms
-     * @param requestDelayMs
-     */
-    private validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
-    }
-
-    /**
-     * Delay between concurrent signing requests to avoid rate limits
-     * @param index
-     */
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
+        const requestDelayMs = config.requestDelayMs || 0;
+        validateRequestDelayMs(requestDelayMs);
+        this.delay = createBatchDelay(requestDelayMs);
     }
 
     /**
@@ -185,42 +161,18 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
 
         const url = `${this.apiBaseUrl}/public/v1/submit/sign_raw_payload`;
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const activityResponse = await fetchWithSignerErrors<ActivityResponse>(
+            url,
+            {
                 body,
                 headers: {
                     'Content-Type': 'application/json',
                     [stamp.stampHeaderName]: stamp.stampHeaderValue,
                 },
                 method: 'POST',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Turnkey network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Turnkey API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let activityResponse: ActivityResponse;
-        try {
-            activityResponse = (await response.json()) as ActivityResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Turnkey response',
-            });
-        }
+            },
+            'Turnkey',
+        );
 
         const signResult = activityResponse.activity?.result?.signRawPayloadResult;
         if (!signResult || !signResult.r || !signResult.s) {
@@ -291,42 +243,18 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
 
         const url = `${this.apiBaseUrl}/public/v1/submit/sign_transaction`;
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const activityResponse = await fetchWithSignerErrors<ActivityResponse>(
+            url,
+            {
                 body,
                 headers: {
                     'Content-Type': 'application/json',
                     [stamp.stampHeaderName]: stamp.stampHeaderValue,
                 },
                 method: 'POST',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Turnkey network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Turnkey API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let activityResponse: ActivityResponse;
-        try {
-            activityResponse = (await response.json()) as ActivityResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Turnkey response',
-            });
-        }
+            },
+            'Turnkey',
+        );
 
         const signedTransaction = activityResponse.activity?.result?.signTransactionResult?.signedTransaction;
         if (!signedTransaction) {

@@ -2,12 +2,14 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase58Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
+    createBatchDelay,
     createSignatureDictionary,
-    sanitizeRemoteErrorResponse,
+    fetchWithSignerErrors,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
     validateHttpsUrl,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -75,7 +77,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     private readonly apiBaseUrl: string;
     private readonly pollIntervalMs: number;
     private readonly maxPollAttempts: number;
-    private readonly requestDelayMs: number;
+    private readonly delay: (index: number) => Promise<void>;
     private readonly useProgramCall: boolean;
     private initialized = false;
 
@@ -123,10 +125,11 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         this.apiBaseUrl = apiBaseUrl;
         this.pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
         this.maxPollAttempts = config.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS;
-        this.requestDelayMs = config.requestDelayMs ?? 0;
+        const requestDelayMs = config.requestDelayMs ?? 0;
         this.useProgramCall = config.useProgramCall ?? false;
 
-        this.validateRequestDelayMs(this.requestDelayMs);
+        validateRequestDelayMs(requestDelayMs);
+        this.delay = createBatchDelay(requestDelayMs);
     }
 
     /**
@@ -157,31 +160,6 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     }
 
     /**
-     * Validate request delay ms
-     */
-    private validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
-    }
-
-    /**
-     * Add delay between concurrent requests
-     */
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
-    }
-
-    /**
      * Fetch the public key from Fireblocks API
      */
     private async fetchPublicKey(): Promise<Address> {
@@ -189,41 +167,17 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         const token = await createJwt(this.apiKey, this.privateKeyPem, uri, '');
 
         const url = `${this.apiBaseUrl}${uri}`;
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const addressesResponse = await fetchWithSignerErrors<VaultAddressesResponse>(
+            url,
+            {
                 headers: {
                     Authorization: `Bearer ${token}`,
                     'X-API-Key': this.apiKey,
                 },
                 method: 'GET',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Fireblocks network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Fireblocks API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let addressesResponse: VaultAddressesResponse;
-        try {
-            addressesResponse = (await response.json()) as VaultAddressesResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Fireblocks response',
-            });
-        }
+            },
+            'Fireblocks',
+        );
 
         const firstAddress = addressesResponse.addresses?.[0]?.address;
         if (!firstAddress) {
@@ -251,9 +205,9 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         const token = await createJwt(this.apiKey, this.privateKeyPem, uri, bodyStr);
 
         const url = `${this.apiBaseUrl}${uri}`;
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        return await fetchWithSignerErrors<T>(
+            url,
+            {
                 body: body ? bodyStr : undefined,
                 headers: {
                     Authorization: `Bearer ${token}`,
@@ -261,32 +215,9 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                     'X-API-Key': this.apiKey,
                 },
                 method,
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Fireblocks network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Fireblocks API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        try {
-            return (await response.json()) as T;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Fireblocks response',
-            });
-        }
+            },
+            'Fireblocks',
+        );
     }
 
     /**
