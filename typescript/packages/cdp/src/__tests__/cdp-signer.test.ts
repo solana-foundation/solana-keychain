@@ -13,18 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
-    return {
-        ...mod,
-        assertSignatureValid: vi.fn(),
-        sanitizeRemoteErrorResponse:
-            mod.sanitizeRemoteErrorResponse ??
-            ((text: string) =>
-                `${text
-                    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim()
-                    .slice(0, 256)} [truncated]`),
-    };
+    return { ...mod, assertSignatureValid: vi.fn() };
 });
 
 import { CdpSigner } from '../cdp-signer.js';
