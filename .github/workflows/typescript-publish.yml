@@ -54,9 +54,21 @@ env:
     keychain
 
 jobs:
+  guard-main:
+    name: Guard main branch for publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if workflow_dispatch is not on main
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::Publish TypeScript Packages must be run from main. Current ref: ${{ github.ref }}"
+            exit 1
+          fi
+
   publish:
     name: Publish @solana/keychain-* packages
     runs-on: ubuntu-latest
+    needs: guard-main
     env:
       NPM_CONFIG_PROVENANCE: true
 

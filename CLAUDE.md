@@ -55,15 +55,15 @@ cd rust && cargo clippy --all-targets --all-features -- -D warnings
 just branch-info
 
 # Branch strategy:
-#   main           → Audited code only, stable releases
-#   release/X.Y.Z  → Pre-audit features for version X.Y.Z
-#   hotfix/*       → Hotfixes from main
+#   main                → Integration branch (audited + unaudited commits)
+#   feat/*,fix/*,chore/* → Topic branches from main
+#   hotfix/*            → Urgent fixes from deployed stable tag
 ```
 
 ### Publishing a Rust Release
 ```bash
 # Prepare a new release (prompts for version, generates CHANGELOG, stages changes)
-# Run from main for stable release, or release/X.Y.Z for beta
+# Run from main for both stable and prerelease versions (e.g. 1.2.3-beta.1)
 just release
 
 # Review the CHANGELOG.md, then commit
@@ -85,14 +85,15 @@ just release-ts
 git commit -m "chore: release ts-keychain vX.Y.Z"
 git push
 
-# Then manually trigger the "Publish @solana/keychain (Manual)" workflow
+# Then manually trigger the "Publish TypeScript Packages (Manual)" workflow
 ```
 
 ### Creating a Hotfix
 ```bash
-# Create a hotfix branch from main
+# Create a hotfix branch from a deployed stable tag
 just hotfix              # prompts for name
-just hotfix fix-auth     # or pass name directly
+just hotfix fix-auth     # pass name directly
+just hotfix fix-auth v1.2.3 # optionally pass base tag
 
 # Apply fixes, then create PR to main
 # After merge, run 'just release' on main to publish
