@@ -45,6 +45,8 @@ let base58Encoder: ReturnType<typeof getBase58Encoder> | undefined;
 let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
 let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
 
+const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
+
 class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly apiKey: string;
@@ -481,37 +483,13 @@ function extractApiErrorMessage(payload: unknown, fallback: string): string {
 
 function decodeSignatureString(value?: string): SignatureBytes | undefined {
     if (!value) return undefined;
-
     base58Encoder ||= getBase58Encoder();
     try {
         const bytes = base58Encoder.encode(value);
-        if (bytes.length === 64) {
-            return bytes as SignatureBytes;
-        }
+        return bytes.length === 64 ? (bytes as SignatureBytes) : undefined;
     } catch {
-        // Try next codec
+        return undefined;
     }
-
-    if (/^(0x)?[0-9a-fA-F]{128}$/.test(value)) {
-        const clean = value.startsWith('0x') ? value.slice(2) : value;
-        const bytes = new Uint8Array(64);
-        for (let i = 0; i < 64; i++) {
-            bytes[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-        }
-        return bytes as SignatureBytes;
-    }
-
-    base64Encoder ||= getBase64Encoder();
-    try {
-        const bytes = base64Encoder.encode(value);
-        if (bytes.length === 64) {
-            return bytes as SignatureBytes;
-        }
-    } catch {
-        // no-op
-    }
-
-    return undefined;
 }
 
 function deriveSignerSeed(secret: string, apiKey: string): Uint8Array {
@@ -537,15 +515,21 @@ function deriveSignerSeed(secret: string, apiKey: string): Uint8Array {
 }
 
 function ed25519PublicKeyFromSeed(seed: Uint8Array): Uint8Array {
-    const pkcs8Prefix = Buffer.from('302e020100300506032b657004220420', 'hex');
-    const privateKey = createPrivateKey({ format: 'der', key: Buffer.concat([pkcs8Prefix, seed]), type: 'pkcs8' });
+    const privateKey = createPrivateKey({
+        format: 'der',
+        key: Buffer.concat([ED25519_PKCS8_PREFIX, seed]),
+        type: 'pkcs8',
+    });
     const spki = createPublicKey(privateKey).export({ format: 'der', type: 'spki' }) as Buffer;
     return new Uint8Array(spki.slice(-32));
 }
 
 function ed25519Sign(seed: Uint8Array, message: Uint8Array): Uint8Array {
-    const pkcs8Prefix = Buffer.from('302e020100300506032b657004220420', 'hex');
-    const privateKey = createPrivateKey({ format: 'der', key: Buffer.concat([pkcs8Prefix, seed]), type: 'pkcs8' });
+    const privateKey = createPrivateKey({
+        format: 'der',
+        key: Buffer.concat([ED25519_PKCS8_PREFIX, seed]),
+        type: 'pkcs8',
+    });
     return new Uint8Array(cryptoSign(null, message, privateKey));
 }
 

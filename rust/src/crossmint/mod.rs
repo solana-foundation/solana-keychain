@@ -6,7 +6,6 @@ use crate::sdk_adapter::{Pubkey, Signature, Transaction};
 use crate::traits::SignedTransaction;
 use crate::transaction_util::TransactionUtil;
 use crate::{error::SignerError, traits::SolanaSigner};
-use base64::Engine;
 use std::str::FromStr;
 use types::{
     CreateTransactionParams, CreateTransactionRequest, TransactionResponse, WalletResponse,
@@ -466,38 +465,8 @@ impl CrossmintSigner {
         Ok((project_id, environment))
     }
 
-    fn decode_signature(signature_str: &str) -> Option<Signature> {
-        Self::decode_base58_signature(signature_str)
-            .or_else(|| Self::decode_hex_signature(signature_str))
-            .or_else(|| Self::decode_base64_signature(signature_str))
-    }
-
     fn decode_base58_signature(signature_str: &str) -> Option<Signature> {
         let bytes = bs58::decode(signature_str).into_vec().ok()?;
-        let sig_bytes: [u8; 64] = bytes.try_into().ok()?;
-        Some(Signature::from(sig_bytes))
-    }
-
-    fn decode_hex_signature(signature_str: &str) -> Option<Signature> {
-        let clean = signature_str.strip_prefix("0x").unwrap_or(signature_str);
-        if clean.len() != 128 || !clean.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return None;
-        }
-
-        let mut bytes = Vec::with_capacity(64);
-        for i in (0..clean.len()).step_by(2) {
-            let byte = u8::from_str_radix(&clean[i..i + 2], 16).ok()?;
-            bytes.push(byte);
-        }
-
-        let sig_bytes: [u8; 64] = bytes.try_into().ok()?;
-        Some(Signature::from(sig_bytes))
-    }
-
-    fn decode_base64_signature(signature_str: &str) -> Option<Signature> {
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(signature_str)
-            .ok()?;
         let sig_bytes: [u8; 64] = bytes.try_into().ok()?;
         Some(Signature::from(sig_bytes))
     }
@@ -564,7 +533,7 @@ impl CrossmintSigner {
         if let Some(approvals) = &response.approvals {
             for submitted in &approvals.submitted {
                 if let Some(signature_str) = &submitted.signature {
-                    if let Some(signature) = Self::decode_signature(signature_str) {
+                    if let Some(signature) = Self::decode_base58_signature(signature_str) {
                         return Ok(signature);
                     }
                 }
