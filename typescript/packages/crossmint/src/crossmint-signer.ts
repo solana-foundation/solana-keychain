@@ -45,8 +45,6 @@ let base58Encoder: ReturnType<typeof getBase58Encoder> | undefined;
 let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
 let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
 
-const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
-
 class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly apiKey: string;
@@ -517,7 +515,7 @@ function deriveSignerSeed(secret: string, apiKey: string): Uint8Array {
 function ed25519PublicKeyFromSeed(seed: Uint8Array): Uint8Array {
     const privateKey = createPrivateKey({
         format: 'der',
-        key: Buffer.concat([ED25519_PKCS8_PREFIX, seed]),
+        key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]),
         type: 'pkcs8',
     });
     const spki = createPublicKey(privateKey).export({ format: 'der', type: 'spki' }) as Buffer;
@@ -527,7 +525,7 @@ function ed25519PublicKeyFromSeed(seed: Uint8Array): Uint8Array {
 function ed25519Sign(seed: Uint8Array, message: Uint8Array): Uint8Array {
     const privateKey = createPrivateKey({
         format: 'der',
-        key: Buffer.concat([ED25519_PKCS8_PREFIX, seed]),
+        key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]),
         type: 'pkcs8',
     });
     return new Uint8Array(cryptoSign(null, message, privateKey));
