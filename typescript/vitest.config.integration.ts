@@ -2,9 +2,6 @@ import { defineConfig } from 'vitest/config';
 
 import NoAllSkippedReporter from './packages/test-utils/src/no-all-skipped-reporter.js';
 
-// Load root .env before tests run (Node 20+ built-in, no package needed)
-try { process.loadEnvFile(new URL('../.env', import.meta.url).pathname); } catch { /* no .env, skip */ }
-
 export default defineConfig({
     test: {
         globals: true,
