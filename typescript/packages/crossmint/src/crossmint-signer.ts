@@ -272,7 +272,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         }
 
         base58Encoder ||= getBase58Encoder();
-        const messageBytes = base58Encoder.encode(message);
+        const messageBytes = new Uint8Array(base58Encoder.encode(message));
         const signatureBytes = ed25519Sign(this.signerSeed!, messageBytes);
 
         base58Decoder ||= getBase58Decoder();

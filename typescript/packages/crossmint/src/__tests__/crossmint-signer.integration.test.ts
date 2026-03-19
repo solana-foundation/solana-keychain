@@ -1,5 +1,5 @@
 import {
-    address,
+    type Blockhash,
     createSignableMessage,
     createTransactionMessage,
     pipe,
@@ -25,7 +25,7 @@ async function getLatestBlockhash() {
             params: [{ commitment: 'finalized' }],
         }),
     });
-    const json = (await res.json()) as { result: { value: { blockhash: string; lastValidBlockHeight: number } } };
+    const json = (await res.json()) as { result: { value: { blockhash: Blockhash; lastValidBlockHeight: bigint } } };
     return json.result.value;
 }
 
