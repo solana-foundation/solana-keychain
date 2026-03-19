@@ -39,9 +39,10 @@ mod tests {
         })
         .expect("Failed to create CrossmintSigner");
 
-        signer.init().await.unwrap_or_else(|e| {
-            panic!("Failed to initialize CrossmintSigner: {e}");
-        });
+        signer
+            .init()
+            .await
+            .expect("Failed to initialize CrossmintSigner");
 
         signer
     }
@@ -77,7 +78,7 @@ mod tests {
         let (base64_txn, signature) = signer
             .sign_transaction(&mut transaction)
             .await
-            .unwrap_or_else(|e| panic!("Failed to sign transaction with Crossmint: {e}"));
+            .expect("Failed to sign transaction with Crossmint");
 
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
 
