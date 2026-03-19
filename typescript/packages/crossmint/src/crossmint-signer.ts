@@ -9,7 +9,6 @@ import {
     getBase64Encoder,
 } from '@solana/codecs-strings';
 import {
-    assertSignatureValid,
     createSignatureDictionary,
     createSignerError,
     extractSignatureFromWireTransaction,
@@ -206,11 +205,6 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
                     await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
                 }
                 const signature = await this.signTransactionManaged(transaction);
-                await assertSignatureValid({
-                    data: transaction.messageBytes,
-                    signature,
-                    signerAddress: this.address,
-                });
                 return createSignatureDictionary({
                     signature,
                     signerAddress: this.address,
