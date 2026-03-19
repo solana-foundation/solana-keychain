@@ -1,11 +1,19 @@
 import { createPrivateKey, createPublicKey, hkdfSync, sign as cryptoSign } from 'node:crypto';
 
 import { Address, assertIsAddress } from '@solana/addresses';
-import { getBase58Decoder, getBase58Encoder, getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
+    getBase16Encoder,
+    getBase58Decoder,
+    getBase58Encoder,
+    getBase64Decoder,
+    getBase64Encoder,
+} from '@solana/codecs-strings';
+import {
+    assertSignatureValid,
     createSignatureDictionary,
     createSignerError,
     extractSignatureFromWireTransaction,
+    SignerError,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -40,6 +48,7 @@ const DEFAULT_API_BASE_URL = 'https://www.crossmint.com/api';
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 60;
 
+let base16Encoder: ReturnType<typeof getBase16Encoder> | undefined;
 let base58Decoder: ReturnType<typeof getBase58Decoder> | undefined;
 let base58Encoder: ReturnType<typeof getBase58Encoder> | undefined;
 let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
@@ -198,6 +207,11 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
                     await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
                 }
                 const signature = await this.signTransactionManaged(transaction);
+                await assertSignatureValid({
+                    data: transaction.messageBytes,
+                    signature,
+                    signerAddress: this.address,
+                });
                 return createSignatureDictionary({
                     signature,
                     signerAddress: this.address,
@@ -394,7 +408,10 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
             });
 
             return signatureDict[this.address];
-        } catch {
+        } catch (error) {
+            if (error instanceof SignerError) {
+                throw error;
+            }
             return undefined;
         }
     }
@@ -490,6 +507,10 @@ function decodeSignatureString(value?: string): SignatureBytes | undefined {
     }
 }
 
+const PKCS8_ED25519_PREFIX = new Uint8Array([
+    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+]);
+
 function deriveSignerSeed(secret: string, apiKey: string): Uint8Array {
     const rawSecret = secret.startsWith('xmsk1_') ? secret.slice(6) : secret;
     if (rawSecret.length !== 64) {
@@ -497,7 +518,8 @@ function deriveSignerSeed(secret: string, apiKey: string): Uint8Array {
             message: `signerSecret must be a 64-char hex string, got ${rawSecret.length} chars`,
         });
     }
-    const ikm = Buffer.from(rawSecret, 'hex');
+    base16Encoder ||= getBase16Encoder();
+    const ikm = Buffer.from(base16Encoder.encode(rawSecret));
 
     // Parse API key: {ck|sk}_{environment}_{base58data}
     // base58-decoded data is UTF-8: "projectId:nacl_signature"
@@ -512,10 +534,14 @@ function deriveSignerSeed(secret: string, apiKey: string): Uint8Array {
     return new Uint8Array(hkdfSync('sha256', ikm, 'crossmint', info, 32));
 }
 
+function buildPkcs8Der(seed: Uint8Array): Buffer {
+    return Buffer.concat([PKCS8_ED25519_PREFIX, seed]);
+}
+
 function ed25519PublicKeyFromSeed(seed: Uint8Array): Uint8Array {
     const privateKey = createPrivateKey({
         format: 'der',
-        key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]),
+        key: buildPkcs8Der(seed),
         type: 'pkcs8',
     });
     const spki = createPublicKey(privateKey).export({ format: 'der', type: 'spki' }) as Buffer;
@@ -525,10 +551,10 @@ function ed25519PublicKeyFromSeed(seed: Uint8Array): Uint8Array {
 function ed25519Sign(seed: Uint8Array, message: Uint8Array): Uint8Array {
     const privateKey = createPrivateKey({
         format: 'der',
-        key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]),
+        key: buildPkcs8Der(seed),
         type: 'pkcs8',
     });
-    return new Uint8Array(cryptoSign(null, message, privateKey));
+    return new Uint8Array(cryptoSign(null, Buffer.from(message), privateKey));
 }
 
 function stringifyError(error: unknown): string {
