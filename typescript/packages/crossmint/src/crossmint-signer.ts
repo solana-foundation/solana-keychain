@@ -13,7 +13,6 @@ import {
     createSignatureDictionary,
     createSignerError,
     extractSignatureFromWireTransaction,
-    SignerError,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -408,10 +407,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
             });
 
             return signatureDict[this.address];
-        } catch (error) {
-            if (error instanceof SignerError) {
-                throw error;
-            }
+        } catch {
             return undefined;
         }
     }
