@@ -1,11 +1,11 @@
+import { createPrivateKey, createPublicKey, hkdfSync, sign as cryptoSign } from 'node:crypto';
+
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase58Decoder, getBase58Encoder, getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
-    assertSignatureValid,
     createSignatureDictionary,
     createSignerError,
     extractSignatureFromWireTransaction,
-    SignerError,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -55,6 +55,8 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
     private readonly requestDelayMs: number;
     private readonly signer?: string;
 
+    private readonly signerSeed?: Uint8Array;
+
     private constructor(config: {
         address: Address<TAddress>;
         apiBaseUrl: string;
@@ -63,6 +65,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         pollIntervalMs: number;
         requestDelayMs: number;
         signer?: string;
+        signerSeed?: Uint8Array;
         walletLocator: string;
     }) {
         this.address = config.address;
@@ -72,6 +75,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         this.pollIntervalMs = config.pollIntervalMs;
         this.maxPollAttempts = config.maxPollAttempts;
         this.requestDelayMs = config.requestDelayMs;
+        this.signerSeed = config.signerSeed;
         this.signer = config.signer;
     }
 
@@ -131,6 +135,16 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
             );
         }
 
+        let signerSeed: Uint8Array | undefined;
+        let signer = config.signer;
+        if (config.signerSecret) {
+            signerSeed = deriveSignerSeed(config.signerSecret, config.apiKey);
+            if (!signer) {
+                base58Decoder ||= getBase58Decoder();
+                signer = `server:${base58Decoder.decode(ed25519PublicKeyFromSeed(signerSeed))}`;
+            }
+        }
+
         const wallet = await fetchWallet(apiBaseUrl, config.apiKey, config.walletLocator);
         if (wallet.chainType.toLowerCase() !== 'solana') {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
@@ -161,7 +175,8 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
             maxPollAttempts,
             pollIntervalMs,
             requestDelayMs,
-            signer: config.signer,
+            signer,
+            signerSeed,
             walletLocator: config.walletLocator,
         });
     }
@@ -183,11 +198,6 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
                     await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
                 }
                 const signature = await this.signTransactionManaged(transaction);
-                await assertSignatureValid({
-                    data: transaction.messageBytes,
-                    signature,
-                    signerAddress: this.address,
-                });
                 return createSignatureDictionary({
                     signature,
                     signerAddress: this.address,
@@ -211,6 +221,10 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         let response = await this.createTransaction(transaction);
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
+            if (response.status === 'awaiting-approval' && this.signerSeed && this.signer) {
+                response = await this.submitApproval(response);
+                continue;
+            }
             const terminalSignature = this.resolveTerminalStatus(response);
             if (terminalSignature) {
                 return terminalSignature;
@@ -247,6 +261,28 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
             default:
                 return undefined;
         }
+    }
+
+    private async submitApproval(response: CrossmintTransactionResponse): Promise<CrossmintTransactionResponse> {
+        const message = response.approvals?.pending?.[0]?.message;
+        if (!message) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message: 'Crossmint transaction awaiting approval but no pending message found',
+            });
+        }
+
+        base58Encoder ||= getBase58Encoder();
+        const messageBytes = base58Encoder.encode(message);
+        const signatureBytes = ed25519Sign(this.signerSeed!, messageBytes);
+
+        base58Decoder ||= getBase58Decoder();
+        const signatureB58 = base58Decoder.decode(signatureBytes);
+
+        const path = `/${API_VERSION}/wallets/${encodeURIComponent(this.walletLocator)}/transactions/${encodeURIComponent(response.id)}/approvals`;
+        const result = await this.request(path, 'POST', {
+            approvals: [{ signature: signatureB58, signer: this.signer }],
+        });
+        return parseTransactionResponse(result, 'submit approval');
     }
 
     private async createTransaction(
@@ -358,10 +394,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
             });
 
             return signatureDict[this.address];
-        } catch (error) {
-            if (error instanceof SignerError) {
-                throw error;
-            }
+        } catch {
             return undefined;
         }
     }
@@ -413,7 +446,10 @@ async function fetchWallet(
     const wallet = payload as Partial<CrossmintWalletResponse>;
     if (!wallet.address || !wallet.chainType || !wallet.type) {
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-            message: extractApiErrorMessage(payload, 'Crossmint wallet response missing required fields (address, chainType, type)'),
+            message: extractApiErrorMessage(
+                payload,
+                'Crossmint wallet response missing required fields (address, chainType, type)',
+            ),
         });
     }
 
@@ -476,6 +512,41 @@ function decodeSignatureString(value?: string): SignatureBytes | undefined {
     }
 
     return undefined;
+}
+
+function deriveSignerSeed(secret: string, apiKey: string): Uint8Array {
+    const rawSecret = secret.startsWith('xmsk1_') ? secret.slice(6) : secret;
+    if (rawSecret.length !== 64) {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: `signerSecret must be a 64-char hex string, got ${rawSecret.length} chars`,
+        });
+    }
+    const ikm = Buffer.from(rawSecret, 'hex');
+
+    // Parse API key: {ck|sk}_{environment}_{base58data}
+    // base58-decoded data is UTF-8: "projectId:nacl_signature"
+    const parts = apiKey.split('_');
+    const environment = parts[1];
+    const base58Data = parts.slice(2).join('_');
+    base58Encoder ||= getBase58Encoder();
+    const decoded = base58Encoder.encode(base58Data);
+    const projectId = new TextDecoder().decode(decoded).split(':')[0];
+
+    const info = `${projectId}:${environment}:solana-ed25519`;
+    return new Uint8Array(hkdfSync('sha256', ikm, 'crossmint', info, 32));
+}
+
+function ed25519PublicKeyFromSeed(seed: Uint8Array): Uint8Array {
+    const pkcs8Prefix = Buffer.from('302e020100300506032b657004220420', 'hex');
+    const privateKey = createPrivateKey({ format: 'der', key: Buffer.concat([pkcs8Prefix, seed]), type: 'pkcs8' });
+    const spki = createPublicKey(privateKey).export({ format: 'der', type: 'spki' }) as Buffer;
+    return new Uint8Array(spki.slice(-32));
+}
+
+function ed25519Sign(seed: Uint8Array, message: Uint8Array): Uint8Array {
+    const pkcs8Prefix = Buffer.from('302e020100300506032b657004220420', 'hex');
+    const privateKey = createPrivateKey({ format: 'der', key: Buffer.concat([pkcs8Prefix, seed]), type: 'pkcs8' });
+    return new Uint8Array(cryptoSign(null, message, privateKey));
 }
 
 function stringifyError(error: unknown): string {

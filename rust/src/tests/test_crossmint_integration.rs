@@ -2,6 +2,7 @@ pub const CROSSMINT_API_KEY: &str = "CROSSMINT_API_KEY";
 pub const CROSSMINT_WALLET_LOCATOR: &str = "CROSSMINT_WALLET_LOCATOR";
 pub const CROSSMINT_API_BASE_URL: &str = "CROSSMINT_API_BASE_URL";
 pub const CROSSMINT_SIGNER: &str = "CROSSMINT_SIGNER";
+pub const CROSSMINT_SIGNER_SECRET: &str = "CROSSMINT_SIGNER_SECRET";
 
 #[cfg(feature = "crossmint")]
 #[cfg(test)]
@@ -25,10 +26,12 @@ mod tests {
             .expect("CROSSMINT_WALLET_LOCATOR must be set for integration tests");
         let api_base_url = env::var(CROSSMINT_API_BASE_URL).ok();
         let signer = env::var(CROSSMINT_SIGNER).ok();
+        let signer_secret = env::var(CROSSMINT_SIGNER_SECRET).ok();
 
         let mut signer = CrossmintSigner::new(CrossmintSignerConfig {
             api_key,
             wallet_locator,
+            signer_secret,
             signer,
             api_base_url,
             poll_interval_ms: None,
@@ -36,10 +39,9 @@ mod tests {
         })
         .expect("Failed to create CrossmintSigner");
 
-        signer
-            .init()
-            .await
-            .expect("Failed to initialize CrossmintSigner");
+        signer.init().await.unwrap_or_else(|e| {
+            panic!("Failed to initialize CrossmintSigner: {e}");
+        });
 
         signer
     }
@@ -75,7 +77,7 @@ mod tests {
         let (base64_txn, signature) = signer
             .sign_transaction(&mut transaction)
             .await
-            .expect("Failed to sign transaction with Crossmint");
+            .unwrap_or_else(|e| panic!("Failed to sign transaction with Crossmint: {e}"));
 
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
 

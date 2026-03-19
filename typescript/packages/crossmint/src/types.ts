@@ -5,6 +5,8 @@ export interface CrossmintSignerConfig {
     pollIntervalMs?: number;
     requestDelayMs?: number;
     signer?: string;
+    /** Server signer secret (`xmsk1_<64hex>`). When set, automatically signs awaiting-approval transactions. */
+    signerSecret?: string;
     walletLocator: string;
 }
 
@@ -32,6 +34,10 @@ export interface CrossmintTransactionOnChain {
 }
 
 export interface CrossmintTransactionApprovals {
+    pending?: Array<{
+        message?: string;
+        signer?: unknown;
+    }>;
     submitted?: Array<{
         signature?: string;
     }>;

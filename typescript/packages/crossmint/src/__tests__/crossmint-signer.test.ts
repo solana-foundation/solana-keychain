@@ -88,9 +88,7 @@ describe('CrossmintSigner', () => {
         });
 
         it('throws config error for invalid base URL', async () => {
-            await expect(
-                createCrossmintSigner({ ...mockConfig, apiBaseUrl: 'not-a-url' }),
-            ).rejects.toMatchObject({
+            await expect(createCrossmintSigner({ ...mockConfig, apiBaseUrl: 'not-a-url' })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
                 message: expect.stringContaining('Invalid apiBaseUrl'),
             });
@@ -115,18 +113,14 @@ describe('CrossmintSigner', () => {
         });
 
         it('throws config error for pollIntervalMs <= 0', async () => {
-            await expect(
-                createCrossmintSigner({ ...mockConfig, pollIntervalMs: 0 }),
-            ).rejects.toMatchObject({
+            await expect(createCrossmintSigner({ ...mockConfig, pollIntervalMs: 0 })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
                 message: expect.stringContaining('pollIntervalMs'),
             });
         });
 
         it('throws config error for maxPollAttempts <= 0', async () => {
-            await expect(
-                createCrossmintSigner({ ...mockConfig, maxPollAttempts: 0 }),
-            ).rejects.toMatchObject({
+            await expect(createCrossmintSigner({ ...mockConfig, maxPollAttempts: 0 })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
                 message: expect.stringContaining('maxPollAttempts'),
             });
@@ -242,17 +236,9 @@ describe('CrossmintSigner', () => {
         it('throws timeout error when polling exceeds maxPollAttempts', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()
+                .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'tx-1', status: 'pending' }), { status: 201 }))
                 .mockResolvedValueOnce(
-                    new Response(
-                        JSON.stringify({ id: 'tx-1', status: 'pending' }),
-                        { status: 201 },
-                    ),
-                )
-                .mockResolvedValueOnce(
-                    new Response(
-                        JSON.stringify({ id: 'tx-1', status: 'pending' }),
-                        { status: 200 },
-                    ),
+                    new Response(JSON.stringify({ id: 'tx-1', status: 'pending' }), { status: 200 }),
                 );
 
             const signer = await createCrossmintSigner({
@@ -270,12 +256,7 @@ describe('CrossmintSigner', () => {
         it('throws on HTTP error during transaction creation', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()
-                .mockResolvedValueOnce(
-                    new Response(
-                        JSON.stringify({ message: 'Unauthorized' }),
-                        { status: 401 },
-                    ),
-                );
+                .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 }));
 
             const signer = await createCrossmintSigner({
                 ...mockConfig,

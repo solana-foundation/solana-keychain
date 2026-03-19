@@ -23,6 +23,10 @@ const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 60;
 pub struct CrossmintSignerConfig {
     pub api_key: String,
     pub wallet_locator: String,
+    /// Optional server signer secret (`xmsk1_<64hex>`). When provided, the signer
+    /// derives an Ed25519 keypair via HKDF and automatically signs any
+    /// `awaiting-approval` transactions from the Crossmint API.
+    pub signer_secret: Option<String>,
     pub signer: Option<String>,
     pub api_base_url: Option<String>,
     pub poll_interval_ms: Option<u64>,
@@ -40,6 +44,7 @@ pub struct CrossmintSigner {
     public_key: Pubkey,
     poll_interval_ms: u64,
     max_poll_attempts: u32,
+    signing_key: Option<ed25519_dalek::SigningKey>,
 }
 
 impl std::fmt::Debug for CrossmintSigner {
@@ -100,15 +105,28 @@ impl CrossmintSigner {
             .build()
             .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
 
+        let (signing_key, signer) = if let Some(secret) = &config.signer_secret {
+            let key = Self::derive_signing_key(secret, &config.api_key)?;
+            let pubkey_b58 = bs58::encode(key.verifying_key().as_bytes()).into_string();
+            let locator = config
+                .signer
+                .clone()
+                .unwrap_or_else(|| format!("server:{pubkey_b58}"));
+            (Some(key), Some(locator))
+        } else {
+            (None, config.signer)
+        };
+
         Ok(Self {
             api_key: config.api_key,
             wallet_locator: config.wallet_locator,
-            signer: config.signer,
+            signer,
             api_base_url,
             client,
             public_key: Pubkey::default(),
             poll_interval_ms,
             max_poll_attempts,
+            signing_key,
         })
     }
 
@@ -196,23 +214,25 @@ impl CrossmintSigner {
     }
 
     fn build_wallets_api_url(&self, segments: &[&str]) -> Result<String, SignerError> {
-        let mut url = reqwest::Url::parse(&self.api_base_url)
+        // Validate base URL and get its string form (without trailing slash)
+        let base = reqwest::Url::parse(&self.api_base_url)
             .map_err(|e| SignerError::ConfigError(format!("Invalid api_base_url: {e}")))?;
+        if base.cannot_be_a_base() {
+            return Err(SignerError::ConfigError(
+                "api_base_url cannot be used as a base URL".to_string(),
+            ));
+        }
+        let base_str = base.as_str().trim_end_matches('/');
 
-        {
-            let mut path_segments = url.path_segments_mut().map_err(|_| {
-                SignerError::ConfigError("api_base_url cannot be used as a base URL".to_string())
-            })?;
-            path_segments.pop_if_empty();
-            path_segments.push("2025-06-09");
-            path_segments.push("wallets");
-            path_segments.push(&self.wallet_locator);
-            for segment in segments {
-                path_segments.push(segment);
-            }
+        // Encode colons in wallet_locator to match encodeURIComponent behavior
+        let encoded_locator = self.wallet_locator.replace(':', "%3A");
+        let mut url = format!("{}/2025-06-09/wallets/{}", base_str, encoded_locator);
+        for segment in segments {
+            url.push('/');
+            url.push_str(segment);
         }
 
-        Ok(url.to_string())
+        Ok(url)
     }
 
     async fn parse_response_with_required_field<T>(
@@ -287,9 +307,7 @@ impl CrossmintSigner {
                     )));
                 }
                 "awaiting-approval" => {
-                    return Err(SignerError::SigningFailed(
-                        "Crossmint transaction is awaiting approval; additional signer approvals are required".to_string(),
-                    ));
+                    response = self.handle_awaiting_approval(response).await?;
                 }
                 _ => {
                     tokio::time::sleep(tokio::time::Duration::from_millis(self.poll_interval_ms))
@@ -320,6 +338,132 @@ impl CrossmintSigner {
                 self.max_poll_attempts
             ))),
         }
+    }
+
+    async fn handle_awaiting_approval(
+        &self,
+        response: TransactionResponse,
+    ) -> Result<TransactionResponse, SignerError> {
+        let (Some(signing_key), Some(signer_locator)) = (&self.signing_key, &self.signer) else {
+            return Err(SignerError::SigningFailed(
+                "Crossmint transaction is awaiting approval; additional signer approvals are required".to_string(),
+            ));
+        };
+
+        let message = response
+            .approvals
+            .as_ref()
+            .and_then(|a| a.pending.first())
+            .and_then(|p| p.message.as_deref())
+            .ok_or_else(|| {
+                SignerError::SigningFailed(
+                    "Crossmint transaction awaiting approval but no pending message found"
+                        .to_string(),
+                )
+            })?;
+
+        self.submit_approval(&response.id, signer_locator, message, signing_key)
+            .await
+    }
+
+    async fn submit_approval(
+        &self,
+        transaction_id: &str,
+        signer_locator: &str,
+        message: &str,
+        signing_key: &ed25519_dalek::SigningKey,
+    ) -> Result<TransactionResponse, SignerError> {
+        use ed25519_dalek::Signer;
+
+        let message_bytes = bs58::decode(message).into_vec().map_err(|e| {
+            SignerError::SigningFailed(format!("Failed to decode approval message as base58: {e}"))
+        })?;
+
+        let signature = signing_key.sign(&message_bytes);
+        let signature_b58 = bs58::encode(signature.to_bytes()).into_string();
+
+        let url = self.build_wallets_api_url(&["transactions", transaction_id, "approvals"])?;
+
+        let body = serde_json::json!({
+            "approvals": [{
+                "signer": signer_locator,
+                "signature": signature_b58
+            }]
+        });
+
+        let response = self
+            .client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("X-API-KEY", &self.api_key)
+            .json(&body)
+            .send()
+            .await?;
+
+        Self::parse_response_with_required_field(response, "id", "submit_approval").await
+    }
+
+    fn derive_signing_key(
+        secret: &str,
+        api_key: &str,
+    ) -> Result<ed25519_dalek::SigningKey, SignerError> {
+        use hkdf::Hkdf;
+        use sha2::Sha256;
+
+        let (project_id, environment) = Self::parse_api_key(api_key)?;
+
+        let raw_secret = secret.strip_prefix("xmsk1_").unwrap_or(secret);
+        if raw_secret.len() != 64 {
+            return Err(SignerError::ConfigError(format!(
+                "signer_secret must be a 64-char hex string (got {})",
+                raw_secret.len()
+            )));
+        }
+        let ikm = (0..raw_secret.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&raw_secret[i..i + 2], 16))
+            .collect::<Result<Vec<u8>, _>>()
+            .map_err(|e| {
+                SignerError::ConfigError(format!("signer_secret is not valid hex: {e}"))
+            })?;
+
+        let info = format!("{project_id}:{environment}:solana-ed25519");
+        let hkdf = Hkdf::<Sha256>::new(Some(b"crossmint"), &ikm);
+        let mut key_bytes = [0u8; 32];
+        hkdf.expand(info.as_bytes(), &mut key_bytes)
+            .map_err(|e| SignerError::ConfigError(format!("HKDF expand failed: {e}")))?;
+
+        Ok(ed25519_dalek::SigningKey::from_bytes(&key_bytes))
+    }
+
+    fn parse_api_key(api_key: &str) -> Result<(String, String), SignerError> {
+        // Format: {ck|sk}_{environment}_{base58data}
+        // base58-decoded data is UTF-8: "projectId:nacl_signature"
+        let mut parts = api_key.splitn(3, '_');
+        parts.next(); // skip ck/sk prefix
+        let environment = parts
+            .next()
+            .ok_or_else(|| SignerError::ConfigError("Invalid API key format".to_string()))?
+            .to_string();
+        let base58_data = parts
+            .next()
+            .ok_or_else(|| SignerError::ConfigError("Invalid API key format".to_string()))?;
+
+        let decoded = bs58::decode(base58_data)
+            .into_vec()
+            .map_err(|e| SignerError::ConfigError(format!("Failed to decode API key data: {e}")))?;
+        let decoded_str = std::str::from_utf8(&decoded).map_err(|e| {
+            SignerError::ConfigError(format!("API key data is not valid UTF-8: {e}"))
+        })?;
+        let project_id = decoded_str
+            .split(':')
+            .next()
+            .ok_or_else(|| {
+                SignerError::ConfigError("Could not extract projectId from API key".to_string())
+            })?
+            .to_string();
+
+        Ok((project_id, environment))
     }
 
     fn decode_signature(signature_str: &str) -> Option<Signature> {
@@ -533,6 +677,7 @@ mod tests {
             public_key: Pubkey::default(),
             poll_interval_ms,
             max_poll_attempts,
+            signing_key: None,
         }
     }
 
@@ -541,6 +686,7 @@ mod tests {
         let result = CrossmintSigner::new(CrossmintSignerConfig {
             api_key: "test-api-key".to_string(),
             wallet_locator: "test-wallet".to_string(),
+            signer_secret: None,
             signer: None,
             api_base_url: Some("http://insecure.example.com".to_string()),
             poll_interval_ms: None,
@@ -610,6 +756,7 @@ mod tests {
         let signer = CrossmintSigner::new(CrossmintSignerConfig {
             api_key: "test-api-key".to_string(),
             wallet_locator: "test-wallet".to_string(),
+            signer_secret: None,
             signer: None,
             api_base_url: None,
             poll_interval_ms: None,

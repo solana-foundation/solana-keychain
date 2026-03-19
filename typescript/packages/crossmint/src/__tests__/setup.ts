@@ -19,6 +19,7 @@ const CONFIG: SignerTestConfig<SolanaSigner> = {
             pollIntervalMs: process.env.CROSSMINT_POLL_INTERVAL_MS
                 ? Number(process.env.CROSSMINT_POLL_INTERVAL_MS)
                 : undefined,
+            signerSecret: process.env.CROSSMINT_SIGNER_SECRET,
             signer: process.env.CROSSMINT_SIGNER,
         }),
 };
