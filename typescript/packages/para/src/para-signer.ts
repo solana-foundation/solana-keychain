@@ -62,11 +62,16 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
     private readonly walletId: string;
 
     private constructor(
-        config: ParaSignerConfig & { delay: (index: number) => Promise<void>; validatedBaseUrl: string },
+        config: {
+            apiBaseUrl: string;
+            apiKey: string;
+            delay: (index: number) => Promise<void>;
+            walletId: string;
+        },
         address: Address<TAddress>,
     ) {
         this.apiKey = config.apiKey;
-        this.apiBaseUrl = config.validatedBaseUrl;
+        this.apiBaseUrl = config.apiBaseUrl;
         this.walletId = config.walletId;
         this.address = address;
         this.delay = config.delay;
@@ -135,7 +140,7 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
         }
 
         return new ParaSigner<TAddress>(
-            { ...config, delay, validatedBaseUrl: apiBaseUrl },
+            { apiBaseUrl, apiKey: config.apiKey, delay, walletId: config.walletId },
             wallet.address as Address<TAddress>,
         );
     }

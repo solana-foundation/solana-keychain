@@ -80,14 +80,20 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
     private readonly delay: (index: number) => Promise<void>;
 
     private constructor(
-        config: PrivySignerConfig & { delay: (index: number) => Promise<void> },
+        config: {
+            apiBaseUrl: string;
+            appId: string;
+            appSecret: string;
+            delay: (index: number) => Promise<void>;
+            walletId: string;
+        },
         address: Address<TAddress>,
     ) {
         this.address = address;
         this.appId = config.appId;
         this.appSecret = config.appSecret;
         this.walletId = config.walletId;
-        this.apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
+        this.apiBaseUrl = config.apiBaseUrl;
         this.delay = config.delay;
     }
 
@@ -113,9 +119,11 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
 
         return new PrivySigner<TAddress>(
             {
-                ...config,
                 apiBaseUrl,
+                appId: config.appId,
+                appSecret: config.appSecret,
                 delay,
+                walletId: config.walletId,
             },
             address,
         );
