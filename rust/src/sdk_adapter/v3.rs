@@ -24,6 +24,7 @@ pub fn keypair_pubkey(keypair: &Keypair) -> Pubkey {
 }
 
 /// Derive a keypair from a 32-byte seed (v3 adapter)
+#[allow(dead_code)]
 pub fn keypair_from_seed(seed: &[u8]) -> Result<Keypair, String> {
     solana_sdk_v3::signer::keypair::keypair_from_seed(seed).map_err(|e| e.to_string())
 }
