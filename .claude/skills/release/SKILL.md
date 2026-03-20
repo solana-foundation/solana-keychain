@@ -13,6 +13,18 @@ Prepare a release PR for solana-keychain. This is the **initialize** half of the
 
 The local `just release` / `just release-ts` commands handle version bumps and changelog generation; GitHub Actions handles tagging and publishing.
 
+## Step 0: Confirm scope
+
+**Ask the user:** "Are you releasing Rust, TypeScript, or both?"
+
+Use the answer to skip irrelevant steps below. The branch name, commit message, and PR body all vary by scope:
+
+| Scope | Branch | Commit |
+|-------|--------|--------|
+| Rust only | `chore/release-rust-vX.Y.Z` | `chore: release rust vX.Y.Z` |
+| TypeScript only | `chore/release-ts-vA.B.C` | `chore: release ts-keychain vA.B.C` |
+| Both | `chore/release-rust-vX.Y.Z-ts-vA.B.C` | `chore: release rust vX.Y.Z and ts-keychain vA.B.C` |
+
 ## Prerequisites
 
 Ensure these tools are installed:
@@ -39,7 +51,7 @@ git checkout main
 git pull
 ```
 
-## Step 2: Run Rust release (on main)
+## Step 2: Run Rust release (skip if TypeScript only)
 
 ```bash
 just release
@@ -50,7 +62,7 @@ This runs `cargo set-version <version>` on `rust/Cargo.toml` and regenerates `ru
 
 For pre-release versions use semver suffixes: `1.2.3-beta.1`, `1.2.3-rc.1`.
 
-## Step 3: Run TypeScript release (on main)
+## Step 3: Run TypeScript release (skip if Rust only)
 
 ```bash
 just release-ts
@@ -63,7 +75,7 @@ This runs `npm version <version> --no-git-tag-version` on these packages plus th
 PACKAGES="core aws-kms cdp dfns fireblocks gcp-kms para privy turnkey vault keychain test-utils crossmint"
 ```
 
-## Step 4: Update Cargo.lock
+## Step 4: Update Cargo.lock (skip if TypeScript only)
 
 `just release` stages `Cargo.toml` and `CHANGELOG.md` but does not update the lock file. CI runs with `--locked`, so a stale lock file will fail the build. Run:
 
@@ -74,21 +86,26 @@ git add rust/Cargo.lock
 
 ## Step 5: Create release branch, commit, and push
 
+Use the branch name and commit message from the scope table in Step 0.
+
 ```bash
-git checkout -b chore/release-rust-vX.Y.Z-ts-vA.B.C
-git commit -m "chore: release rust vX.Y.Z and ts-keychain vA.B.C"
-git push -u origin chore/release-rust-vX.Y.Z-ts-vA.B.C
+git checkout -b <branch-name>
+git commit -m "<commit-message>"
+git push -u origin <branch-name>
 ```
 
 ## Step 6: Open PR
 
+Tailor the PR body to only list what was released:
+
 ```bash
 gh pr create \
-  --title "chore: release rust vX.Y.Z and ts-keychain vA.B.C" \
+  --title "<commit-message>" \
   --reviewer dev-jodee,amilz \
   --body "$(cat <<'EOF'
 ## Release
 
+<!-- Include only the lines that apply: -->
 - Rust `solana-keychain` → vX.Y.Z ([CHANGELOG](rust/CHANGELOG.md))
 - TypeScript `@solana/keychain` and packages → vA.B.C
 
@@ -101,7 +118,7 @@ EOF
 
 ## Next Step
 
-After the PR is reviewed and approved, the reviewer runs the `complete-release` skill to squash-merge the PR and trigger the **Publish Rust Crate** and **Publish TypeScript Packages (Manual)** GitHub Actions workflows.
+After the PR is reviewed and approved, the reviewer runs the `complete-release` skill to squash-merge the PR and trigger the relevant publish workflow(s).
 
 ## Hotfix Note
 
