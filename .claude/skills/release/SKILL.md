@@ -29,22 +29,14 @@ Ensure these tools are installed:
 | Rust crate | `rust/Cargo.toml` | `version` |
 | TypeScript packages | `typescript/packages/keychain/package.json` | `version` |
 
-## Step 1: Pull latest changes
+## Step 1: Pull latest changes on main
 
 ```bash
+git checkout main
 git pull
 ```
 
-## Step 2: Create a release branch
-
-```bash
-# Branch name must match pattern: chore/release-*
-git checkout -b chore/release-rust-vX.Y.Z-ts-vA.B.C
-```
-
-The Justfile branch check allows `main` and any `chore/release-*` branch. The true safety gate (enforcing `main` before publishing) lives in GitHub Actions.
-
-## Step 3: Run Rust release
+## Step 2: Run Rust release (on main)
 
 ```bash
 just release
@@ -55,7 +47,7 @@ This runs `cargo set-version <version>` on `rust/Cargo.toml` and regenerates `ru
 
 For pre-release versions use semver suffixes: `1.2.3-beta.1`, `1.2.3-rc.1`.
 
-## Step 4: Run TypeScript release
+## Step 3: Run TypeScript release (on main)
 
 ```bash
 just release-ts
@@ -64,14 +56,15 @@ just release-ts
 
 This runs `npm version <version> --no-git-tag-version` on all 13 packages (core, aws-kms, cdp, dfns, fireblocks, gcp-kms, para, privy, turnkey, vault, keychain, test-utils) plus the root workspace, then stages all changes.
 
-## Step 5: Commit and push
+## Step 4: Create release branch, commit, and push
 
 ```bash
+git checkout -b chore/release-rust-vX.Y.Z-ts-vA.B.C
 git commit -m "chore: release rust vX.Y.Z and ts-keychain vA.B.C"
 git push -u origin chore/release-rust-vX.Y.Z-ts-vA.B.C
 ```
 
-## Step 6: Open PR
+## Step 5: Open PR
 
 ```bash
 gh pr create \
@@ -91,7 +84,7 @@ EOF
 )"
 ```
 
-## Step 7: Post-merge — Trigger GitHub Actions
+## Step 6: Post-merge — Trigger GitHub Actions
 
 After the PR merges to `main`:
 
