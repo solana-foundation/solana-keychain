@@ -31,7 +31,15 @@ Note the PR number (e.g. `42`).
 gh pr review <PR_NUMBER> --approve --body "LGTM"
 ```
 
-## Step 3: Squash merge and delete the branch
+## Step 3: Confirm CI is green, then squash merge
+
+Check that all required status checks have passed before merging:
+
+```bash
+gh pr checks <PR_NUMBER>
+```
+
+All checks should show `pass`. Once green:
 
 ```bash
 gh pr merge <PR_NUMBER> --squash --delete-branch

@@ -62,6 +62,12 @@ This runs `cargo set-version <version>` on `rust/Cargo.toml` and regenerates `ru
 
 For pre-release versions use semver suffixes: `1.2.3-beta.1`, `1.2.3-rc.1`.
 
+> **If releasing both Rust and TypeScript:** `just release` leaves staged files, and `just release-ts` requires a clean working directory. Commit the Rust changes before running Step 3:
+> ```bash
+> git commit -m "chore: bump rust version to vX.Y.Z"
+> ```
+> You will squash everything into one commit in Step 5.
+
 ## Step 3: Run TypeScript release (skip if Rust only)
 
 ```bash
@@ -109,9 +115,9 @@ gh pr create \
 - Rust `solana-keychain` → vX.Y.Z ([CHANGELOG](rust/CHANGELOG.md))
 - TypeScript `@solana/keychain` and packages → vA.B.C
 
-## Post-merge
+## Merge
 
-After this PR merges, a reviewer should run the `complete-release` skill to approve, squash-merge, and trigger the publish workflows.
+A reviewer will run the `complete-release` skill to review CI, approve, squash-merge, and trigger the publish workflows.
 EOF
 )"
 ```
