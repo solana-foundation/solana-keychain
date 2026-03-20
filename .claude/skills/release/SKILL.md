@@ -56,7 +56,16 @@ just release-ts
 
 This runs `npm version <version> --no-git-tag-version` on all 13 packages (core, aws-kms, cdp, dfns, fireblocks, gcp-kms, para, privy, turnkey, vault, keychain, test-utils, crossmint) plus the root workspace, then stages all changes.
 
-## Step 4: Create release branch, commit, and push
+## Step 4: Update Cargo.lock
+
+`just release` stages `Cargo.toml` and `CHANGELOG.md` but does not update the lock file. CI runs with `--locked`, so a stale lock file will fail the build. Run:
+
+```bash
+cd rust && cargo update --workspace && cd ..
+git add rust/Cargo.lock
+```
+
+## Step 5: Create release branch, commit, and push
 
 ```bash
 git checkout -b chore/release-rust-vX.Y.Z-ts-vA.B.C
@@ -64,7 +73,7 @@ git commit -m "chore: release rust vX.Y.Z and ts-keychain vA.B.C"
 git push -u origin chore/release-rust-vX.Y.Z-ts-vA.B.C
 ```
 
-## Step 5: Open PR
+## Step 6: Open PR
 
 ```bash
 gh pr create \
@@ -85,7 +94,7 @@ EOF
 )"
 ```
 
-## Step 6: Post-merge — Trigger GitHub Actions
+## Step 7: Post-merge — Trigger GitHub Actions
 
 After the PR merges to `main`:
 
