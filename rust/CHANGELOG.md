@@ -1,3 +1,12 @@
+## 0.5.0 - 2026-03-20
+
+
+### Features
+
+- add rust and typescript crossmint signers (#70)
+
+- add signature verification to all signer backends (#68)
+
 ## 0.4.0 - 2026-03-06
 
 

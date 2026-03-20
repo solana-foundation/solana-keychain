@@ -1,6 +1,6 @@
 {
   "name": "@solana/keychain-workspace",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "Unified Solana transaction signing across multiple backends",
   "type": "module",
