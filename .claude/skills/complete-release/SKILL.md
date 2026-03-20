@@ -39,7 +39,22 @@ gh pr merge <PR_NUMBER> --squash --delete-branch
 
 Wait for merge to complete before proceeding.
 
-## Step 4: Trigger Rust publish workflow
+## Step 4: Detect what changed and trigger publish workflows
+
+Check which paths the merged PR touched, then trigger only the relevant workflow(s):
+
+```bash
+# Get the files changed by the merged PR
+FILES=$(gh pr view <PR_NUMBER> --json files --jq '.files[].path')
+
+CHANGED_RUST=$(echo "$FILES" | grep -q "^rust/" && echo "yes" || echo "no")
+CHANGED_TS=$(echo "$FILES" | grep -q "^typescript/" && echo "yes" || echo "no")
+
+echo "Rust changed: $CHANGED_RUST"
+echo "TypeScript changed: $CHANGED_TS"
+```
+
+If Rust changed (`rust/Cargo.toml`, `rust/CHANGELOG.md`, etc.):
 
 ```bash
 gh workflow run "Publish Rust Crate" \
@@ -49,7 +64,7 @@ gh workflow run "Publish Rust Crate" \
   -f create-github-release=true
 ```
 
-## Step 5: Trigger TypeScript publish workflow
+If TypeScript changed (`typescript/packages/*/package.json`, etc.):
 
 ```bash
 gh workflow run "Publish TypeScript Packages (Manual)" \
@@ -60,20 +75,20 @@ gh workflow run "Publish TypeScript Packages (Manual)" \
   -f create-github-release=true
 ```
 
-## Step 6: Verify workflows started
+## Step 5: Verify workflows started
+
+Only check workflows that were triggered:
 
 ```bash
 gh run list --workflow="Publish Rust Crate" --limit 1
 gh run list --workflow="Publish TypeScript Packages (Manual)" --limit 1
 ```
 
-Both should show a run in `queued` or `in_progress` state.
+Each triggered workflow should show `queued` or `in_progress`.
 
 ## Verification
 
 Once workflows complete:
 
-- Confirm `vX.Y.Z` tag exists on GitHub
-- Confirm crates.io page shows new version
-- Confirm `ts-keychain-vA.B.C` tag exists on GitHub
-- Confirm `@solana/keychain` on npm shows new version
+- If Rust was published: confirm `vX.Y.Z` tag exists on GitHub and crates.io shows the new version
+- If TypeScript was published: confirm `ts-keychain-vA.B.C` tag exists on GitHub and `@solana/keychain` on npm shows the new version
