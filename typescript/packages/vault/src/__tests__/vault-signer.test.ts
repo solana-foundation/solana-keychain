@@ -122,12 +122,15 @@ describe('VaultSigner', () => {
             }).toThrow('requestDelayMs must not be negative');
         });
 
-        it('should accept high requestDelayMs without warning', () => {
+        it('should accept high requestDelayMs with warning', () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
             const signer = new VaultSigner({
                 ...mockConfig,
                 requestDelayMs: 3001,
             });
             expect(signer).toBeDefined();
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is 3001ms'));
+            warnSpy.mockRestore();
         });
     });
 

@@ -96,7 +96,8 @@ describe('FireblocksSigner', () => {
             }).toThrow('requestDelayMs must not be negative');
         });
 
-        it('should accept high requestDelayMs without warning', () => {
+        it('should accept high requestDelayMs with warning', () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
             const signer = new FireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
@@ -104,6 +105,8 @@ describe('FireblocksSigner', () => {
                 requestDelayMs: 5000,
             });
             expect(signer).toBeDefined();
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is 5000ms'));
+            warnSpy.mockRestore();
         });
 
         it('should use default assetId', () => {

@@ -107,7 +107,8 @@ describe('GcpKmsSigner', () => {
             }).toThrow('requestDelayMs must not be negative');
         });
 
-        it('should accept high requestDelayMs without warning', () => {
+        it('should accept high requestDelayMs with warning', () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
             const signer = new GcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
@@ -115,6 +116,8 @@ describe('GcpKmsSigner', () => {
             });
 
             expect(signer).toBeDefined();
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is 5000ms'));
+            warnSpy.mockRestore();
         });
     });
 

@@ -143,9 +143,12 @@ describe('CdpSigner', () => {
             );
         });
 
-        it('accepts high requestDelayMs without warning', async () => {
+        it('accepts high requestDelayMs with warning', async () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
             const signer = await CdpSigner.create(makeConfig({ requestDelayMs: 5000 }));
             expect(signer).toBeDefined();
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is 5000ms'));
+            warnSpy.mockRestore();
         });
 
         it('accepts custom baseUrl', async () => {

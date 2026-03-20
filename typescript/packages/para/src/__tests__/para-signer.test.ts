@@ -172,10 +172,13 @@ describe('ParaSigner', () => {
             });
         });
 
-        it('should accept high requestDelayMs without warning', async () => {
+        it('should accept high requestDelayMs with warning', async () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
             const signer = await ParaSigner.create({ ...mockConfig, requestDelayMs: 3001 });
             expect(signer).toBeDefined();
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is 3001ms'));
+            warnSpy.mockRestore();
         });
     });
 
