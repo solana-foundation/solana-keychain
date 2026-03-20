@@ -69,6 +69,7 @@ git push -u origin chore/release-rust-vX.Y.Z-ts-vA.B.C
 ```bash
 gh pr create \
   --title "chore: release rust vX.Y.Z and ts-keychain vA.B.C" \
+  --reviewer dev-jodee,amilz \
   --body "$(cat <<'EOF'
 ## Release
 
