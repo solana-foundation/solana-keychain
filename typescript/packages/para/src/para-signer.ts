@@ -9,7 +9,6 @@ import {
     SolanaSigner,
     throwSignerError,
     validateHttpsUrl,
-    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -68,7 +67,6 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
         this.walletId = config.walletId;
         this.address = address;
         const requestDelayMs = config.requestDelayMs ?? 0;
-        validateRequestDelayMs(requestDelayMs);
         this.delay = createBatchDelay(requestDelayMs);
     }
 

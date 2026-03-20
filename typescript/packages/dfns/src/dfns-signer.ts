@@ -9,7 +9,6 @@ import {
     SolanaSigner,
     throwSignerError,
     validateHttpsUrl,
-    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -100,9 +99,9 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
         apiBaseUrl: string;
         authToken: string;
         credId: string;
+        delay: (index: number) => Promise<void>;
         keyId: string;
         privateKeyPem: string;
-        requestDelayMs: number;
         walletId: string;
     }) {
         this.address = config.address;
@@ -112,7 +111,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
         this.walletId = config.walletId;
         this.apiBaseUrl = config.apiBaseUrl;
         this.keyId = config.keyId;
-        this.delay = createBatchDelay(config.requestDelayMs);
+        this.delay = config.delay;
     }
 
     /**
@@ -149,9 +148,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
 
         const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
         validateHttpsUrl(apiBaseUrl, 'apiBaseUrl');
-        const requestDelayMs = config.requestDelayMs ?? 0;
-        validateRequestDelayMs(requestDelayMs);
-
+        const delay = createBatchDelay(config.requestDelayMs ?? 0);
         const wallet = await fetchWallet(apiBaseUrl, config.authToken, config.walletId);
 
         if (wallet.status !== 'Active') {
@@ -191,9 +188,9 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
             apiBaseUrl,
             authToken: config.authToken,
             credId: config.credId,
+            delay,
             keyId: wallet.signingKey.id,
             privateKeyPem: config.privateKeyPem,
-            requestDelayMs,
             walletId: config.walletId,
         });
     }

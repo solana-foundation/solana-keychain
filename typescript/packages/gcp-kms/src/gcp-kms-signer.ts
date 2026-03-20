@@ -7,7 +7,6 @@ import {
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
-    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -81,7 +80,6 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
 
         this.keyName = config.keyName;
         const requestDelayMs = config.requestDelayMs || 0;
-        validateRequestDelayMs(requestDelayMs);
         this.delay = createBatchDelay(requestDelayMs);
         this.client = new v1.KeyManagementServiceClient();
     }

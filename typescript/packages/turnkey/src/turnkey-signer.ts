@@ -9,7 +9,6 @@ import {
     SolanaSigner,
     throwSignerError,
     validateHttpsUrl,
-    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -110,7 +109,6 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
             apiPublicKey: config.apiPublicKey,
         });
         const requestDelayMs = config.requestDelayMs || 0;
-        validateRequestDelayMs(requestDelayMs);
         this.delay = createBatchDelay(requestDelayMs);
     }
 

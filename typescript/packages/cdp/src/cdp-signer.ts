@@ -11,7 +11,6 @@ import {
     SolanaSigner,
     throwSignerError,
     validateHttpsUrl,
-    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { createKeyPairFromBytes, SignatureBytes } from '@solana/keys';
 import type { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -222,7 +221,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         apiKey: CryptoKey;
         apiKeyId: string;
         baseUrl: string;
-        requestDelayMs: number;
+        delay: (index: number) => Promise<void>;
         walletKey: CryptoKey;
     }) {
         this.address = config.address;
@@ -231,7 +230,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         this.walletKey = config.walletKey;
         this.baseUrl = config.baseUrl;
         this.apiHost = config.apiHost;
-        this.delay = createBatchDelay(config.requestDelayMs);
+        this.delay = config.delay;
     }
 
     /**
@@ -281,8 +280,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         const parsedBaseUrl = validateHttpsUrl(baseUrl, 'baseUrl');
         const apiHost = parsedBaseUrl.host;
 
-        const requestDelayMs = config.requestDelayMs ?? 0;
-        validateRequestDelayMs(requestDelayMs);
+        const delay = createBatchDelay(config.requestDelayMs ?? 0);
 
         const [apiKey, walletKey] = await Promise.all([
             loadApiKey(config.cdpApiKeySecret),
@@ -295,7 +293,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
             apiKey,
             apiKeyId: config.cdpApiKeyId,
             baseUrl,
-            requestDelayMs,
+            delay,
             walletKey,
         });
     }

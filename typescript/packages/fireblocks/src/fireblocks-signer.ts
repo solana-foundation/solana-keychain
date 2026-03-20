@@ -10,7 +10,6 @@ import {
     SolanaSigner,
     throwSignerError,
     validateHttpsUrl,
-    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -129,7 +128,6 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         const requestDelayMs = config.requestDelayMs ?? 0;
         this.useProgramCall = config.useProgramCall ?? false;
 
-        validateRequestDelayMs(requestDelayMs);
         this.delay = createBatchDelay(requestDelayMs);
     }
 

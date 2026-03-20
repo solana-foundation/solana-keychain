@@ -7,7 +7,6 @@ import {
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
-    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -80,7 +79,6 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
 
         this.keyId = config.keyId;
         const requestDelayMs = config.requestDelayMs || 0;
-        validateRequestDelayMs(requestDelayMs);
         this.delay = createBatchDelay(requestDelayMs);
 
         // Create AWS KMS client

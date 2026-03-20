@@ -1,38 +1,36 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createBatchDelay, validateRequestDelayMs } from '../config.js';
+import { createBatchDelay } from '../config.js';
 import { SignerErrorCode } from '../errors.js';
-
-describe('validateRequestDelayMs', () => {
-    it('accepts zero', () => {
-        expect(() => validateRequestDelayMs(0)).not.toThrow();
-    });
-
-    it('accepts positive values', () => {
-        expect(() => validateRequestDelayMs(100)).not.toThrow();
-    });
-
-    it('warns when requestDelayMs exceeds 3000ms', () => {
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        validateRequestDelayMs(5000);
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is 5000ms'));
-        warnSpy.mockRestore();
-    });
-
-    it('throws CONFIG_ERROR for negative values', () => {
-        expect(() => validateRequestDelayMs(-1)).toThrow('requestDelayMs must not be negative');
-        try {
-            validateRequestDelayMs(-1);
-        } catch (error: unknown) {
-            expect((error as { code: string }).code).toBe(SignerErrorCode.CONFIG_ERROR);
-        }
-    });
-});
 
 describe('createBatchDelay', () => {
     it('returns a function', () => {
         const delay = createBatchDelay(100);
         expect(typeof delay).toBe('function');
+    });
+
+    it('accepts zero delayMs', () => {
+        expect(() => createBatchDelay(0)).not.toThrow();
+    });
+
+    it('accepts positive delayMs', () => {
+        expect(() => createBatchDelay(100)).not.toThrow();
+    });
+
+    it('throws CONFIG_ERROR for negative delayMs', () => {
+        expect(() => createBatchDelay(-1)).toThrow('requestDelayMs must not be negative');
+        try {
+            createBatchDelay(-1);
+        } catch (error: unknown) {
+            expect((error as { code: string }).code).toBe(SignerErrorCode.CONFIG_ERROR);
+        }
+    });
+
+    it('warns when delayMs exceeds 3000ms', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        createBatchDelay(5000);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is 5000ms'));
+        warnSpy.mockRestore();
     });
 
     it('resolves immediately for index 0', async () => {

@@ -10,7 +10,6 @@ import {
     SolanaSigner,
     throwSignerError,
     validateHttpsUrl,
-    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -87,7 +86,6 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
         this.walletId = config.walletId;
         this.apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
         const requestDelayMs = config.requestDelayMs ?? 0;
-        validateRequestDelayMs(requestDelayMs);
         this.delay = createBatchDelay(requestDelayMs);
     }
 
