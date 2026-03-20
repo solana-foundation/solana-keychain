@@ -201,8 +201,8 @@ release: _check-release-tools
     set -euo pipefail
 
     current_branch=$(git rev-parse --abbrev-ref HEAD)
-    if [ "$current_branch" != "main" ] && ! echo "$current_branch" | grep -qE '^chore/release-'; then
-        echo "Error: Releases must be prepared from main or a chore/release-* branch (current branch: $current_branch)"
+    if [ "$current_branch" != "main" ]; then
+        echo "Error: Releases must be prepared from main (current branch: $current_branch)"
         exit 1
     fi
 
@@ -316,8 +316,8 @@ release-ts: _check-ts-release
     set -euo pipefail
 
     current_branch=$(git rev-parse --abbrev-ref HEAD)
-    if [ "$current_branch" != "main" ] && ! echo "$current_branch" | grep -qE '^chore/release-'; then
-        echo "Error: TypeScript releases must be prepared from main or a chore/release-* branch (current branch: $current_branch)"
+    if [ "$current_branch" != "main" ]; then
+        echo "Error: TypeScript releases must be prepared from main (current branch: $current_branch)"
         exit 1
     fi
 
