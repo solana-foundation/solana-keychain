@@ -3,35 +3,18 @@ name: release
 description: >
   Guide for releasing a new version of solana-keychain (Rust and/or TypeScript).
   Use when asked to "prepare a release", "bump the version", "release Rust", "release TypeScript",
-  "publish a new version", or "cut a release". Covers the PR author half of the release flow:
-  version bumps, changelog, branch, push, and open PR with reviewers.
+  "publish a new version", or "cut a release". Covers the PR-based release flow end-to-end.
 ---
 
 # Release Skill
 
-Prepare a release PR for solana-keychain. This is the **initialize** half of the release flow — it opens the PR and assigns reviewers. After the PR is approved and merged, use the `complete-release` skill to trigger publishing.
-
-The local `just release` / `just release-ts` commands handle version bumps and changelog generation; GitHub Actions handles tagging and publishing.
-
-## Step 0: Confirm scope
-
-**Ask the user:** "Are you releasing Rust, TypeScript, or both?"
-
-Use the answer to skip irrelevant steps below. The branch name, commit message, and PR body all vary by scope:
-
-| Scope | Branch | Commit |
-|-------|--------|--------|
-| Rust only | `chore/release-rust-vX.Y.Z` | `chore: release rust vX.Y.Z` |
-| TypeScript only | `chore/release-ts-vA.B.C` | `chore: release ts-keychain vA.B.C` |
-| Both | `chore/release-rust-vX.Y.Z-ts-vA.B.C` | `chore: release rust vX.Y.Z and ts-keychain vA.B.C` |
+Prepare and publish a new release of solana-keychain via a PR-based flow.
 
 ## Prerequisites
 
-Ensure these tools are installed:
-
 | Tool | Install |
 |------|---------|
-| `cargo-edit` (provides `cargo set-version`) | `cargo install cargo-edit` |
+| `cargo-edit` (`cargo set-version`) | `cargo install cargo-edit` |
 | `git-cliff` | `cargo install git-cliff` |
 | `pnpm` | `npm install -g pnpm` |
 | `gh` CLI | `brew install gh` |
@@ -44,94 +27,122 @@ Ensure these tools are installed:
 | Rust crate | `rust/Cargo.toml` | `version` |
 | TypeScript packages | `typescript/packages/keychain/package.json` | `version` |
 
-## Step 1: Pull latest changes on main
+---
+
+## IMPORTANT: Do NOT use `just release` / `just release-ts`
+
+Both recipes use `[confirm]` + `read -p` for interactive prompts. They cannot be invoked non-interactively (stdin piping breaks them). Always use the manual steps below instead.
+
+---
+
+## Step 1: Pull latest main and verify clean state
 
 ```bash
 git checkout main
 git pull
+git status  # must be clean before proceeding
 ```
 
-## Step 2: Run Rust release (skip if TypeScript only)
+Also check whether the release branch already exists — if so, skip to Step 6:
 
 ```bash
-just release
-# When prompted, confirm and enter the new version (e.g. 0.5.0)
+git branch -a | grep release
 ```
 
-This runs `cargo set-version <version>` on `rust/Cargo.toml` and regenerates `rust/CHANGELOG.md` via `git-cliff`, then stages both files.
+---
 
-For pre-release versions use semver suffixes: `1.2.3-beta.1`, `1.2.3-rc.1`.
-
-> **If releasing both Rust and TypeScript:** `just release` leaves staged files, and `just release-ts` requires a clean working directory. Commit the Rust changes before running Step 3:
-> ```bash
-> git commit -m "chore: bump rust version to vX.Y.Z"
-> ```
-> You will squash everything into one commit in Step 5.
-
-## Step 3: Run TypeScript release (skip if Rust only)
+## Step 2: Bump Rust version
 
 ```bash
-just release-ts
-# When prompted, confirm and enter the new version (e.g. 0.6.0)
+cd rust && cargo set-version X.Y.Z && cd ..
 ```
 
-This runs `npm version <version> --no-git-tag-version` on these packages plus the root workspace, then stages all changes:
+---
+
+## Step 3: Generate CHANGELOG.md
+
+Run from the **project root** (not from `rust/`):
 
 ```bash
-PACKAGES="core aws-kms cdp dfns fireblocks gcp-kms para privy turnkey vault keychain test-utils crossmint"
+last_tag=$(git tag -l "v*" --sort=-version:refname | head -1)
+if [ -f rust/CHANGELOG.md ]; then
+  git-cliff "${last_tag}..HEAD" --tag "vX.Y.Z" --config .github/cliff.toml --strip all > /tmp/CHANGELOG.new.md
+  cat rust/CHANGELOG.md >> /tmp/CHANGELOG.new.md
+  mv /tmp/CHANGELOG.new.md rust/CHANGELOG.md
+else
+  git-cliff "${last_tag}..HEAD" --tag "vX.Y.Z" --config .github/cliff.toml --output rust/CHANGELOG.md --strip all
+fi
 ```
 
-## Step 4: Update Cargo.lock (skip if TypeScript only)
+Review the output: `cat rust/CHANGELOG.md | head -30`
 
-`just release` stages `Cargo.toml` and `CHANGELOG.md` but does not update the lock file. CI runs with `--locked`, so a stale lock file will fail the build. Run:
+---
+
+## Step 4: Update Cargo.lock and commit Rust changes
+
+This MUST happen before the TS release — `just release-ts` checks for a clean working tree and will fail if `Cargo.lock` is dirty.
 
 ```bash
 cd rust && cargo update --workspace && cd ..
-git add rust/Cargo.lock
+git add rust/Cargo.toml rust/CHANGELOG.md rust/Cargo.lock
+git commit -m "chore: bump rust version to vX.Y.Z"
 ```
 
-## Step 5: Create release branch, commit, and push
+---
 
-Use the branch name and commit message from the scope table in Step 0.
+## Step 5: Bump TypeScript versions
 
 ```bash
-git checkout -b <branch-name>
-git commit -m "<commit-message>"
-git push -u origin <branch-name>
+cd typescript
+for pkg in core aws-kms cdp dfns fireblocks gcp-kms para privy turnkey vault keychain test-utils crossmint; do
+  cd packages/${pkg} && npm version "A.B.C" --no-git-tag-version && cd ../..
+done
+npm version "A.B.C" --no-git-tag-version
+cd ..
 ```
 
-## Step 6: Open PR
+---
 
-Tailor the PR body to only list what was released:
+## Step 6: Create release branch, commit all changes, push
+
+```bash
+git checkout -b chore/release-rust-vX.Y.Z-ts-vA.B.C
+git add typescript/
+git commit -m "chore: release rust vX.Y.Z and ts-keychain vA.B.C"
+git push -u origin chore/release-rust-vX.Y.Z-ts-vA.B.C
+```
+
+If the branch already existed from a previous session, switch to it and verify it already has the right state before opening the PR.
+
+---
+
+## Step 7: Open PR
 
 ```bash
 gh pr create \
-  --title "<commit-message>" \
+  --title "chore: release rust vX.Y.Z and ts-keychain vA.B.C" \
   --reviewer dev-jodee,amilz \
   --body "$(cat <<'EOF'
 ## Release
 
-<!-- Include only the lines that apply: -->
-- Rust `solana-keychain` → vX.Y.Z ([CHANGELOG](rust/CHANGELOG.md))
-- TypeScript `@solana/keychain` and packages → vA.B.C
+- Rust \`solana-keychain\` → vX.Y.Z ([CHANGELOG](rust/CHANGELOG.md))
+- TypeScript \`@solana/keychain\` and packages → vA.B.C
 
 ## Merge
 
-A reviewer will run the `complete-release` skill to review CI, approve, squash-merge, and trigger the publish workflows.
+A reviewer will run the \`complete-release\` skill to review CI, approve, squash-merge, and trigger the publish workflows.
 EOF
 )"
 ```
 
-## Next Step
+---
 
-After the PR is reviewed and approved, the reviewer runs the `complete-release` skill to squash-merge the PR and trigger the relevant publish workflow(s).
+## Hotfix
 
-## Hotfix Note
-
-For urgent fixes to a deployed stable version, use `just hotfix` instead of this flow:
+For urgent fixes to a deployed stable version:
 
 ```bash
-just hotfix <fix-name>     # creates hotfix/<fix-name> from latest stable tag
+just hotfix <fix-name>   # creates hotfix/<fix-name> from latest stable tag
 # apply fixes, push, open PR to main
-# after merge, run just release on main
+# after merge, run this release flow on main
 ```
