@@ -54,7 +54,7 @@ just release-ts
 # When prompted, confirm and enter the new version (e.g. 0.6.0)
 ```
 
-This runs `npm version <version> --no-git-tag-version` on all 13 packages (core, aws-kms, cdp, dfns, fireblocks, gcp-kms, para, privy, turnkey, vault, keychain, test-utils) plus the root workspace, then stages all changes.
+This runs `npm version <version> --no-git-tag-version` on all 13 packages (core, aws-kms, cdp, dfns, fireblocks, gcp-kms, para, privy, turnkey, vault, keychain, test-utils, crossmint) plus the root workspace, then stages all changes.
 
 ## Step 4: Create release branch, commit, and push
 
