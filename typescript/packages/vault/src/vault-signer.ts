@@ -9,6 +9,7 @@ import {
     SolanaSigner,
     throwSignerError,
     validateHttpsUrl,
+    validateUrl,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -88,7 +89,9 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
         }
 
         const vaultAddr = config.vaultAddr.replace(/\/$/, ''); // Remove trailing slash
-        if (!config.allowHttp) {
+        if (config.allowHttp) {
+            validateUrl(vaultAddr, 'vaultAddr');
+        } else {
             validateHttpsUrl(vaultAddr, 'vaultAddr');
         }
 

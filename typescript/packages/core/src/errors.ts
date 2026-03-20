@@ -125,15 +125,18 @@ export function isSignerError<C extends SignerErrorCode>(error: unknown, code: C
  * @returns The parsed URL object.
  * @throws {SignerError} `SIGNER_CONFIG_ERROR` when the URL is invalid or does not use HTTPS.
  */
-export function validateHttpsUrl(url: string, fieldName: string): URL {
-    let parsedUrl: URL;
+export function validateUrl(url: string, fieldName: string): URL {
     try {
-        parsedUrl = new URL(url);
+        return new URL(url);
     } catch {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
             message: `${fieldName} is not a valid URL`,
         });
     }
+}
+
+export function validateHttpsUrl(url: string, fieldName: string): URL {
+    const parsedUrl = validateUrl(url, fieldName);
 
     if (parsedUrl.protocol !== 'https:') {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {

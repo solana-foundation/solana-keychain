@@ -79,14 +79,16 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
     private readonly apiBaseUrl: string;
     private readonly delay: (index: number) => Promise<void>;
 
-    private constructor(config: PrivySignerConfig, address: Address<TAddress>) {
+    private constructor(
+        config: PrivySignerConfig & { delay: (index: number) => Promise<void> },
+        address: Address<TAddress>,
+    ) {
         this.address = address;
         this.appId = config.appId;
         this.appSecret = config.appSecret;
         this.walletId = config.walletId;
         this.apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
-        const requestDelayMs = config.requestDelayMs ?? 0;
-        this.delay = createBatchDelay(requestDelayMs);
+        this.delay = config.delay;
     }
 
     /**
@@ -102,6 +104,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
         }
         const apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
         validateHttpsUrl(apiBaseUrl, 'apiBaseUrl');
+        const delay = createBatchDelay(config.requestDelayMs ?? 0);
 
         const address = await fetchPublicKey<TAddress>({
             ...config,
@@ -112,6 +115,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
             {
                 ...config,
                 apiBaseUrl,
+                delay,
             },
             address,
         );

@@ -61,13 +61,15 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
     private readonly delay: (index: number) => Promise<void>;
     private readonly walletId: string;
 
-    private constructor(config: ParaSignerConfig, address: Address<TAddress>) {
+    private constructor(
+        config: ParaSignerConfig & { delay: (index: number) => Promise<void>; validatedBaseUrl: string },
+        address: Address<TAddress>,
+    ) {
         this.apiKey = config.apiKey;
-        this.apiBaseUrl = (config.apiBaseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+        this.apiBaseUrl = config.validatedBaseUrl;
         this.walletId = config.walletId;
         this.address = address;
-        const requestDelayMs = config.requestDelayMs ?? 0;
-        this.delay = createBatchDelay(requestDelayMs);
+        this.delay = config.delay;
     }
 
     /**
@@ -95,6 +97,7 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
 
         const apiBaseUrl = (config.apiBaseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
         validateHttpsUrl(apiBaseUrl, 'apiBaseUrl');
+        const delay = createBatchDelay(config.requestDelayMs ?? 0);
         const url = `${apiBaseUrl}/v1/wallets/${config.walletId}`;
 
         const wallet = await fetchWithSignerErrors<ParaWalletResponse>(
@@ -131,7 +134,10 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
             });
         }
 
-        return new ParaSigner<TAddress>(config, wallet.address as Address<TAddress>);
+        return new ParaSigner<TAddress>(
+            { ...config, delay, validatedBaseUrl: apiBaseUrl },
+            wallet.address as Address<TAddress>,
+        );
     }
 
     /**
