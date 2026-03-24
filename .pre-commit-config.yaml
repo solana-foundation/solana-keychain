@@ -1,0 +1,11 @@
+# See https://pre-commit.com for more information
+repos:
+  - repo: local
+    hooks:
+      - id: just-fmt
+        name: just fmt
+        description: Format and lint code
+        entry: just fmt
+        language: system
+        types_or: [rust, ts]
+        pass_filenames: false
