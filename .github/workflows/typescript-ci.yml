@@ -37,14 +37,14 @@ jobs:
             const parseVar = (name) => {
               const raw = process.env[name];
               if (raw !== 'true' && raw !== 'false') {
-                core.setFailed(
-                  `${name} must be set to the string 'true' or 'false' in repository Actions variables. Received: ${raw ?? 'undefined'}`
-                );
-                return false;
+                const message = `${name} must be set to the string 'true' or 'false' in repository Actions variables. Received: ${raw ?? 'undefined'}`;
+                core.setFailed(message);
+                throw new Error(message);
               }
               return raw === 'true';
             };
 
+            // CI_SIGNER_MEMORY_ENABLED is Rust-only; validate it exists but do not include it in TS package selection.
             parseVar('CI_SIGNER_MEMORY_ENABLED');
 
             const enabled = {
