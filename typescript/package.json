@@ -40,5 +40,13 @@
     "vitest": "^4.0.10"
   },
   "prettier": "@solana/prettier-config-solana",
+  "pnpm": {
+    "overrides": {
+      "brace-expansion@^1.0.0": "1.1.13",
+      "brace-expansion@^2.0.0": "2.0.3",
+      "picomatch@^2.0.0": "2.3.2",
+      "picomatch@^4.0.0": "4.0.4"
+    }
+  },
   "packageManager": "pnpm@10.14.0"
 }
