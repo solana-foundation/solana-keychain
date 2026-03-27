@@ -1,8 +1,9 @@
 // Core types and utilities (flat export)
 export * from '@solana/keychain-core';
 
-// Unified signer factory and config union
+// Unified signer factory, address resolver, and config union
 export { createSigner } from './create-signer.js';
+export { resolveAddress } from './resolve-address.js';
 export type { BackendName, KeychainSignerConfig } from './types.js';
 
 // Individual config types (flat re-exports)
