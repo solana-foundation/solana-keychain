@@ -13,7 +13,9 @@ This installs all signer implementations. For a smaller bundle, install individu
 - `@solana/keychain-aws-kms` - AWS KMS signer
 - `@solana/keychain-cdp` - Coinbase Developer Platform (CDP) signer
 - `@solana/keychain-crossmint` - Crossmint signer
+- `@solana/keychain-dfns` - Dfns signer
 - `@solana/keychain-fireblocks` - Fireblocks signer
+- `@solana/keychain-gcp-kms` - Google Cloud KMS signer
 - `@solana/keychain-para` - Para MPC signer
 - `@solana/keychain-privy` - Privy signer
 - `@solana/keychain-turnkey` - Turnkey signer
@@ -28,8 +30,11 @@ The main signer classes are exported directly for convenience:
 ```typescript
 import {
     AwsKmsSigner,
+    CdpSigner,
     CrossmintSigner,
+    DfnsSigner,
     FireblocksSigner,
+    GcpKmsSigner,
     ParaSigner,
     PrivySigner,
     TurnkeySigner,
@@ -50,7 +55,7 @@ const signer = new VaultSigner({
 Each signer package is also available under its namespace for accessing types and utilities:
 
 ```typescript
-import { awsKms, crossmint, fireblocks, para, privy, turnkey, vault } from '@solana/keychain';
+import { awsKms, cdp, crossmint, dfns, fireblocks, gcpKms, para, privy, turnkey, vault } from '@solana/keychain';
 
 // Access types
 type VaultConfig = vault.VaultSignerConfig;
@@ -83,8 +88,11 @@ try {
 | Signer |  Package |
 |--------|----------|
 | `AwsKmsSigner` | [@solana/keychain-aws-kms](../aws-kms/README.md) |
+| `CdpSigner` | [@solana/keychain-cdp](../cdp/README.md) |
 | `CrossmintSigner` | [@solana/keychain-crossmint](../crossmint/README.md) |
+| `DfnsSigner` | [@solana/keychain-dfns](../dfns/README.md) |
 | `FireblocksSigner` | [@solana/keychain-fireblocks](../fireblocks/README.md) |
+| `GcpKmsSigner` | [@solana/keychain-gcp-kms](../gcp-kms/README.md) |
 | `ParaSigner` | [@solana/keychain-para](../para/README.md) |
 | `PrivySigner` | [@solana/keychain-privy](../privy/README.md) |
 | `TurnkeySigner` | [@solana/keychain-turnkey](../turnkey/README.md) |

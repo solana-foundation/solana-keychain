@@ -1,7 +1,7 @@
 {
     "name": "@solana/keychain-cdp",
     "author": "Solana Foundation",
-    "version": "0.6.0",
+    "version": "0.6.1",
     "description": "Coinbase Developer Platform (CDP) signer for Solana transactions",
     "license": "MIT",
     "repository": "https://github.com/solana-foundation/solana-keychain",
