@@ -1,7 +1,7 @@
 import type { Address } from '@solana/addresses';
 import type { SolanaSigner } from '@solana/keychain-core';
 import { SignerErrorCode } from '@solana/keychain-core';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { KeychainSignerConfig } from '../types.js';
 
@@ -26,6 +26,10 @@ const { resolveAddress } = await import('../resolve-address.js');
 const { createSigner } = await import('../create-signer.js');
 
 describe('resolveAddress', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
     describe('sync backends (publicKey in config)', () => {
         it.each(['aws-kms', 'gcp-kms', 'turnkey', 'vault'] as const)(
             '%s returns publicKey directly',
