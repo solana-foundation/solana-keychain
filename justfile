@@ -191,9 +191,9 @@ branch-info:
     @echo "Releasing:"
     @echo "  Stable/Beta/RC: checkout main, run 'just release'"
     @echo "  Pre-release versions use semver suffixes (e.g. 2.3.0-beta.1)"
-    @echo "  Hotfix: run 'just hotfix' from deployed stable tag"
+    @echo "  Hotfix: run 'just hotfix' from deployed stable tag, then run 'just release' from hotfix/*"
 
-# Prepare a new release (run from main; use semver pre-release suffixes for beta/rc)
+# Prepare a new release (run from main or hotfix/*; use semver pre-release suffixes for beta/rc)
 [confirm("Start release process?")]
 [working-directory: 'rust']
 release: _check-release-tools
@@ -201,10 +201,13 @@ release: _check-release-tools
     set -euo pipefail
 
     current_branch=$(git rev-parse --abbrev-ref HEAD)
-    if [ "$current_branch" != "main" ]; then
-        echo "Error: Releases must be prepared from main (current branch: $current_branch)"
-        exit 1
-    fi
+    case "$current_branch" in
+        main|hotfix/*) ;;
+        *)
+            echo "Error: Releases must be prepared from main or hotfix/* (current branch: $current_branch)"
+            exit 1
+            ;;
+    esac
 
     current_version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
     echo "Current version: ${current_version}"
@@ -235,8 +238,14 @@ release: _check-release-tools
     echo "Release prepared! Next steps:"
     echo "  1. Review CHANGELOG.md"
     echo "  2. git commit -m 'chore: release v$version'"
-    echo "  3. git push"
-    echo "  4. Trigger 'Publish Rust Crate' workflow"
+    echo "  3. git push origin HEAD"
+    if [[ "$current_branch" == hotfix/* ]]; then
+        echo "  4. Trigger 'Publish Rust Crate' workflow from this hotfix branch"
+        echo "  5. Trigger 'Publish TypeScript Packages' workflow from this hotfix branch (if needed)"
+        echo "  6. Merge hotfix back to main"
+    else
+        echo "  4. Create PR, merge, then trigger 'Publish Rust Crate' workflow"
+    fi
 
 # Start a hotfix branch from a deployed stable tag
 hotfix name='' base_tag='':
@@ -304,11 +313,13 @@ hotfix name='' base_tag='':
 
     echo ""
     echo "Next steps:"
-    echo "  1. Apply your hotfix commits"
-    echo "  2. Push and create PR to main"
-    echo "  3. After merge, run 'just release' on main to publish"
+    echo "  1. Apply your hotfix commits on $branch_name"
+    echo "  2. Run 'just release' (and 'just release-ts' if needed) on $branch_name"
+    echo "  3. Commit and push $branch_name"
+    echo "  4. Trigger publish workflows from $branch_name"
+    echo "  5. Merge $branch_name back to main"
 
-# Bump TypeScript package versions and prepare for release
+# Bump TypeScript package versions and prepare for release (run from main or hotfix/*)
 [confirm("This will bump all TypeScript package versions. Continue?")]
 [working-directory: 'typescript']
 release-ts: _check-ts-release
@@ -316,10 +327,13 @@ release-ts: _check-ts-release
     set -euo pipefail
 
     current_branch=$(git rev-parse --abbrev-ref HEAD)
-    if [ "$current_branch" != "main" ]; then
-        echo "Error: TypeScript releases must be prepared from main (current branch: $current_branch)"
-        exit 1
-    fi
+    case "$current_branch" in
+        main|hotfix/*) ;;
+        *)
+            echo "Error: TypeScript releases must be prepared from main or hotfix/* (current branch: $current_branch)"
+            exit 1
+            ;;
+    esac
 
     current_version=$(node -p "require('./packages/keychain/package.json').version")
     echo "Current version: ${current_version}"
@@ -346,8 +360,13 @@ release-ts: _check-ts-release
     echo ""
     echo "TypeScript release prepared! Next steps:"
     echo "  1. git commit -m 'chore(ts): release v$version'"
-    echo "  2. git push"
-    echo "  3. Trigger 'Publish TypeScript Packages' workflow in GitHub Actions"
+    echo "  2. git push origin HEAD"
+    if [[ "$current_branch" == hotfix/* ]]; then
+        echo "  3. Trigger 'Publish TypeScript Packages' workflow from this hotfix branch"
+        echo "  4. Merge hotfix back to main"
+    else
+        echo "  3. Trigger 'Publish TypeScript Packages' workflow in GitHub Actions"
+    fi
 
 [private]
 _check-ts-release:

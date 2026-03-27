@@ -61,44 +61,56 @@ just branch-info
 #   hotfix/*            → Urgent fixes from deployed stable tag
 ```
 
-### Publishing a Rust Release
+### Publishing a Rust Release (Mainline)
 ```bash
 # Prepare a new release (prompts for version, generates CHANGELOG, stages changes)
-# Run from main for both stable and prerelease versions (e.g. 1.2.3-beta.1)
+# Mainline path: run from main after release PR merge
 just release
 
 # Review the CHANGELOG.md, then commit
 git commit -m "chore: release vX.Y.Z"
 
 # Push to GitHub
-git push
+git push origin HEAD
 
-# Then manually trigger the "Publish Rust Crate" workflow on GitHub Actions
-# This will create git tags and publish to crates.io
+# Manually trigger "Publish Rust Crate" from main
+# Publish workflows run from the ref you dispatch
 ```
 
-### Publishing a TypeScript Release
+### Publishing a TypeScript Release (Mainline)
 ```bash
 # Prepare a new TypeScript SDK release (prompts for version)
+# Mainline path: run from main after release PR merge
 just release-ts
 
 # Commit and push
 git commit -m "chore: release ts-keychain vX.Y.Z"
-git push
+git push origin HEAD
 
-# Then manually trigger the "Publish TypeScript Packages (Manual)" workflow
+# Manually trigger "Publish TypeScript Packages (Manual)" from main
 ```
 
-### Creating a Hotfix
+### Creating a Hotfix Release
 ```bash
 # Create a hotfix branch from a deployed stable tag
 just hotfix              # prompts for name
 just hotfix fix-auth     # pass name directly
 just hotfix fix-auth v1.2.3 # optionally pass base tag
 
-# Apply fixes, then create PR to main
-# After merge, run 'just release' on main to publish
+# On hotfix/*: apply fixes and prepare release
+just release             # required for Rust publish
+just release-ts          # if TypeScript packages changed
+
+# Commit and push hotfix branch
+git push origin HEAD
+
+# Trigger publish workflows from hotfix/* before merge-back
+# Then open PR from hotfix/* to main and merge back
 ```
+
+Release skill references for agents:
+- `.claude/skills/release/SKILL.md`
+- `.claude/skills/complete-release/SKILL.md`
 
 ## Architecture
 

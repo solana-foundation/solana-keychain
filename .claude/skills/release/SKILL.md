@@ -10,6 +10,11 @@ description: >
 
 Prepare and publish a new release of solana-keychain via a PR-based flow.
 
+## Publish Paths
+
+- Mainline release: prepare release changes, open PR to `main`, merge, then publish from `main`.
+- Hotfix release: create `hotfix/*` from deployed tag, prepare release on `hotfix/*`, publish from `hotfix/*`, then merge back to `main`.
+
 ## Prerequisites
 
 | Tool | Install |
@@ -116,7 +121,7 @@ If the branch already existed from a previous session, switch to it and verify i
 
 ---
 
-## Step 7: Open PR
+## Step 7: Open PR to main
 
 ```bash
 gh pr create \
@@ -130,7 +135,7 @@ gh pr create \
 
 ## Merge
 
-A reviewer will run the \`complete-release\` skill to review CI, approve, squash-merge, and trigger the publish workflows.
+For mainline releases, a reviewer will run the \`complete-release\` skill to review CI, approve, squash-merge, and trigger publish workflows from \`main\`.
 EOF
 )"
 ```
@@ -143,6 +148,12 @@ For urgent fixes to a deployed stable version:
 
 ```bash
 just hotfix <fix-name>   # creates hotfix/<fix-name> from latest stable tag
-# apply fixes, push, open PR to main
-# after merge, run this release flow on main
+# apply fixes on hotfix/* and run release prep on hotfix/*
+just release             # required for Rust publish
+just release-ts          # if TypeScript packages changed
+# commit and push hotfix/*
+# publish from hotfix/* before merge-back
+# then open PR to main and merge hotfix back
 ```
+
+Hotfix patch releases are published from `hotfix/*` before merge-back to `main`.

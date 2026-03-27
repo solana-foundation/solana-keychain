@@ -1,14 +1,19 @@
 ---
 name: complete-release
 description: >
-  Finalize a solana-keychain release after the PR is approved: approve, squash-merge, and trigger
-  both publish workflows via gh CLI. Use when asked to "finalize release", "merge release PR",
-  "complete release", "publish packages", or "approve and merge release".
+  Finalize a mainline solana-keychain release after the PR is approved: approve, squash-merge, and
+  trigger both publish workflows from main via gh CLI. Use when asked to "finalize release",
+  "merge release PR", "complete release", "publish packages", or "approve and merge release".
 ---
 
 # Complete Release Skill
 
-This is the **reviewer** half of the release flow. Run this after the release PR has been reviewed and is ready to merge.
+This is the **reviewer** half of the mainline release flow. Run this after a release PR to `main` has been reviewed and is ready to merge.
+
+Notes:
+- This skill is mainline-only: it dispatches publish workflows from `main`.
+- Hotfix releases are published from `hotfix/*` before merge-back and are handled in `.claude/skills/release/SKILL.md`.
+- Publish workflows allow both `main` and `hotfix/*` refs.
 
 ## Prerequisites
 
@@ -47,7 +52,7 @@ gh pr merge <PR_NUMBER> --squash --delete-branch
 
 Wait for merge to complete before proceeding.
 
-## Step 4: Detect what changed and trigger publish workflows
+## Step 4: Detect what changed and trigger publish workflows from main
 
 Check which paths the merged PR touched, then trigger only the relevant workflow(s):
 
