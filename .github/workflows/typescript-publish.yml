@@ -12,7 +12,9 @@ on:
           - all
           - core
           - aws-kms
+          - cdp
           - crossmint
+          - dfns
           - fireblocks
           - gcp-kms
           - para
@@ -323,7 +325,9 @@ jobs:
             const packages = [
               '@solana/keychain-core',
               '@solana/keychain-aws-kms',
+              '@solana/keychain-cdp',
               '@solana/keychain-crossmint',
+              '@solana/keychain-dfns',
               '@solana/keychain-fireblocks',
               '@solana/keychain-gcp-kms',
               '@solana/keychain-para',
