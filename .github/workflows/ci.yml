@@ -7,7 +7,94 @@ on:
     branches: [main]
 
 jobs:
+  resolve-signers:
+    runs-on: ubuntu-latest
+    outputs:
+      rust_unit_backends_json: ${{ steps.resolve.outputs.rust_unit_backends_json }}
+      rust_unit_backend_count: ${{ steps.resolve.outputs.rust_unit_backend_count }}
+      rust_integration_tests_json: ${{ steps.resolve.outputs.rust_integration_tests_json }}
+      rust_integration_test_count: ${{ steps.resolve.outputs.rust_integration_test_count }}
+      rust_ci_features: ${{ steps.resolve.outputs.rust_ci_features }}
+    steps:
+      - name: Resolve enabled signers from repository variables
+        id: resolve
+        uses: actions/github-script@v7
+        env:
+          CI_SIGNER_MEMORY_ENABLED: ${{ vars.CI_SIGNER_MEMORY_ENABLED }}
+          CI_SIGNER_VAULT_ENABLED: ${{ vars.CI_SIGNER_VAULT_ENABLED }}
+          CI_SIGNER_PRIVY_ENABLED: ${{ vars.CI_SIGNER_PRIVY_ENABLED }}
+          CI_SIGNER_TURNKEY_ENABLED: ${{ vars.CI_SIGNER_TURNKEY_ENABLED }}
+          CI_SIGNER_AWS_KMS_ENABLED: ${{ vars.CI_SIGNER_AWS_KMS_ENABLED }}
+          CI_SIGNER_FIREBLOCKS_ENABLED: ${{ vars.CI_SIGNER_FIREBLOCKS_ENABLED }}
+          CI_SIGNER_GCP_KMS_ENABLED: ${{ vars.CI_SIGNER_GCP_KMS_ENABLED }}
+          CI_SIGNER_PARA_ENABLED: ${{ vars.CI_SIGNER_PARA_ENABLED }}
+          CI_SIGNER_CDP_ENABLED: ${{ vars.CI_SIGNER_CDP_ENABLED }}
+          CI_SIGNER_DFNS_ENABLED: ${{ vars.CI_SIGNER_DFNS_ENABLED }}
+          CI_SIGNER_CROSSMINT_ENABLED: ${{ vars.CI_SIGNER_CROSSMINT_ENABLED }}
+        with:
+          script: |
+            const parseVar = (name) => {
+              const raw = process.env[name];
+              if (raw !== 'true' && raw !== 'false') {
+                core.setFailed(
+                  `${name} must be set to the string 'true' or 'false' in repository Actions variables. Received: ${raw ?? 'undefined'}`
+                );
+                return false;
+              }
+              return raw === 'true';
+            };
+
+            const enabled = {
+              memory: parseVar('CI_SIGNER_MEMORY_ENABLED'),
+              vault: parseVar('CI_SIGNER_VAULT_ENABLED'),
+              privy: parseVar('CI_SIGNER_PRIVY_ENABLED'),
+              turnkey: parseVar('CI_SIGNER_TURNKEY_ENABLED'),
+              aws_kms: parseVar('CI_SIGNER_AWS_KMS_ENABLED'),
+              fireblocks: parseVar('CI_SIGNER_FIREBLOCKS_ENABLED'),
+              gcp_kms: parseVar('CI_SIGNER_GCP_KMS_ENABLED'),
+              para: parseVar('CI_SIGNER_PARA_ENABLED'),
+              cdp: parseVar('CI_SIGNER_CDP_ENABLED'),
+              dfns: parseVar('CI_SIGNER_DFNS_ENABLED'),
+              crossmint: parseVar('CI_SIGNER_CROSSMINT_ENABLED'),
+            };
+
+            const rustUnitOrder = [
+              'memory',
+              'vault',
+              'privy',
+              'turnkey',
+              'aws_kms',
+              'fireblocks',
+              'gcp_kms',
+              'cdp',
+              'para',
+              'dfns',
+              'crossmint',
+            ];
+            const rustUnitBackends = rustUnitOrder.filter((backend) => enabled[backend]);
+
+            const rustIntegrationMap = [
+              ['privy', 'test_privy_integration'],
+              ['turnkey', 'test_turnkey_integration'],
+              ['fireblocks', 'test_fireblocks_integration'],
+              ['aws_kms', 'test_aws_kms_integration'],
+              ['gcp_kms', 'test_gcp_kms_integration'],
+              ['dfns', 'test_dfns_integration'],
+              ['crossmint', 'test_crossmint_integration'],
+            ];
+            const rustIntegrationTests = rustIntegrationMap
+              .filter(([signer]) => enabled[signer])
+              .map(([, testName]) => testName);
+
+            core.setOutput('rust_unit_backends_json', JSON.stringify(rustUnitBackends));
+            core.setOutput('rust_unit_backend_count', String(rustUnitBackends.length));
+            core.setOutput('rust_integration_tests_json', JSON.stringify(rustIntegrationTests));
+            core.setOutput('rust_integration_test_count', String(rustIntegrationTests.length));
+            core.setOutput('rust_ci_features', rustUnitBackends.join(','));
+
   rust-test:
+    needs: resolve-signers
+    if: ${{ needs.resolve-signers.outputs.rust_unit_backend_count != '0' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -15,7 +102,7 @@ jobs:
     strategy:
       matrix:
         sdk_version: [v2, v3]
-        backend: [memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, dfns, crossmint, all]
+        backend: ${{ fromJSON(needs.resolve-signers.outputs.rust_unit_backends_json) }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -30,7 +117,8 @@ jobs:
           fi
 
   rust-integration-test:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
+    needs: resolve-signers
+    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) && needs.resolve-signers.outputs.rust_integration_test_count != '0' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -41,16 +129,7 @@ jobs:
     strategy:
       matrix:
         sdk_version: [v2, v3]
-        test:
-          [
-            test_privy_integration,
-            test_turnkey_integration,
-            test_fireblocks_integration,
-            test_aws_kms_integration,
-            test_gcp_kms_integration,
-            test_dfns_integration,
-            test_crossmint_integration,
-          ]
+        test: ${{ fromJSON(needs.resolve-signers.outputs.rust_integration_tests_json) }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -102,13 +181,16 @@ jobs:
           CROSSMINT_SIGNER: ${{ secrets.CROSSMINT_SIGNER }}
           SOLANA_RPC_URL: https://api.devnet.solana.com
         run: |
+          ci_features="${{ needs.resolve-signers.outputs.rust_ci_features }}"
           if [ "${{ matrix.sdk_version }}" = "v2" ]; then
-            cargo test --locked --no-default-features --features all,sdk-v2,unsafe-debug,integration-tests tests::${{ matrix.test }}::
+            cargo test --locked --no-default-features --features ${ci_features},sdk-v2,unsafe-debug,integration-tests tests::${{ matrix.test }}::
           else
-            cargo test --locked --no-default-features --features all,sdk-v3,unsafe-debug,integration-tests tests::${{ matrix.test }}::
+            cargo test --locked --no-default-features --features ${ci_features},sdk-v3,unsafe-debug,integration-tests tests::${{ matrix.test }}::
           fi
 
   rust-lint:
+    needs: resolve-signers
+    if: ${{ needs.resolve-signers.outputs.rust_unit_backend_count != '0' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -120,6 +202,6 @@ jobs:
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
       - name: Clippy SDK v2
-        run: cargo clippy --locked --all-targets --features all,sdk-v2,unsafe-debug,integration-tests -- -D warnings
+        run: cargo clippy --locked --all-targets --features ${{ needs.resolve-signers.outputs.rust_ci_features }},sdk-v2,unsafe-debug,integration-tests -- -D warnings
       - name: Clippy SDK v3
-        run: cargo clippy --locked --all-targets --no-default-features --features all,sdk-v3,unsafe-debug,integration-tests -- -D warnings
+        run: cargo clippy --locked --all-targets --no-default-features --features ${{ needs.resolve-signers.outputs.rust_ci_features }},sdk-v3,unsafe-debug,integration-tests -- -D warnings
