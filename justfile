@@ -244,7 +244,7 @@ release: _check-release-tools
         echo "  5. Trigger 'Publish TypeScript Packages' workflow from this hotfix branch (if needed)"
         echo "  6. Merge hotfix back to main"
     else
-        echo "  4. Create PR, merge, then trigger 'Publish Rust Crate' workflow"
+        echo "  4. Trigger 'Publish Rust Crate' workflow from main"
     fi
 
 # Start a hotfix branch from a deployed stable tag
