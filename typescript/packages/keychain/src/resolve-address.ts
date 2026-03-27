@@ -1,4 +1,5 @@
 import { type Address, assertIsAddress } from '@solana/addresses';
+import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 
 import { createSigner } from './create-signer.js';
 import type { KeychainSignerConfig } from './types.js';
@@ -50,7 +51,11 @@ export async function resolveAddress(config: KeychainSignerConfig): Promise<Addr
             return signer.address;
         }
 
-        default:
-            throw new Error(`Unknown backend: ${String((config as { backend: string }).backend)}`);
+        default: {
+            const _exhaustive: never = config;
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: `Unknown backend: ${String((_exhaustive as { backend: string }).backend)}`,
+            });
+        }
     }
 }

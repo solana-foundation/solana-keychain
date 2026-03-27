@@ -1,6 +1,7 @@
 import { createAwsKmsSigner } from '@solana/keychain-aws-kms';
 import { createCdpSigner } from '@solana/keychain-cdp';
 import type { SolanaSigner } from '@solana/keychain-core';
+import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 import { createCrossmintSigner } from '@solana/keychain-crossmint';
 import { createDfnsSigner } from '@solana/keychain-dfns';
 import { createFireblocksSigner } from '@solana/keychain-fireblocks';
@@ -54,7 +55,11 @@ export async function createSigner(config: KeychainSignerConfig): Promise<Solana
             return createTurnkeySigner(stripBackend(config));
         case 'vault':
             return createVaultSigner(stripBackend(config));
-        default:
-            throw new Error(`Unknown backend: ${String((config as { backend: string }).backend)}`);
+        default: {
+            const _exhaustive: never = config;
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: `Unknown backend: ${String((_exhaustive as { backend: string }).backend)}`,
+            });
+        }
     }
 }

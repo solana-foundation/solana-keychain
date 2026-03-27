@@ -39,11 +39,12 @@
         "build": "tsc --build",
         "clean": "rm -rf dist *.tsbuildinfo",
         "prepack": "pnpm run build",
-        "test": "pnpm run typecheck",
+        "test": "vitest run && pnpm run typecheck",
         "typecheck": "tsc --noEmit",
         "test:treeshakability": "agadoo dist/index.js"
     },
     "dependencies": {
+        "@solana/addresses": "^6.0.1",
         "@solana/keychain-core": "workspace:*",
         "@solana/keychain-aws-kms": "workspace:*",
         "@solana/keychain-cdp": "workspace:*",
