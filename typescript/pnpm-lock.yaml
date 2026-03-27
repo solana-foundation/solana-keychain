@@ -67,74 +67,71 @@ importers:
       '@aws-sdk/client-kms':
         specifier: ^3.1009.0
         version: 3.1009.0
-      '@solana/addresses':
-        specifier: ^6.0.1
-        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-      '@solana/codecs-strings':
-        specifier: ^6.0.1
-        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/keychain-core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      '@solana-program/memo':
+        specifier: ^0.11.0
+        version: 0.11.0(@solana/kit@6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10))
+      '@solana/addresses':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/keychain-test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
       '@solana/keys':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/kit':
+        specifier: ^6.0.1
+        version: 6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@solana/signers':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/transactions':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-    devDependencies:
-      '@solana-program/memo':
-        specifier: ^0.11.0
-        version: 0.11.0(@solana/kit@6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10))
-      '@solana/keychain-test-utils':
-        specifier: workspace:*
-        version: link:../test-utils
-      '@solana/kit':
-        specifier: ^6.0.1
-        version: 6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
 
   packages/cdp:
     dependencies:
+      '@solana/keychain-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@solana-program/memo':
+        specifier: ^0.11.0
+        version: 0.11.0(@solana/kit@6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10))
       '@solana/addresses':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/codecs-strings':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-      '@solana/keychain-core':
+      '@solana/keychain-test-utils':
         specifier: workspace:*
-        version: link:../core
+        version: link:../test-utils
       '@solana/keys':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/kit':
+        specifier: ^6.0.1
+        version: 6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@solana/signers':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/transactions':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-    devDependencies:
-      '@solana-program/memo':
-        specifier: ^0.11.0
-        version: 0.11.0(@solana/kit@6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10))
-      '@solana/keychain-test-utils':
-        specifier: workspace:*
-        version: link:../test-utils
-      '@solana/kit':
-        specifier: ^6.0.1
-        version: 6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
 
   packages/core:
-    dependencies:
+    devDependencies:
       '@solana/addresses':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
@@ -153,62 +150,46 @@ importers:
       '@solana/transactions':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-    devDependencies:
       vitest:
         specifier: ^4.0.10
         version: 4.0.10(@types/node@24.10.1)(tsx@4.20.6)
 
   packages/dfns:
     dependencies:
+      '@solana/keychain-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
       '@solana/addresses':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/codecs-strings':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-      '@solana/keychain-core':
+      '@solana/keychain-test-utils':
         specifier: workspace:*
-        version: link:../core
+        version: link:../test-utils
       '@solana/keys':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/kit':
+        specifier: ^6.0.1
+        version: 6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@solana/signers':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/transactions':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-    devDependencies:
-      '@solana/keychain-test-utils':
-        specifier: workspace:*
-        version: link:../test-utils
-      '@solana/kit':
-        specifier: ^6.0.1
-        version: 6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
 
   packages/fireblocks:
     dependencies:
-      '@solana/addresses':
-        specifier: ^6.0.1
-        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-      '@solana/codecs-strings':
-        specifier: ^6.0.1
-        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/keychain-core':
         specifier: workspace:*
         version: link:../core
-      '@solana/keys':
-        specifier: ^6.0.1
-        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-      '@solana/signers':
-        specifier: ^6.0.1
-        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-      '@solana/transactions':
-        specifier: ^6.0.1
-        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       jose:
         specifier: ^6.1.3
         version: 6.1.3
@@ -216,12 +197,27 @@ importers:
       '@solana-program/memo':
         specifier: ^0.11.0
         version: 0.11.0(@solana/kit@6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10))
+      '@solana/addresses':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/codecs-strings':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/keychain-test-utils':
         specifier: workspace:*
         version: link:../test-utils
+      '@solana/keys':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/kit':
         specifier: ^6.0.1
         version: 6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      '@solana/signers':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/transactions':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
@@ -231,37 +227,46 @@ importers:
       '@google-cloud/kms':
         specifier: ^5.4.0
         version: 5.4.0
-      '@solana/addresses':
-        specifier: ^6.0.1
-        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/keychain-core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      '@solana-program/memo':
+        specifier: ^0.11.0
+        version: 0.11.0(@solana/kit@6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10))
+      '@solana/addresses':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/keychain-test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
       '@solana/keys':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/kit':
+        specifier: ^6.0.1
+        version: 6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@solana/signers':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/transactions':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-    devDependencies:
-      '@solana-program/memo':
-        specifier: ^0.11.0
-        version: 0.11.0(@solana/kit@6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10))
-      '@solana/keychain-test-utils':
-        specifier: workspace:*
-        version: link:../test-utils
-      '@solana/kit':
-        specifier: ^6.0.1
-        version: 6.0.1(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
 
   packages/keychain:
     dependencies:
+      '@solana/addresses':
+        specifier: '>=6.0.1'
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/codecs-core':
+        specifier: '>=6.0.1'
+        version: 6.0.1(typescript@5.9.3)
+      '@solana/codecs-strings':
+        specifier: '>=6.0.1'
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/keychain-aws-kms':
         specifier: workspace:*
         version: link:../aws-kms
@@ -292,18 +297,31 @@ importers:
       '@solana/keychain-vault':
         specifier: workspace:*
         version: link:../vault
+      '@solana/keys':
+        specifier: '>=6.0.1'
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/signers':
+        specifier: '>=6.0.1'
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/transactions':
+        specifier: '>=6.0.1'
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
 
   packages/para:
     dependencies:
+      '@solana/keychain-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
       '@solana/addresses':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/codecs-strings':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-      '@solana/keychain-core':
+      '@solana/keychain-test-utils':
         specifier: workspace:*
-        version: link:../core
+        version: link:../test-utils
       '@solana/keys':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
@@ -313,16 +331,16 @@ importers:
       '@solana/transactions':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-    devDependencies:
-      '@solana/keychain-test-utils':
-        specifier: workspace:*
-        version: link:../test-utils
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
 
   packages/privy:
     dependencies:
+      '@solana/keychain-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
       '@solana/addresses':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
@@ -332,25 +350,21 @@ importers:
       '@solana/codecs-strings':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-      '@solana/keychain-core':
+      '@solana/keychain-test-utils':
         specifier: workspace:*
-        version: link:../core
+        version: link:../test-utils
       '@solana/keys':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/nominal-types':
+        specifier: ^6.0.1
+        version: 6.0.1(typescript@5.9.3)
       '@solana/signers':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/transactions':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-    devDependencies:
-      '@solana/keychain-test-utils':
-        specifier: workspace:*
-        version: link:../test-utils
-      '@solana/nominal-types':
-        specifier: ^6.0.1
-        version: 6.0.1(typescript@5.9.3)
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
@@ -379,6 +393,10 @@ importers:
       '@noble/curves':
         specifier: ^2.0.1
         version: 2.0.1
+      '@solana/keychain-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
       '@solana/addresses':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
@@ -388,9 +406,9 @@ importers:
       '@solana/codecs-strings':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-      '@solana/keychain-core':
+      '@solana/keychain-test-utils':
         specifier: workspace:*
-        version: link:../core
+        version: link:../test-utils
       '@solana/keys':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
@@ -400,16 +418,16 @@ importers:
       '@solana/transactions':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-    devDependencies:
-      '@solana/keychain-test-utils':
-        specifier: workspace:*
-        version: link:../test-utils
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
 
   packages/vault:
     dependencies:
+      '@solana/keychain-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
       '@solana/addresses':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
@@ -419,25 +437,21 @@ importers:
       '@solana/codecs-strings':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-      '@solana/keychain-core':
+      '@solana/keychain-test-utils':
         specifier: workspace:*
-        version: link:../core
+        version: link:../test-utils
       '@solana/keys':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/nominal-types':
+        specifier: ^6.0.1
+        version: 6.0.1(typescript@5.9.3)
       '@solana/signers':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/transactions':
         specifier: ^6.0.1
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
-    devDependencies:
-      '@solana/keychain-test-utils':
-        specifier: workspace:*
-        version: link:../test-utils
-      '@solana/nominal-types':
-        specifier: ^6.0.1
-        version: 6.0.1(typescript@5.9.3)
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3

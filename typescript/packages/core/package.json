@@ -35,15 +35,21 @@
         "typecheck": "tsc --noEmit",
         "test:treeshakability": "agadoo dist/index.js"
     },
-    "dependencies": {
+    "peerDependencies": {
+        "@solana/addresses": ">=6.0.1",
+        "@solana/codecs-core": ">=6.0.1",
+        "@solana/codecs-strings": ">=6.0.1",
+        "@solana/keys": ">=6.0.1",
+        "@solana/signers": ">=6.0.1",
+        "@solana/transactions": ">=6.0.1"
+    },
+    "devDependencies": {
         "@solana/addresses": "^6.0.1",
         "@solana/codecs-core": "^6.0.1",
         "@solana/codecs-strings": "^6.0.1",
         "@solana/keys": "^6.0.1",
         "@solana/signers": "^6.0.1",
-        "@solana/transactions": "^6.0.1"
-    },
-    "devDependencies": {
+        "@solana/transactions": "^6.0.1",
         "vitest": "^4.0.10"
     },
     "publishConfig": {
