@@ -17,6 +17,7 @@ jobs:
       rust_ci_features: ${{ steps.resolve.outputs.rust_ci_features }}
       ts_live_packages_space: ${{ steps.resolve.outputs.ts_live_packages_space }}
       ts_live_package_count: ${{ steps.resolve.outputs.ts_live_package_count }}
+      aws_kms_enabled: ${{ steps.resolve.outputs.aws_kms_enabled }}
     steps:
       - name: Resolve enabled signers from repository variables
         id: resolve
@@ -74,6 +75,7 @@ jobs:
             ];
 
             const rustLiveTestMap = [
+              // gcp_kms omitted: Workload Identity OIDC is not available in the fork external-live environment.
               ['privy', 'test_privy_integration'],
               ['turnkey', 'test_turnkey_integration'],
               ['fireblocks', 'test_fireblocks_integration'],
@@ -85,6 +87,7 @@ jobs:
             ];
 
             const tsLivePackageMap = [
+              // gcp-kms omitted: Workload Identity OIDC is not available in the fork external-live environment.
               ['privy', 'privy'],
               ['turnkey', 'turnkey'],
               ['fireblocks', 'fireblocks'],
@@ -108,6 +111,7 @@ jobs:
             core.setOutput('rust_ci_features', rustFeatures.join(','));
             core.setOutput('ts_live_packages_space', tsPackages.join(' '));
             core.setOutput('ts_live_package_count', String(tsPackages.length));
+            core.setOutput('aws_kms_enabled', String(enabled.aws_kms));
 
   fork-external-live-manual:
     needs: resolve-signers
@@ -154,27 +158,33 @@ jobs:
             core.info(`Running external live tests for fork PR #${pr.number} at ${pr.head.sha}.`);
 
       - name: Checkout PR head SHA
+        if: ${{ needs.resolve-signers.outputs.rust_live_test_count != '0' || needs.resolve-signers.outputs.ts_live_package_count != '0' }}
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.pr.outputs.head_sha }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - if: ${{ needs.resolve-signers.outputs.rust_live_test_count != '0' }}
+        uses: dtolnay/rust-toolchain@stable
 
-      - uses: actions/setup-node@v4
+      - if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - uses: pnpm/action-setup@v2
+      - if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
+        uses: pnpm/action-setup@v2
         with:
           version: 10.14.0
 
       - name: Configure AWS credentials
+        if: ${{ needs.resolve-signers.outputs.aws_kms_enabled == 'true' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_KMS_REGION }}
 
       - name: Run Rust external live integration tests
+        if: ${{ needs.resolve-signers.outputs.rust_live_test_count != '0' }}
         working-directory: rust
         env:
           RUST_LIVE_TESTS: ${{ needs.resolve-signers.outputs.rust_live_tests_space }}
@@ -231,10 +241,12 @@ jobs:
           done
 
       - name: Install TypeScript dependencies
+        if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
         working-directory: typescript
         run: pnpm install
 
       - name: Build TypeScript packages
+        if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
         env:
           TS_LIVE_PACKAGES: ${{ needs.resolve-signers.outputs.ts_live_packages_space }}
         working-directory: typescript
@@ -250,6 +262,7 @@ jobs:
           done
 
       - name: Run TypeScript external live integration tests
+        if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
         working-directory: typescript
         env:
           TS_LIVE_PACKAGES: ${{ needs.resolve-signers.outputs.ts_live_packages_space }}
