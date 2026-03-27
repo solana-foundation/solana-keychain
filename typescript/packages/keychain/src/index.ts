@@ -1,6 +1,22 @@
 // Core types and utilities (flat export)
 export * from '@solana/keychain-core';
 
+// Unified signer factory and config union
+export { createSigner } from './create-signer.js';
+export type { BackendName, KeychainSignerConfig } from './types.js';
+
+// Individual config types (flat re-exports)
+export type { AwsKmsSignerConfig } from '@solana/keychain-aws-kms';
+export type { CdpSignerConfig } from '@solana/keychain-cdp';
+export type { CrossmintSignerConfig } from '@solana/keychain-crossmint';
+export type { DfnsSignerConfig } from '@solana/keychain-dfns';
+export type { FireblocksSignerConfig } from '@solana/keychain-fireblocks';
+export type { GcpKmsSignerConfig } from '@solana/keychain-gcp-kms';
+export type { ParaSignerConfig } from '@solana/keychain-para';
+export type { PrivySignerConfig } from '@solana/keychain-privy';
+export type { TurnkeySignerConfig } from '@solana/keychain-turnkey';
+export type { VaultSignerConfig } from '@solana/keychain-vault';
+
 // Signer implementations (namespaced to avoid conflicts)
 export * as awsKms from '@solana/keychain-aws-kms';
 export * as cdp from '@solana/keychain-cdp';
