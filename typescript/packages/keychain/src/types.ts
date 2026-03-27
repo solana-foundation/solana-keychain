@@ -9,19 +9,6 @@ import type { PrivySignerConfig } from '@solana/keychain-privy';
 import type { TurnkeySignerConfig } from '@solana/keychain-turnkey';
 import type { VaultSignerConfig } from '@solana/keychain-vault';
 
-/** String literal union of all supported backend names. */
-export type BackendName =
-    | 'aws-kms'
-    | 'cdp'
-    | 'crossmint'
-    | 'dfns'
-    | 'fireblocks'
-    | 'gcp-kms'
-    | 'para'
-    | 'privy'
-    | 'turnkey'
-    | 'vault';
-
 /**
  * Discriminated union of all signer backend configurations.
  * The `backend` field narrows the type to the correct config shape.
@@ -37,3 +24,6 @@ export type KeychainSignerConfig =
     | (PrivySignerConfig & { backend: 'privy' })
     | (TurnkeySignerConfig & { backend: 'turnkey' })
     | (VaultSignerConfig & { backend: 'vault' });
+
+/** String literal union of all supported backend names, derived from {@link KeychainSignerConfig}. */
+export type BackendName = KeychainSignerConfig['backend'];

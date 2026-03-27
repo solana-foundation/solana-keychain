@@ -1,4 +1,4 @@
-import type { Address } from '@solana/addresses';
+import { type Address, assertIsAddress } from '@solana/addresses';
 
 import { createSigner } from './create-signer.js';
 import type { KeychainSignerConfig } from './types.js';
@@ -32,11 +32,13 @@ export async function resolveAddress(config: KeychainSignerConfig): Promise<Addr
         case 'gcp-kms':
         case 'turnkey':
         case 'vault':
-            return config.publicKey as Address;
+            assertIsAddress(config.publicKey);
+            return config.publicKey;
 
         // CDP provides address directly in config
         case 'cdp':
-            return config.address as Address;
+            assertIsAddress(config.address);
+            return config.address;
 
         // Backends that fetch the address from a remote API
         case 'crossmint':
