@@ -46,7 +46,9 @@ env:
   PUBLISH_PACKAGES: |
     core
     aws-kms
+    cdp
     crossmint
+    dfns
     fireblocks
     gcp-kms
     para
