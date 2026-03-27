@@ -42,16 +42,24 @@
     },
     "dependencies": {
         "@noble/curves": "^2.0.1",
-        "@solana/keychain-core": "workspace:*",
+        "@solana/keychain-core": "workspace:*"
+    },
+    "peerDependencies": {
+        "@solana/addresses": ">=6.0.1",
+        "@solana/codecs-core": ">=6.0.1",
+        "@solana/codecs-strings": ">=6.0.1",
+        "@solana/keys": ">=6.0.1",
+        "@solana/signers": ">=6.0.1",
+        "@solana/transactions": ">=6.0.1"
+    },
+    "devDependencies": {
         "@solana/addresses": "^6.0.1",
         "@solana/codecs-core": "^6.0.1",
         "@solana/codecs-strings": "^6.0.1",
+        "@solana/keychain-test-utils": "workspace:*",
         "@solana/keys": "^6.0.1",
         "@solana/signers": "^6.0.1",
-        "@solana/transactions": "^6.0.1"
-    },
-    "devDependencies": {
-        "@solana/keychain-test-utils": "workspace:*",
+        "@solana/transactions": "^6.0.1",
         "dotenv": "^17.2.3"
     },
     "publishConfig": {
