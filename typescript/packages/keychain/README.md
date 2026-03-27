@@ -15,7 +15,7 @@ This installs all signer implementations. For a smaller bundle, install individu
 - `@solana/keychain-crossmint` - Crossmint signer
 - `@solana/keychain-dfns` - Dfns signer
 - `@solana/keychain-fireblocks` - Fireblocks signer
-- `@solana/keychain-gcp-kms` - Google Cloud KMS signer
+- `@solana/keychain-gcp-kms` - GCP KMS signer
 - `@solana/keychain-para` - Para MPC signer
 - `@solana/keychain-privy` - Privy signer
 - `@solana/keychain-turnkey` - Turnkey signer
@@ -23,47 +23,87 @@ This installs all signer implementations. For a smaller bundle, install individu
 
 ## Usage
 
-### Direct Signer Imports
+### Unified Factory (Recommended)
 
-The main signer classes are exported directly for convenience:
+Use `createSigner` with a discriminated config to create any backend:
 
 ```typescript
-import {
-    AwsKmsSigner,
-    CdpSigner,
-    CrossmintSigner,
-    DfnsSigner,
-    FireblocksSigner,
-    GcpKmsSigner,
-    ParaSigner,
-    PrivySigner,
-    TurnkeySigner,
-    VaultSigner,
-} from '@solana/keychain';
+import { createSigner } from '@solana/keychain';
 
-// Use any signer directly
-const signer = new VaultSigner({
+const signer = await createSigner({
+    backend: 'privy',
+    appId: 'your-app-id',
+    appSecret: 'your-app-secret',
+    walletId: 'your-wallet-id',
+});
+
+await signer.signTransactions([transaction]);
+```
+
+The `backend` field determines which signer is created. TypeScript narrows the config type automatically — you get full autocomplete for each backend's required fields.
+
+### Resolve Address Without Signing
+
+Use `resolveAddress` to get a signer's Solana address without initializing the full signing pipeline:
+
+```typescript
+import { resolveAddress } from '@solana/keychain';
+
+// Sync backends (AWS KMS, GCP KMS, Turnkey, Vault, CDP) return instantly
+const address = await resolveAddress({
+    backend: 'vault',
     vaultAddr: 'https://vault.example.com',
     vaultToken: 'hvs.xxx',
-    keyName: 'my-solana-key',
-    publicKey: 'YourSolanaPublicKey',
+    keyName: 'my-key',
+    publicKey: '4Nd1m...',
+});
+
+// Async backends (Privy, Para, Fireblocks, Crossmint, Dfns) fetch from the API
+const address2 = await resolveAddress({
+    backend: 'privy',
+    appId: '...',
+    appSecret: '...',
+    walletId: '...',
+});
+```
+
+### Config Types
+
+The `KeychainSignerConfig` discriminated union and individual config types are exported for building config management, CLIs, or dashboards:
+
+```typescript
+import type { KeychainSignerConfig, BackendName, PrivySignerConfig } from '@solana/keychain';
+
+// BackendName = 'aws-kms' | 'cdp' | 'crossmint' | 'dfns' | 'fireblocks' | 'gcp-kms' | 'para' | 'privy' | 'turnkey' | 'vault'
+
+function loadConfig(json: unknown): KeychainSignerConfig {
+    // Parse and validate your config...
+}
+```
+
+### Direct Factory Imports
+
+Each backend also exports its own factory function:
+
+```typescript
+import { createPrivySigner } from '@solana/keychain';
+
+const signer = await createPrivySigner({
+    appId: '...',
+    appSecret: '...',
+    walletId: '...',
 });
 ```
 
 ### Namespaced Imports
 
-Each signer package is also available under its namespace for accessing types and utilities:
+Each signer package is available under its namespace for accessing types and utilities:
 
 ```typescript
-import { awsKms, cdp, crossmint, dfns, fireblocks, gcpKms, para, privy, turnkey, vault } from '@solana/keychain';
+import { fireblocks, vault } from '@solana/keychain';
 
-// Access types
 type VaultConfig = vault.VaultSignerConfig;
-type CrossmintConfig = crossmint.CrossmintSignerConfig;
 type FireblocksStatus = fireblocks.FireblocksTransactionStatus;
-
-// Or use signers via namespace
-const signer = new vault.VaultSigner({ ... });
 ```
 
 ### Core Utilities
@@ -71,9 +111,8 @@ const signer = new vault.VaultSigner({ ... });
 Core types and utilities from `@solana/keychain-core` are re-exported:
 
 ```typescript
-import { SignerErrorCode, SolanaSigner } from '@solana/keychain';
+import { SignerErrorCode, type SolanaSigner } from '@solana/keychain';
 
-// Use error codes
 try {
     await signer.signMessages([message]);
 } catch (error) {
@@ -85,22 +124,22 @@ try {
 
 ## Available Signers
 
-| Signer |  Package |
-|--------|----------|
-| `AwsKmsSigner` | [@solana/keychain-aws-kms](../aws-kms/README.md) |
-| `CdpSigner` | [@solana/keychain-cdp](../cdp/README.md) |
-| `CrossmintSigner` | [@solana/keychain-crossmint](../crossmint/README.md) |
-| `DfnsSigner` | [@solana/keychain-dfns](../dfns/README.md) |
-| `FireblocksSigner` | [@solana/keychain-fireblocks](../fireblocks/README.md) |
-| `GcpKmsSigner` | [@solana/keychain-gcp-kms](../gcp-kms/README.md) |
-| `ParaSigner` | [@solana/keychain-para](../para/README.md) |
-| `PrivySigner` | [@solana/keychain-privy](../privy/README.md) |
-| `TurnkeySigner` | [@solana/keychain-turnkey](../turnkey/README.md) |
-| `VaultSigner` | [@solana/keychain-vault](../vault/README.md) |
+| Backend | Package | Address Source |
+|---------|---------|---------------|
+| `aws-kms` | [@solana/keychain-aws-kms](../aws-kms/README.md) | Config (`publicKey`) |
+| `cdp` | [@solana/keychain-cdp](../cdp/README.md) | Config (`address`) |
+| `crossmint` | [@solana/keychain-crossmint](../crossmint/README.md) | API |
+| `dfns` | [@solana/keychain-dfns](../dfns/README.md) | API |
+| `fireblocks` | [@solana/keychain-fireblocks](../fireblocks/README.md) | API |
+| `gcp-kms` | [@solana/keychain-gcp-kms](../gcp-kms/README.md) | Config (`publicKey`) |
+| `para` | [@solana/keychain-para](../para/README.md) | API |
+| `privy` | [@solana/keychain-privy](../privy/README.md) | API |
+| `turnkey` | [@solana/keychain-turnkey](../turnkey/README.md) | Config (`publicKey`) |
+| `vault` | [@solana/keychain-vault](../vault/README.md) | Config (`publicKey`) |
 
 ## Common Interface
 
-All signers are compatible with the `@solana/kit` and `@solana/signers` libraries and implement the `SolanaSigner` interface:
+All signers implement `SolanaSigner`, which is compatible with `@solana/kit` and `@solana/signers`:
 
 ```typescript
 interface SolanaSigner<TAddress extends string = string> {
@@ -108,15 +147,6 @@ interface SolanaSigner<TAddress extends string = string> {
     signMessages(messages: SignableMessage[]): Promise<SignatureDictionary[]>;
     signTransactions(transactions: Transaction[]): Promise<SignatureDictionary[]>;
     isAvailable(): Promise<boolean>;
-}
-```
-
-This allows you to write code that works with any signer:
-
-```typescript
-async function signAndSend(signer: SolanaSigner, transaction: Transaction) {
-    const [signatures] = await signer.signTransactions([transaction]);
-    // ... send transaction
 }
 ```
 
