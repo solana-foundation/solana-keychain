@@ -42,7 +42,7 @@
   "prettier": "@solana/prettier-config-solana",
   "pnpm": {
     "overrides": {
-      "@tootallnate/once": "3.0.1",
+      "http-proxy-agent@5.0.0>@tootallnate/once": "3.0.1",
       "ajv@^6.0.0": "6.14.0",
       "bn.js@^5.0.0": "5.2.3",
       "brace-expansion@^1.0.0": "1.1.13",
