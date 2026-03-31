@@ -11,14 +11,13 @@ vi.mock('@solana/keychain-core', async importOriginal => {
 });
 
 const mockGetRequestHeaders = vi.fn();
-const mockGetClient = vi.fn();
 const mockFetch = vi.fn();
 const originalFetch = globalThis.fetch;
 
 vi.mock('google-auth-library', () => {
     return {
         GoogleAuth: class {
-            getClient = mockGetClient;
+            getRequestHeaders = mockGetRequestHeaders;
         },
     };
 });
@@ -60,8 +59,7 @@ describe('GcpKmsSigner', () => {
     beforeEach(() => {
         vi.clearAllMocks();
 
-        mockGetRequestHeaders.mockResolvedValue({ authorization: 'Bearer test-token' });
-        mockGetClient.mockResolvedValue({ getRequestHeaders: mockGetRequestHeaders });
+        mockGetRequestHeaders.mockResolvedValue(new Headers({ authorization: 'Bearer test-token' }));
     });
 
     afterAll(() => {
@@ -174,7 +172,6 @@ describe('GcpKmsSigner', () => {
 
             expect(result).toHaveLength(1);
             expect(result[0]?.[signer.address]).toBeDefined();
-            expect(mockGetClient).toHaveBeenCalledTimes(1);
             expect(mockGetRequestHeaders).toHaveBeenCalledWith(SIGN_ENDPOINT);
             expect(mockFetch).toHaveBeenCalledTimes(1);
 

@@ -122,21 +122,12 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
     }
 
     private async authorizedFetch(url: string, init: RequestInit): Promise<Response> {
-        const authClient = await this.auth.getClient();
-        const authHeaders = await authClient.getRequestHeaders(url);
+        const authHeaders = await this.auth.getRequestHeaders(url);
         const headers = new Headers(init.headers);
 
-        if (authHeaders instanceof Headers) {
-            authHeaders.forEach((value, key) => {
-                headers.set(key, value);
-            });
-        } else {
-            for (const [key, value] of Object.entries(authHeaders)) {
-                if (typeof value === 'string') {
-                    headers.set(key, value);
-                }
-            }
-        }
+        authHeaders.forEach((value, key) => {
+            headers.set(key, value);
+        });
 
         if (init.body && !headers.has('content-type')) {
             headers.set('content-type', 'application/json');
