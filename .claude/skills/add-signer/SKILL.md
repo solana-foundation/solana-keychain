@@ -18,6 +18,11 @@ Orchestrate adding a new signing backend to solana-keychain. Delegate to existin
 - **Most recent Rust signer**: `rust/src/para/` (use as pattern)
 - **Most recent TS signer**: `typescript/packages/para/` (use as pattern)
 - **Trait definition (source of truth)**: `rust/src/traits.rs`
+- **Shared HTTP config**: `rust/src/http_client_config.rs`
+- **Transaction utilities**: `rust/src/transaction_util.rs`
+- **Unified TS factory**: `typescript/packages/keychain/src/create-signer.ts`
+- **TS address resolver**: `typescript/packages/keychain/src/resolve-address.ts`
+- **TS config union**: `typescript/packages/keychain/src/types.ts`
 
 ## Step 1: Gather Information
 
@@ -54,11 +59,10 @@ Read `docs/ADDING_SIGNERS.md` for detailed code templates. Read `rust/src/para/m
 2. Re-export signer type (`pub use <name>::<Name>Signer`)
 3. `Signer` enum variant
 4. Factory method on `impl Signer` (`from_<name>`)
-5. **All 5 match arms** in `impl SolanaSigner for Signer`:
+5. **All 4 match arms** in `impl SolanaSigner for Signer`:
    - `pubkey()`
    - `sign_transaction()`
    - `sign_message()`
-   - `sign_partial_transaction()`
    - `is_available()`
 6. Add feature to `compile_error!` cfg gate (search for `compile_error!`)
 
@@ -66,19 +70,22 @@ Read `docs/ADDING_SIGNERS.md` for detailed code templates. Read `rust/src/para/m
 
 ### Critical Gotchas
 
-- **5 trait methods**: Always read `rust/src/traits.rs` for the current trait definition — it is the source of truth.
-- **Return type**: `sign_transaction` and `sign_partial_transaction` return `SignedTransaction = (String, Signature)` — a tuple of base64-encoded transaction + signature.
+- **4 trait methods**: Always read `rust/src/traits.rs` for the current trait definition — it is the source of truth. The trait has `pubkey()`, `sign_transaction()`, `sign_message()`, and `is_available()`.
+- **Return type**: `sign_transaction` returns `SignTransactionResult` (an enum of `Complete(SignedTransaction)` or `Partial(SignedTransaction)`). Use `TransactionUtil::classify_signed_transaction()` from `rust/src/transaction_util.rs` to classify the result.
+- **Shared utilities**: Use `TransactionUtil::add_signature_to_transaction()` and `TransactionUtil::serialize_transaction()` instead of implementing your own.
 - **SDK adapter**: Import types from `crate::sdk_adapter`, not `solana_sdk` directly. The project supports both SDK v2 and v3 via an adapter layer.
-- **`sign_partial_transaction`**: Serialize with `requireAllSignatures: false`. See existing signers (e.g., `rust/src/para/mod.rs`) for the pattern.
+- **HTTPS enforcement**: Remote signers must use `reqwest::ClientBuilder::https_only(true)` gated behind `#[cfg(not(test))]` for wiremock compatibility.
+- **HTTP timeouts**: Accept optional `HttpClientConfig` from `crate::http_client_config` for request/connect timeouts (defaults: 30s/5s).
+- **Error safety**: Never use `.expect()` or `.unwrap()` on untrusted API responses. Both `Display` and `Debug` on `SignerError` are redacted — keep error messages generic.
 
 ### Signer Patterns
 
 **Sync constructor** (public key provided upfront): Memory, Vault, Turnkey, CDP
 ```
-pub fn new(..., public_key: String) -> Result<Self, SignerError>
+pub fn new(..., public_key: String, http_config: Option<HttpClientConfig>) -> Result<Self, SignerError>
 ```
 
-**Async init** (public key fetched from API): Privy, Fireblocks, Dfns, Para
+**Async init** (public key fetched from API): Privy, Fireblocks, Dfns, Para, Crossmint
 ```
 pub fn new(...) -> Self  // or Result<Self, SignerError>
 pub async fn init(&mut self) -> Result<(), SignerError>  // fetches pubkey
@@ -89,6 +96,7 @@ let mut signer = <Name>Signer::new(config);
 signer.init().await?;
 Ok(Self::<Name>(signer))
 ```
+**Important**: Use `Option<Pubkey>` (not `Pubkey::default()`) for the public key field before `init()`. Return `SignerError::ConfigError` from signing methods if `init()` hasn't been called.
 
 **Async constructor** (no separate init step): AWS KMS, GCP KMS
 ```
@@ -101,14 +109,25 @@ pub struct <Name>SignerConfig { ... }
 pub fn new(config: <Name>SignerConfig) -> Self
 ```
 
+**HTTP client pattern** (all remote signers):
+```rust
+let http = http_config.unwrap_or_default();
+let builder = reqwest::Client::builder()
+    .timeout(http.resolved_request_timeout())
+    .connect_timeout(http.resolved_connect_timeout());
+#[cfg(not(test))]
+let builder = builder.https_only(true);
+let client = builder.build()?;
+```
+
 ## Step 3: Rust Tests
 
 ### Unit Tests (wiremock)
 Add `#[cfg(test)] mod tests` at the bottom of `mod.rs`. Use `wiremock::MockServer` to mock HTTP endpoints. Cover:
 - Constructor validation (valid + invalid inputs)
 - `sign_message` success
-- `sign_transaction` success
-- Error cases (401, malformed response)
+- `sign_transaction` success (verify `SignTransactionResult::Complete` vs `Partial`)
+- Error cases (401, malformed response) — assert error type only, not error message text
 - `is_available` success + failure
 
 ### Integration Tests
@@ -144,9 +163,15 @@ Also create: `package.json`, `tsconfig.json`, `README.md`
 
 ### Update Umbrella Package: `typescript/packages/keychain/`
 
-- `src/index.ts` — Add namespace export, factory function re-export, and class re-export
+6 files to modify:
+- `src/types.ts` — Add `YourSignerConfig` to `KeychainSignerConfig` discriminated union with `& { backend: '<name>' }`
+- `src/create-signer.ts` — Import `create<Name>Signer`, add switch case
+- `src/resolve-address.ts` — Add to fast-path (if config has publicKey) or fetch-path (if async init) switch case
+- `src/index.ts` — Add 4 export lines: config type, namespace, factory fn, deprecated class
 - `package.json` — Add `@solana/keychain-<name>: "workspace:*"` dependency
 - `tsconfig.json` — Add `{ "path": "../<name>" }` reference
+
+The switch statements have exhaustive `never` checks — TypeScript will error if you add to the union but miss a case.
 
 ### Key TS Patterns
 
@@ -155,6 +180,10 @@ Also create: `package.json`, `tsconfig.json`, `README.md`
 - Private constructor
 - Use `throwSignerError(SignerErrorCode.*, { cause, message })` from `@solana/keychain-core`
 - Wrap all `fetch()` calls in try/catch
+- Validate `apiBaseUrl` uses HTTPS: `new URL(url).protocol !== 'https:'` → throw `CONFIG_ERROR`
+- Sanitize remote error text: `sanitizeRemoteErrorResponse()` from `@solana/keychain-core`
+- Guard against malformed JSON: property access inside try/catch or use `?.`
+- Add `@throws` JSDoc to factory functions listing error codes
 
 ## Step 5: Environment & Docs
 

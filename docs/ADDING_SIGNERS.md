@@ -19,10 +19,11 @@ The library uses a trait-based architecture where all signers implement the `Sol
 ### Quick Checklist
 
 - [ ] Create your signer module with implementation
-- [ ] Implement the `SolanaSigner` trait
+- [ ] Implement the `SolanaSigner` trait (3 async methods + `pubkey()`)
 - [ ] Add a feature flag in `Cargo.toml`
-- [ ] Update the `Signer` enum in `src/lib.rs`
+- [ ] Update the `Signer` enum in `src/lib.rs` (4 match arms)
 - [ ] Update `src/error.rs` reqwest `From` impl cfg gate (if your signer uses reqwest)
+- [ ] Enforce HTTPS and configure timeouts on HTTP clients
 - [ ] Add comprehensive unit tests (wiremock-based, in your module)
 - [ ] Add integration test file `rust/src/tests/test_<name>_integration.rs`
 - [ ] Declare integration test module in `rust/src/tests/mod.rs`
@@ -76,31 +77,43 @@ impl std::fmt::Debug for YourServiceSigner {
 
 ### Step 3: Implement Constructor and Helper Methods
 
+Remote signers **must** enforce HTTPS and configure HTTP timeouts. Use the shared `HttpClientConfig` struct for timeout settings.
+
 ```rust
+use crate::http_client_config::HttpClientConfig;
+use std::time::Duration;
+
 impl YourServiceSigner {
     /// Create a new YourServiceSigner
-    ///
-    /// # Arguments
-    ///
-    /// * `api_key` - YourService API key
-    /// * `api_secret` - YourService API secret
-    /// * `wallet_id` - YourService wallet ID
-    /// * `public_key` - Base58-encoded Solana public key
     pub fn new(
         api_key: String,
         api_secret: String,
         wallet_id: String,
         public_key: String,
+        http_config: Option<HttpClientConfig>,
     ) -> Result<Self, SignerError> {
         let pubkey = Pubkey::from_str(&public_key)
             .map_err(|e| SignerError::InvalidPublicKey(format!("Invalid public key: {e}")))?;
+
+        let http = http_config.unwrap_or_default();
+        let builder = reqwest::Client::builder()
+            .timeout(http.resolved_request_timeout())
+            .connect_timeout(http.resolved_connect_timeout());
+
+        // Enforce HTTPS in production; wiremock uses HTTP in tests
+        #[cfg(not(test))]
+        let builder = builder.https_only(true);
+
+        let client = builder.build().map_err(|e| {
+            SignerError::ConfigError(format!("Failed to build HTTP client: {e}"))
+        })?;
 
         Ok(Self {
             api_key,
             api_secret,
             wallet_id,
             api_base_url: "https://api.yourservice.com/v1".to_string(),
-            client: reqwest::Client::new(),
+            client,
             public_key: pubkey,
         })
     }
@@ -123,24 +136,24 @@ impl YourServiceSigner {
             .send()
             .await?;
 
+        // 3. Check for errors — use generic messages, never expose raw API response text
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
             return Err(SignerError::RemoteApiError(format!(
-                "API error {status}: {error_text}"
+                "YourService API returned status {status}"
             )));
         }
 
-        // 3. Parse the response and extract signature
-        let response_data: SignResponse = response.json().await?;
+        // 4. Parse the response — always use map_err, never .expect() or .unwrap()
+        let response_data: SignResponse = response
+            .json()
+            .await
+            .map_err(|e| SignerError::SerializationError(format!("Failed to parse response: {e}")))?;
         let sig_bytes = base64::engine::general_purpose::STANDARD
             .decode(&response_data.signature)
             .map_err(|e| SignerError::SerializationError(format!("Failed to decode signature: {e}")))?;
 
-        // 4. Convert to Solana signature (must be exactly 64 bytes)
+        // 5. Convert to Solana signature (must be exactly 64 bytes)
         let sig_array: [u8; 64] = sig_bytes
             .try_into()
             .map_err(|_| SignerError::SigningFailed("Invalid signature length".to_string()))?;
@@ -152,30 +165,44 @@ impl YourServiceSigner {
 
 ### Step 4: Implement the SolanaSigner Trait
 
+The trait has 3 async methods (`sign_transaction`, `sign_message`, `is_available`) plus `pubkey()`. Note that `sign_transaction` returns `SignTransactionResult` — a tagged enum indicating whether the transaction is fully signed or partially signed.
+
+Use the shared `TransactionUtil` helpers for signing and serialization instead of implementing your own.
+
 ```rust
+use crate::transaction_util::TransactionUtil;
+use crate::traits::SignTransactionResult;
+
 #[async_trait::async_trait]
 impl SolanaSigner for YourServiceSigner {
     fn pubkey(&self) -> Pubkey {
         self.public_key
     }
 
-    async fn sign_transaction(&self, tx: &mut Transaction) -> Result<SignedTransaction, SignerError> {
-        // Sign and serialize the transaction
-        // See rust/src/para/mod.rs for a complete reference implementation
-        todo!("Implement signing and serialization")
+    async fn sign_transaction(
+        &self,
+        tx: &mut Transaction,
+    ) -> Result<SignTransactionResult, SignerError> {
+        // 1. Serialize the transaction for your API
+        let tx_bytes = bincode::serialize(tx)
+            .map_err(|e| SignerError::SerializationError(format!("Failed to serialize: {e}")))?;
+
+        // 2. Call your signing API
+        let signature = self.sign(&tx_bytes).await?;
+
+        // 3. Add the signature to the transaction at the correct position
+        TransactionUtil::add_signature_to_transaction(tx, &self.public_key, signature)?;
+
+        // 4. Serialize and classify as Complete or Partial
+        let serialized = TransactionUtil::serialize_transaction(tx)?;
+        Ok(TransactionUtil::classify_signed_transaction(
+            tx,
+            (serialized, signature),
+        ))
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign(message).await
-    }
-
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        // Same as sign_transaction but serializes with requireAllSignatures: false
-        // See rust/src/para/mod.rs for a complete reference implementation
-        todo!("Implement partial signing and serialization")
     }
 
     async fn is_available(&self) -> bool {
@@ -232,7 +259,7 @@ all = ["memory", "vault", "privy", "turnkey", "your_service"]  # Update all
 
 ### Step 7: Update the Signer Enum
 
-Add your signer to `src/lib.rs`:
+Add your signer to `src/lib.rs`. You need 4 match arms in the `SolanaSigner` impl: `pubkey`, `sign_transaction`, `sign_message`, and `is_available`.
 
 ```rust
 // Add feature-gated module
@@ -270,11 +297,12 @@ impl Signer {
             api_secret,
             wallet_id,
             public_key,
+            None, // uses default HttpClientConfig
         )?))
     }
 }
 
-// Update trait implementation
+// Update trait implementation — 4 match arms
 #[async_trait::async_trait]
 impl SolanaSigner for Signer {
     fn pubkey(&self) -> sdk_adapter::Pubkey {
@@ -288,7 +316,7 @@ impl SolanaSigner for Signer {
     async fn sign_transaction(
         &self,
         tx: &mut sdk_adapter::Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
+    ) -> Result<SignTransactionResult, SignerError> {
         match self {
             // ... existing variants
             #[cfg(feature = "your_service")]
@@ -304,17 +332,6 @@ impl SolanaSigner for Signer {
             // ... existing variants
             #[cfg(feature = "your_service")]
             Signer::YourService(s) => s.sign_message(message).await,
-        }
-    }
-
-    async fn sign_partial_transaction(
-        &self,
-        tx: &mut sdk_adapter::Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        match self {
-            // ... existing variants
-            #[cfg(feature = "your_service")]
-            Signer::YourService(s) => s.sign_partial_transaction(tx).await,
         }
     }
 
@@ -422,6 +439,7 @@ If your signer uses `reqwest`, you must add your feature to the `#[cfg(any(...))
     feature = "cdp",
     feature = "dfns",
     feature = "para",
+    feature = "crossmint",
     feature = "your_service"  // Add your feature here
 ))]
 impl From<reqwest::Error> for SignerError {
@@ -530,9 +548,11 @@ CI is a two-phase process. Coordinate with maintainers to prepare `main` before 
 - [ ] Export `createXSigner()` factory function returning `SolanaSigner<TAddress>`
 - [ ] Export `static create()` on the class
 - [ ] Export config interface (`XSignerConfig`)
+- [ ] Enforce HTTPS on `apiBaseUrl` config fields
+- [ ] Sanitize remote API error text with `sanitizeRemoteErrorResponse()`
 - [ ] Unit tests with vitest + mocks
 - [ ] Integration tests using `runSignerIntegrationTest` + `setup.ts`
-- [ ] Update umbrella package `typescript/packages/keychain/` (namespace export, class re-export, dependency)
+- [ ] Update umbrella package `typescript/packages/keychain/` (see [Umbrella Package](#umbrella-package) — 6 files)
 - [ ] README with `createXSigner()` as primary usage
 - [ ] `.env.example` with required env vars
 - [ ] CI updates (`typescript-ci.yml`, `typescript-publish.yml`)
@@ -651,9 +671,41 @@ export class YourSigner<TAddress extends string = string> implements SolanaSigne
 
 **Key rules:**
 
+- **HTTPS enforcement**: If your signer accepts an `apiBaseUrl` config field, validate the URL scheme in `create()`:
+  ```typescript
+  const parsedUrl = new URL(config.apiBaseUrl);
+  if (parsedUrl.protocol !== 'https:') {
+      throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+          message: 'apiBaseUrl must use HTTPS',
+      });
+  }
+  ```
+- **Error sanitization**: Never include raw remote API response text in errors. Use `sanitizeRemoteErrorResponse()` from `@solana/keychain-core`:
+  ```typescript
+  import { sanitizeRemoteErrorResponse } from '@solana/keychain-core';
+
+  const errorText = await response.text();
+  throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+      message: `YourService API error: ${sanitizeRemoteErrorResponse(errorText)}`,
+  });
+  ```
+- **Safe JSON parsing**: Access parsed JSON properties inside the try/catch or use optional chaining (`?.`) to guard against malformed responses that would throw raw `TypeError`:
+  ```typescript
+  let data: YourApiResponse;
+  try {
+      data = (await response.json()) as YourApiResponse;
+  } catch (error) {
+      throwSignerError(SignerErrorCode.PARSING_ERROR, { cause: error, ... });
+  }
+  const signature = data?.result?.signature;
+  if (!signature) {
+      throwSignerError(SignerErrorCode.SIGNING_FAILED, { ... });
+  }
+  ```
 - Wrap all `fetch()` calls in try/catch — use `throwSignerError(SignerErrorCode.HTTP_ERROR, { cause: error, ... })` from `@solana/keychain-core`
 - Add `cause` to catch blocks to preserve stack traces
 - Use `requestDelayMs` pattern if your API has rate limits (see any existing signer for the `delay()` + `validateRequestDelayMs()` pattern)
+- Add `@throws` JSDoc to factory functions listing the error codes they can throw
 
 #### Index Exports
 
@@ -744,27 +796,72 @@ describe('YourSigner Integration', () => {
 
 ### Umbrella Package
 
-Update `typescript/packages/keychain/` to include your signer:
+Update `typescript/packages/keychain/` to register your signer in the unified factory. There are 6 files to modify:
 
-**`keychain/src/index.ts`** — add two lines:
+**a) `keychain/src/types.ts`** — add your config to the discriminated union:
 
 ```typescript
+import type { YourSignerConfig } from '@solana/keychain-your-signer';
+
+export type KeychainSignerConfig =
+    // ... existing members
+    | (YourSignerConfig & { backend: 'your-signer' });
+```
+
+**b) `keychain/src/create-signer.ts`** — add import and switch case:
+
+```typescript
+import { createYourSigner } from '@solana/keychain-your-signer';
+
+// Inside the switch:
+case 'your-signer':
+    return await createYourSigner(stripBackend(config));
+```
+
+**c) `keychain/src/resolve-address.ts`** — add to the correct path:
+
+If your signer config includes the public key (sync), add to the fast-path group:
+```typescript
+case 'your-signer':
+    assertIsAddress(config.publicKey);
+    return config.publicKey;
+```
+
+If your signer fetches the public key from an API (async), add to the fetch group:
+```typescript
+case 'your-signer':
+// (falls through to createSigner call)
+```
+
+**d) `keychain/src/index.ts`** — add 4 export lines across the tiers:
+
+```typescript
+// Individual config type (flat re-export)
+export type { YourSignerConfig } from '@solana/keychain-your-signer';
+
+// Namespaced signer implementation
 export * as yourSigner from '@solana/keychain-your-signer';
 
+// Factory function (preferred API)
+export { createYourSigner } from '@solana/keychain-your-signer';
+
+// Class export (deprecated tier)
 export { YourSigner } from '@solana/keychain-your-signer';
 ```
 
-**`keychain/package.json`** — add to `dependencies`:
+**e) `keychain/package.json`** — add to `dependencies`:
 
 ```json
 "@solana/keychain-your-signer": "workspace:*"
 ```
 
-**`keychain/tsconfig.json`** — add to `references`:
+**f) `keychain/tsconfig.json`** — add to `references`:
 
 ```json
 { "path": "../your-signer" }
 ```
+
+> **Note:** The `createSigner()` and `resolveAddress()` switch statements have exhaustive `never` checks — TypeScript will emit a compile error if you add your config to the union but forget to handle it in the switch.
 
 ### README
 
@@ -864,7 +961,10 @@ Before submitting your PR:
 - [ ] All tests pass (`just test`)
 - [ ] Code is formatted/linting passes (`just fmt`)
 - [ ] No hardcoded values or secrets in code
-- [ ] Error messages are helpful and descriptive
+- [ ] Error messages use generic text (no raw API response data)
+- [ ] No `.expect()` or `.unwrap()` on untrusted API responses
+- [ ] HTTPS enforced on HTTP clients (Rust: `https_only(true)`, TS: URL protocol check)
+- [ ] HTTP timeouts configured via `HttpClientConfig`
 - [ ] Follows naming conventions (snake_case for Rust, camelCase for TypeScript)
 - [ ] `error.rs` reqwest cfg gate updated (if using reqwest)
 - [ ] Integration test file added with standard test scenarios
@@ -872,30 +972,43 @@ Before submitting your PR:
 - [ ] Added to README.md supported backends table
 - [ ] CI changes included
 - [ ] TypeScript package with unit + integration tests
-- [ ] Umbrella package updated (`keychain/src/index.ts`, `keychain/package.json`)
+- [ ] Umbrella package updated (6 files — see [Umbrella Package](#umbrella-package))
 - [ ] Coordinated with maintainers on Phase 1 CI preparation
 
 ## Implementation Tips
 
 ### Error Handling
 
-Always use the existing error types. If you need a new error type, propose it in your PR:
+Always use the existing error types. Both `Display` and `Debug` on `SignerError` are redacted — the inner string is only accessible programmatically, never printed in logs. Keep error messages generic and avoid including raw API response data:
 
 ```rust
-// Good - uses existing error types
-return Err(SignerError::RemoteApiError(format!("API error: {}", status)));
+// Good — generic message, no raw API data
+return Err(SignerError::RemoteApiError(format!(
+    "YourService API returned status {status}"
+)));
 
-// Good - converts from standard errors
+// Good — converts from standard errors with map_err
 let bytes = base64::decode(data)
     .map_err(|e| SignerError::SerializationError(format!("Failed to decode: {e}")))?;
+
+// BAD — never use .expect() on untrusted data
+let decoded = STANDARD.decode(&api_response.signature).expect("decode failed");
+
+// BAD — never include raw API error text
+return Err(SignerError::RemoteApiError(format!("API error: {error_body}")));
 ```
 
 ### Security Best Practices
 
-- Never log sensitive data (private keys, API secrets)
-- Use `Debug` impl that hides sensitive fields
-- Validate all inputs (public keys, signatures)
-- Use HTTPS for API calls
+- **Never log sensitive data** (private keys, API secrets, raw API responses)
+- **Use `Debug` impl that hides sensitive fields** — both `Debug` and `Display` on `SignerError` are redacted by default; do not rely on error messages containing details
+- **Validate all inputs** (public keys, signatures)
+- **Enforce HTTPS** — use `reqwest::ClientBuilder::https_only(true)` (Rust) or validate URL protocol (TypeScript); gate with `#[cfg(not(test))]` for wiremock compatibility
+- **Configure HTTP timeouts** — use `HttpClientConfig` for request/connect timeouts (defaults: 30s/5s)
+- **Never use `.expect()` or `.unwrap()` on untrusted API responses** — always use `map_err` to convert to `SignerError`
+- **Sanitize remote error text** — in TypeScript, use `sanitizeRemoteErrorResponse()` before including API error text in errors
+- **Use `Option<Pubkey>` for async-init signers** — do not default to `Pubkey::default()` (the zero address); return `SignerError::ConfigError` if signing is attempted before init
+- **Zeroize intermediate key material** — use `zeroize::Zeroizing<Vec<u8>>` for buffers containing raw private key bytes
 - Consider rate limiting and retry logic
 
 ### Testing with Mocks
@@ -935,11 +1048,13 @@ Adds support for YourService as a signing backend. [Link to YourService Document
 - [X] Implemented SolanaSigner trait for YourServiceSigner
 - [X] Added feature flag 'your_service'
 - [X] Updated error.rs reqwest cfg gate
+- [X] HTTPS enforced, HTTP timeouts configured
 - [X] Added integration tests (sign_message, sign_transaction, is_available)
 - [X] Updated .env.example
 - [X] Added to README.md supported backends table
 - [X] CI Phase 2 changes included
 - [X] TypeScript package with unit + integration tests
+- [X] Umbrella package updated (types, create-signer, resolve-address, index, package.json, tsconfig)
 - [X] Coordinated with maintainers on Phase 1 CI
 
 Closes #1337
