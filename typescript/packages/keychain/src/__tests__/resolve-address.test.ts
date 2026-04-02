@@ -31,28 +31,25 @@ describe('resolveAddress', () => {
     });
 
     describe('sync backends (publicKey in config)', () => {
-        it.each(['aws-kms', 'gcp-kms', 'turnkey', 'vault'] as const)(
-            '%s returns publicKey directly',
-            async backend => {
-                const config = {
-                    backend,
-                    keyId: 'k',
-                    keyName: 'k',
-                    publicKey: TEST_ADDRESS,
-                    vaultAddr: 'https://v',
-                    vaultToken: 't',
-                    apiPrivateKey: 'pk',
-                    apiPublicKey: 'pub',
-                    organizationId: 'org',
-                    privateKeyId: 'pkid',
-                } as KeychainSignerConfig;
+        it.each(['aws-kms', 'gcp-kms', 'turnkey', 'vault'] as const)('%s returns publicKey directly', async backend => {
+            const config = {
+                backend,
+                keyId: 'k',
+                keyName: 'k',
+                publicKey: TEST_ADDRESS,
+                vaultAddr: 'https://v',
+                vaultToken: 't',
+                apiPrivateKey: 'pk',
+                apiPublicKey: 'pub',
+                organizationId: 'org',
+                privateKeyId: 'pkid',
+            } as KeychainSignerConfig;
 
-                const address = await resolveAddress(config);
+            const address = await resolveAddress(config);
 
-                expect(address).toBe(TEST_ADDRESS);
-                expect(createSigner).not.toHaveBeenCalled();
-            },
-        );
+            expect(address).toBe(TEST_ADDRESS);
+            expect(createSigner).not.toHaveBeenCalled();
+        });
 
         it('throws for invalid publicKey', async () => {
             const config = {

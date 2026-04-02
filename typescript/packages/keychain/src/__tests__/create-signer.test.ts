@@ -37,7 +37,13 @@ const BACKEND_CONFIGS: Record<string, { config: KeychainSignerConfig; modulePath
         modulePath: '@solana/keychain-aws-kms',
     },
     cdp: {
-        config: { backend: 'cdp', address: TEST_ADDRESS, cdpApiKeyId: 'id', cdpApiKeySecret: 's', cdpWalletSecret: 'w' },
+        config: {
+            backend: 'cdp',
+            address: TEST_ADDRESS,
+            cdpApiKeyId: 'id',
+            cdpApiKeySecret: 's',
+            cdpWalletSecret: 'w',
+        },
         factoryName: 'createCdpSigner',
         modulePath: '@solana/keychain-cdp',
     },
@@ -84,7 +90,13 @@ const BACKEND_CONFIGS: Record<string, { config: KeychainSignerConfig; modulePath
         modulePath: '@solana/keychain-turnkey',
     },
     vault: {
-        config: { backend: 'vault', keyName: 'key', publicKey: TEST_ADDRESS, vaultAddr: 'https://v', vaultToken: 'tok' },
+        config: {
+            backend: 'vault',
+            keyName: 'key',
+            publicKey: TEST_ADDRESS,
+            vaultAddr: 'https://v',
+            vaultToken: 'tok',
+        },
         factoryName: 'createVaultSigner',
         modulePath: '@solana/keychain-vault',
     },
