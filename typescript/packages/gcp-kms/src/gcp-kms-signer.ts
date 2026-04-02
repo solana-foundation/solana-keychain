@@ -2,6 +2,7 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import {
     assertSignatureValid,
     createSignatureDictionary,
+    sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -29,29 +30,6 @@ type AsymmetricSignResponse = {
 type PublicKeyResponse = {
     algorithm?: string;
 };
-
-type HttpError = Error & {
-    status?: number;
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null;
-}
-
-function getErrorMessage(payload: unknown): string | undefined {
-    if (!isRecord(payload)) return undefined;
-
-    const nestedError = payload.error;
-    if (isRecord(nestedError) && typeof nestedError.message === 'string') {
-        return nestedError.message;
-    }
-
-    if (typeof payload.message === 'string') {
-        return payload.message;
-    }
-
-    return undefined;
-}
 export function createGcpKmsSigner<TAddress extends string = string>(
     config: GcpKmsSignerConfig,
 ): SolanaSigner<TAddress> {
@@ -136,30 +114,38 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
         return await fetch(url, { ...init, headers });
     }
 
-    private async parseJson(response: Response): Promise<unknown> {
-        const text = await response.text();
-        if (!text) return {};
-
-        try {
-            return JSON.parse(text) as unknown;
-        } catch {
-            return { message: text };
-        }
-    }
-
     private async request<TResponse>(url: string, init: RequestInit): Promise<TResponse> {
-        const response = await this.authorizedFetch(url, init);
-        const payload = await this.parseJson(response);
+        let response: Response;
+        try {
+            response = await this.authorizedFetch(url, init);
+        } catch (error) {
+            throwSignerError(SignerErrorCode.HTTP_ERROR, {
+                cause: error,
+                message: 'GCP KMS network request failed',
+                url,
+            });
+        }
 
         if (!response.ok) {
-            const error = new Error(
-                getErrorMessage(payload) ?? `Request failed with status ${response.status}`,
-            ) as HttpError;
-            error.status = response.status;
-            throw error;
+            const errorText = await response.text().catch(() => 'Failed to read error response');
+            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+                message: `GCP KMS API error: ${response.status}`,
+                response: sanitizeRemoteErrorResponse(errorText),
+                status: response.status,
+            });
         }
 
-        return payload as TResponse;
+        let payload: TResponse;
+        try {
+            payload = (await response.json()) as TResponse;
+        } catch (error) {
+            throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                cause: error,
+                message: 'Failed to parse GCP KMS response',
+            });
+        }
+
+        return payload;
     }
 
     /**
@@ -215,20 +201,11 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
 
             return signature as SignatureBytes;
         } catch (error: unknown) {
-            // Re-throw SignerError as-is
+            // Re-throw SignerError as-is (from request())
             if (error instanceof Error && error.name === 'SignerError') {
                 throw error;
             }
-            if (error instanceof Error) {
-                // GCP SDK errors
-                const gcpError = error as HttpError;
-                throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                    cause: error,
-                    message: `GCP KMS Sign operation failed: ${gcpError.message || error.message}`,
-                    status: gcpError.status,
-                });
-            }
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                 cause: error,
                 message: 'GCP KMS Sign operation failed',
             });
