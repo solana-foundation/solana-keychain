@@ -7,7 +7,18 @@ import type { GcpKmsSignerConfig } from '../types.js';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
-    return { ...mod, assertSignatureValid: vi.fn() };
+    return {
+        ...mod,
+        assertSignatureValid: vi.fn(),
+        sanitizeRemoteErrorResponse:
+            mod.sanitizeRemoteErrorResponse ??
+            ((text: string) =>
+                text
+                    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .slice(0, 256)),
+    };
 });
 
 const mockGetRequestHeaders = vi.fn();
@@ -257,7 +268,20 @@ describe('GcpKmsSigner', () => {
 
             const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
 
-            await expect(signer.signMessages([message])).rejects.toThrow('GCP KMS Sign operation failed: GCP Error');
+            await expect(signer.signMessages([message])).rejects.toThrow('GCP KMS API error: 403');
+        });
+
+        it('should handle network errors', async () => {
+            mockFetch.mockRejectedValue(new Error('Network error'));
+
+            const signer = new GcpKmsSigner({
+                keyName: TEST_KEY_NAME,
+                publicKey: TEST_PUBLIC_KEY,
+            });
+
+            const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
+
+            await expect(signer.signMessages([message])).rejects.toThrow('GCP KMS network request failed');
         });
     });
 
@@ -351,9 +375,7 @@ describe('GcpKmsSigner', () => {
 
             const transaction = { messageBytes: new Uint8Array([1, 2, 3, 4]), signatures: {} } as any;
 
-            await expect(signer.signTransactions([transaction])).rejects.toThrow(
-                'GCP KMS Sign operation failed: GCP Error',
-            );
+            await expect(signer.signTransactions([transaction])).rejects.toThrow('GCP KMS API error: 403');
         });
     });
 
