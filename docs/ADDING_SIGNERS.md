@@ -81,7 +81,6 @@ Remote signers **must** enforce HTTPS and configure HTTP timeouts. Use the share
 
 ```rust
 use crate::http_client_config::HttpClientConfig;
-use std::time::Duration;
 
 impl YourServiceSigner {
     /// Create a new YourServiceSigner
@@ -367,6 +366,7 @@ mod tests {
             "test-secret".to_string(),
             "test-wallet".to_string(),
             keypair.pubkey().to_string(),
+            None,
         );
         assert!(signer.is_ok());
     }
@@ -393,6 +393,7 @@ mod tests {
             "test-secret".to_string(),
             "test-wallet".to_string(),
             keypair.pubkey().to_string(),
+            None,
         ).unwrap();
         signer.api_base_url = mock_server.uri();
 
@@ -417,6 +418,7 @@ mod tests {
             "bad-secret".to_string(),
             "test-wallet".to_string(),
             keypair.pubkey().to_string(),
+            None,
         ).unwrap();
         signer.api_base_url = mock_server.uri();
 
