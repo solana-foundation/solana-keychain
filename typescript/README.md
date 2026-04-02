@@ -6,7 +6,7 @@ TypeScript packages for building custom Solana signers compatible with `@solana/
 
 ```typescript
 import { createKeychainSigner } from '@solana/keychain';
-import { signTransactionWithSigners } from '@solana/signers';
+import { signTransactionWithSigners } from '@solana/signers'; // requires @solana/signers ≥ 6.5
 
 // Create any signer via the unified factory
 const signer = await createKeychainSigner({
