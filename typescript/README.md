@@ -46,7 +46,7 @@ interface SolanaSigner<TAddress extends string = string> {
 }
 ```
 
- See the [`@solana/keychain` README](./packages/keychain/README.md) for more usage patterns.
+See the [`@solana/keychain` README](./packages/keychain/README.md) for more usage patterns.
 
 ## Packages
 
