@@ -5,34 +5,48 @@ TypeScript packages for building custom Solana signers compatible with `@solana/
 ## Quick Example
 
 ```typescript
-import { SolanaSigner } from '@solana/keychain-core';
-import { signTransactionMessageWithSigners } from '@solana/signers';
+import { createKeychainSigner } from '@solana/keychain';
+import { signTransactionWithSigners } from '@solana/signers';
 
-class MyCustomSigner implements SolanaSigner {
-    readonly address: Address;
+// Create any signer via the unified factory
+const signer = await createKeychainSigner({
+    backend: 'privy',
+    appId: 'your-app-id',
+    appSecret: 'your-app-secret',
+    walletId: 'your-wallet-id',
+});
 
-    async isAvailable(): Promise<boolean> {
-        return await myBackend.healthCheck();
-    }
-
-    async signTransactions(transactions) {
-        return await myBackend.sign(transactions);
-    }
-
-    async signMessages(messages) {
-        return await myBackend.signMessages(messages);
-    }
-}
-
-const customSigner = new MyCustomSigner(config);
-const transaction = pipe(
-    createTransactionMessage({ version: 0 }),
-    tx => setTransactionMessageFeePayerSigner(customSigner, tx),
-    tx /* ... */
-);
-const signedTx = await signTransactionMessageWithSigners(transaction);
+// Sign an already-compiled transaction
+const signedTx = await signTransactionWithSigners([signer], compiledTransaction);
 ```
-(see [test-signer.ts](./examples/test-signer.ts) for a complete example)
+
+Or install an individual signer package for a smaller dependency footprint:
+
+```typescript
+import { createPrivySigner } from '@solana/keychain-privy';
+import { signTransactionWithSigners } from '@solana/signers';
+
+const signer = await createPrivySigner({
+    appId: 'your-app-id',
+    appSecret: 'your-app-secret',
+    walletId: 'your-wallet-id',
+});
+
+const signedTx = await signTransactionWithSigners([signer], compiledTransaction);
+```
+
+All keychain signers implement the `SolanaSigner` interface from `@solana/keychain-core`, which is compatible with `@solana/signers` and `@solana/kit`:
+
+```typescript
+interface SolanaSigner<TAddress extends string = string> {
+    readonly address: Address<TAddress>;
+    signMessages(messages: SignableMessage[]): Promise<SignatureDictionary[]>;
+    signTransactions(transactions: Transaction[]): Promise<SignatureDictionary[]>;
+    isAvailable(): Promise<boolean>;
+}
+```
+
+ See the [`@solana/keychain` README](./packages/keychain/README.md) for more usage patterns.
 
 ## Packages
 

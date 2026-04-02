@@ -81,6 +81,28 @@ function loadConfig(json: unknown): KeychainSignerConfig {
 }
 ```
 
+### Signing a Compiled Transaction
+
+If you already have a compiled transaction (e.g. from a dApp, backend service, or another system), use `signTransactionWithSigners` from `@solana/signers` (≥ 6.5) to sign it directly:
+
+```typescript
+import { signTransactionWithSigners } from '@solana/signers';
+import { createKeychainSigner } from '@solana/keychain';
+
+const signer = await createKeychainSigner({
+    backend: 'vault',
+    vaultAddr: 'https://vault.example.com',
+    vaultToken: 'hvs.xxx',
+    keyName: 'my-key',
+    publicKey: '4Nd1m...',
+});
+
+// Sign an already-compiled transaction
+const signedTx = await signTransactionWithSigners([signer], compiledTransaction);
+```
+
+This complements the message-level helpers (`signTransactionMessageWithSigners`) which extract signers from account metas automatically. The transaction-level variant is useful when signers aren't embedded in the transaction message.
+
 ### Direct Factory Imports
 
 Each backend also exports its own factory function:

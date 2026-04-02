@@ -25,6 +25,7 @@
 | **AWS KMS** | AWS Key Management Service with EdDSA (Ed25519) signing | `aws_kms` |
 | **Fireblocks** | Fireblocks institutional custody platform | `fireblocks` |
 | **GCP KMS** | Google Cloud Key Management Service with Ed25519 signing | `gcp_kms` |
+| **Dfns** | Dfns wallet infrastructure with Ed25519 signing | `dfns` |
 | **Para** | MPC wallets with Para infrastructure | `para` |
 | **CDP** | Coinbase Developer Platform managed wallet infrastructure | `cdp` |
 | **Crossmint** | Crossmint managed wallets (`smart` and `mpc`) | `crossmint` |
@@ -34,19 +35,19 @@
 ```toml
 [dependencies]
 # Basic usage (memory signer only)
-solana-keychain = "0.3"
+solana-keychain = "0.5"
 
 # With CDP support
-solana-keychain = { version = "0.3", features = ["cdp"] }
+solana-keychain = { version = "0.5", features = ["cdp"] }
 
 # With Vault support
-solana-keychain = { version = "0.3", features = ["vault"] }
+solana-keychain = { version = "0.5", features = ["vault"] }
 
 # With Crossmint support
-solana-keychain = { version = "0.3", features = ["crossmint"] }
+solana-keychain = { version = "0.5", features = ["crossmint"] }
 
 # All backends
-solana-keychain = { version = "0.3", features = ["all"] }
+solana-keychain = { version = "0.5", features = ["all"] }
 ```
 
 ## Quick Start
