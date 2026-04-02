@@ -25,12 +25,12 @@ This installs all signer implementations. For a smaller bundle, install individu
 
 ### Unified Factory (Recommended)
 
-Use `createSigner` with a discriminated config to create any backend:
+Use `createKeychainSigner` with a discriminated config to create any backend:
 
 ```typescript
-import { createSigner } from '@solana/keychain';
+import { createKeychainSigner } from '@solana/keychain';
 
-const signer = await createSigner({
+const signer = await createKeychainSigner({
     backend: 'privy',
     appId: 'your-app-id',
     appSecret: 'your-app-secret',

@@ -2,7 +2,7 @@
 export * from '@solana/keychain-core';
 
 // Unified signer factory, address resolver, and config union
-export { createSigner } from './create-signer.js';
+export { createKeychainSigner } from './create-keychain-signer.js';
 export { resolveAddress } from './resolve-address.js';
 export type { BackendName, KeychainSignerConfig } from './types.js';
 

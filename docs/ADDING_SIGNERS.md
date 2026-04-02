@@ -810,7 +810,7 @@ export type KeychainSignerConfig =
     | (YourSignerConfig & { backend: 'your-signer' });
 ```
 
-**b) `keychain/src/create-signer.ts`** — add import and switch case:
+**b) `keychain/src/create-keychain-signer.ts`** — add import and switch case:
 
 ```typescript
 import { createYourSigner } from '@solana/keychain-your-signer';
@@ -832,7 +832,7 @@ case 'your-signer':
 If your signer fetches the public key from an API (async), add to the fetch group:
 ```typescript
 case 'your-signer':
-// (falls through to createSigner call)
+// (falls through to createKeychainSigner call)
 ```
 
 **d) `keychain/src/index.ts`** — add 4 export lines across the tiers:

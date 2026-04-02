@@ -165,7 +165,7 @@ Also create: `package.json`, `tsconfig.json`, `README.md`
 
 6 files to modify:
 - `src/types.ts` — Add `YourSignerConfig` to `KeychainSignerConfig` discriminated union with `& { backend: '<name>' }`
-- `src/create-signer.ts` — Import `create<Name>Signer`, add switch case
+- `src/create-keychain-signer.ts` — Import `create<Name>Signer`, add switch case
 - `src/resolve-address.ts` — Add to fast-path (if config has publicKey) or fetch-path (if async init) switch case
 - `src/index.ts` — Add 4 export lines: config type, namespace, factory fn, deprecated class
 - `package.json` — Add `@solana/keychain-<name>: "workspace:*"` dependency

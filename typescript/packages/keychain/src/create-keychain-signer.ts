@@ -25,7 +25,7 @@ function stripBackend<T extends { backend: string }>({ backend: _, ...rest }: T)
  *
  * @example
  * ```typescript
- * const signer = await createSigner({
+ * const signer = await createKeychainSigner({
  *     backend: 'privy',
  *     appId: '...',
  *     appSecret: '...',
@@ -33,7 +33,7 @@ function stripBackend<T extends { backend: string }>({ backend: _, ...rest }: T)
  * });
  * ```
  */
-export async function createSigner(config: KeychainSignerConfig): Promise<SolanaSigner> {
+export async function createKeychainSigner(config: KeychainSignerConfig): Promise<SolanaSigner> {
     switch (config.backend) {
         case 'aws-kms':
             return createAwsKmsSigner(stripBackend(config));

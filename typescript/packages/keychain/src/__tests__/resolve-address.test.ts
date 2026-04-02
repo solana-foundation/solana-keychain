@@ -16,14 +16,14 @@ function makeMockSigner(address: Address = TEST_ADDRESS): SolanaSigner {
     } as unknown as SolanaSigner;
 }
 
-// Mock createSigner so we don't pull in all backend deps
-vi.mock('../create-signer.js', () => ({
-    createSigner: vi.fn().mockResolvedValue(makeMockSigner()),
+// Mock createKeychainSigner so we don't pull in all backend deps
+vi.mock('../create-keychain-signer.js', () => ({
+    createKeychainSigner: vi.fn().mockResolvedValue(makeMockSigner()),
 }));
 
 // Must import after mock setup
 const { resolveAddress } = await import('../resolve-address.js');
-const { createSigner } = await import('../create-signer.js');
+const { createKeychainSigner } = await import('../create-keychain-signer.js');
 
 describe('resolveAddress', () => {
     beforeEach(() => {
@@ -48,7 +48,7 @@ describe('resolveAddress', () => {
             const address = await resolveAddress(config);
 
             expect(address).toBe(TEST_ADDRESS);
-            expect(createSigner).not.toHaveBeenCalled();
+            expect(createKeychainSigner).not.toHaveBeenCalled();
         });
 
         it('throws for invalid publicKey', async () => {
@@ -77,7 +77,7 @@ describe('resolveAddress', () => {
             const address = await resolveAddress(config as KeychainSignerConfig);
 
             expect(address).toBe(TEST_ADDRESS);
-            expect(createSigner).not.toHaveBeenCalled();
+            expect(createKeychainSigner).not.toHaveBeenCalled();
         });
 
         it('throws for invalid address', async () => {
@@ -95,7 +95,7 @@ describe('resolveAddress', () => {
 
     describe('async backends (fetch from API)', () => {
         it.each(['crossmint', 'dfns', 'fireblocks', 'para', 'privy'] as const)(
-            '%s delegates to createSigner',
+            '%s delegates to createKeychainSigner',
             async backend => {
                 const config = {
                     backend,
@@ -113,7 +113,7 @@ describe('resolveAddress', () => {
                 const address = await resolveAddress(config);
 
                 expect(address).toBe(TEST_ADDRESS);
-                expect(createSigner).toHaveBeenCalledWith(config);
+                expect(createKeychainSigner).toHaveBeenCalledWith(config);
             },
         );
     });

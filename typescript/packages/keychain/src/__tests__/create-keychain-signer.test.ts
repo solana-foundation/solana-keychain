@@ -3,7 +3,7 @@ import type { SolanaSigner } from '@solana/keychain-core';
 import { SignerErrorCode } from '@solana/keychain-core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createSigner } from '../create-signer.js';
+import { createKeychainSigner } from '../create-keychain-signer.js';
 import type { KeychainSignerConfig } from '../types.js';
 
 const TEST_ADDRESS = '11111111111111111111111111111111' as Address;
@@ -102,7 +102,7 @@ const BACKEND_CONFIGS: Record<string, { config: KeychainSignerConfig; modulePath
     },
 };
 
-describe('createSigner', () => {
+describe('createKeychainSigner', () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
@@ -114,7 +114,7 @@ describe('createSigner', () => {
             const factory = mod[factoryName] as ReturnType<typeof vi.fn>;
             factory.mockResolvedValue(mockSigner);
 
-            const result = await createSigner(config);
+            const result = await createKeychainSigner(config);
 
             expect(result).toBe(mockSigner);
             expect(factory).toHaveBeenCalledOnce();
@@ -126,7 +126,7 @@ describe('createSigner', () => {
             const factory = mod[factoryName] as ReturnType<typeof vi.fn>;
             factory.mockResolvedValue(mockSigner);
 
-            await createSigner(config);
+            await createKeychainSigner(config);
 
             const passedConfig = factory.mock.calls[0]![0] as Record<string, unknown>;
             expect(passedConfig).not.toHaveProperty('backend');
@@ -137,7 +137,7 @@ describe('createSigner', () => {
             const factory = mod[factoryName] as ReturnType<typeof vi.fn>;
             factory.mockRejectedValue(new Error('factory error'));
 
-            await expect(createSigner(config)).rejects.toThrow('factory error');
+            await expect(createKeychainSigner(config)).rejects.toThrow('factory error');
         });
     });
 
@@ -145,7 +145,7 @@ describe('createSigner', () => {
         const badConfig = { backend: 'nonexistent' } as unknown as KeychainSignerConfig;
 
         try {
-            await createSigner(badConfig);
+            await createKeychainSigner(badConfig);
             expect.unreachable('should have thrown');
         } catch (error) {
             expect((error as { code: string }).code).toBe(SignerErrorCode.CONFIG_ERROR);

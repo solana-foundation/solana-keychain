@@ -1,7 +1,7 @@
 import { type Address, assertIsAddress } from '@solana/addresses';
 import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 
-import { createSigner } from './create-signer.js';
+import { createKeychainSigner } from './create-keychain-signer.js';
 import type { KeychainSignerConfig } from './types.js';
 
 /**
@@ -47,7 +47,7 @@ export async function resolveAddress(config: KeychainSignerConfig): Promise<Addr
         case 'fireblocks':
         case 'para':
         case 'privy': {
-            const signer = await createSigner(config);
+            const signer = await createKeychainSigner(config);
             return signer.address;
         }
 
