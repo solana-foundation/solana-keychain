@@ -1,3 +1,12 @@
+## 1.0.1 - 2026-04-03
+
+
+### Documentation
+
+- update rust/README.md with security audit section
+
+- add Accretion audit report and security audit section
+
 ## 1.0.0 - 2026-04-03
 
 
