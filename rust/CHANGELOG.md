@@ -1,3 +1,49 @@
+## 1.0.0 - 2026-04-03
+
+
+### Bug Fixes
+
+- align aws-kms package metadata and lockfile with main
+
+- align signer trait and tests with transaction result enum
+
+- address review findings and dfns auth signing compatibility
+
+- redact private key file io errors
+
+- redact private key parse errors
+
+- implement audit remediations across rust and ts
+
+
+### Refactoring
+
+- avoid expect in pubkey path
+
+- fold http config into signer factory methods
+
+- move signature prefix parser into signer
+
+- standardize signer constructors around config structs
+
+- remove cfg test branches from https enforcement
+
+
+### Testing
+
+- add signature verification failure coverage
+
+- cover signature verification failure path
+
+- fail integration when required env is missing
+
+
+### Style
+
+- apply formatting fixes
+
+- hoist test imports to module scope
+
 ## 0.5.1 - 2026-03-27
 
 ## 0.5.0 - 2026-03-20
