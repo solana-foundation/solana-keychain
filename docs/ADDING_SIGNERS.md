@@ -787,7 +787,7 @@ Copy `packages/para/package.json` as a starting point and modify. Key fields:
 {
     "name": "@solana/keychain-<name>",
     "author": "Solana Foundation",
-    "version": "0.4.0",
+    "version": "1.0.1",
     "description": "Your signer for Solana transactions",
     "license": "MIT",
     "repository": "https://github.com/solana-foundation/solana-keychain",
