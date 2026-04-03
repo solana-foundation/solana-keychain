@@ -1,7 +1,7 @@
 {
     "name": "@solana/keychain-crossmint",
     "author": "Solana Foundation",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Crossmint wallet signer for Solana transactions",
     "license": "MIT",
     "repository": "https://github.com/solana-foundation/solana-keychain",
