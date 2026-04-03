@@ -2,8 +2,6 @@
 
 **Flexible, framework-agnostic Solana transaction signing for Rust applications**
 
-> ⚠️ **SECURITY NOTICE**: This library has not been audited. Use at your own risk. Not recommended for production use with real funds without a thorough security review. The authors and contributors are not responsible for any loss of funds or damages resulting from the use of this library.
-
 `solana-keychain` provides a unified interface for signing Solana transactions with multiple backend implementations. Whether you need local keypairs for development, enterprise vault integration, or managed wallet services, this library offers a consistent API across all signing methods.
 
 ## Features
@@ -238,6 +236,12 @@ pub trait SolanaSigner: Send + Sync {
     async fn is_available(&self) -> bool;
 }
 ```
+
+## Security Audit
+
+`solana-keychain` has been audited by [Accretion](https://accretion.xyz). View the [audit report](../audits/2026-accretion-solana-foundation-solana-keychain-audit-A26SFR2.pdf).
+
+Audit status, audited-through commit, and the current unaudited delta are tracked in [audits/AUDIT_STATUS.md](../audits/AUDIT_STATUS.md).
 
 ## Contributing
 
