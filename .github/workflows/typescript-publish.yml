@@ -67,9 +67,9 @@ jobs:
       - name: Fail if workflow_dispatch is not on an allowed branch
         run: |
           case "${{ github.ref }}" in
-            refs/heads/main|refs/heads/hotfix/*) ;;
+            refs/heads/main|refs/heads/hotfix/*|refs/heads/release/*) ;;
             *)
-              echo "::error::Publish TypeScript Packages must be run from main or hotfix/*. Current ref: ${{ github.ref }}"
+              echo "::error::Publish TypeScript Packages must be run from main, hotfix/*, or release/*. Current ref: ${{ github.ref }}"
               exit 1
               ;;
           esac
