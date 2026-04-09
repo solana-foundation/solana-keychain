@@ -363,22 +363,31 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         response: CrossmintTransactionResponse,
         transaction: Transaction & TransactionWithinSizeLimit & TransactionWithLifetime,
     ): Promise<SignatureBytes> {
+        let transactionFailed = false;
         if (response.onChain?.transaction) {
             try {
                 return await this.extractSignatureFromSerializedTransaction(response.onChain.transaction);
             } catch {
                 // onChain.transaction failed (e.g., Crossmint returned a different
-                // format or refreshed the blockhash). Fall through to txId.
+                // format, refreshed the blockhash, or uses a different signing key
+                // for smart wallets). Fall through to txId.
+                transactionFailed = true;
             }
         }
 
         const fromTxId = decodeSignatureString(response.onChain?.txId);
         if (fromTxId) {
-            await assertSignatureValid({
-                data: transaction.messageBytes,
-                signature: fromTxId,
-                signerAddress: this.address,
-            });
+            if (!transactionFailed) {
+                // No onChain.transaction was present — verify txId against the
+                // original message bytes (e.g., MPC wallets sign them directly).
+                await assertSignatureValid({
+                    data: transaction.messageBytes,
+                    signature: fromTxId,
+                    signerAddress: this.address,
+                });
+            }
+            // When onChain.transaction was present but failed, the txId is the
+            // on-chain signature from the managed service; trust it as-is.
             return fromTxId;
         }
 

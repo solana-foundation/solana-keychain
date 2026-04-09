@@ -367,11 +367,9 @@ describe('CrossmintSigner', () => {
 
             const results = await signer.signTransactions([createMockTransaction()]);
             expect(results[0]![signer.address]).toEqual(MOCK_SIGNATURE_BYTES);
-            expect(assertSignatureValid).toHaveBeenCalledWith({
-                data: MOCK_MESSAGE_BYTES,
-                signature: MOCK_SIGNATURE_BYTES,
-                signerAddress: signer.address,
-            });
+            // assertSignatureValid is skipped when falling through from a failed
+            // onChain.transaction (managed service trust model for smart wallets).
+            expect(assertSignatureValid).not.toHaveBeenCalled();
         });
 
         it('throws on failed transaction status', async () => {
