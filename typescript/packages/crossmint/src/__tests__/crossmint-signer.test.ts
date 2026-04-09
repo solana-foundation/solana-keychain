@@ -212,7 +212,7 @@ describe('CrossmintSigner', () => {
             });
         });
 
-        it('signs via managed flow and extracts signature from matching serialized transaction', async () => {
+        it('signs via managed flow and extracts signature from serialized transaction', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()
                 .mockResolvedValueOnce(
@@ -235,8 +235,44 @@ describe('CrossmintSigner', () => {
             const results = await signer.signTransactions([createMockTransaction()]);
             expect(results).toHaveLength(1);
             expect(results[0]![signer.address]).toEqual(MOCK_SIGNATURE_BYTES);
+            // Signature is verified against the returned transaction's message bytes
+            // (Crossmint may refresh the blockhash before signing).
             expect(assertSignatureValid).toHaveBeenCalledWith({
                 data: MOCK_MESSAGE_BYTES,
+                signature: MOCK_SIGNATURE_BYTES,
+                signerAddress: signer.address,
+            });
+        });
+
+        it('extracts signature from serialized transaction even when returned message bytes differ', async () => {
+            const returnedMessageBytes = new Uint8Array([9, 9, 9]);
+            vi.mocked(getTransactionDecoder).mockReturnValue({
+                decode: vi.fn(() => createDecodedTransaction({ messageBytes: returnedMessageBytes })),
+            } as any);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse()) // create()
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-refreshed',
+                            status: 'success',
+                            onChain: { transaction: MOCK_SERIALIZED_TRANSACTION_B58 },
+                        }),
+                        { status: 201 },
+                    ),
+                );
+
+            const signer = await createCrossmintSigner({
+                ...mockConfig,
+                maxPollAttempts: 1,
+                pollIntervalMs: 1,
+            });
+
+            const results = await signer.signTransactions([createMockTransaction()]);
+            expect(results[0]![signer.address]).toEqual(MOCK_SIGNATURE_BYTES);
+            // Verification uses the returned message bytes, not the original ones
+            expect(assertSignatureValid).toHaveBeenCalledWith({
+                data: returnedMessageBytes,
                 signature: MOCK_SIGNATURE_BYTES,
                 signerAddress: signer.address,
             });
@@ -271,16 +307,16 @@ describe('CrossmintSigner', () => {
             expect(assertSignatureValid).not.toHaveBeenCalled();
         });
 
-        it('rejects when serialized transaction has mismatched message bytes and no txId fallback', async () => {
+        it('rejects when no signature can be extracted', async () => {
             vi.mocked(getTransactionDecoder).mockReturnValue({
-                decode: vi.fn(() => createDecodedTransaction({ messageBytes: new Uint8Array([9, 9, 9]) })),
+                decode: vi.fn(() => createDecodedTransaction({ signerAddress: 'other-address' })),
             } as any);
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()
                 .mockResolvedValueOnce(
                     new Response(
                         JSON.stringify({
-                            id: 'tx-mismatch',
+                            id: 'tx-no-sig',
                             status: 'success',
                             onChain: { transaction: MOCK_SERIALIZED_TRANSACTION_B58 },
                         }),
@@ -301,9 +337,11 @@ describe('CrossmintSigner', () => {
             expect(assertSignatureValid).not.toHaveBeenCalled();
         });
 
-        it('falls through to txId when serialized transaction has mismatched message bytes', async () => {
+        it('falls through to txId when transaction decode throws', async () => {
             vi.mocked(getTransactionDecoder).mockReturnValue({
-                decode: vi.fn(() => createDecodedTransaction({ messageBytes: new Uint8Array([9, 9, 9]) })),
+                decode: vi.fn(() => {
+                    throw new Error('decode failed');
+                }),
             } as any);
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()

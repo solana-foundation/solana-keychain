@@ -365,10 +365,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
     ): Promise<SignatureBytes> {
         if (response.onChain?.transaction) {
             try {
-                return await this.extractSignatureFromSerializedTransaction(
-                    response.onChain.transaction,
-                    transaction.messageBytes,
-                );
+                return await this.extractSignatureFromSerializedTransaction(response.onChain.transaction);
             } catch {
                 // onChain.transaction failed (e.g., Crossmint returned a different
                 // format or refreshed the blockhash). Fall through to txId.
@@ -390,18 +387,10 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         });
     }
 
-    private async extractSignatureFromSerializedTransaction(
-        serializedTransaction: string,
-        expectedMessageBytes: Transaction['messageBytes'],
-    ): Promise<SignatureBytes> {
+    private async extractSignatureFromSerializedTransaction(serializedTransaction: string): Promise<SignatureBytes> {
         base58Encoder ||= getBase58Encoder();
         const txBytes = base58Encoder.encode(serializedTransaction);
         const decodedTransaction = getTransactionDecoder().decode(txBytes);
-        if (!bytesEqual(decodedTransaction.messageBytes, expectedMessageBytes)) {
-            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                message: 'Crossmint returned an onChain.transaction with different message bytes',
-            });
-        }
 
         const signature = decodedTransaction.signatures[this.address];
         if (!signature) {
@@ -411,27 +400,16 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
             });
         }
 
+        // Verify against the message bytes that Crossmint actually signed.
+        // Crossmint may refresh the blockhash before signing, so these may
+        // differ from the original transaction.messageBytes.
         await assertSignatureValid({
-            data: expectedMessageBytes,
+            data: decodedTransaction.messageBytes,
             signature,
             signerAddress: this.address,
         });
         return signature;
     }
-}
-
-function bytesEqual(left: ArrayLike<number>, right: ArrayLike<number>): boolean {
-    if (left.length !== right.length) {
-        return false;
-    }
-
-    for (let index = 0; index < left.length; index += 1) {
-        if (left[index] !== right[index]) {
-            return false;
-        }
-    }
-
-    return true;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
