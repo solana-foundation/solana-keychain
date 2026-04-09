@@ -50,8 +50,6 @@ pub struct OnChainData {
 pub struct Approvals {
     #[serde(default)]
     pub pending: Vec<PendingApproval>,
-    #[serde(default)]
-    pub submitted: Vec<SubmittedApproval>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,11 +57,4 @@ pub struct Approvals {
 pub struct PendingApproval {
     #[serde(default)]
     pub message: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SubmittedApproval {
-    #[serde(default)]
-    pub signature: Option<String>,
 }

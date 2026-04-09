@@ -495,9 +495,24 @@ impl CrossmintSigner {
         Some(Signature::from(sig_bytes))
     }
 
+    fn verify_signature_matches_message(
+        &self,
+        signature: &Signature,
+        message: &[u8],
+    ) -> Result<(), SignerError> {
+        if signature.verify(&self.public_key.to_bytes(), message) {
+            Ok(())
+        } else {
+            Err(SignerError::SigningFailed(
+                "Crossmint returned a signature for different bytes".to_string(),
+            ))
+        }
+    }
+
     fn extract_signature_from_serialized_transaction(
         &self,
         serialized_transaction: &str,
+        expected_message: &[u8],
     ) -> Result<Signature, SignerError> {
         let bytes = bs58::decode(serialized_transaction)
             .into_vec()
@@ -513,6 +528,14 @@ impl CrossmintSigner {
             ))
         })?;
 
+        let remote_message = transaction.message_data();
+        if remote_message != expected_message {
+            return Err(SignerError::SigningFailed(
+                "Crossmint returned an onChain.transaction with different message bytes"
+                    .to_string(),
+            ));
+        }
+
         let position =
             TransactionUtil::get_signing_keypair_position(&transaction, &self.public_key).map_err(
                 |e| {
@@ -522,7 +545,7 @@ impl CrossmintSigner {
                 },
             )?;
 
-        transaction
+        let signature = transaction
             .signatures
             .get(position)
             .copied()
@@ -531,36 +554,33 @@ impl CrossmintSigner {
                 SignerError::SigningFailed(
                     "Crossmint onChain.transaction did not contain a signer signature".to_string(),
                 )
-            })
+            })?;
+
+        self.verify_signature_matches_message(&signature, expected_message)?;
+        Ok(signature)
     }
 
     fn extract_signature_from_response(
         &self,
         response: &TransactionResponse,
+        expected_message: &[u8],
     ) -> Result<Signature, SignerError> {
         if let Some(on_chain) = &response.on_chain {
             if let Some(serialized_transaction) = &on_chain.transaction {
-                if let Ok(signature) =
-                    self.extract_signature_from_serialized_transaction(serialized_transaction)
-                {
-                    return Ok(signature);
-                }
+                return self.extract_signature_from_serialized_transaction(
+                    serialized_transaction,
+                    expected_message,
+                );
             }
 
             if let Some(tx_id) = &on_chain.tx_id {
-                if let Some(signature) = Self::decode_base58_signature(tx_id) {
-                    return Ok(signature);
-                }
-            }
-        }
-
-        if let Some(approvals) = &response.approvals {
-            for submitted in &approvals.submitted {
-                if let Some(signature_str) = &submitted.signature {
-                    if let Some(signature) = Self::decode_base58_signature(signature_str) {
-                        return Ok(signature);
-                    }
-                }
+                let signature = Self::decode_base58_signature(tx_id).ok_or_else(|| {
+                    SignerError::SigningFailed(
+                        "Crossmint onChain.txId was not a valid Solana signature".to_string(),
+                    )
+                })?;
+                self.verify_signature_matches_message(&signature, expected_message)?;
+                return Ok(signature);
             }
         }
 
@@ -579,6 +599,7 @@ impl CrossmintSigner {
             ));
         }
 
+        let expected_message = transaction.message_data();
         let serialized = bincode::serialize(transaction).map_err(|e| {
             SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
         })?;
@@ -586,7 +607,7 @@ impl CrossmintSigner {
 
         let create_response = self.create_transaction(transaction_b58).await?;
         let final_response = self.poll_transaction(create_response).await?;
-        let signature = self.extract_signature_from_response(&final_response)?;
+        let signature = self.extract_signature_from_response(&final_response, &expected_message)?;
 
         TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
 
@@ -634,7 +655,7 @@ impl SolanaSigner for CrossmintSigner {
 mod tests {
     use super::*;
     use crate::sdk_adapter::{keypair_pubkey, keypair_sign_message, Keypair};
-    use crate::test_util::create_test_transaction;
+    use crate::test_util::{create_test_transaction, create_test_transaction_with_recipient};
     use wiremock::{
         matchers::{header, method, path},
         Mock, MockServer, ResponseTemplate,
@@ -891,7 +912,8 @@ mod tests {
         let mut signer = create_test_signer(&server.uri(), 1, 2);
         signer.init().await.unwrap();
 
-        let mut signed_remote_tx = create_test_transaction(&signer_pubkey);
+        let mut local_tx = create_test_transaction(&signer_pubkey);
+        let mut signed_remote_tx = local_tx.clone();
         let expected_signature = keypair_sign_message(&keypair, &signed_remote_tx.message_data());
         TransactionUtil::add_signature_to_transaction(
             &mut signed_remote_tx,
@@ -918,15 +940,122 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut local_tx = create_test_transaction(&signer_pubkey);
-        let (serialized, signature) = signer
+        let (_serialized, signature) = signer
             .sign_transaction(&mut local_tx)
             .await
             .unwrap()
             .into_signed_transaction();
 
         assert_eq!(signature, expected_signature);
-        assert!(!serialized.is_empty());
+        assert!(!_serialized.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_sign_transaction_rejects_approval_signatures_for_local_transaction_bytes() {
+        let server = MockServer::start().await;
+        let wallet_keypair = Keypair::new();
+        let signer_address = keypair_pubkey(&wallet_keypair).to_string();
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .and(header("x-api-key", "test-api-key"))
+            .respond_with(wallet_response(&signer_address))
+            .mount(&server)
+            .await;
+
+        let approval_signer = Keypair::new();
+        let approval_signature =
+            keypair_sign_message(&approval_signer, b"crossmint-approval-payload");
+        let approval_signature_b58 = bs58::encode(approval_signature.as_ref()).into_string();
+
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .and(header("x-api-key", "test-api-key"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "tx-approval",
+                "status": "success",
+                "approvals": {
+                    "submitted": [
+                        { "signature": approval_signature_b58 }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 1);
+        signer.init().await.unwrap();
+
+        let mut tx = create_test_transaction(&signer.pubkey());
+        let result = signer.sign_transaction(&mut tx).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            SignerError::SigningFailed(msg) => {
+                assert!(
+                    msg.contains("Unable to extract signature"),
+                    "Unexpected error message: {msg}"
+                );
+            }
+            other => panic!("Expected SigningFailed error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sign_transaction_rejects_mismatched_on_chain_transaction_message_bytes() {
+        let server = MockServer::start().await;
+        let wallet_keypair = Keypair::new();
+        let signer_pubkey = keypair_pubkey(&wallet_keypair);
+        let signer_address = signer_pubkey.to_string();
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .and(header("x-api-key", "test-api-key"))
+            .respond_with(wallet_response(&signer_address))
+            .mount(&server)
+            .await;
+
+        let recipient = Pubkey::new_unique();
+        let mut remote_tx = create_test_transaction_with_recipient(&signer_pubkey, &recipient);
+        let remote_signature = keypair_sign_message(&wallet_keypair, &remote_tx.message_data());
+        TransactionUtil::add_signature_to_transaction(
+            &mut remote_tx,
+            &signer_pubkey,
+            remote_signature,
+        )
+        .unwrap();
+        let remote_on_chain_transaction =
+            bs58::encode(bincode::serialize(&remote_tx).unwrap()).into_string();
+
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .and(header("x-api-key", "test-api-key"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "tx-mismatch",
+                "status": "success",
+                "onChain": {
+                    "transaction": remote_on_chain_transaction
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 1);
+        signer.init().await.unwrap();
+
+        let mut local_tx = create_test_transaction(&signer_pubkey);
+        let result = signer.sign_transaction(&mut local_tx).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            SignerError::SigningFailed(msg) => {
+                assert!(
+                    msg.contains("different message bytes"),
+                    "Unexpected error message: {msg}"
+                );
+            }
+            other => panic!("Expected SigningFailed error, got: {:?}", other),
+        }
     }
 
     #[tokio::test]
