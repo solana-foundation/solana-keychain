@@ -392,7 +392,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
 
     private async extractSignatureFromSerializedTransaction(
         serializedTransaction: string,
-        expectedMessageBytes: Uint8Array,
+        expectedMessageBytes: Transaction['messageBytes'],
     ): Promise<SignatureBytes> {
         base58Encoder ||= getBase58Encoder();
         const txBytes = base58Encoder.encode(serializedTransaction);
@@ -420,7 +420,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
     }
 }
 
-function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+function bytesEqual(left: ArrayLike<number>, right: ArrayLike<number>): boolean {
     if (left.length !== right.length) {
         return false;
     }
