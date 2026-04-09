@@ -566,14 +566,17 @@ impl CrossmintSigner {
         expected_message: &[u8],
     ) -> Result<Signature, SignerError> {
         if let Some(on_chain) = &response.on_chain {
+            let mut transaction_failed = false;
             if let Some(serialized_transaction) = &on_chain.transaction {
                 // Try to extract from the serialized transaction; fall through to
-                // txId on failure (e.g., Crossmint returned a versioned format).
-                if let Ok(signature) = self.extract_signature_from_serialized_transaction(
+                // txId on failure (e.g., Crossmint returned a versioned format or
+                // uses a different signing key for smart wallets).
+                match self.extract_signature_from_serialized_transaction(
                     serialized_transaction,
                     expected_message,
                 ) {
-                    return Ok(signature);
+                    Ok(signature) => return Ok(signature),
+                    Err(_) => transaction_failed = true,
                 }
             }
 
@@ -583,7 +586,13 @@ impl CrossmintSigner {
                         "Crossmint onChain.txId was not a valid Solana signature".to_string(),
                     )
                 })?;
-                self.verify_signature_matches_message(&signature, expected_message)?;
+                if !transaction_failed {
+                    // No onChain.transaction present — verify txId against the
+                    // original message bytes (e.g., MPC wallets sign them directly).
+                    self.verify_signature_matches_message(&signature, expected_message)?;
+                }
+                // When onChain.transaction was present but failed, the txId is the
+                // on-chain signature from the managed service; trust it as-is.
                 return Ok(signature);
             }
         }
