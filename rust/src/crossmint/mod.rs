@@ -213,7 +213,6 @@ impl CrossmintSigner {
     }
 
     fn build_wallets_api_url(&self, segments: &[&str]) -> Result<String, SignerError> {
-        // Validate base URL and get its string form (without trailing slash)
         let base = reqwest::Url::parse(&self.api_base_url)
             .map_err(|e| SignerError::ConfigError(format!("Invalid api_base_url: {e}")))?;
         if base.cannot_be_a_base() {
@@ -221,17 +220,42 @@ impl CrossmintSigner {
                 "api_base_url cannot be used as a base URL".to_string(),
             ));
         }
-        let base_str = base.as_str().trim_end_matches('/');
 
-        // Encode colons in wallet_locator to match encodeURIComponent behavior
-        let encoded_locator = self.wallet_locator.replace(':', "%3A");
-        let mut url = format!("{}/2025-06-09/wallets/{}", base_str, encoded_locator);
+        let mut url = base.as_str().trim_end_matches('/').to_string();
+        url.push_str("/2025-06-09/wallets/");
+        url.push_str(&Self::encode_uri_component(&self.wallet_locator));
         for segment in segments {
             url.push('/');
-            url.push_str(segment);
+            url.push_str(&Self::encode_uri_component(segment));
         }
 
         Ok(url)
+    }
+
+    fn encode_uri_component(input: &str) -> String {
+        let mut encoded = String::with_capacity(input.len());
+        for byte in input.bytes() {
+            if matches!(
+                byte,
+                b'A'..=b'Z'
+                    | b'a'..=b'z'
+                    | b'0'..=b'9'
+                    | b'-'
+                    | b'_'
+                    | b'.'
+                    | b'!'
+                    | b'~'
+                    | b'*'
+                    | b'\''
+                    | b'('
+                    | b')'
+            ) {
+                encoded.push(byte as char);
+            } else {
+                encoded.push_str(&format!("%{:02X}", byte));
+            }
+        }
+        encoded
     }
 
     async fn parse_response_with_required_field<T>(
@@ -645,6 +669,116 @@ mod tests {
             max_poll_attempts,
             signing_key: None,
         }
+    }
+
+    fn create_url_builder_test_signer(wallet_locator: &str) -> CrossmintSigner {
+        let mut signer = create_test_signer(
+            "https://example.com/api",
+            DEFAULT_POLL_INTERVAL_MS,
+            DEFAULT_MAX_POLL_ATTEMPTS,
+        );
+        signer.wallet_locator = wallet_locator.to_string();
+        signer
+    }
+
+    fn build_url_and_path(wallet_locator: &str, segments: &[&str]) -> (String, String) {
+        let signer = create_url_builder_test_signer(wallet_locator);
+        let built_url = signer.build_wallets_api_url(segments).unwrap();
+        let path = reqwest::Url::parse(&built_url).unwrap().path().to_string();
+        (built_url, path)
+    }
+
+    #[test]
+    fn test_build_wallets_api_url_encodes_raw_slashes_in_wallet_locator() {
+        let (built_url, path) = build_url_and_path("userId:test-user/child:solana:smart", &[]);
+
+        assert_eq!(
+            built_url,
+            "https://example.com/api/2025-06-09/wallets/userId%3Atest-user%2Fchild%3Asolana%3Asmart"
+        );
+        assert_eq!(
+            path,
+            "/api/2025-06-09/wallets/userId%3Atest-user%2Fchild%3Asolana%3Asmart"
+        );
+        assert!(
+            !path.contains("/child"),
+            "wallet locator slash must stay inside a single encoded path segment: {path}"
+        );
+    }
+
+    #[test]
+    fn test_build_wallets_api_url_prevents_dot_segment_retargeting() {
+        let (built_url, path) =
+            build_url_and_path("userId:attacker/../victim:solana:smart", &["transactions"]);
+
+        assert_eq!(
+            built_url,
+            "https://example.com/api/2025-06-09/wallets/userId%3Aattacker%2F..%2Fvictim%3Asolana%3Asmart/transactions"
+        );
+        assert_eq!(
+            path,
+            "/api/2025-06-09/wallets/userId%3Aattacker%2F..%2Fvictim%3Asolana%3Asmart/transactions"
+        );
+        assert_ne!(
+            path, "/api/2025-06-09/wallets/victim%3Asolana%3Asmart/transactions",
+            "wallet locator must not normalize into a different wallet path"
+        );
+    }
+
+    #[test]
+    fn test_build_wallets_api_url_double_encodes_encoded_traversal_sequences() {
+        for (wallet_locator, expected_fragment) in [
+            (
+                "userId:attacker%2Fvictim:solana:smart",
+                "userId%3Aattacker%252Fvictim%3Asolana%3Asmart",
+            ),
+            (
+                "userId:attacker%2e%2e%2Fvictim:solana:smart",
+                "userId%3Aattacker%252e%252e%252Fvictim%3Asolana%3Asmart",
+            ),
+        ] {
+            let (built_url, path) = build_url_and_path(wallet_locator, &[]);
+
+            assert!(
+                built_url.contains(expected_fragment),
+                "expected encoded traversal fragment {expected_fragment} in URL {built_url}"
+            );
+            assert!(
+                path.contains(expected_fragment),
+                "expected encoded traversal fragment {expected_fragment} in path {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_wallets_api_url_encodes_query_and_fragment_metacharacters() {
+        let (built_url, path) = build_url_and_path("userId:test?wallet#fragment:solana:smart", &[]);
+
+        assert_eq!(
+            built_url,
+            "https://example.com/api/2025-06-09/wallets/userId%3Atest%3Fwallet%23fragment%3Asolana%3Asmart"
+        );
+        assert_eq!(
+            path,
+            "/api/2025-06-09/wallets/userId%3Atest%3Fwallet%23fragment%3Asolana%3Asmart"
+        );
+    }
+
+    #[test]
+    fn test_build_wallets_api_url_matches_typescript_encodeuricomponent_behavior() {
+        let (built_url, path) = build_url_and_path(
+            "userId:alice/../wallet?draft#frag:solana:smart",
+            &["transactions", "tx-123", "approvals"],
+        );
+
+        assert_eq!(
+            built_url,
+            "https://example.com/api/2025-06-09/wallets/userId%3Aalice%2F..%2Fwallet%3Fdraft%23frag%3Asolana%3Asmart/transactions/tx-123/approvals"
+        );
+        assert_eq!(
+            path,
+            "/api/2025-06-09/wallets/userId%3Aalice%2F..%2Fwallet%3Fdraft%23frag%3Asolana%3Asmart/transactions/tx-123/approvals"
+        );
     }
 
     #[test]
