@@ -22,6 +22,8 @@ import type { GcpKmsSignerConfig } from './types.js';
 const CLOUD_KMS_BASE_URL = 'https://cloudkms.googleapis.com/v1';
 const CLOUD_KMS_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 const ED25519_SIGNATURE_LENGTH = 64;
+const GCP_KMS_KEY_NAME_PATTERN =
+    /^projects\/[A-Za-z0-9._-]+\/locations\/[A-Za-z0-9._-]+\/keyRings\/[A-Za-z0-9._-]+\/cryptoKeys\/[A-Za-z0-9._-]+\/cryptoKeyVersions\/[A-Za-z0-9._-]+$/;
 
 type AsymmetricSignResponse = {
     signature?: string;
@@ -57,6 +59,7 @@ export function createGcpKmsSigner<TAddress extends string = string>(
 export class GcpKmsSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly keyName: string;
+    private readonly keyNamePathSegments: readonly string[];
     private readonly auth: GoogleAuth;
     private readonly requestDelayMs: number;
 
@@ -89,14 +92,36 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
             });
         }
 
-        this.keyName = config.keyName;
+        this.keyName = this.normalizeKeyName(config.keyName);
+        this.keyNamePathSegments = this.keyName.split('/');
         this.requestDelayMs = config.requestDelayMs || 0;
         this.validateRequestDelayMs(this.requestDelayMs);
         this.auth = new GoogleAuth({ scopes: [CLOUD_KMS_SCOPE] });
     }
 
-    private buildResourceUrl(suffix: string): string {
-        return `${CLOUD_KMS_BASE_URL}/${this.keyName.replace(/^\/+/, '')}${suffix}`;
+    private normalizeKeyName(keyName: string): string {
+        const canonicalKeyName = keyName.replace(/^\/+/, '');
+
+        if (/\/{2,}/.test(canonicalKeyName) || /[#?%]/.test(canonicalKeyName)) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'Invalid GCP KMS keyName format',
+            });
+        }
+
+        if (!GCP_KMS_KEY_NAME_PATTERN.test(canonicalKeyName)) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'Invalid GCP KMS keyName format',
+            });
+        }
+
+        return canonicalKeyName;
+    }
+
+    private buildResourceUrl(suffix: ':asymmetricSign' | '/publicKey'): string {
+        const url = new URL(`${CLOUD_KMS_BASE_URL}/`);
+        const basePathSegments = url.pathname.split('/').filter(Boolean);
+        url.pathname = `/${[...basePathSegments, ...this.keyNamePathSegments].join('/')}${suffix}`;
+        return url.toString();
     }
 
     private async authorizedFetch(url: string, init: RequestInit): Promise<Response> {

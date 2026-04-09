@@ -57,6 +57,7 @@ function assertAuthorizedRequest(url: string, method: string, callIndex = 0): Re
 describe('GcpKmsSigner', () => {
     const TEST_KEY_NAME =
         'projects/test-project/locations/us-east1/keyRings/test-ring/cryptoKeys/test-key/cryptoKeyVersions/1';
+    const TEST_KEY_NAME_WITH_LEADING_SLASH = `/${TEST_KEY_NAME}`;
     const TEST_PUBLIC_KEY = address('11111111111111111111111111111111');
     const SIGN_ENDPOINT = `https://cloudkms.googleapis.com/v1/${TEST_KEY_NAME}:asymmetricSign`;
     const PUBLIC_KEY_ENDPOINT = `https://cloudkms.googleapis.com/v1/${TEST_KEY_NAME}/publicKey`;
@@ -141,6 +142,39 @@ describe('GcpKmsSigner', () => {
             }).toThrow('Invalid Solana public key format');
         });
 
+        it('should throw error for invalid keyName format', () => {
+            const invalidKeyNames = [
+                'projects/test-project/locations/us-east1/keyRings/test-ring/cryptoKeys/test-key/cryptoKeyVersions/1#',
+                'projects/test-project/locations/us-east1/keyRings/test-ring/cryptoKeys/test-key/cryptoKeyVersions/1?',
+                'projects/test-project/locations/us-east1/keyRings/test-ring/cryptoKeys/test-key/cryptoKeyVersions/%31',
+                'projects/test-project/locations/us-east1/keyRings/test-ring/cryptoKeys/test-key//cryptoKeyVersions/1',
+                'projects/test-project/locations/us-east1/keyRings/test-ring/cryptoKeys/test-key',
+            ];
+
+            for (const keyName of invalidKeyNames) {
+                expect(() => {
+                    new GcpKmsSigner({
+                        keyName,
+                        publicKey: TEST_PUBLIC_KEY,
+                    });
+                }).toThrow('Invalid GCP KMS keyName format');
+            }
+        });
+
+        it('should canonicalize leading slashes in keyName', async () => {
+            mockFetch.mockResolvedValue(createJsonResponse({ signature: TEST_SIGNATURE_BASE64 }));
+
+            const signer = new GcpKmsSigner({
+                keyName: TEST_KEY_NAME_WITH_LEADING_SLASH,
+                publicKey: TEST_PUBLIC_KEY,
+            });
+
+            await signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }]);
+
+            expect(mockGetRequestHeaders).toHaveBeenCalledWith(SIGN_ENDPOINT);
+            assertAuthorizedRequest(SIGN_ENDPOINT, 'POST');
+        });
+
         it('should validate requestDelayMs', () => {
             expect(() => {
                 new GcpKmsSigner({
@@ -194,6 +228,23 @@ describe('GcpKmsSigner', () => {
                     data: Buffer.from(message.content).toString('base64'),
                 }),
             );
+        });
+
+        it('should build sign URL without fragments or queries for valid keyName', async () => {
+            const signer = new GcpKmsSigner({
+                keyName: TEST_KEY_NAME,
+                publicKey: TEST_PUBLIC_KEY,
+            });
+
+            mockFetch.mockResolvedValue(createJsonResponse({ signature: TEST_SIGNATURE_BASE64 }));
+
+            await signer.signMessages([{ content: new Uint8Array([1, 2, 3, 4]), signatures: {} }]);
+
+            expect(mockGetRequestHeaders).toHaveBeenCalledWith(SIGN_ENDPOINT);
+            const [calledUrl] = getFetchCall(0);
+            expect(calledUrl).toBe(SIGN_ENDPOINT);
+            expect(calledUrl).not.toContain('#');
+            expect(calledUrl).not.toContain('?');
         });
 
         it('should handle multiple messages with delay', async () => {
@@ -392,6 +443,21 @@ describe('GcpKmsSigner', () => {
 
             expect(available).toBe(true);
             expect(mockFetch).toHaveBeenCalledTimes(1);
+            assertAuthorizedRequest(PUBLIC_KEY_ENDPOINT, 'GET');
+        });
+
+        it('should use canonical public key endpoint for valid key names', async () => {
+            mockFetch.mockResolvedValue(createJsonResponse({ algorithm: 'EC_SIGN_ED25519' }));
+
+            const signer = new GcpKmsSigner({
+                keyName: TEST_KEY_NAME_WITH_LEADING_SLASH,
+                publicKey: TEST_PUBLIC_KEY,
+            });
+
+            const available = await signer.isAvailable();
+
+            expect(available).toBe(true);
+            expect(mockGetRequestHeaders).toHaveBeenCalledWith(PUBLIC_KEY_ENDPOINT);
             assertAuthorizedRequest(PUBLIC_KEY_ENDPOINT, 'GET');
         });
 
