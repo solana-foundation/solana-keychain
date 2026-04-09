@@ -567,10 +567,14 @@ impl CrossmintSigner {
     ) -> Result<Signature, SignerError> {
         if let Some(on_chain) = &response.on_chain {
             if let Some(serialized_transaction) = &on_chain.transaction {
-                return self.extract_signature_from_serialized_transaction(
+                // Try to extract from the serialized transaction; fall through to
+                // txId on failure (e.g., Crossmint returned a versioned format).
+                if let Ok(signature) = self.extract_signature_from_serialized_transaction(
                     serialized_transaction,
                     expected_message,
-                );
+                ) {
+                    return Ok(signature);
+                }
             }
 
             if let Some(tx_id) = &on_chain.tx_id {
@@ -1002,7 +1006,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sign_transaction_rejects_mismatched_on_chain_transaction_message_bytes() {
+    async fn test_sign_transaction_rejects_mismatched_on_chain_transaction_message_bytes_with_no_txid(
+    ) {
         let server = MockServer::start().await;
         let wallet_keypair = Keypair::new();
         let signer_pubkey = keypair_pubkey(&wallet_keypair);
@@ -1050,12 +1055,67 @@ mod tests {
         match result.unwrap_err() {
             SignerError::SigningFailed(msg) => {
                 assert!(
-                    msg.contains("different message bytes"),
+                    msg.contains("Unable to extract signature"),
                     "Unexpected error message: {msg}"
                 );
             }
             other => panic!("Expected SigningFailed error, got: {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn test_sign_transaction_falls_through_to_txid_when_on_chain_transaction_has_mismatched_message_bytes(
+    ) {
+        let server = MockServer::start().await;
+        let keypair = Keypair::new();
+        let signer_pubkey = keypair_pubkey(&keypair);
+        let signer_address = signer_pubkey.to_string();
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .and(header("x-api-key", "test-api-key"))
+            .respond_with(wallet_response(&signer_address))
+            .mount(&server)
+            .await;
+
+        // onChain.transaction with different message bytes (different recipient)
+        let recipient = Pubkey::new_unique();
+        let mut remote_tx = create_test_transaction_with_recipient(&signer_pubkey, &recipient);
+        let remote_sig = keypair_sign_message(&keypair, &remote_tx.message_data());
+        TransactionUtil::add_signature_to_transaction(&mut remote_tx, &signer_pubkey, remote_sig)
+            .unwrap();
+        let remote_on_chain_transaction =
+            bs58::encode(bincode::serialize(&remote_tx).unwrap()).into_string();
+
+        // onChain.txId is a valid signature over the LOCAL transaction message
+        let mut local_tx = create_test_transaction(&signer_pubkey);
+        let expected_signature = keypair_sign_message(&keypair, &local_tx.message_data());
+        let tx_id = bs58::encode(expected_signature.as_ref()).into_string();
+
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .and(header("x-api-key", "test-api-key"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "tx-fallthrough",
+                "status": "success",
+                "onChain": {
+                    "transaction": remote_on_chain_transaction,
+                    "txId": tx_id
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 1);
+        signer.init().await.unwrap();
+
+        let (_serialized, signature) = signer
+            .sign_transaction(&mut local_tx)
+            .await
+            .unwrap()
+            .into_signed_transaction();
+
+        assert_eq!(signature, expected_signature);
     }
 
     #[tokio::test]

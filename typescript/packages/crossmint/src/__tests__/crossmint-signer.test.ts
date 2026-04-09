@@ -271,7 +271,7 @@ describe('CrossmintSigner', () => {
             expect(assertSignatureValid).not.toHaveBeenCalled();
         });
 
-        it('rejects mismatched serialized transaction message bytes', async () => {
+        it('rejects when serialized transaction has mismatched message bytes and no txId fallback', async () => {
             vi.mocked(getTransactionDecoder).mockReturnValue({
                 decode: vi.fn(() => createDecodedTransaction({ messageBytes: new Uint8Array([9, 9, 9]) })),
             } as any);
@@ -296,9 +296,44 @@ describe('CrossmintSigner', () => {
 
             await expect(signer.signTransactions([createMockTransaction()])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
-                message: expect.stringContaining('different message bytes'),
+                message: expect.stringContaining('Unable to extract signature'),
             });
             expect(assertSignatureValid).not.toHaveBeenCalled();
+        });
+
+        it('falls through to txId when serialized transaction has mismatched message bytes', async () => {
+            vi.mocked(getTransactionDecoder).mockReturnValue({
+                decode: vi.fn(() => createDecodedTransaction({ messageBytes: new Uint8Array([9, 9, 9]) })),
+            } as any);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse()) // create()
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-fallthrough',
+                            status: 'success',
+                            onChain: {
+                                transaction: MOCK_SERIALIZED_TRANSACTION_B58,
+                                txId: MOCK_SIGNATURE_B58,
+                            },
+                        }),
+                        { status: 201 },
+                    ),
+                );
+
+            const signer = await createCrossmintSigner({
+                ...mockConfig,
+                maxPollAttempts: 1,
+                pollIntervalMs: 1,
+            });
+
+            const results = await signer.signTransactions([createMockTransaction()]);
+            expect(results[0]![signer.address]).toEqual(MOCK_SIGNATURE_BYTES);
+            expect(assertSignatureValid).toHaveBeenCalledWith({
+                data: MOCK_MESSAGE_BYTES,
+                signature: MOCK_SIGNATURE_BYTES,
+                signerAddress: signer.address,
+            });
         });
 
         it('throws on failed transaction status', async () => {

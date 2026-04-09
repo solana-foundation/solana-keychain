@@ -1,12 +1,7 @@
 import { createPrivateKey, createPublicKey, hkdfSync, sign as cryptoSign } from 'node:crypto';
 
 import { Address, assertIsAddress } from '@solana/addresses';
-import {
-    getBase16Encoder,
-    getBase58Decoder,
-    getBase58Encoder,
-    getBase64Encoder,
-} from '@solana/codecs-strings';
+import { getBase16Encoder, getBase58Decoder, getBase58Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
     createSignatureDictionary,
@@ -369,10 +364,15 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         transaction: Transaction & TransactionWithinSizeLimit & TransactionWithLifetime,
     ): Promise<SignatureBytes> {
         if (response.onChain?.transaction) {
-            return await this.extractSignatureFromSerializedTransaction(
-                response.onChain.transaction,
-                transaction.messageBytes,
-            );
+            try {
+                return await this.extractSignatureFromSerializedTransaction(
+                    response.onChain.transaction,
+                    transaction.messageBytes,
+                );
+            } catch {
+                // onChain.transaction failed (e.g., Crossmint returned a different
+                // format or refreshed the blockhash). Fall through to txId.
+            }
         }
 
         const fromTxId = decodeSignatureString(response.onChain?.txId);
