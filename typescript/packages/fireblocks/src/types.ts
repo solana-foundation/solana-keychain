@@ -25,7 +25,8 @@ export interface FireblocksSignerConfig {
 
     /**
      * Use PROGRAM_CALL operation for signing transactions (default: false)
-     * When true, Fireblocks signs and broadcasts the transaction to Solana.
+     * When true, Fireblocks signs and broadcasts the transaction to Solana,
+     * but callers must not treat the broadcast response as a reusable local signature.
      * When false, uses RAW signing (signs message bytes only, caller broadcasts).
      */
     useProgramCall?: boolean;
@@ -86,7 +87,10 @@ export interface TransactionResponse {
     id: string;
     signedMessages?: SignedMessage[];
     status: string;
-    /** Transaction hash (base58 encoded signature) - populated for PROGRAM_CALL after broadcast */
+    /**
+     * Transaction id returned for PROGRAM_CALL after broadcast.
+     * This is a broadcast artifact, not a reusable signer-bound signature.
+     */
     txHash?: string;
 }
 

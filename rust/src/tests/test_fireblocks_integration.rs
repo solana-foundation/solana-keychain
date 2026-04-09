@@ -95,17 +95,19 @@ mod tests {
             .await
             .expect("Failed to get blockhash from RPC");
 
-        let (base64_txn, signature) = signer
-            .sign_transaction(&mut transaction)
-            .await
-            .expect("Failed to sign transaction with Fireblocks")
-            .into_signed_transaction();
+        let result = signer.sign_transaction(&mut transaction).await;
 
-        assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
-        assert!(
-            !base64_txn.is_empty(),
-            "Serialized transaction should not be empty"
-        );
+        let error =
+            result.expect_err("PROGRAM_CALL should fail closed without a signer-bound signature");
+        match error {
+            crate::error::SignerError::SigningFailed(message) => {
+                assert!(
+                    message.contains("Fireblocks PROGRAM_CALL returned broadcast transaction id"),
+                    "unexpected error message: {message}"
+                );
+            }
+            other => panic!("expected signing failure, got {other:?}"),
+        }
     }
 
     #[tokio::test]

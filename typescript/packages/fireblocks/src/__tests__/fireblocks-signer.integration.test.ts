@@ -3,9 +3,10 @@
  *
  * Unlike other signers, Fireblocks PROGRAM_CALL mode signs AND broadcasts
  * the transaction to Solana through Fireblocks' infrastructure. The signed
- * transaction never returns to the caller — only a txHash comes back after
- * polling. This means LiteSVM (used by runSignerIntegrationTest) can never
- * observe the transaction, so we test against devnet directly.
+ * transaction never returns to the caller, and the broadcast transaction id
+ * is not a reusable signer-bound signature artifact. This means LiteSVM
+ * (used by runSignerIntegrationTest) can never observe a signer-specific
+ * transaction signature from PROGRAM_CALL, so we test against devnet directly.
  *
  * RAW mode returns a raw signature but is not available on the Fireblocks
  * sandbox/testnet environment used in CI.
@@ -35,7 +36,7 @@ function hasRequiredEnvVars(): boolean {
 
 describe('FireblocksSigner Integration', () => {
     it.skipIf(!hasRequiredEnvVars())(
-        'signs transactions with PROGRAM_CALL',
+        'fails closed for PROGRAM_CALL because Fireblocks only returns a broadcast transaction id',
         async () => {
             const signer = await createFireblocksSigner({
                 apiKey: process.env.FIREBLOCKS_API_KEY!,
@@ -58,10 +59,9 @@ describe('FireblocksSigner Integration', () => {
                 tx => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, tx),
             );
 
-            const signed = await signTransactionMessageWithSigners(transaction);
-
-            expect(signed.signatures[signer.address]).toBeDefined();
-            expect(signed.signatures[signer.address]?.length).toBe(64);
+            await expect(signTransactionMessageWithSigners(transaction)).rejects.toThrow(
+                'Fireblocks PROGRAM_CALL returned txHash without a reusable signer-bound signature',
+            );
         },
         120_000,
     );

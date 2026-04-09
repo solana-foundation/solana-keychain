@@ -79,7 +79,8 @@ pub struct TransactionResponse {
     pub sub_status: Option<String>,
     #[serde(default)]
     pub signed_messages: Vec<SignedMessage>,
-    /// Transaction hash (populated for PROGRAM_CALL after broadcast)
+    /// Transaction hash returned for PROGRAM_CALL after broadcast.
+    /// This is a broadcast artifact, not a reusable signer-bound signature.
     #[serde(default)]
     pub tx_hash: Option<String>,
 }

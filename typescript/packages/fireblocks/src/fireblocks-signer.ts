@@ -1,5 +1,5 @@
 import { Address, assertIsAddress } from '@solana/addresses';
-import { getBase16Decoder, getBase16Encoder, getBase58Encoder } from '@solana/codecs-strings';
+import { getBase16Decoder, getBase16Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
     createSignatureDictionary,
@@ -314,8 +314,9 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     }
 
     /**
-     * Sign a transaction using Fireblocks PROGRAM_CALL operation
-     * This broadcasts the transaction to Solana through Fireblocks
+     * Sign a transaction using Fireblocks PROGRAM_CALL operation.
+     * This broadcasts the transaction through Fireblocks but does not yield a
+     * reusable signer-bound signature artifact for the local signer address.
      */
     private async signWithProgramCall(
         transaction: Transaction & TransactionWithinSizeLimit & TransactionWithLifetime,
@@ -340,7 +341,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     }
 
     /**
-     * Poll for transaction completion and extract signature
+     * Poll for transaction completion and extract a reusable signer-bound signature.
      */
     private async pollForSignature(transactionId: string): Promise<SignatureBytes> {
         const uri = `/v1/transactions/${transactionId}`;
@@ -370,15 +371,13 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                     return sigBytes as SignatureBytes;
                 }
 
-                // Try txHash (PROGRAM_CALL - base58 encoded signature)
+                // PROGRAM_CALL only returns a broadcast transaction id, not a
+                // reusable signer-bound signature over the local message bytes.
                 if (txResponse.txHash) {
-                    const sigBytes = getBase58Encoder().encode(txResponse.txHash);
-                    if (sigBytes.length !== 64) {
-                        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                            message: `Invalid txHash length: expected 64 bytes, got ${sigBytes.length}`,
-                        });
-                    }
-                    return sigBytes as SignatureBytes;
+                    throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                        message:
+                            'Fireblocks PROGRAM_CALL returned txHash without a reusable signer-bound signature; use RAW signing for local signature artifacts',
+                    });
                 }
 
                 throwSignerError(SignerErrorCode.SIGNING_FAILED, {
@@ -443,15 +442,11 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                 const signatureBytes = this.useProgramCall
                     ? await this.signWithProgramCall(transaction)
                     : await this.signRawBytes(new Uint8Array(transaction.messageBytes));
-                // Skip verification for PROGRAM_CALL: it broadcasts to Solana and returns
-                // a txHash (on-chain confirmation), not a signature over the message bytes.
-                if (!this.useProgramCall) {
-                    await assertSignatureValid({
-                        data: transaction.messageBytes,
-                        signature: signatureBytes,
-                        signerAddress: this.address,
-                    });
-                }
+                await assertSignatureValid({
+                    data: transaction.messageBytes,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
                 return createSignatureDictionary({
                     signature: signatureBytes,
                     signerAddress: this.address,

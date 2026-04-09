@@ -58,6 +58,8 @@ pub struct FireblocksSignerConfig {
     pub poll_interval_ms: Option<u64>,
     pub max_poll_attempts: Option<u32>,
     /// Use PROGRAM_CALL operation for transaction signing (auto-broadcasts to Solana).
+    /// PROGRAM_CALL returns a broadcast transaction id, not a reusable signer-bound
+    /// signature for local transaction classification.
     /// Default: false (uses RAW signing)
     pub use_program_call: Option<bool>,
     /// Optional HTTP client timeout config.
@@ -220,15 +222,13 @@ impl FireblocksSigner {
 
     /// Sign a transaction using PROGRAM_CALL operation.
     ///
-    /// NOTE: No local signature verification is performed here because Fireblocks
-    /// injects a durable nonce AdvanceNonce instruction into the transaction by
-    /// default, which changes the message that gets signed. The local
-    /// `message_data()` will not match what Fireblocks actually signs.
-    /// See: https://developers.fireblocks.com/reference/interact-with-solana-programs
+    /// PROGRAM_CALL broadcasts through Fireblocks and only yields a transaction
+    /// id after submission. That broadcast artifact is not a reusable
+    /// signer-bound signature for the local Fireblocks pubkey.
     async fn sign_with_program_call(
         &self,
         transaction: &Transaction,
-    ) -> Result<Signature, SignerError> {
+    ) -> Result<String, SignerError> {
         self.initialized_pubkey()?;
 
         let serialized = bincode::serialize(transaction).map_err(|e| {
@@ -248,10 +248,10 @@ impl FireblocksSigner {
             })),
         };
 
-        self.request_and_poll_signature(request).await
+        self.request_and_poll_program_call_tx_id(request).await
     }
 
-    /// Request a signature from Fireblocks and poll until complete
+    /// Request a raw signature from Fireblocks and poll until complete
     async fn request_and_poll_signature(
         &self,
         request: CreateTransactionRequest,
@@ -260,6 +260,22 @@ impl FireblocksSigner {
         let tx_response = self.poll_for_signature(&create_response.id).await?;
 
         self.extract_signature(&tx_response)
+    }
+
+    /// Request a PROGRAM_CALL broadcast through Fireblocks and return the transaction id.
+    async fn request_and_poll_program_call_tx_id(
+        &self,
+        request: CreateTransactionRequest,
+    ) -> Result<String, SignerError> {
+        let create_response = self.create_transaction(request).await?;
+        let tx_response = self.poll_for_signature(&create_response.id).await?;
+
+        tx_response.tx_hash.ok_or_else(|| {
+            SignerError::SigningFailed(
+                "Fireblocks PROGRAM_CALL completed without returning a broadcast transaction id"
+                    .to_string(),
+            )
+        })
     }
 
     /// Create a transaction (signing request) in Fireblocks
@@ -386,9 +402,9 @@ impl FireblocksSigner {
         })
     }
 
-    /// Extract signature from transaction response
-    /// - RAW operations: signature in signed_messages[0].signature.full_sig (hex encoded)
-    /// - PROGRAM_CALL: signature in tx_hash (base58 encoded, already broadcast)
+    /// Extract signer-bound signature from transaction response.
+    /// PROGRAM_CALL responses only carry a broadcast transaction id in `tx_hash`,
+    /// which must not be treated as a reusable signature for the Fireblocks pubkey.
     fn extract_signature(&self, response: &TransactionResponse) -> Result<Signature, SignerError> {
         // Try signed_messages first (RAW operations)
         if let Some(signed_message) = response.signed_messages.first() {
@@ -403,31 +419,10 @@ impl FireblocksSigner {
                 SignerError::SerializationError("Failed to decode hex signature".to_string())
             })?;
 
-            let sig_array: [u8; 64] = sig_bytes.try_into().map_err(|_| {
-                SignerError::SigningFailed(
-                    "Invalid signature length (expected 64 bytes)".to_string(),
-                )
-            })?;
-
-            return Ok(Signature::from(sig_array));
-        }
-
-        // Try tx_hash (PROGRAM_CALL - base58 encoded signature, already broadcast)
-        if let Some(tx_hash) = &response.tx_hash {
-            let sig_bytes = bs58::decode(tx_hash).into_vec().map_err(|_e| {
-                #[cfg(feature = "unsafe-debug")]
-                log::error!("Failed to decode base58 tx_hash: {_e}");
-
-                #[cfg(not(feature = "unsafe-debug"))]
-                log::error!("Failed to decode base58 tx_hash");
-
-                SignerError::SerializationError("Failed to decode base58 tx_hash".to_string())
-            })?;
-
             let sig_array: [u8; EXPECTED_SIGNATURE_LENGTH] =
                 sig_bytes.try_into().map_err(|_| {
                     SignerError::SigningFailed(format!(
-                        "Invalid tx_hash length (expected {} bytes)",
+                        "Invalid signature length (expected {} bytes)",
                         EXPECTED_SIGNATURE_LENGTH
                     ))
                 })?;
@@ -435,8 +430,15 @@ impl FireblocksSigner {
             return Ok(Signature::from(sig_array));
         }
 
+        if response.tx_hash.is_some() {
+            return Err(SignerError::SigningFailed(
+                "Fireblocks PROGRAM_CALL returned tx_hash without a reusable signer-bound signature; use RAW signing for local signature artifacts"
+                    .to_string(),
+            ));
+        }
+
         Err(SignerError::SigningFailed(
-            "No signature found in response (no signed_messages or tx_hash)".to_string(),
+            "No reusable signature found in response (no signed_messages)".to_string(),
         ))
     }
 
@@ -444,15 +446,16 @@ impl FireblocksSigner {
         &self,
         transaction: &mut Transaction,
     ) -> Result<SignedTransaction, SignerError> {
+        if self.use_program_call {
+            let tx_id = self.sign_with_program_call(transaction).await?;
+            return Err(SignerError::SigningFailed(format!(
+                "Fireblocks PROGRAM_CALL returned broadcast transaction id {tx_id} without a reusable signer-bound signature; use RAW signing for local signature artifacts"
+            )));
+        }
+
         let public_key = self.initialized_pubkey()?;
-        let signature = if self.use_program_call {
-            // PROGRAM_CALL: signs and auto-broadcasts to Solana
-            self.sign_with_program_call(transaction).await?
-        } else {
-            // RAW (default): sign the message bytes, caller broadcasts
-            let message_bytes = transaction.message_data();
-            self.sign_raw_bytes(&message_bytes).await?
-        };
+        let message_bytes = transaction.message_data();
+        let signature = self.sign_raw_bytes(&message_bytes).await?;
 
         TransactionUtil::add_signature_to_transaction(transaction, &public_key, signature)?;
 
@@ -845,12 +848,9 @@ p6B5CCtpBPgD01Vm+bT/JQ==
     }
 
     #[tokio::test]
-    async fn test_sign_transaction_program_call() {
+    async fn test_sign_transaction_program_call_rejects_tx_hash_as_signature() {
         let mock_server = MockServer::start().await;
         let signer = create_test_signer_program_call(&mock_server.uri());
-
-        let sig_bytes = [0x42u8; 64];
-        let sig_hex = hex::encode(sig_bytes);
 
         // Mock create transaction for PROGRAM_CALL
         Mock::given(method("POST"))
@@ -864,17 +864,13 @@ p6B5CCtpBPgD01Vm+bT/JQ==
             .mount(&mock_server)
             .await;
 
-        // Mock get transaction (polling)
+        // Mock get transaction (polling) returning only txHash after broadcast.
         Mock::given(method("GET"))
             .and(path("/v1/transactions/tx-456"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "id": "tx-456",
                 "status": "COMPLETED",
-                "signedMessages": [{
-                    "signature": {
-                        "fullSig": sig_hex
-                    }
-                }]
+                "txHash": "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"
             })))
             .expect(1)
             .mount(&mock_server)
@@ -882,9 +878,115 @@ p6B5CCtpBPgD01Vm+bT/JQ==
 
         let mut transaction = create_test_transaction(&signer.pubkey());
         let result = signer.sign_transaction(&mut transaction).await;
-        assert!(result.is_ok());
-        let (_, signature) = result.unwrap().into_signed_transaction();
-        assert_eq!(signature.as_ref(), &sig_bytes);
+
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(matches!(error, SignerError::SigningFailed(_)));
+        match error {
+            SignerError::SigningFailed(message) => {
+                assert!(
+                    message.contains("Fireblocks PROGRAM_CALL returned broadcast transaction id"),
+                    "unexpected error message: {message}"
+                );
+            }
+            _ => unreachable!("expected signing failure"),
+        }
+        assert!(
+            transaction
+                .signatures
+                .iter()
+                .all(|signature| *signature == Signature::default()),
+            "PROGRAM_CALL must not inject txHash into signer slots"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_program_call_txhash_can_be_foreign_slot0_signature_but_is_rejected() {
+        let mock_server = MockServer::start().await;
+        let mut signer = create_test_signer_program_call(&mock_server.uri());
+
+        let payer = Keypair::new();
+        let fireblocks_vault = Keypair::new();
+        signer.public_key = Some(keypair_pubkey(&fireblocks_vault));
+
+        let program_id = Pubkey::new_unique();
+        let recipient = Pubkey::new_unique();
+        let instruction = crate::sdk_adapter::Instruction {
+            program_id,
+            accounts: vec![
+                crate::sdk_adapter::AccountMeta::new(keypair_pubkey(&payer), true),
+                crate::sdk_adapter::AccountMeta::new(keypair_pubkey(&fireblocks_vault), true),
+                crate::sdk_adapter::AccountMeta::new(recipient, false),
+            ],
+            data: vec![1, 2, 3],
+        };
+        let message =
+            crate::sdk_adapter::Message::new(&[instruction], Some(&keypair_pubkey(&payer)));
+        let mut transaction = crate::sdk_adapter::Transaction::new_unsigned(message);
+        transaction.message.recent_blockhash = crate::sdk_adapter::Hash::default();
+
+        let required = transaction.message.header.num_required_signatures as usize;
+        assert_eq!(required, 2, "POC requires exactly 2 required signatures");
+
+        let message_bytes = transaction.message_data();
+        let payer_sig = payer.sign_message(&message_bytes);
+        assert!(
+            payer_sig.verify(&keypair_pubkey(&payer).to_bytes(), &message_bytes),
+            "sanity: payer signature must verify for slot-0 pubkey"
+        );
+
+        transaction.signatures = vec![Signature::default(); required];
+        transaction.signatures[0] = payer_sig;
+
+        let tx_hash = bs58::encode(payer_sig.as_ref()).into_string();
+
+        Mock::given(method("POST"))
+            .and(path("/v1/transactions"))
+            .and(header("X-API-Key", "test-api-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "tx-456",
+                "status": "SUBMITTED"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/transactions/tx-456"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "tx-456",
+                "status": "COMPLETED",
+                "txHash": tx_hash
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = signer.sign_transaction(&mut transaction).await;
+
+        assert!(result.is_err(), "PROGRAM_CALL txHash must be rejected");
+        let error = result.unwrap_err();
+        assert!(matches!(error, SignerError::SigningFailed(_)));
+        match error {
+            SignerError::SigningFailed(message) => {
+                assert!(
+                    message.contains("Fireblocks PROGRAM_CALL returned broadcast transaction id"),
+                    "unexpected error message: {message}"
+                );
+            }
+            _ => unreachable!("expected signing failure"),
+        }
+
+        assert_eq!(
+            transaction.signatures[0].as_ref(),
+            payer_sig.as_ref(),
+            "Existing payer slot must be preserved"
+        );
+        assert_eq!(
+            transaction.signatures[1],
+            Signature::default(),
+            "Fireblocks slot must remain unsigned"
+        );
     }
 
     #[tokio::test]

@@ -2,6 +2,14 @@ import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
 
+vi.mock('@solana/transactions', async importOriginal => {
+    const mod = await importOriginal<typeof import('@solana/transactions')>();
+    return {
+        ...mod,
+        getBase64EncodedWireTransaction: vi.fn(() => 'base64-wire-transaction'),
+    };
+});
+
 import { FireblocksSigner } from '../fireblocks-signer.js';
 import type { FireblocksSignerConfig } from '../types.js';
 import { TEST_API_KEY, TEST_RSA_PRIVATE_KEY, TEST_VAULT_ACCOUNT_ID } from './setup.js';
@@ -540,7 +548,7 @@ describe('FireblocksSigner', () => {
             expect(result[0]).toHaveProperty(signer.address);
         });
 
-        it('should extract signature from txHash (base58) when signedMessages is absent', async () => {
+        it('should reject PROGRAM_CALL txHash because it is not a reusable signer-bound signature', async () => {
             const keyPair = await generateKeyPairSigner();
 
             // Mock init fetch
@@ -555,8 +563,8 @@ describe('FireblocksSigner', () => {
                 json: async () => ({ id: 'tx-123', status: 'SUBMITTED' }),
             });
 
-            // Mock poll for completion - return txHash (base58 encoded 64 bytes) instead of signedMessages
-            // This tests the txHash extraction path in pollForSignature
+            // Mock poll for completion - PROGRAM_CALL returns txHash after broadcast,
+            // which must not be treated as a reusable signer-bound signature.
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({
@@ -569,6 +577,7 @@ describe('FireblocksSigner', () => {
             const signer = new FireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                useProgramCall: true,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
 
@@ -579,13 +588,12 @@ describe('FireblocksSigner', () => {
                 signatures: {},
             } as unknown as Parameters<typeof signer.signTransactions>[0][0];
 
-            const result = await signer.signTransactions([transaction]);
-
-            expect(result).toHaveLength(1);
-            expect(result[0]).toHaveProperty(signer.address);
+            await expect(signer.signTransactions([transaction])).rejects.toThrow(
+                'Fireblocks PROGRAM_CALL returned txHash without a reusable signer-bound signature',
+            );
         });
 
-        it('should throw error when txHash decodes to invalid length', async () => {
+        it('should still reject malformed txHash in PROGRAM_CALL because it is not a reusable signer-bound signature', async () => {
             const keyPair = await generateKeyPairSigner();
 
             // Mock init fetch
@@ -600,19 +608,21 @@ describe('FireblocksSigner', () => {
                 json: async () => ({ id: 'tx-123', status: 'SUBMITTED' }),
             });
 
-            // Mock poll for completion - return a short base58 string (not 64 bytes)
+            // Mock poll for completion - txHash remains a broadcast transaction id,
+            // regardless of whether it would decode to a valid signature length.
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({
                     id: 'tx-123',
                     status: 'COMPLETED',
-                    txHash: '2abc', // Very short, will decode to fewer than 64 bytes
+                    txHash: '2abc',
                 }),
             });
 
             const signer = new FireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                useProgramCall: true,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
 
@@ -623,7 +633,9 @@ describe('FireblocksSigner', () => {
                 signatures: {},
             } as unknown as Parameters<typeof signer.signTransactions>[0][0];
 
-            await expect(signer.signTransactions([transaction])).rejects.toThrow('Invalid txHash length');
+            await expect(signer.signTransactions([transaction])).rejects.toThrow(
+                'Fireblocks PROGRAM_CALL returned txHash without a reusable signer-bound signature',
+            );
         });
     });
 
