@@ -223,7 +223,7 @@ impl PrivySigner {
 #[async_trait::async_trait]
 impl SolanaSigner for PrivySigner {
     fn pubkey(&self) -> Pubkey {
-        self.public_key.unwrap_or_default()
+        self.public_key.expect("PrivySigner not initialized")
     }
 
     async fn sign_transaction(
@@ -259,6 +259,7 @@ mod tests {
     use super::*;
     use crate::sdk_adapter::{keypair_pubkey, Keypair, Signer};
     use crate::test_util::create_test_transaction;
+    use std::panic::{self, AssertUnwindSafe};
     use wiremock::{
         matchers::{header, method, path},
         Mock, MockServer, ResponseTemplate,
@@ -504,6 +505,18 @@ mod tests {
         let result = signer.sign_transaction(&mut tx).await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+    }
+
+    #[tokio::test]
+    async fn test_privy_pubkey_requires_init() {
+        let signer = PrivySigner::new(
+            "test-app-id".to_string(),
+            "test-app-secret".to_string(),
+            "test-wallet-id".to_string(),
+        );
+
+        let result = panic::catch_unwind(AssertUnwindSafe(|| signer.pubkey()));
+        assert!(result.is_err());
     }
 
     #[tokio::test]
