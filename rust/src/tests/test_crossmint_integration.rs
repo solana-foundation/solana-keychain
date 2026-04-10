@@ -63,7 +63,7 @@ mod tests {
             .expect("Failed to initialize CrossmintSigner");
 
         if let Some(test_pubkey) = resolve_test_signer_pubkey_override() {
-            signer.set_public_key_for_tests(test_pubkey);
+            signer.public_key = test_pubkey;
         }
 
         signer

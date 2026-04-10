@@ -40,6 +40,9 @@ pub struct CrossmintSigner {
     signer: Option<String>,
     api_base_url: String,
     client: reqwest::Client,
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub(crate) public_key: Pubkey,
+    #[cfg(not(any(test, feature = "integration-tests")))]
     public_key: Pubkey,
     poll_interval_ms: u64,
     max_poll_attempts: u32,
@@ -156,11 +159,6 @@ impl CrossmintSigner {
         })?;
 
         Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_public_key_for_tests(&mut self, pubkey: Pubkey) {
-        self.public_key = pubkey;
     }
 
     async fn fetch_wallet(&self) -> Result<WalletResponse, SignerError> {
