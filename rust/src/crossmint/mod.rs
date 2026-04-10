@@ -2,7 +2,7 @@
 
 mod types;
 
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, Transaction, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
 use crate::{error::SignerError, traits::SolanaSigner};
@@ -16,6 +16,7 @@ const CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const DEFAULT_POLL_INTERVAL_MS: u64 = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 60;
+const TEST_SIGNER_DERIVED_PUBKEY_ENV: &str = "TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY";
 
 /// Configuration for creating a CrossmintSigner
 #[derive(Clone)]
@@ -149,13 +150,47 @@ impl CrossmintSigner {
             )));
         }
 
-        self.public_key = Pubkey::from_str(&wallet.address).map_err(|_| {
+        let mut resolved_pubkey = Pubkey::from_str(&wallet.address).map_err(|_| {
             SignerError::InvalidPublicKey(
                 "Invalid Solana public key returned by Crossmint wallet".to_string(),
             )
         })?;
 
+        if let Some(test_pubkey) = Self::resolve_test_signer_pubkey_override()? {
+            resolved_pubkey = test_pubkey;
+        }
+
+        self.public_key = resolved_pubkey;
+
         Ok(())
+    }
+
+    fn resolve_test_signer_pubkey_override() -> Result<Option<Pubkey>, SignerError> {
+        if !cfg!(any(test, feature = "integration-tests")) {
+            return Ok(None);
+        }
+
+        let raw_pubkey = std::env::var(TEST_SIGNER_DERIVED_PUBKEY_ENV).ok();
+        Self::parse_test_signer_pubkey_override(raw_pubkey.as_deref())
+    }
+
+    fn parse_test_signer_pubkey_override(
+        raw_pubkey: Option<&str>,
+    ) -> Result<Option<Pubkey>, SignerError> {
+        let Some(raw_pubkey) = raw_pubkey.map(str::trim).filter(|value| !value.is_empty()) else {
+            return Ok(None);
+        };
+
+        let pubkey = Pubkey::from_str(raw_pubkey).map_err(|_| {
+            SignerError::ConfigError(format!(
+                "{TEST_SIGNER_DERIVED_PUBKEY_ENV} must be a valid Solana public key"
+            ))
+        })?;
+        Ok(Some(pubkey))
+    }
+
+    fn debug_signatures_enabled() -> bool {
+        std::env::var("CROSSMINT_DEBUG_SIGNATURES").as_deref() == Ok("1")
     }
 
     async fn fetch_wallet(&self) -> Result<WalletResponse, SignerError> {
@@ -512,7 +547,6 @@ impl CrossmintSigner {
     fn extract_signature_from_serialized_transaction(
         &self,
         serialized_transaction: &str,
-        expected_message: &[u8],
     ) -> Result<Signature, SignerError> {
         let bytes = bs58::decode(serialized_transaction)
             .into_vec()
@@ -522,28 +556,49 @@ impl CrossmintSigner {
                 ))
             })?;
 
-        let transaction: Transaction = bincode::deserialize(&bytes).map_err(|e| {
+        let transaction: VersionedTransaction = bincode::deserialize(&bytes).map_err(|e| {
             SignerError::SerializationError(format!(
                 "Failed to deserialize Crossmint onChain.transaction: {e}"
             ))
         })?;
 
-        let remote_message = transaction.message_data();
-        if remote_message != expected_message {
+        let required_signers = usize::from(transaction.message.header().num_required_signatures);
+        let signer_keys = transaction.message.static_account_keys();
+        if signer_keys.len() < required_signers {
             return Err(SignerError::SigningFailed(
-                "Crossmint returned an onChain.transaction with different message bytes"
-                    .to_string(),
+                "Invalid account index: not enough account keys".to_string(),
             ));
         }
 
-        let position =
-            TransactionUtil::get_signing_keypair_position(&transaction, &self.public_key).map_err(
-                |e| {
-                    SignerError::SigningFailed(format!(
-                        "Failed to locate signer pubkey in Crossmint transaction: {e}"
-                    ))
-                },
-            )?;
+        if Self::debug_signatures_enabled() {
+            let signer_keys_debug: Vec<String> = signer_keys
+                .iter()
+                .take(required_signers)
+                .map(|pk| pk.to_string())
+                .collect();
+            eprintln!(
+                "[crossmint-debug] decoded serialized transaction: expected_signer={}, required_signers={:?}, remote_message_len={}",
+                self.public_key,
+                signer_keys_debug,
+                transaction.message.serialize().len()
+            );
+        }
+
+        let position = signer_keys
+            .iter()
+            .take(required_signers)
+            .position(|key| key == &self.public_key)
+            .ok_or_else(|| {
+                if Self::debug_signatures_enabled() {
+                    eprintln!(
+                        "[crossmint-debug] signer position lookup failed for expected_signer={}",
+                        self.public_key
+                    );
+                }
+                SignerError::SigningFailed(
+                    "Failed to locate signer pubkey in Crossmint transaction".to_string(),
+                )
+            })?;
 
         let signature = transaction
             .signatures
@@ -551,12 +606,19 @@ impl CrossmintSigner {
             .copied()
             .filter(|sig| *sig != Signature::default())
             .ok_or_else(|| {
+                if Self::debug_signatures_enabled() {
+                    eprintln!(
+                        "[crossmint-debug] signature slot missing or default at position={} for expected_signer={}",
+                        position, self.public_key
+                    );
+                }
                 SignerError::SigningFailed(
                     "Crossmint onChain.transaction did not contain a signer signature".to_string(),
                 )
             })?;
 
-        self.verify_signature_matches_message(&signature, expected_message)?;
+        let remote_message = transaction.message.serialize();
+        self.verify_signature_matches_message(&signature, &remote_message)?;
         Ok(signature)
     }
 
@@ -570,15 +632,27 @@ impl CrossmintSigner {
                 // Try to extract from the serialized transaction first. If that
                 // fails, only accept txId if it verifies against the original
                 // requested message bytes.
-                if let Ok(signature) = self.extract_signature_from_serialized_transaction(
-                    serialized_transaction,
-                    expected_message,
-                ) {
-                    return Ok(signature);
+                match self.extract_signature_from_serialized_transaction(serialized_transaction) {
+                    Ok(signature) => return Ok(signature),
+                    Err(error) => {
+                        if Self::debug_signatures_enabled() {
+                            eprintln!(
+                                "[crossmint-debug] serialized transaction extraction failed: {error:?}"
+                            );
+                        }
+                    }
                 }
             }
 
             if let Some(tx_id) = &on_chain.tx_id {
+                if Self::debug_signatures_enabled() {
+                    eprintln!(
+                        "[crossmint-debug] validating txId fallback: expected_signer={}, tx_id_len={}, expected_message_len={}",
+                        self.public_key,
+                        tx_id.len(),
+                        expected_message.len()
+                    );
+                }
                 let signature = Self::decode_base58_signature(tx_id).ok_or_else(|| {
                     SignerError::SigningFailed(
                         "Crossmint onChain.txId was not a valid Solana signature".to_string(),
@@ -847,6 +921,23 @@ mod tests {
         assert_eq!(signer.pubkey(), keypair_pubkey(&keypair));
     }
 
+    #[test]
+    fn test_parse_test_signer_pubkey_override_accepts_valid_pubkey() {
+        let keypair = Keypair::new();
+        let pubkey = keypair_pubkey(&keypair);
+        let pubkey_str = pubkey.to_string();
+
+        let parsed =
+            CrossmintSigner::parse_test_signer_pubkey_override(Some(pubkey_str.as_str())).unwrap();
+        assert_eq!(parsed, Some(pubkey));
+    }
+
+    #[test]
+    fn test_parse_test_signer_pubkey_override_rejects_invalid_pubkey() {
+        let result = CrossmintSigner::parse_test_signer_pubkey_override(Some("not-a-pubkey"));
+        assert!(matches!(result, Err(SignerError::ConfigError(_))));
+    }
+
     #[tokio::test]
     async fn test_init_url_encodes_wallet_locator() {
         let server = MockServer::start().await;
@@ -1007,8 +1098,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sign_transaction_rejects_mismatched_on_chain_transaction_message_bytes_with_no_txid(
-    ) {
+    async fn test_sign_transaction_accepts_signature_from_on_chain_transaction_bytes() {
         let server = MockServer::start().await;
         let wallet_keypair = Keypair::new();
         let signer_pubkey = keypair_pubkey(&wallet_keypair);
@@ -1050,23 +1140,16 @@ mod tests {
         signer.init().await.unwrap();
 
         let mut local_tx = create_test_transaction(&signer_pubkey);
-        let result = signer.sign_transaction(&mut local_tx).await;
-
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            SignerError::SigningFailed(msg) => {
-                assert!(
-                    msg.contains("Unable to extract signature"),
-                    "Unexpected error message: {msg}"
-                );
-            }
-            other => panic!("Expected SigningFailed error, got: {:?}", other),
-        }
+        let (_serialized, signature) = signer
+            .sign_transaction(&mut local_tx)
+            .await
+            .unwrap()
+            .into_signed_transaction();
+        assert_eq!(signature, remote_signature);
     }
 
     #[tokio::test]
-    async fn test_sign_transaction_rejects_txid_when_on_chain_transaction_has_mismatched_message_bytes(
-    ) {
+    async fn test_sign_transaction_prefers_on_chain_transaction_signature_over_txid_fallback() {
         let server = MockServer::start().await;
         let keypair = Keypair::new();
         let signer_pubkey = keypair_pubkey(&keypair);
@@ -1109,18 +1192,12 @@ mod tests {
         signer.init().await.unwrap();
 
         let mut local_tx = create_test_transaction(&signer_pubkey);
-        let result = signer.sign_transaction(&mut local_tx).await;
-
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            SignerError::SigningFailed(msg) => {
-                assert!(
-                    msg.contains("different bytes"),
-                    "Unexpected error message: {msg}"
-                );
-            }
-            other => panic!("Expected SigningFailed error, got: {:?}", other),
-        }
+        let (_serialized, signature) = signer
+            .sign_transaction(&mut local_tx)
+            .await
+            .unwrap()
+            .into_signed_transaction();
+        assert_eq!(signature, remote_sig);
     }
 
     #[tokio::test]

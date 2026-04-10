@@ -10,7 +10,7 @@ pub use solana_sdk::message::Message;
 pub use solana_sdk::pubkey::Pubkey;
 pub use solana_sdk::signature::{Keypair, Signature};
 pub use solana_sdk::signer::Signer;
-pub use solana_sdk::transaction::Transaction;
+pub use solana_sdk::transaction::{Transaction, VersionedTransaction};
 
 /// Parse a keypair from bytes (v2 adapter)
 pub fn keypair_from_bytes(bytes: &[u8]) -> Result<Keypair, String> {

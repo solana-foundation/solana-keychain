@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getBase58Decoder } from '@solana/codecs-strings';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
@@ -27,6 +27,8 @@ const mockConfig = {
     apiBaseUrl: 'https://api.test.crossmint.com/api',
     walletLocator: 'userId:test-user:solana:smart',
 };
+const MOCK_DERIVED_ADDRESS = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
+const ORIGINAL_TEST_DERIVED_PUBKEY = process.env.TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY;
 
 const base58Decoder = getBase58Decoder();
 const MOCK_SIGNATURE_BYTES = new Uint8Array(64).fill(7);
@@ -66,10 +68,19 @@ function mockWalletResponse(overrides?: Record<string, unknown>): Response {
 describe('CrossmintSigner', () => {
     beforeEach(() => {
         vi.resetAllMocks();
+        delete process.env.TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY;
         vi.mocked(assertSignatureValid).mockResolvedValue(undefined);
         vi.mocked(getTransactionDecoder).mockReturnValue({
             decode: vi.fn(() => createDecodedTransaction()),
         } as any);
+    });
+
+    afterAll(() => {
+        if (ORIGINAL_TEST_DERIVED_PUBKEY == null) {
+            delete process.env.TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY;
+            return;
+        }
+        process.env.TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY = ORIGINAL_TEST_DERIVED_PUBKEY;
     });
 
     describe('create', () => {
@@ -87,6 +98,25 @@ describe('CrossmintSigner', () => {
                     method: 'GET',
                 }),
             );
+        });
+
+        it('uses TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY in test runtime when set', async () => {
+            process.env.TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY = MOCK_DERIVED_ADDRESS;
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
+
+            const signer = await createCrossmintSigner(mockConfig);
+
+            expect(signer.address).toBe(MOCK_DERIVED_ADDRESS);
+        });
+
+        it('throws config error for invalid TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY', async () => {
+            process.env.TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY = 'not-a-solana-address';
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
+
+            await expect(createCrossmintSigner(mockConfig)).rejects.toMatchObject({
+                code: 'SIGNER_CONFIG_ERROR',
+                message: expect.stringContaining('TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY'),
+            });
         });
 
         it('throws config error when apiKey is missing', async () => {
