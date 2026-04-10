@@ -337,7 +337,7 @@ describe('CrossmintSigner', () => {
             expect(assertSignatureValid).not.toHaveBeenCalled();
         });
 
-        it('falls through to txId when transaction decode throws', async () => {
+        it('verifies txId when transaction decode throws', async () => {
             vi.mocked(getTransactionDecoder).mockReturnValue({
                 decode: vi.fn(() => {
                     throw new Error('decode failed');
@@ -367,9 +367,45 @@ describe('CrossmintSigner', () => {
 
             const results = await signer.signTransactions([createMockTransaction()]);
             expect(results[0]![signer.address]).toEqual(MOCK_SIGNATURE_BYTES);
-            // assertSignatureValid is skipped when falling through from a failed
-            // onChain.transaction (managed service trust model for smart wallets).
-            expect(assertSignatureValid).not.toHaveBeenCalled();
+            expect(assertSignatureValid).toHaveBeenCalledWith({
+                data: MOCK_MESSAGE_BYTES,
+                signature: MOCK_SIGNATURE_BYTES,
+                signerAddress: signer.address,
+            });
+        });
+
+        it('rejects txId when transaction decode throws and txId validation fails', async () => {
+            vi.mocked(getTransactionDecoder).mockReturnValue({
+                decode: vi.fn(() => {
+                    throw new Error('decode failed');
+                }),
+            } as any);
+            vi.mocked(assertSignatureValid).mockRejectedValueOnce(new Error('signature validation failed'));
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse()) // create()
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-fallthrough-invalid',
+                            status: 'success',
+                            onChain: {
+                                transaction: MOCK_SERIALIZED_TRANSACTION_B58,
+                                txId: MOCK_SIGNATURE_B58,
+                            },
+                        }),
+                        { status: 201 },
+                    ),
+                );
+
+            const signer = await createCrossmintSigner({
+                ...mockConfig,
+                maxPollAttempts: 1,
+                pollIntervalMs: 1,
+            });
+
+            await expect(signer.signTransactions([createMockTransaction()])).rejects.toThrow(
+                'signature validation failed',
+            );
         });
 
         it('throws on failed transaction status', async () => {

@@ -566,17 +566,15 @@ impl CrossmintSigner {
         expected_message: &[u8],
     ) -> Result<Signature, SignerError> {
         if let Some(on_chain) = &response.on_chain {
-            let mut transaction_failed = false;
             if let Some(serialized_transaction) = &on_chain.transaction {
-                // Try to extract from the serialized transaction; fall through to
-                // txId on failure (e.g., Crossmint returned a versioned format or
-                // uses a different signing key for smart wallets).
-                match self.extract_signature_from_serialized_transaction(
+                // Try to extract from the serialized transaction first. If that
+                // fails, only accept txId if it verifies against the original
+                // requested message bytes.
+                if let Ok(signature) = self.extract_signature_from_serialized_transaction(
                     serialized_transaction,
                     expected_message,
                 ) {
-                    Ok(signature) => return Ok(signature),
-                    Err(_) => transaction_failed = true,
+                    return Ok(signature);
                 }
             }
 
@@ -586,13 +584,7 @@ impl CrossmintSigner {
                         "Crossmint onChain.txId was not a valid Solana signature".to_string(),
                     )
                 })?;
-                if !transaction_failed {
-                    // No onChain.transaction present — verify txId against the
-                    // original message bytes (e.g., MPC wallets sign them directly).
-                    self.verify_signature_matches_message(&signature, expected_message)?;
-                }
-                // When onChain.transaction was present but failed, the txId is the
-                // on-chain signature from the managed service; trust it as-is.
+                self.verify_signature_matches_message(&signature, expected_message)?;
                 return Ok(signature);
             }
         }
@@ -1073,7 +1065,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sign_transaction_falls_through_to_txid_when_on_chain_transaction_has_mismatched_message_bytes(
+    async fn test_sign_transaction_rejects_txid_when_on_chain_transaction_has_mismatched_message_bytes(
     ) {
         let server = MockServer::start().await;
         let keypair = Keypair::new();
@@ -1096,10 +1088,8 @@ mod tests {
         let remote_on_chain_transaction =
             bs58::encode(bincode::serialize(&remote_tx).unwrap()).into_string();
 
-        // onChain.txId is a valid signature over the LOCAL transaction message
-        let mut local_tx = create_test_transaction(&signer_pubkey);
-        let expected_signature = keypair_sign_message(&keypair, &local_tx.message_data());
-        let tx_id = bs58::encode(expected_signature.as_ref()).into_string();
+        // onChain.txId is only valid for the remote transaction bytes, not the local ones.
+        let tx_id = bs58::encode(remote_sig.as_ref()).into_string();
 
         Mock::given(method("POST"))
             .and(path("/2025-06-09/wallets/test-wallet/transactions"))
@@ -1118,13 +1108,19 @@ mod tests {
         let mut signer = create_test_signer(&server.uri(), 1, 1);
         signer.init().await.unwrap();
 
-        let (_serialized, signature) = signer
-            .sign_transaction(&mut local_tx)
-            .await
-            .unwrap()
-            .into_signed_transaction();
+        let mut local_tx = create_test_transaction(&signer_pubkey);
+        let result = signer.sign_transaction(&mut local_tx).await;
 
-        assert_eq!(signature, expected_signature);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            SignerError::SigningFailed(msg) => {
+                assert!(
+                    msg.contains("different bytes"),
+                    "Unexpected error message: {msg}"
+                );
+            }
+            other => panic!("Expected SigningFailed error, got: {:?}", other),
+        }
     }
 
     #[tokio::test]

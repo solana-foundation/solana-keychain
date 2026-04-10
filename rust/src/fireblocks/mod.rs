@@ -496,7 +496,7 @@ impl FireblocksSigner {
 #[async_trait::async_trait]
 impl SolanaSigner for FireblocksSigner {
     fn pubkey(&self) -> Pubkey {
-        self.public_key.unwrap_or_default()
+        self.public_key.expect("FireblocksSigner not initialized")
     }
 
     async fn sign_transaction(
@@ -647,6 +647,13 @@ p6B5CCtpBPgD01Vm+bT/JQ==
         let result = signer.init().await;
         assert!(result.is_ok());
         assert_eq!(signer.pubkey().to_string(), TEST_PUBKEY);
+    }
+
+    #[test]
+    #[should_panic(expected = "FireblocksSigner not initialized")]
+    fn test_pubkey_requires_init() {
+        let signer = create_test_signer_uninit("http://localhost");
+        let _ = signer.pubkey();
     }
 
     #[tokio::test]
