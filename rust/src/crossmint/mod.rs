@@ -163,10 +163,6 @@ impl CrossmintSigner {
         self.public_key = pubkey;
     }
 
-    fn debug_signatures_enabled() -> bool {
-        std::env::var("CROSSMINT_DEBUG_SIGNATURES").as_deref() == Ok("1")
-    }
-
     async fn fetch_wallet(&self) -> Result<WalletResponse, SignerError> {
         let url = self.build_wallets_api_url(&[])?;
 
@@ -544,31 +540,11 @@ impl CrossmintSigner {
             ));
         }
 
-        if Self::debug_signatures_enabled() {
-            let signer_keys_debug: Vec<String> = signer_keys
-                .iter()
-                .take(required_signers)
-                .map(|pk| pk.to_string())
-                .collect();
-            eprintln!(
-                "[crossmint-debug] decoded serialized transaction: expected_signer={}, required_signers={:?}, remote_message_len={}",
-                self.public_key,
-                signer_keys_debug,
-                transaction.message.serialize().len()
-            );
-        }
-
         let position = signer_keys
             .iter()
             .take(required_signers)
             .position(|key| key == &self.public_key)
             .ok_or_else(|| {
-                if Self::debug_signatures_enabled() {
-                    eprintln!(
-                        "[crossmint-debug] signer position lookup failed for expected_signer={}",
-                        self.public_key
-                    );
-                }
                 SignerError::SigningFailed(
                     "Failed to locate signer pubkey in Crossmint transaction".to_string(),
                 )
@@ -580,12 +556,6 @@ impl CrossmintSigner {
             .copied()
             .filter(|sig| *sig != Signature::default())
             .ok_or_else(|| {
-                if Self::debug_signatures_enabled() {
-                    eprintln!(
-                        "[crossmint-debug] signature slot missing or default at position={} for expected_signer={}",
-                        position, self.public_key
-                    );
-                }
                 SignerError::SigningFailed(
                     "Crossmint onChain.transaction did not contain a signer signature".to_string(),
                 )
@@ -606,27 +576,14 @@ impl CrossmintSigner {
                 // Try to extract from the serialized transaction first. If that
                 // fails, only accept txId if it verifies against the original
                 // requested message bytes.
-                match self.extract_signature_from_serialized_transaction(serialized_transaction) {
-                    Ok(signature) => return Ok(signature),
-                    Err(error) => {
-                        if Self::debug_signatures_enabled() {
-                            eprintln!(
-                                "[crossmint-debug] serialized transaction extraction failed: {error:?}"
-                            );
-                        }
-                    }
+                if let Ok(signature) =
+                    self.extract_signature_from_serialized_transaction(serialized_transaction)
+                {
+                    return Ok(signature);
                 }
             }
 
             if let Some(tx_id) = &on_chain.tx_id {
-                if Self::debug_signatures_enabled() {
-                    eprintln!(
-                        "[crossmint-debug] validating txId fallback: expected_signer={}, tx_id_len={}, expected_message_len={}",
-                        self.public_key,
-                        tx_id.len(),
-                        expected_message.len()
-                    );
-                }
                 let signature = Self::decode_base58_signature(tx_id).ok_or_else(|| {
                     SignerError::SigningFailed(
                         "Crossmint onChain.txId was not a valid Solana signature".to_string(),

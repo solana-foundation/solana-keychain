@@ -366,20 +366,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         if (response.onChain?.transaction) {
             try {
                 return await this.extractSignatureFromSerializedTransaction(response.onChain.transaction);
-            } catch (error) {
-                if (process.env.CROSSMINT_DEBUG_SIGNATURES === '1') {
-                    const txId = response.onChain?.txId;
-                    console.error(
-                        '[crossmint-debug] serialized transaction extraction failed',
-                        JSON.stringify({
-                            error: error instanceof Error ? error.message : String(error),
-                            hasSerializedTransaction: true,
-                            hasTxId: Boolean(txId),
-                            signerAddress: this.address,
-                            txIdLength: txId?.length ?? null,
-                        }),
-                    );
-                }
+            } catch {
                 // If Crossmint returned an onChain.transaction but it could not be
                 // decoded or validated, fall through to txId and still require
                 // cryptographic validation against the original message bytes.
@@ -388,16 +375,6 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
 
         const fromTxId = decodeSignatureString(response.onChain?.txId);
         if (fromTxId) {
-            if (process.env.CROSSMINT_DEBUG_SIGNATURES === '1') {
-                console.error(
-                    '[crossmint-debug] validating txId fallback',
-                    JSON.stringify({
-                        messageLength: transaction.messageBytes.length,
-                        signerAddress: this.address,
-                        txIdLength: response.onChain?.txId?.length ?? null,
-                    }),
-                );
-            }
             await assertSignatureValid({
                 data: transaction.messageBytes,
                 signature: fromTxId,
@@ -422,17 +399,6 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
                 address: this.address,
                 message: `No signature found for address ${this.address}`,
             });
-        }
-
-        if (process.env.CROSSMINT_DEBUG_SIGNATURES === '1') {
-            console.error(
-                '[crossmint-debug] validating serialized transaction signature',
-                JSON.stringify({
-                    messageLength: decodedTransaction.messageBytes.length,
-                    signatureLength: signature.byteLength,
-                    signerAddress: this.address,
-                }),
-            );
         }
 
         // Verify against the message bytes that Crossmint actually signed.
