@@ -182,6 +182,7 @@ jobs:
           CROSSMINT_API_BASE_URL: ${{ secrets.CROSSMINT_API_BASE_URL }}
           CROSSMINT_SIGNER_SECRET: ${{ secrets.CROSSMINT_SIGNER_SECRET }}
           CROSSMINT_SIGNER: ${{ secrets.CROSSMINT_SIGNER }}
+          TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY: ${{ secrets.TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY }}
           SOLANA_RPC_URL: https://api.devnet.solana.com
         run: |
           ci_features="${{ needs.resolve-signers.outputs.rust_ci_features }}"
