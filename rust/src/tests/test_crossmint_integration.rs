@@ -3,6 +3,7 @@ pub const CROSSMINT_WALLET_LOCATOR: &str = "CROSSMINT_WALLET_LOCATOR";
 pub const CROSSMINT_API_BASE_URL: &str = "CROSSMINT_API_BASE_URL";
 pub const CROSSMINT_SIGNER: &str = "CROSSMINT_SIGNER";
 pub const CROSSMINT_SIGNER_SECRET: &str = "CROSSMINT_SIGNER_SECRET";
+pub const TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY: &str = "TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY";
 
 #[cfg(feature = "crossmint")]
 #[cfg(test)]
@@ -10,12 +11,29 @@ mod tests {
     use base64::{engine::general_purpose::STANDARD, Engine};
     use dotenvy::dotenv;
     use std::env;
+    use std::str::FromStr;
 
     use super::*;
     use crate::crossmint::{CrossmintSigner, CrossmintSignerConfig};
-    use crate::sdk_adapter::{Message, Transaction};
+    use crate::sdk_adapter::{Message, Pubkey, Transaction};
     use crate::tests::rpc_util::get_rpc_blockhash;
     use crate::traits::SolanaSigner;
+
+    fn resolve_test_signer_pubkey_override() -> Option<Pubkey> {
+        let from_test_env = env::var(TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+
+        let resolved = from_test_env.or_else(|| {
+            env::var(CROSSMINT_SIGNER)
+                .ok()
+                .and_then(|value| value.strip_prefix("server:").map(|v| v.trim().to_string()))
+                .filter(|value| !value.is_empty())
+        })?;
+
+        Pubkey::from_str(&resolved).ok()
+    }
 
     async fn get_signer() -> CrossmintSigner {
         dotenv().ok();
@@ -43,6 +61,10 @@ mod tests {
             .init()
             .await
             .expect("Failed to initialize CrossmintSigner");
+
+        if let Some(test_pubkey) = resolve_test_signer_pubkey_override() {
+            signer.set_public_key_for_tests(test_pubkey);
+        }
 
         signer
     }

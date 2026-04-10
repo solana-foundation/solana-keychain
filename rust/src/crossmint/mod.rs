@@ -16,7 +16,6 @@ const CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const DEFAULT_POLL_INTERVAL_MS: u64 = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 60;
-const TEST_SIGNER_DERIVED_PUBKEY_ENV: &str = "TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY";
 
 /// Configuration for creating a CrossmintSigner
 #[derive(Clone)]
@@ -150,43 +149,18 @@ impl CrossmintSigner {
             )));
         }
 
-        let mut resolved_pubkey = Pubkey::from_str(&wallet.address).map_err(|_| {
+        self.public_key = Pubkey::from_str(&wallet.address).map_err(|_| {
             SignerError::InvalidPublicKey(
                 "Invalid Solana public key returned by Crossmint wallet".to_string(),
             )
         })?;
 
-        if let Some(test_pubkey) = Self::resolve_test_signer_pubkey_override()? {
-            resolved_pubkey = test_pubkey;
-        }
-
-        self.public_key = resolved_pubkey;
-
         Ok(())
     }
 
-    fn resolve_test_signer_pubkey_override() -> Result<Option<Pubkey>, SignerError> {
-        if !cfg!(any(test, feature = "integration-tests")) {
-            return Ok(None);
-        }
-
-        let raw_pubkey = std::env::var(TEST_SIGNER_DERIVED_PUBKEY_ENV).ok();
-        Self::parse_test_signer_pubkey_override(raw_pubkey.as_deref())
-    }
-
-    fn parse_test_signer_pubkey_override(
-        raw_pubkey: Option<&str>,
-    ) -> Result<Option<Pubkey>, SignerError> {
-        let Some(raw_pubkey) = raw_pubkey.map(str::trim).filter(|value| !value.is_empty()) else {
-            return Ok(None);
-        };
-
-        let pubkey = Pubkey::from_str(raw_pubkey).map_err(|_| {
-            SignerError::ConfigError(format!(
-                "{TEST_SIGNER_DERIVED_PUBKEY_ENV} must be a valid Solana public key"
-            ))
-        })?;
-        Ok(Some(pubkey))
+    #[cfg(test)]
+    pub(crate) fn set_public_key_for_tests(&mut self, pubkey: Pubkey) {
+        self.public_key = pubkey;
     }
 
     fn debug_signatures_enabled() -> bool {
@@ -919,23 +893,6 @@ mod tests {
 
         signer.init().await.unwrap();
         assert_eq!(signer.pubkey(), keypair_pubkey(&keypair));
-    }
-
-    #[test]
-    fn test_parse_test_signer_pubkey_override_accepts_valid_pubkey() {
-        let keypair = Keypair::new();
-        let pubkey = keypair_pubkey(&keypair);
-        let pubkey_str = pubkey.to_string();
-
-        let parsed =
-            CrossmintSigner::parse_test_signer_pubkey_override(Some(pubkey_str.as_str())).unwrap();
-        assert_eq!(parsed, Some(pubkey));
-    }
-
-    #[test]
-    fn test_parse_test_signer_pubkey_override_rejects_invalid_pubkey() {
-        let result = CrossmintSigner::parse_test_signer_pubkey_override(Some("not-a-pubkey"));
-        assert!(matches!(result, Err(SignerError::ConfigError(_))));
     }
 
     #[tokio::test]

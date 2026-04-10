@@ -39,7 +39,6 @@ const API_VERSION = '2025-06-09';
 const DEFAULT_API_BASE_URL = 'https://www.crossmint.com/api';
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 60;
-const TEST_SIGNER_DERIVED_PUBKEY_ENV = 'TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY';
 
 let base16Encoder: ReturnType<typeof getBase16Encoder> | undefined;
 let base58Decoder: ReturnType<typeof getBase58Decoder> | undefined;
@@ -167,19 +166,6 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
                 cause: error,
                 message: 'Invalid Solana address from Crossmint wallet response',
             });
-        }
-
-        const testDerivedPubkey = getTestSignerDerivedPubkeyOverride();
-        if (testDerivedPubkey) {
-            try {
-                assertIsAddress(testDerivedPubkey);
-                address = testDerivedPubkey as Address<TAddress>;
-            } catch (error) {
-                throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                    cause: error,
-                    message: `${TEST_SIGNER_DERIVED_PUBKEY_ENV} must be a valid Solana address`,
-                });
-            }
         }
 
         return new CrossmintSigner<TAddress>({
@@ -463,16 +449,6 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
 
 function normalizeBaseUrl(baseUrl: string): string {
     return baseUrl.replace(/\/+$/, '');
-}
-
-function getTestSignerDerivedPubkeyOverride(): string | undefined {
-    if (!isTestRuntime()) return undefined;
-    const maybePubkey = process.env[TEST_SIGNER_DERIVED_PUBKEY_ENV]?.trim();
-    return maybePubkey ? maybePubkey : undefined;
-}
-
-function isTestRuntime(): boolean {
-    return process.env.NODE_ENV === 'test' || process.env.VITEST === 'true' || process.env.VITEST === '1';
 }
 
 async function fetchWallet(
