@@ -3,7 +3,7 @@
     "author": "Solana Foundation",
     "license": "MIT",
     "repository": "https://github.com/solana-foundation/solana-keychain",
-    "version": "1.0.1",
+    "version": "1.1.0",
     "description": "Core interfaces and types for external Solana signers",
     "keywords": [
         "solana",

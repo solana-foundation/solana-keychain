@@ -1,7 +1,7 @@
 {
     "name": "@solana/keychain-aws-kms",
     "author": "Solana Foundation",
-    "version": "1.0.1",
+    "version": "1.1.0",
     "description": "AWS KMS-based signer for Solana transactions using EdDSA (Ed25519)",
     "license": "MIT",
     "repository": "https://github.com/solana-foundation/solana-keychain",
