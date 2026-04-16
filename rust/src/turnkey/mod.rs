@@ -318,7 +318,8 @@ mod tests {
 
     // Generate a valid P256 private key for testing
     fn create_test_api_keys() -> (String, String) {
-        let signing_key = p256::ecdsa::SigningKey::random(&mut rand::thread_rng());
+        let signing_key =
+            p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
         let private_key_hex = hex::encode(signing_key.to_bytes());
         let verifying_key = signing_key.verifying_key();
         let public_key_hex = hex::encode(verifying_key.to_encoded_point(false).as_bytes());

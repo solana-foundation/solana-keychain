@@ -104,7 +104,6 @@ zeroize = "1.8.2"
 [dev-dependencies]
 tokio = { version = "1.47", features = ["test-util", "macros", "rt"] }
 wiremock = "0.6"
-rand = "0.10.0"
 dotenvy = "0.15.7"
 litesvm = "0.7.0"
 litesvm-v3 = { package = "litesvm", version = "=0.8.1" }

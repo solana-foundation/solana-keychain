@@ -5990,7 +5990,6 @@ dependencies = [
  "litesvm 0.8.1",
  "log",
  "p256",
- "rand 0.10.0",
  "reqwest 0.12.28",
  "rsa",
  "scoped-env",
