@@ -176,7 +176,7 @@ jobs:
         with:
           version: 10.14.0
 
-      - uses: dopplerhq/secrets-fetch-action@v1.3.0
+      - uses: dopplerhq/secrets-fetch-action@v2.0.0
         id: doppler
         with:
           auth-method: oidc

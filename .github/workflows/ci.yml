@@ -136,7 +136,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: dopplerhq/secrets-fetch-action@v1.3.0
+      - uses: dopplerhq/secrets-fetch-action@v2.0.0
         id: doppler
         with:
           auth-method: oidc
