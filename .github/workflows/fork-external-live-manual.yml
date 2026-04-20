@@ -176,12 +176,21 @@ jobs:
         with:
           version: 10.14.0
 
+      - uses: dopplerhq/secrets-fetch-action@v1.3.0
+        id: doppler
+        with:
+          auth-method: oidc
+          doppler-identity-id: ${{ vars.DOPPLER_SERVICE_IDENTITY_ID }}
+          doppler-project: ${{ vars.DOPPLER_PROJECT || 'keychain' }}
+          doppler-config: ${{ vars.DOPPLER_CONFIG_EXTERNAL_LIVE || vars.DOPPLER_CONFIG_CI || 'stg_github' }}
+          inject-env-vars: true
+
       - name: Configure AWS credentials
         if: ${{ needs.resolve-signers.outputs.aws_kms_enabled == 'true' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_KMS_REGION }}
+          role-to-assume: ${{ steps.doppler.outputs.AWS_ROLE_ARN }}
+          aws-region: ${{ steps.doppler.outputs.AWS_KMS_REGION }}
 
       - name: Run Rust external live integration tests
         if: ${{ needs.resolve-signers.outputs.rust_live_test_count != '0' }}
@@ -189,38 +198,6 @@ jobs:
         env:
           RUST_LIVE_TESTS: ${{ needs.resolve-signers.outputs.rust_live_tests_space }}
           RUST_CI_FEATURES: ${{ needs.resolve-signers.outputs.rust_ci_features }}
-          PRIVY_APP_ID: ${{ secrets.PRIVY_APP_ID }}
-          PRIVY_APP_SECRET: ${{ secrets.PRIVY_APP_SECRET }}
-          PRIVY_WALLET_ID: ${{ secrets.PRIVY_WALLET_ID }}
-          TURNKEY_API_PUBLIC_KEY: ${{ secrets.TURNKEY_API_KEY }}
-          TURNKEY_API_PRIVATE_KEY: ${{ secrets.TURNKEY_API_PRIVATE_KEY }}
-          TURNKEY_ORGANIZATION_ID: ${{ secrets.TURNKEY_ORGANIZATION_ID }}
-          TURNKEY_PRIVATE_KEY_ID: ${{ secrets.TURNKEY_PRIVATE_KEY_ID }}
-          TURNKEY_PUBLIC_KEY: ${{ secrets.TURNKEY_SIGNER_PUBKEY }}
-          FIREBLOCKS_API_KEY: ${{ secrets.FIREBLOCKS_API_KEY }}
-          FIREBLOCKS_PRIVATE_KEY_PEM: ${{ secrets.FIREBLOCKS_PRIVATE_KEY_PEM }}
-          FIREBLOCKS_VAULT_ACCOUNT_ID: ${{ secrets.FIREBLOCKS_VAULT_ACCOUNT_ID }}
-          AWS_KMS_KEY_ID: ${{ secrets.AWS_KMS_KEY_ID }}
-          AWS_KMS_SIGNER_PUBKEY: ${{ secrets.AWS_KMS_SIGNER_PUBKEY }}
-          AWS_KMS_REGION: ${{ secrets.AWS_KMS_REGION }}
-          PARA_API_KEY: ${{ secrets.PARA_API_KEY }}
-          PARA_WALLET_ID: ${{ secrets.PARA_WALLET_ID }}
-          PARA_API_BASE_URL: ${{ secrets.PARA_API_BASE_URL }}
-          CDP_API_KEY_ID: ${{ secrets.CDP_API_KEY_ID }}
-          CDP_API_KEY_SECRET: ${{ secrets.CDP_API_KEY_SECRET }}
-          CDP_WALLET_SECRET: ${{ secrets.CDP_WALLET_SECRET }}
-          CDP_SOLANA_ADDRESS: ${{ secrets.CDP_SOLANA_ADDRESS }}
-          DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN }}
-          DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID }}
-          DFNS_PRIVATE_KEY_PEM: ${{ secrets.DFNS_PRIVATE_KEY_PEM }}
-          DFNS_WALLET_ID: ${{ secrets.DFNS_WALLET_ID }}
-          DFNS_API_BASE_URL: ${{ secrets.DFNS_API_BASE_URL }}
-          CROSSMINT_API_KEY: ${{ secrets.CROSSMINT_API_KEY }}
-          CROSSMINT_WALLET_LOCATOR: ${{ secrets.CROSSMINT_WALLET_LOCATOR }}
-          CROSSMINT_API_BASE_URL: ${{ secrets.CROSSMINT_API_BASE_URL }}
-          CROSSMINT_SIGNER_SECRET: ${{ secrets.CROSSMINT_SIGNER_SECRET }}
-          CROSSMINT_SIGNER: ${{ secrets.CROSSMINT_SIGNER }}
-          TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY: ${{ secrets.TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY }}
           SOLANA_RPC_URL: https://api.devnet.solana.com
         run: |
           set -euo pipefail
@@ -267,38 +244,6 @@ jobs:
         working-directory: typescript
         env:
           TS_LIVE_PACKAGES: ${{ needs.resolve-signers.outputs.ts_live_packages_space }}
-          PRIVY_APP_ID: ${{ secrets.PRIVY_APP_ID }}
-          PRIVY_APP_SECRET: ${{ secrets.PRIVY_APP_SECRET }}
-          PRIVY_WALLET_ID: ${{ secrets.PRIVY_WALLET_ID }}
-          TURNKEY_API_PUBLIC_KEY: ${{ secrets.TURNKEY_API_KEY }}
-          TURNKEY_API_PRIVATE_KEY: ${{ secrets.TURNKEY_API_PRIVATE_KEY }}
-          TURNKEY_ORGANIZATION_ID: ${{ secrets.TURNKEY_ORGANIZATION_ID }}
-          TURNKEY_PRIVATE_KEY_ID: ${{ secrets.TURNKEY_PRIVATE_KEY_ID }}
-          TURNKEY_PUBLIC_KEY: ${{ secrets.TURNKEY_SIGNER_PUBKEY }}
-          FIREBLOCKS_API_KEY: ${{ secrets.FIREBLOCKS_API_KEY }}
-          FIREBLOCKS_PRIVATE_KEY_PEM: ${{ secrets.FIREBLOCKS_PRIVATE_KEY_PEM }}
-          FIREBLOCKS_VAULT_ACCOUNT_ID: ${{ secrets.FIREBLOCKS_VAULT_ACCOUNT_ID }}
-          AWS_KMS_KEY_ID: ${{ secrets.AWS_KMS_KEY_ID }}
-          AWS_KMS_SIGNER_PUBKEY: ${{ secrets.AWS_KMS_SIGNER_PUBKEY }}
-          AWS_KMS_REGION: ${{ secrets.AWS_KMS_REGION }}
-          PARA_API_KEY: ${{ secrets.PARA_API_KEY }}
-          PARA_WALLET_ID: ${{ secrets.PARA_WALLET_ID }}
-          PARA_API_BASE_URL: ${{ secrets.PARA_API_BASE_URL }}
-          CDP_API_KEY_ID: ${{ secrets.CDP_API_KEY_ID }}
-          CDP_API_KEY_SECRET: ${{ secrets.CDP_API_KEY_SECRET }}
-          CDP_WALLET_SECRET: ${{ secrets.CDP_WALLET_SECRET }}
-          CDP_SOLANA_ADDRESS: ${{ secrets.CDP_SOLANA_ADDRESS }}
-          DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN }}
-          DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID }}
-          DFNS_PRIVATE_KEY_PEM: ${{ secrets.DFNS_PRIVATE_KEY_PEM }}
-          DFNS_WALLET_ID: ${{ secrets.DFNS_WALLET_ID }}
-          DFNS_API_BASE_URL: ${{ secrets.DFNS_API_BASE_URL }}
-          CROSSMINT_API_KEY: ${{ secrets.CROSSMINT_API_KEY }}
-          CROSSMINT_WALLET_LOCATOR: ${{ secrets.CROSSMINT_WALLET_LOCATOR }}
-          CROSSMINT_API_BASE_URL: ${{ secrets.CROSSMINT_API_BASE_URL }}
-          CROSSMINT_SIGNER_SECRET: ${{ secrets.CROSSMINT_SIGNER_SECRET }}
-          CROSSMINT_SIGNER: ${{ secrets.CROSSMINT_SIGNER }}
-          TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY: ${{ secrets.TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY }}
         run: |
           set -euo pipefail
 

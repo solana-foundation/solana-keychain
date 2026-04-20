@@ -161,66 +161,30 @@ jobs:
       - uses: pnpm/action-setup@v2
         with:
           version: 10.14.0
+      - uses: dopplerhq/secrets-fetch-action@v1.3.0
+        id: doppler
+        with:
+          auth-method: oidc
+          doppler-identity-id: ${{ vars.DOPPLER_SERVICE_IDENTITY_ID }}
+          doppler-project: ${{ vars.DOPPLER_PROJECT || 'keychain' }}
+          doppler-config: ${{ vars.DOPPLER_CONFIG_CI || 'stg_github' }}
+          inject-env-vars: true
       - name: Configure AWS credentials
         if: matrix.package == 'aws-kms'
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_KMS_REGION }}
+          role-to-assume: ${{ steps.doppler.outputs.AWS_ROLE_ARN }}
+          aws-region: ${{ steps.doppler.outputs.AWS_KMS_REGION }}
       - name: Install dependencies
         run: pnpm install
       - name: Setup GCP credentials
         if: matrix.package == 'gcp-kms'
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          credentials_json: ${{ steps.doppler.outputs.GCP_SERVICE_ACCOUNT_KEY }}
       - name: Build packages
         run: pnpm -F @solana/keychain-${{ matrix.package }}... run build
       - name: Run integration tests for @solana/keychain-${{ matrix.package }}
-        env:
-          # Privy
-          PRIVY_APP_ID: ${{ secrets.PRIVY_APP_ID }}
-          PRIVY_APP_SECRET: ${{ secrets.PRIVY_APP_SECRET }}
-          PRIVY_WALLET_ID: ${{ secrets.PRIVY_WALLET_ID }}
-          # Turnkey
-          TURNKEY_API_PUBLIC_KEY: ${{ secrets.TURNKEY_API_KEY }}
-          TURNKEY_API_PRIVATE_KEY: ${{ secrets.TURNKEY_API_PRIVATE_KEY }}
-          TURNKEY_ORGANIZATION_ID: ${{ secrets.TURNKEY_ORGANIZATION_ID }}
-          TURNKEY_PRIVATE_KEY_ID: ${{ secrets.TURNKEY_PRIVATE_KEY_ID }}
-          TURNKEY_PUBLIC_KEY: ${{ secrets.TURNKEY_SIGNER_PUBKEY }}
-          # Fireblocks
-          FIREBLOCKS_API_KEY: ${{ secrets.FIREBLOCKS_API_KEY }}
-          FIREBLOCKS_PRIVATE_KEY_PEM: ${{ secrets.FIREBLOCKS_PRIVATE_KEY_PEM }}
-          FIREBLOCKS_VAULT_ACCOUNT_ID: ${{ secrets.FIREBLOCKS_VAULT_ACCOUNT_ID }}
-          # GCP KMS
-          GCP_KMS_KEY_NAME: ${{ secrets.GCP_KMS_KEY_NAME }}
-          GCP_KMS_SIGNER_PUBKEY: ${{ secrets.GCP_KMS_SIGNER_PUBKEY }}
-          # AWS KMS
-          AWS_KMS_KEY_ID: ${{ secrets.AWS_KMS_KEY_ID }}
-          AWS_KMS_SIGNER_PUBKEY: ${{ secrets.AWS_KMS_SIGNER_PUBKEY }}
-          AWS_KMS_REGION: ${{ secrets.AWS_KMS_REGION }}
-          # Para
-          PARA_API_KEY: ${{ secrets.PARA_API_KEY }}
-          PARA_WALLET_ID: ${{ secrets.PARA_WALLET_ID }}
-          PARA_API_BASE_URL: ${{ secrets.PARA_API_BASE_URL }}
-          # CDP
-          CDP_API_KEY_ID: ${{ secrets.CDP_API_KEY_ID }}
-          CDP_API_KEY_SECRET: ${{ secrets.CDP_API_KEY_SECRET }}
-          CDP_WALLET_SECRET: ${{ secrets.CDP_WALLET_SECRET }}
-          CDP_SOLANA_ADDRESS: ${{ secrets.CDP_SOLANA_ADDRESS }}
-          # DFNS
-          DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN }}
-          DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID }}
-          DFNS_PRIVATE_KEY_PEM: ${{ secrets.DFNS_PRIVATE_KEY_PEM }}
-          DFNS_WALLET_ID: ${{ secrets.DFNS_WALLET_ID }}
-          DFNS_API_BASE_URL: ${{ secrets.DFNS_API_BASE_URL }}
-          # Crossmint
-          CROSSMINT_API_KEY: ${{ secrets.CROSSMINT_API_KEY }}
-          CROSSMINT_WALLET_LOCATOR: ${{ secrets.CROSSMINT_WALLET_LOCATOR }}
-          CROSSMINT_API_BASE_URL: ${{ secrets.CROSSMINT_API_BASE_URL }}
-          CROSSMINT_SIGNER_SECRET: ${{ secrets.CROSSMINT_SIGNER_SECRET }}
-          CROSSMINT_SIGNER: ${{ secrets.CROSSMINT_SIGNER }}
-          TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY: ${{ secrets.TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY }}
         run: pnpm -F @solana/keychain-${{ matrix.package }} run test:integration
 
   typescript-lint:
