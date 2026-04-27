@@ -17,6 +17,7 @@
 //! - `para`: Para MPC wallet integration
 //! - `dfns`: Dfns Wallet API integration
 //! - `crossmint`: Crossmint wallet integration
+//! - `openfort`: Openfort backend wallet integration
 //! - `all`: Enable all signer backends
 //!
 //! ## SDK Version Selection
@@ -63,6 +64,8 @@ pub mod cdp;
 pub mod crossmint;
 #[cfg(feature = "dfns")]
 pub mod dfns;
+#[cfg(feature = "openfort")]
+pub mod openfort;
 #[cfg(feature = "para")]
 pub mod para;
 
@@ -99,6 +102,8 @@ pub use cdp::{CdpSigner, CdpSignerConfig};
 pub use crossmint::{CrossmintSigner, CrossmintSignerConfig};
 #[cfg(feature = "dfns")]
 pub use dfns::{DfnsSigner, DfnsSignerConfig};
+#[cfg(feature = "openfort")]
+pub use openfort::{OpenfortSigner, OpenfortSignerConfig};
 #[cfg(feature = "para")]
 pub use para::{ParaSigner, ParaSignerConfig};
 
@@ -114,10 +119,11 @@ pub use para::{ParaSigner, ParaSignerConfig};
     feature = "cdp",
     feature = "dfns",
     feature = "para",
-    feature = "crossmint"
+    feature = "crossmint",
+    feature = "openfort"
 )))]
 compile_error!(
-    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, cdp, para, dfns, or crossmint"
+    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, cdp, para, dfns, crossmint, or openfort"
 );
 
 /// Unified signer enum supporting multiple backends
@@ -147,6 +153,8 @@ pub enum Signer {
     Cdp(CdpSigner),
     #[cfg(feature = "dfns")]
     Dfns(DfnsSigner),
+    #[cfg(feature = "openfort")]
+    Openfort(OpenfortSigner),
     #[cfg(feature = "para")]
     Para(ParaSigner),
     #[cfg(feature = "crossmint")]
@@ -323,6 +331,31 @@ impl Signer {
         signer.init().await?;
         Ok(Self::Crossmint(signer))
     }
+
+    /// Create an Openfort backend wallet signer.
+    ///
+    /// Pass `None` for `http_client_config` to use default timeout settings.
+    #[cfg(feature = "openfort")]
+    pub fn from_openfort(
+        secret_key: String,
+        account_id: String,
+        wallet_secret: String,
+        wallet_secret_key_id: Option<String>,
+        address: String,
+        http_client_config: Option<HttpClientConfig>,
+    ) -> Result<Self, SignerError> {
+        Ok(Self::Openfort(OpenfortSigner::from_config(
+            OpenfortSignerConfig {
+                secret_key,
+                account_id,
+                wallet_secret,
+                wallet_secret_key_id,
+                address,
+                api_base_url: None,
+                http_client_config,
+            },
+        )?))
+    }
 }
 
 #[async_trait::async_trait]
@@ -354,6 +387,8 @@ impl SolanaSigner for Signer {
             Signer::Cdp(s) => s.pubkey(),
             #[cfg(feature = "dfns")]
             Signer::Dfns(s) => s.pubkey(),
+            #[cfg(feature = "openfort")]
+            Signer::Openfort(s) => s.pubkey(),
             #[cfg(feature = "para")]
             Signer::Para(s) => s.pubkey(),
             #[cfg(feature = "crossmint")]
@@ -391,6 +426,8 @@ impl SolanaSigner for Signer {
             Signer::Cdp(s) => s.sign_transaction(tx).await,
             #[cfg(feature = "dfns")]
             Signer::Dfns(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "openfort")]
+            Signer::Openfort(s) => s.sign_transaction(tx).await,
             #[cfg(feature = "para")]
             Signer::Para(s) => s.sign_transaction(tx).await,
             #[cfg(feature = "crossmint")]
@@ -425,6 +462,8 @@ impl SolanaSigner for Signer {
             Signer::Cdp(s) => s.sign_message(message).await,
             #[cfg(feature = "dfns")]
             Signer::Dfns(s) => s.sign_message(message).await,
+            #[cfg(feature = "openfort")]
+            Signer::Openfort(s) => s.sign_message(message).await,
             #[cfg(feature = "para")]
             Signer::Para(s) => s.sign_message(message).await,
             #[cfg(feature = "crossmint")]
@@ -459,6 +498,8 @@ impl SolanaSigner for Signer {
             Signer::Cdp(s) => s.is_available().await,
             #[cfg(feature = "dfns")]
             Signer::Dfns(s) => s.is_available().await,
+            #[cfg(feature = "openfort")]
+            Signer::Openfort(s) => s.is_available().await,
             #[cfg(feature = "para")]
             Signer::Para(s) => s.is_available().await,
             #[cfg(feature = "crossmint")]

@@ -36,6 +36,14 @@ cdp = [
     "dep:hex",
 ]
 dfns = ["dep:reqwest", "dep:hex", "dep:ed25519-dalek", "dep:p256", "dep:sha2", "dep:rsa"]
+openfort = [
+    "dep:reqwest",
+    "dep:jsonwebtoken",
+    "dep:uuid",
+    "dep:chrono",
+    "dep:sha2",
+    "dep:hex",
+]
 all = [
     "memory",
     "vault",
@@ -48,6 +56,7 @@ all = [
     "para",
     "crossmint",
     "dfns",
+    "openfort",
 ]
 
 # SDK version selection (mutually exclusive)
