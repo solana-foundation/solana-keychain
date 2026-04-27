@@ -10,18 +10,20 @@
 //! - `Authorization: Bearer <secret_key>` — Openfort project secret key
 //!   (`sk_live_*` or `sk_test_*`).
 //! - `x-wallet-auth: <ES256 JWT>` — JWT signed by the project's wallet secret
-//!   (an ECDSA P-256 private key registered via
-//!   `POST /v2/accounts/backend/register-secret`).
+//!   (an ECDSA P-256 private key, PEM PKCS#8) issued by the Openfort dashboard.
 //!
-//! The wallet secret is supplied either as a base64-encoded PKCS#8 DER blob
-//! or as a PEM string.
+//! # Configuration
+//!
+//! The signer takes three inputs: project secret key, backend wallet account ID
+//! (`acc_<uuid>`), and the wallet secret PEM. The Solana address is fetched
+//! from `GET /v1/accounts/{account_id}` during [`OpenfortSigner::init`].
 //!
 //! # Solana payload
 //!
 //! For SVM wallets, Openfort signs the bytes as-is (no hashing) and returns a
 //! 64-byte ed25519 signature. The signer hex-encodes the message bytes, sends
 //! them in the `data` field, then verifies the returned signature against the
-//! configured Solana address.
+//! address resolved at init time.
 
 mod types;
 
@@ -30,7 +32,6 @@ use crate::signature_util::EXPECTED_SIGNATURE_LENGTH;
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
-use base64::{engine::general_purpose::STANDARD, Engine};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::Serialize;
 use serde_json::Value;
@@ -102,37 +103,9 @@ fn compute_req_hash(body: &Value) -> Result<String, SignerError> {
     Ok(hex::encode(Sha256::digest(json.as_bytes())))
 }
 
-/// Decode a base64-encoded PKCS#8 DER P-256 private key into a PEM string,
-/// or pass through if the input is already PEM.
-fn wallet_secret_to_pem(wallet_secret: &str) -> Result<String, SignerError> {
-    if wallet_secret.starts_with("-----BEGIN") {
-        return Ok(wallet_secret.to_string());
-    }
-
-    let der = STANDARD.decode(wallet_secret).map_err(|_e| {
-        #[cfg(feature = "unsafe-debug")]
-        log::error!("Failed to decode walletSecret from base64: {_e}");
-        SignerError::InvalidPrivateKey(
-            "Failed to decode Openfort wallet secret from base64".to_string(),
-        )
-    })?;
-
-    let b64 = STANDARD.encode(&der);
-    let wrapped = b64
-        .as_bytes()
-        .chunks(64)
-        .map(|c| String::from_utf8_lossy(c).into_owned())
-        .collect::<Vec<_>>()
-        .join("\n");
-    Ok(format!(
-        "-----BEGIN PRIVATE KEY-----\n{wrapped}\n-----END PRIVATE KEY-----\n"
-    ))
-}
-
 /// Build the X-Wallet-Auth JWT for an Openfort backend wallet request.
 fn create_wallet_jwt(
-    wallet_secret: &str,
-    wallet_secret_key_id: Option<&str>,
+    wallet_secret_pem: &str,
     host: &str,
     method: &str,
     path: &str,
@@ -149,20 +122,17 @@ fn create_wallet_jwt(
         req_hash: Some(compute_req_hash(request_body)?),
     };
 
-    let pem = wallet_secret_to_pem(wallet_secret)?;
-    let key = EncodingKey::from_ec_pem(pem.as_bytes()).map_err(|_e| {
+    let key = EncodingKey::from_ec_pem(wallet_secret_pem.as_bytes()).map_err(|_e| {
         #[cfg(feature = "unsafe-debug")]
         log::error!("Failed to parse Openfort wallet secret as EC key: {_e}");
         SignerError::InvalidPrivateKey(
-            "Failed to parse Openfort wallet secret as EC private key".to_string(),
+            "Failed to parse Openfort wallet secret as EC private key (expected PEM PKCS#8)"
+                .to_string(),
         )
     })?;
 
     let mut header = Header::new(Algorithm::ES256);
     header.typ = Some("JWT".to_string());
-    if let Some(kid) = wallet_secret_key_id {
-        header.kid = Some(kid.to_string());
-    }
 
     encode(&header, &claims, &key).map_err(|_e| {
         #[cfg(feature = "unsafe-debug")]
@@ -173,6 +143,7 @@ fn create_wallet_jwt(
 
 const OPENFORT_API_HOST: &str = "api.openfort.io";
 const OPENFORT_BACKEND_PATH: &str = "/v2/accounts/backend";
+const OPENFORT_ACCOUNTS_PATH: &str = "/v1/accounts";
 
 /// Configuration for an [`OpenfortSigner`].
 #[derive(Clone)]
@@ -181,14 +152,9 @@ pub struct OpenfortSignerConfig {
     pub secret_key: String,
     /// Backend wallet account ID (`acc_<uuid>`).
     pub account_id: String,
-    /// Wallet secret used to sign the X-Wallet-Auth JWT.
-    /// Either a base64-encoded PKCS#8 DER P-256 private key, or a PEM string
-    /// starting with `-----BEGIN`.
-    pub wallet_secret: String,
-    /// Optional `kid` claim placed in the JWT header.
-    pub wallet_secret_key_id: Option<String>,
-    /// Solana address (base58 pubkey) of the backend wallet.
-    pub address: String,
+    /// PEM-encoded PKCS#8 ECDSA P-256 private key issued by the Openfort
+    /// dashboard. Used to sign the `x-wallet-auth` JWT on every request.
+    pub wallet_secret_pem: String,
     /// Base URL (defaults to `https://api.openfort.io`).
     pub api_base_url: Option<String>,
     pub http_client_config: Option<HttpClientConfig>,
@@ -199,9 +165,9 @@ pub struct OpenfortSignerConfig {
 pub struct OpenfortSigner {
     secret_key: String,
     account_id: String,
-    wallet_secret: String,
-    wallet_secret_key_id: Option<String>,
-    public_key: Pubkey,
+    wallet_secret_pem: String,
+    /// Resolved by [`OpenfortSigner::init`] before any signing call.
+    public_key: Option<Pubkey>,
     api_base_url: String,
     api_host: String,
     client: reqwest::Client,
@@ -218,20 +184,17 @@ impl std::fmt::Debug for OpenfortSigner {
 }
 
 impl OpenfortSigner {
-    /// Construct a signer with sensible defaults.
+    /// Construct a signer with sensible defaults. Call [`init`](Self::init)
+    /// before signing to fetch the wallet's Solana address.
     pub fn new(
         secret_key: String,
         account_id: String,
-        wallet_secret: String,
-        wallet_secret_key_id: Option<String>,
-        address: String,
+        wallet_secret_pem: String,
     ) -> Result<Self, SignerError> {
         Self::from_config(OpenfortSignerConfig {
             secret_key,
             account_id,
-            wallet_secret,
-            wallet_secret_key_id,
-            address,
+            wallet_secret_pem,
             api_base_url: None,
             http_client_config: None,
         })
@@ -249,20 +212,11 @@ impl OpenfortSigner {
                 "account_id must not be empty".to_string(),
             ));
         }
-        if config.wallet_secret.is_empty() {
+        if config.wallet_secret_pem.is_empty() {
             return Err(SignerError::ConfigError(
-                "wallet_secret must not be empty".to_string(),
+                "wallet_secret_pem must not be empty".to_string(),
             ));
         }
-        if config.address.is_empty() {
-            return Err(SignerError::ConfigError(
-                "address must not be empty".to_string(),
-            ));
-        }
-
-        let public_key = Pubkey::from_str(&config.address).map_err(|_| {
-            SignerError::InvalidPublicKey(format!("Invalid Solana address: {}", config.address))
-        })?;
 
         let base_url = config
             .api_base_url
@@ -279,17 +233,85 @@ impl OpenfortSigner {
         Ok(Self {
             secret_key: config.secret_key,
             account_id: config.account_id,
-            wallet_secret: config.wallet_secret,
-            wallet_secret_key_id: config.wallet_secret_key_id,
-            public_key,
+            wallet_secret_pem: config.wallet_secret_pem,
+            public_key: None,
             api_base_url: base_url,
             api_host,
             client,
         })
     }
 
+    /// Fetch the wallet's Solana address from `GET /v1/accounts/{id}` and cache it.
+    /// Must be called before [`sign_transaction`](SolanaSigner::sign_transaction)
+    /// or [`sign_message`](SolanaSigner::sign_message).
+    pub async fn init(&mut self) -> Result<(), SignerError> {
+        let pubkey = self.fetch_public_key().await?;
+        self.public_key = Some(pubkey);
+        Ok(())
+    }
+
+    fn initialized_pubkey(&self) -> Result<Pubkey, SignerError> {
+        self.public_key.ok_or_else(|| {
+            SignerError::ConfigError(
+                "OpenfortSigner is not initialized; call init() before signing".to_string(),
+            )
+        })
+    }
+
+    fn account_path(&self) -> String {
+        format!("{}/{}", OPENFORT_ACCOUNTS_PATH, self.account_id)
+    }
+
     fn sign_path(&self) -> String {
         format!("{}/{}/sign", OPENFORT_BACKEND_PATH, self.account_id)
+    }
+
+    /// `GET /v1/accounts/{accountId}` — bearer auth only, no wallet JWT.
+    async fn fetch_public_key(&self) -> Result<Pubkey, SignerError> {
+        let url = format!("{}{}", self.api_base_url, self.account_path());
+
+        let response = self
+            .client
+            .get(&url)
+            .header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", self.secret_key),
+            )
+            .send()
+            .await
+            .map_err(|e| SignerError::HttpError(format!("Openfort HTTP request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let _error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Failed to read error response".to_string());
+
+            #[cfg(feature = "unsafe-debug")]
+            log::error!("Openfort fetch_public_key error - status: {status}, response: {_error_text}");
+            #[cfg(not(feature = "unsafe-debug"))]
+            log::error!("Openfort fetch_public_key error - status: {status}");
+
+            return Err(SignerError::RemoteApiError(format!(
+                "Openfort API error {status}"
+            )));
+        }
+
+        let info: types::AccountInfo = response.json().await.map_err(|_e| {
+            #[cfg(feature = "unsafe-debug")]
+            log::error!("Failed to parse Openfort account response: {_e}");
+            SignerError::SerializationError(
+                "Failed to parse Openfort account response".to_string(),
+            )
+        })?;
+
+        Pubkey::from_str(&info.address).map_err(|_| {
+            SignerError::InvalidPublicKey(format!(
+                "Openfort returned non-Solana address for {}: ensure the account is on an SVM chain",
+                self.account_id
+            ))
+        })
     }
 
     fn build_sign_headers(
@@ -299,8 +321,7 @@ impl OpenfortSigner {
         request_body: &Value,
     ) -> Result<reqwest::header::HeaderMap, SignerError> {
         let wallet_token = create_wallet_jwt(
-            &self.wallet_secret,
-            self.wallet_secret_key_id.as_deref(),
+            &self.wallet_secret_pem,
             &self.api_host,
             method,
             path,
@@ -377,6 +398,7 @@ impl OpenfortSigner {
 
     /// Sign arbitrary bytes via the Openfort API and verify the returned ed25519 signature.
     async fn sign_bytes(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        let public_key = self.initialized_pubkey()?;
         let response = self.call_sign(message).await?;
 
         // Signature is hex-encoded with a leading `0x`.
@@ -397,7 +419,7 @@ impl OpenfortSigner {
 
         let signature = Signature::from(sig_array);
 
-        if !signature.verify(&self.public_key.to_bytes(), message) {
+        if !signature.verify(&public_key.to_bytes(), message) {
             return Err(SignerError::SigningFailed(
                 "Signature verification failed — the returned signature does not match the public key".to_string(),
             ));
@@ -410,8 +432,9 @@ impl OpenfortSigner {
         &self,
         transaction: &mut Transaction,
     ) -> Result<SignedTransaction, SignerError> {
+        let public_key = self.initialized_pubkey()?;
         let signature = self.sign_bytes(&transaction.message_data()).await?;
-        TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
+        TransactionUtil::add_signature_to_transaction(transaction, &public_key, signature)?;
 
         Ok((
             TransactionUtil::serialize_transaction(transaction)?,
@@ -423,7 +446,7 @@ impl OpenfortSigner {
 #[async_trait::async_trait]
 impl SolanaSigner for OpenfortSigner {
     fn pubkey(&self) -> Pubkey {
-        self.public_key
+        self.public_key.expect("OpenfortSigner not initialized")
     }
 
     async fn sign_transaction(
@@ -442,10 +465,13 @@ impl SolanaSigner for OpenfortSigner {
     }
 
     async fn is_available(&self) -> bool {
-        // Openfort does not expose a cheap GET for backend wallets; signing a
-        // zero-byte payload would be billable. Treat the signer as available
-        // once it has been constructed — failures will surface on first call.
-        true
+        let Some(public_key) = self.public_key else {
+            return false;
+        };
+        match self.fetch_public_key().await {
+            Ok(pubkey) => pubkey == public_key,
+            Err(_) => false,
+        }
     }
 }
 
@@ -463,37 +489,15 @@ mod tests {
     const TEST_PUBKEY: &str = "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV";
     const TEST_ACCOUNT_ID: &str = "acc_e0b84653-1741-4a3d-9e91-2b0fd2942f60";
 
-    /// Minimal valid P-256 PKCS#8 DER blob used so jsonwebtoken can parse it.
-    /// Same fixture pattern as the CDP tests — the scalar is `[0x01;32]`,
-    /// which is in the valid range `[1, n-1]`.
-    fn test_wallet_secret() -> String {
-        #[rustfmt::skip]
-        const P256_PKCS8_DER: &[u8] = &[
-            0x30, 0x41,
-            0x02, 0x01, 0x00,
-            0x30, 0x13,
-            0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
-            0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
-            0x04, 0x27,
-            0x30, 0x25,
-            0x02, 0x01, 0x01,
-            0x04, 0x20,
-            0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-            0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-            0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-            0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-        ];
-        STANDARD.encode(P256_PKCS8_DER)
-    }
-
+    /// Build a signer pointing at the mock server, with `public_key` pre-set
+    /// so individual tests can skip exercising `init()`.
     fn create_test_signer(base_url: &str) -> OpenfortSigner {
         let api_host = extract_host(base_url).expect("failed to parse test base URL");
         OpenfortSigner {
             secret_key: "sk_test_secret".to_string(),
             account_id: TEST_ACCOUNT_ID.to_string(),
-            wallet_secret: test_wallet_secret(),
-            wallet_secret_key_id: Some("ws_1".to_string()),
-            public_key: Pubkey::from_str(TEST_PUBKEY).unwrap(),
+            wallet_secret_pem: test_wallet_secret_pem(),
+            public_key: Some(Pubkey::from_str(TEST_PUBKEY).unwrap()),
             api_base_url: base_url.to_string(),
             api_host,
             client: reqwest::Client::new(),
@@ -505,69 +509,29 @@ mod tests {
         let signer = OpenfortSigner::new(
             "sk_test_secret".to_string(),
             TEST_ACCOUNT_ID.to_string(),
-            test_wallet_secret(),
-            Some("ws_1".to_string()),
-            TEST_PUBKEY.to_string(),
+            test_wallet_secret_pem(),
         );
         assert!(signer.is_ok());
-        assert_eq!(signer.unwrap().pubkey().to_string(), TEST_PUBKEY);
+        // Public key stays None until init() runs.
+        assert!(signer.unwrap().public_key.is_none());
     }
 
     #[test]
     fn test_new_rejects_empty_fields() {
         let cases = [
-            (
-                "",
-                TEST_ACCOUNT_ID,
-                test_wallet_secret(),
-                TEST_PUBKEY,
-            ),
-            (
-                "sk_test_secret",
-                "",
-                test_wallet_secret(),
-                TEST_PUBKEY,
-            ),
-            (
-                "sk_test_secret",
-                TEST_ACCOUNT_ID,
-                String::new(),
-                TEST_PUBKEY,
-            ),
-            (
-                "sk_test_secret",
-                TEST_ACCOUNT_ID,
-                test_wallet_secret(),
-                "",
-            ),
+            ("", TEST_ACCOUNT_ID, test_wallet_secret_pem()),
+            ("sk_test_secret", "", test_wallet_secret_pem()),
+            ("sk_test_secret", TEST_ACCOUNT_ID, String::new()),
         ];
 
-        for (sk, account, secret, address) in cases {
-            let result = OpenfortSigner::new(
-                sk.to_string(),
-                account.to_string(),
-                secret,
-                None,
-                address.to_string(),
+        for (sk, account, secret) in cases {
+            let result = OpenfortSigner::new(sk.to_string(), account.to_string(), secret);
+            assert!(
+                result.is_err(),
+                "expected ConfigError for inputs with an empty field"
             );
-            assert!(result.is_err(), "expected ConfigError for inputs with an empty field");
             assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
         }
-    }
-
-    #[test]
-    fn test_new_rejects_invalid_address() {
-        let result = OpenfortSigner::new(
-            "sk_test_secret".to_string(),
-            TEST_ACCOUNT_ID.to_string(),
-            test_wallet_secret(),
-            None,
-            "not-a-valid-pubkey".to_string(),
-        );
-        assert!(matches!(
-            result.unwrap_err(),
-            SignerError::InvalidPublicKey(_)
-        ));
     }
 
     #[test]
@@ -575,14 +539,95 @@ mod tests {
         let signer = create_test_signer("http://localhost");
         let debug_str = format!("{signer:?}");
         assert!(!debug_str.contains("sk_test_secret"));
-        assert!(!debug_str.contains(&test_wallet_secret()));
+        assert!(!debug_str.contains(&test_wallet_secret_pem()));
         assert!(debug_str.contains("OpenfortSigner"));
+    }
+
+    /// Build an uninitialized signer pointing at the wiremock server with a
+    /// plain HTTP client (the production builder forces https_only).
+    fn create_uninitialized_test_signer(base_url: &str) -> OpenfortSigner {
+        let api_host = extract_host(base_url).expect("failed to parse test base URL");
+        OpenfortSigner {
+            secret_key: "sk_test_secret".to_string(),
+            account_id: TEST_ACCOUNT_ID.to_string(),
+            wallet_secret_pem: test_wallet_secret_pem(),
+            public_key: None,
+            api_base_url: base_url.to_string(),
+            api_host,
+            client: reqwest::Client::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_init_fetches_address() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(format!(r"^/v1/accounts/{TEST_ACCOUNT_ID}$")))
+            .and(header_exists("authorization"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "address": TEST_PUBKEY,
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let mut signer = create_uninitialized_test_signer(&mock_server.uri());
+        signer.init().await.unwrap();
+        assert_eq!(signer.pubkey().to_string(), TEST_PUBKEY);
+    }
+
+    #[tokio::test]
+    async fn test_init_unauthorized() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(format!(r"^/v1/accounts/{TEST_ACCOUNT_ID}$")))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let mut signer = create_uninitialized_test_signer(&mock_server.uri());
+        let err = signer.init().await.unwrap_err();
+        assert!(matches!(err, SignerError::RemoteApiError(_)));
+    }
+
+    #[tokio::test]
+    async fn test_init_rejects_non_solana_address() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(format!(r"^/v1/accounts/{TEST_ACCOUNT_ID}$")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "address": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let mut signer = create_uninitialized_test_signer(&mock_server.uri());
+        let err = signer.init().await.unwrap_err();
+        assert!(matches!(err, SignerError::InvalidPublicKey(_)));
+    }
+
+    #[tokio::test]
+    async fn test_sign_message_requires_init() {
+        let signer = OpenfortSigner::new(
+            "sk_test_secret".to_string(),
+            TEST_ACCOUNT_ID.to_string(),
+            test_wallet_secret_pem(),
+        )
+        .unwrap();
+
+        let err = signer.sign_message(b"test").await.unwrap_err();
+        assert!(matches!(err, SignerError::ConfigError(_)));
     }
 
     #[tokio::test]
     async fn test_sign_message_invalid_wallet_secret() {
         let mut signer = create_test_signer("http://localhost");
-        signer.wallet_secret = "not-base64".to_string();
+        signer.wallet_secret_pem = "not-a-pem-key".to_string();
 
         let result = signer.sign_message(b"test").await;
         assert!(matches!(
@@ -602,7 +647,7 @@ mod tests {
         let sig_hex = format!("0x{}", hex::encode(signature.as_ref()));
 
         let mut signer = create_test_signer(&mock_server.uri());
-        signer.public_key = pubkey;
+        signer.public_key = Some(pubkey);
 
         Mock::given(method("POST"))
             .and(path_regex(format!(
@@ -634,7 +679,7 @@ mod tests {
         let sig_hex = format!("0x{}", hex::encode(signature.as_ref()));
 
         let mut signer = create_test_signer(&mock_server.uri());
-        signer.public_key = keypair_pubkey(&other_keypair);
+        signer.public_key = Some(keypair_pubkey(&other_keypair));
 
         Mock::given(method("POST"))
             .and(path_regex(r".*/sign$"))
@@ -724,7 +769,7 @@ mod tests {
         let sig_hex = format!("0x{}", hex::encode(signature.as_ref()));
 
         let mut signer = create_test_signer(&mock_server.uri());
-        signer.public_key = pubkey;
+        signer.public_key = Some(pubkey);
 
         Mock::given(method("POST"))
             .and(path_regex(r".*/sign$"))
