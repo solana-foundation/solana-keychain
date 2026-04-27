@@ -1,28 +1,20 @@
 {
-    "name": "@solana/keychain",
+    "name": "@solana/keychain-openfort",
     "author": "Solana Foundation",
+    "version": "1.1.0",
+    "description": "Openfort backend wallet signer for Solana transactions",
     "license": "MIT",
     "repository": "https://github.com/solana-foundation/solana-keychain",
-    "version": "1.1.0",
-    "description": "Unified Solana transaction signing across multiple backends",
     "keywords": [
         "solana",
         "signing",
         "wallet",
-        "privy",
-        "vault",
-        "turnkey",
-        "aws",
-        "kms",
-        "fireblocks",
-        "cdp",
-        "coinbase",
-        "para",
-        "dfns",
-        "crossmint",
         "openfort"
     ],
     "type": "module",
+    "engines": {
+        "node": ">=19"
+    },
     "sideEffects": false,
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
@@ -40,32 +32,33 @@
         "build": "tsc --build",
         "clean": "rm -rf dist *.tsbuildinfo",
         "prepack": "pnpm run build",
-        "test": "vitest run && pnpm run typecheck",
+        "test": "vitest run",
+        "test:unit": "vitest run --config ../../vitest.config.unit.ts",
+        "test:integration": "vitest run --config ../../vitest.config.integration.ts",
+        "test:watch": "vitest",
+        "test:watch:unit": "vitest --config ../../vitest.config.unit.ts",
+        "test:watch:integration": "vitest --config ../../vitest.config.integration.ts",
         "typecheck": "tsc --noEmit",
         "test:treeshakability": "agadoo dist/index.js"
     },
     "dependencies": {
-        "@solana/addresses": "^6.0.1",
-        "@solana/keychain-core": "workspace:*",
-        "@solana/keychain-aws-kms": "workspace:*",
-        "@solana/keychain-cdp": "workspace:*",
-        "@solana/keychain-crossmint": "workspace:*",
-        "@solana/keychain-dfns": "workspace:*",
-        "@solana/keychain-fireblocks": "workspace:*",
-        "@solana/keychain-gcp-kms": "workspace:*",
-        "@solana/keychain-openfort": "workspace:*",
-        "@solana/keychain-para": "workspace:*",
-        "@solana/keychain-privy": "workspace:*",
-        "@solana/keychain-turnkey": "workspace:*",
-        "@solana/keychain-vault": "workspace:*"
+        "@solana/keychain-core": "workspace:*"
     },
     "peerDependencies": {
         "@solana/addresses": ">=6.0.1",
-        "@solana/codecs-core": ">=6.0.1",
         "@solana/codecs-strings": ">=6.0.1",
         "@solana/keys": ">=6.0.1",
         "@solana/signers": ">=6.0.1",
         "@solana/transactions": ">=6.0.1"
+    },
+    "devDependencies": {
+        "@solana/addresses": "^6.0.1",
+        "@solana/codecs-strings": "^6.0.1",
+        "@solana/keychain-test-utils": "workspace:*",
+        "@solana/keys": "^6.0.1",
+        "@solana/signers": "^6.0.1",
+        "@solana/transactions": "^6.0.1",
+        "dotenv": "^17.2.3"
     },
     "publishConfig": {
         "access": "public"

@@ -327,6 +327,9 @@ importers:
       '@solana/keychain-gcp-kms':
         specifier: workspace:*
         version: link:../gcp-kms
+      '@solana/keychain-openfort':
+        specifier: workspace:*
+        version: link:../openfort
       '@solana/keychain-para':
         specifier: workspace:*
         version: link:../para
@@ -348,6 +351,34 @@ importers:
       '@solana/transactions':
         specifier: '>=6.0.1'
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+
+  packages/openfort:
+    dependencies:
+      '@solana/keychain-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@solana/addresses':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/codecs-strings':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/keychain-test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+      '@solana/keys':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/signers':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/transactions':
+        specifier: ^6.0.1
+        version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
 
   packages/para:
     dependencies:

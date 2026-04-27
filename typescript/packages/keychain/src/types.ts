@@ -4,6 +4,7 @@ import type { CrossmintSignerConfig } from '@solana/keychain-crossmint';
 import type { DfnsSignerConfig } from '@solana/keychain-dfns';
 import type { FireblocksSignerConfig } from '@solana/keychain-fireblocks';
 import type { GcpKmsSignerConfig } from '@solana/keychain-gcp-kms';
+import type { OpenfortSignerConfig } from '@solana/keychain-openfort';
 import type { ParaSignerConfig } from '@solana/keychain-para';
 import type { PrivySignerConfig } from '@solana/keychain-privy';
 import type { TurnkeySignerConfig } from '@solana/keychain-turnkey';
@@ -20,6 +21,7 @@ export type KeychainSignerConfig =
     | (DfnsSignerConfig & { backend: 'dfns' })
     | (FireblocksSignerConfig & { backend: 'fireblocks' })
     | (GcpKmsSignerConfig & { backend: 'gcp-kms' })
+    | (OpenfortSignerConfig & { backend: 'openfort' })
     | (ParaSignerConfig & { backend: 'para' })
     | (PrivySignerConfig & { backend: 'privy' })
     | (TurnkeySignerConfig & { backend: 'turnkey' })

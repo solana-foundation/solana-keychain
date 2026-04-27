@@ -6,6 +6,7 @@ import { createCrossmintSigner } from '@solana/keychain-crossmint';
 import { createDfnsSigner } from '@solana/keychain-dfns';
 import { createFireblocksSigner } from '@solana/keychain-fireblocks';
 import { createGcpKmsSigner } from '@solana/keychain-gcp-kms';
+import { createOpenfortSigner } from '@solana/keychain-openfort';
 import { createParaSigner } from '@solana/keychain-para';
 import { createPrivySigner } from '@solana/keychain-privy';
 import { createTurnkeySigner } from '@solana/keychain-turnkey';
@@ -47,6 +48,8 @@ export async function createKeychainSigner(config: KeychainSignerConfig): Promis
             return await createFireblocksSigner(stripBackend(config));
         case 'gcp-kms':
             return createGcpKmsSigner(stripBackend(config));
+        case 'openfort':
+            return await createOpenfortSigner(stripBackend(config));
         case 'para':
             return await createParaSigner(stripBackend(config));
         case 'privy':
