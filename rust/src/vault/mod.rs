@@ -359,6 +359,9 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/v1/transit/sign/test-key"))
             .and(header("X-Vault-Token", TEST_VAULT_TOKEN))
+            .and(body_json(serde_json::json!({
+                "input": STANDARD.encode(message),
+            })))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "data": { "signature": format!("vault:v1:{signature_b64}") }
             })))
