@@ -18,7 +18,7 @@
 //! (`acc_<uuid>`), and the wallet secret. The wallet secret may be either the
 //! bare base64-encoded PKCS#8 DER body (the convenient single-line form for
 //! env vars) or a full PEM string (`-----BEGIN PRIVATE KEY-----` ...). The
-//! Solana address is fetched from `GET /v1/accounts/{account_id}` during
+//! Solana address is fetched from `GET /v2/accounts/{account_id}` during
 //! [`OpenfortSigner::init`].
 //!
 //! # Solana payload
@@ -160,7 +160,7 @@ fn create_wallet_jwt(
 
 const OPENFORT_API_HOST: &str = "api.openfort.io";
 const OPENFORT_BACKEND_PATH: &str = "/v2/accounts/backend";
-const OPENFORT_ACCOUNTS_PATH: &str = "/v1/accounts";
+const OPENFORT_ACCOUNTS_PATH: &str = "/v2/accounts";
 
 /// Configuration for an [`OpenfortSigner`].
 #[derive(Clone)]
@@ -259,7 +259,7 @@ impl OpenfortSigner {
         })
     }
 
-    /// Fetch the wallet's Solana address from `GET /v1/accounts/{id}` and cache it.
+    /// Fetch the wallet's Solana address from `GET /v2/accounts/{id}` and cache it.
     /// Must be called before [`sign_transaction`](SolanaSigner::sign_transaction)
     /// or [`sign_message`](SolanaSigner::sign_message).
     pub async fn init(&mut self) -> Result<(), SignerError> {
@@ -284,7 +284,7 @@ impl OpenfortSigner {
         format!("{}/{}/sign", OPENFORT_BACKEND_PATH, self.account_id)
     }
 
-    /// `GET /v1/accounts/{accountId}` — bearer auth only, no wallet JWT.
+    /// `GET /v2/accounts/{accountId}` — bearer auth only, no wallet JWT.
     async fn fetch_public_key(&self) -> Result<Pubkey, SignerError> {
         let url = format!("{}{}", self.api_base_url, self.account_path());
 
@@ -617,7 +617,7 @@ mod tests {
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
-            .and(path_regex(format!(r"^/v1/accounts/{TEST_ACCOUNT_ID}$")))
+            .and(path_regex(format!(r"^/v2/accounts/{TEST_ACCOUNT_ID}$")))
             .and(header_exists("authorization"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "address": TEST_PUBKEY,
@@ -636,7 +636,7 @@ mod tests {
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
-            .and(path_regex(format!(r"^/v1/accounts/{TEST_ACCOUNT_ID}$")))
+            .and(path_regex(format!(r"^/v2/accounts/{TEST_ACCOUNT_ID}$")))
             .respond_with(ResponseTemplate::new(401))
             .expect(1)
             .mount(&mock_server)
@@ -652,7 +652,7 @@ mod tests {
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
-            .and(path_regex(format!(r"^/v1/accounts/{TEST_ACCOUNT_ID}$")))
+            .and(path_regex(format!(r"^/v2/accounts/{TEST_ACCOUNT_ID}$")))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "address": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
             })))

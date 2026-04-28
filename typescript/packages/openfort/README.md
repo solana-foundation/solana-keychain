@@ -5,7 +5,7 @@ Openfort backend wallet signer for Solana transactions.
 Calls Openfort's `POST /v2/accounts/backend/{accountId}/sign` endpoint with the
 project secret key plus an `x-wallet-auth` ES256 JWT signed by the wallet
 secret. The Solana address is fetched automatically from
-`GET /v1/accounts/{accountId}` during signer initialization.
+`GET /v2/accounts/{accountId}` during signer initialization.
 
 ## Configuration
 

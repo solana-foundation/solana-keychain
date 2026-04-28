@@ -22,7 +22,7 @@ import type { AccountResponse, OpenfortSignerConfig, SignResponse } from './type
 /**
  * Create and initialize an Openfort backend wallet signer.
  *
- * Fetches the wallet's Solana address from `GET /v1/accounts/{accountId}`
+ * Fetches the wallet's Solana address from `GET /v2/accounts/{accountId}`
  * during initialization and loads the wallet secret.
  *
  * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
@@ -36,7 +36,7 @@ export async function createOpenfortSigner<TAddress extends string = string>(
 }
 
 const DEFAULT_BASE_URL = 'https://api.openfort.io';
-const ACCOUNTS_PATH = '/v1/accounts';
+const ACCOUNTS_PATH = '/v2/accounts';
 const BACKEND_PATH = '/v2/accounts/backend';
 const JWT_LIFETIME_SECS = 120;
 const ED25519_SIGNATURE_LENGTH = 64;
@@ -52,7 +52,7 @@ let utf8Encoder: TextEncoder | undefined;
  * Calls `POST /v2/accounts/backend/{accountId}/sign` for each signing request,
  * authenticated with `Authorization: Bearer <secret_key>` and an `x-wallet-auth`
  * ES256 JWT signed with the wallet secret. The Solana address is resolved
- * from `GET /v1/accounts/{accountId}` during `create()`.
+ * from `GET /v2/accounts/{accountId}` during `create()`.
  *
  * Use the static `create()` factory — it loads the P-256 wallet key and fetches
  * the address before returning.
@@ -100,7 +100,7 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
      * Create and initialize an OpenfortSigner.
      *
      * Loads the P-256 wallet key (base64 DER or PEM) and fetches the wallet's
-     * Solana address from `GET /v1/accounts/{accountId}`.
+     * Solana address from `GET /v2/accounts/{accountId}`.
      *
      * @deprecated Use `createOpenfortSigner()` instead.
      */
@@ -290,7 +290,7 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
         );
     }
 
-    /** Returns true if `GET /v1/accounts/{accountId}` still resolves to the cached address. */
+    /** Returns true if `GET /v2/accounts/{accountId}` still resolves to the cached address. */
     async isAvailable(): Promise<boolean> {
         try {
             const address = await fetchAddress({

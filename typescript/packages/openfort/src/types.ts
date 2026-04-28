@@ -9,7 +9,7 @@
  *    bare base64 DER body (single-line, env-var-friendly) or a full PEM string.
  *
  * The wallet's Solana address is fetched automatically from
- * `GET /v1/accounts/{accountId}` during `create()`.
+ * `GET /v2/accounts/{accountId}` during `create()`.
  */
 export interface OpenfortSignerConfig {
     /** Openfort backend wallet account ID (`acc_<uuid>`). */
@@ -38,7 +38,7 @@ export interface OpenfortSignerConfig {
     walletSecret: string;
 }
 
-/** Response from `GET /v1/accounts/{id}` — only the fields we need. */
+/** Response from `GET /v2/accounts/{id}` — only the fields we need. */
 export interface AccountResponse {
     /** Solana address (base58). */
     address: string;

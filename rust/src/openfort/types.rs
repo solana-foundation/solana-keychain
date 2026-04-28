@@ -10,7 +10,7 @@ pub(super) struct SignResponse {
     pub signature: String,
 }
 
-/// Subset of `GET /v1/accounts/{id}` we care about — just the on-chain address.
+/// Subset of `GET /v2/accounts/{id}` we care about — just the on-chain address.
 #[derive(Deserialize)]
 pub(super) struct AccountInfo {
     pub address: String,
