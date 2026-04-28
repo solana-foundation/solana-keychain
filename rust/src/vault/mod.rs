@@ -1,5 +1,12 @@
 //! HashiCorp Vault signer integration
 
+/// Re-export of the [`reqwest`] crate used internally by this module,
+/// so callers of [`VaultSigner::with_client`] can construct a `Client`
+/// at exactly the version this crate links against — avoiding the
+/// version-mismatch footgun of depending on `reqwest` directly in
+/// their own `Cargo.toml`.
+pub use reqwest;
+
 use crate::sdk_adapter::{Pubkey, Signature, Transaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::{
@@ -91,8 +98,48 @@ impl VaultSigner {
             .build()
             .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
 
+        Self::with_client(
+            client,
+            config.vault_addr,
+            config.token,
+            config.key_name,
+            config.pubkey,
+        )
+    }
+
+    /// Creates a Vault signer from a caller-built [`reqwest::Client`].
+    ///
+    /// Use this when you need control over TLS configuration, proxies,
+    /// timeouts, or other client-level settings that `HttpClientConfig`
+    /// does not expose — for example, trusting a self-signed CA via
+    /// `Client::builder().add_root_certificate(..)` when talking to a
+    /// development Vault instance.
+    ///
+    /// The caller is responsible for whatever security posture the
+    /// supplied client carries (HTTPS-only, cert pinning, etc.); this
+    /// constructor does not enforce `https_only`.
+    ///
+    /// To avoid pulling `reqwest` into your own dependency tree at a
+    /// version that may diverge from `solana-keychain`'s, prefer
+    /// constructing the client via the re-exported
+    /// [`solana_keychain::vault::reqwest`] module.
+    ///
+    /// # Arguments
+    ///
+    /// * `client` - A fully-built reqwest `Client`.
+    /// * `vault_addr` - Vault server address (e.g., "https://vault.example.com")
+    /// * `token` - Vault authentication token
+    /// * `key_name` - Vault key name in transit engine
+    /// * `pubkey` - Base58-encoded public key
+    pub fn with_client(
+        client: Client,
+        vault_addr: String,
+        token: String,
+        key_name: String,
+        pubkey: String,
+    ) -> Result<Self, SignerError> {
         let pubkey = Pubkey::try_from(
-            bs58::decode(&config.pubkey)
+            bs58::decode(&pubkey)
                 .into_vec()
                 .map_err(|e| {
                     SignerError::InvalidPublicKey(format!(
@@ -105,9 +152,9 @@ impl VaultSigner {
 
         Ok(Self {
             client: Arc::new(client),
-            vault_addr: config.vault_addr,
-            token: config.token,
-            key_name: config.key_name,
+            vault_addr,
+            token,
+            key_name,
             pubkey,
         })
     }
@@ -296,6 +343,50 @@ mod tests {
             TEST_PUBKEY.to_string(),
         );
         assert!(signer.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_with_client_uses_supplied_client() {
+        // Prove that a caller-built client is actually the one used for
+        // outbound requests: stand up a mock, hand a plain http client
+        // to `with_client`, and assert the mock sees the call.
+        let mock_server = MockServer::start().await;
+        let keypair = Keypair::new();
+        let message = b"with-client-message";
+        let signature = keypair.sign_message(message);
+        let signature_b64 = STANDARD.encode(signature.as_ref());
+
+        Mock::given(method("POST"))
+            .and(path("/v1/transit/sign/test-key"))
+            .and(header("X-Vault-Token", TEST_VAULT_TOKEN))
+            .and(body_json(serde_json::json!({
+                "input": STANDARD.encode(message),
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": { "signature": format!("vault:v1:{signature_b64}") }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        // The test uses plain http, so we cannot flip `https_only` —
+        // which is precisely the point of `with_client`: the caller
+        // owns the TLS (or lack thereof) policy.
+        let client = Client::builder()
+            .build()
+            .expect("failed to build test client");
+        let signer = VaultSigner::with_client(
+            client,
+            mock_server.uri(),
+            TEST_VAULT_TOKEN.to_string(),
+            TEST_KEY_NAME.to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .expect("with_client should accept a pre-built client");
+
+        let result = signer.sign_message(message).await;
+        assert!(result.is_ok(), "sign_message failed: {:?}", result.err());
+        assert_eq!(result.unwrap(), signature);
     }
 
     #[test]
