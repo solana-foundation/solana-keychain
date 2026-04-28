@@ -2,6 +2,7 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import {
     assertSignatureValid,
     createSignatureDictionary,
+    ED25519_SIGNATURE_LENGTH,
     sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
@@ -21,7 +22,6 @@ import type { GcpKmsSignerConfig } from './types.js';
  */
 const CLOUD_KMS_BASE_URL = 'https://cloudkms.googleapis.com/v1';
 const CLOUD_KMS_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
-const ED25519_SIGNATURE_LENGTH = 64;
 const GCP_KMS_KEY_NAME_PATTERN =
     /^projects\/[A-Za-z0-9._-]+\/locations\/[A-Za-z0-9._-]+\/keyRings\/[A-Za-z0-9._-]+\/cryptoKeys\/[A-Za-z0-9._-]+\/cryptoKeyVersions\/[A-Za-z0-9._-]+$/;
 

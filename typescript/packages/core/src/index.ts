@@ -1,3 +1,4 @@
+export * from './constants.js';
 export * from './encoding.js';
 export * from './errors.js';
 export * from './types.js';

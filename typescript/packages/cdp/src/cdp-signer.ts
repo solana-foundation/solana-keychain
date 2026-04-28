@@ -4,6 +4,7 @@ import {
     assertSignatureValid,
     base64UrlDecoder,
     createSignatureDictionary,
+    ED25519_SIGNATURE_LENGTH,
     extractSignatureFromWireTransaction,
     sanitizeRemoteErrorResponse,
     SignerErrorCode,
@@ -391,9 +392,9 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         base58Encoder ||= getBase58Encoder();
         const signatureBytes = base58Encoder.encode(data.signature) as SignatureBytes;
 
-        if (signatureBytes.length !== 64) {
+        if (signatureBytes.length !== ED25519_SIGNATURE_LENGTH) {
             throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                message: `Invalid signature length: expected 64 bytes, got ${signatureBytes.length}`,
+                message: `Invalid signature length: expected ${ED25519_SIGNATURE_LENGTH} bytes, got ${signatureBytes.length}`,
             });
         }
 
