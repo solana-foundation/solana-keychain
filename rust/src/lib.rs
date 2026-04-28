@@ -334,7 +334,7 @@ impl Signer {
 
     /// Create an Openfort backend wallet signer.
     ///
-    /// Fetches the wallet's Solana address from `GET /v1/accounts/{account_id}`
+    /// Fetches the wallet's Solana address from `GET /v2/accounts/{account_id}`
     /// during initialization. Pass `None` for `http_client_config` to use
     /// default timeout settings.
     #[cfg(feature = "openfort")]
