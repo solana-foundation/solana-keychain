@@ -10,13 +10,16 @@
 //! - `Authorization: Bearer <secret_key>` — Openfort project secret key
 //!   (`sk_live_*` or `sk_test_*`).
 //! - `x-wallet-auth: <ES256 JWT>` — JWT signed by the project's wallet secret
-//!   (an ECDSA P-256 private key, PEM PKCS#8) issued by the Openfort dashboard.
+//!   (an ECDSA P-256 private key) issued by the Openfort dashboard.
 //!
 //! # Configuration
 //!
 //! The signer takes three inputs: project secret key, backend wallet account ID
-//! (`acc_<uuid>`), and the wallet secret PEM. The Solana address is fetched
-//! from `GET /v1/accounts/{account_id}` during [`OpenfortSigner::init`].
+//! (`acc_<uuid>`), and the wallet secret. The wallet secret may be either the
+//! bare base64-encoded PKCS#8 DER body (the convenient single-line form for
+//! env vars) or a full PEM string (`-----BEGIN PRIVATE KEY-----` ...). The
+//! Solana address is fetched from `GET /v1/accounts/{account_id}` during
+//! [`OpenfortSigner::init`].
 //!
 //! # Solana payload
 //!
@@ -103,9 +106,22 @@ fn compute_req_hash(body: &Value) -> Result<String, SignerError> {
     Ok(hex::encode(Sha256::digest(json.as_bytes())))
 }
 
+/// Normalize the wallet secret to a PEM string `jsonwebtoken` can parse.
+/// Accepts either a full PEM (passed through verbatim) or a bare base64
+/// PKCS#8 DER body (the convenient single-line form), in which case it
+/// strips whitespace and wraps it in PEM headers.
+fn wallet_secret_to_pem(wallet_secret: &str) -> String {
+    if wallet_secret.trim_start().starts_with("-----BEGIN") {
+        return wallet_secret.to_string();
+    }
+
+    let stripped: String = wallet_secret.chars().filter(|c| !c.is_whitespace()).collect();
+    format!("-----BEGIN PRIVATE KEY-----\n{stripped}\n-----END PRIVATE KEY-----\n")
+}
+
 /// Build the X-Wallet-Auth JWT for an Openfort backend wallet request.
 fn create_wallet_jwt(
-    wallet_secret_pem: &str,
+    wallet_secret: &str,
     host: &str,
     method: &str,
     path: &str,
@@ -122,11 +138,12 @@ fn create_wallet_jwt(
         req_hash: Some(compute_req_hash(request_body)?),
     };
 
-    let key = EncodingKey::from_ec_pem(wallet_secret_pem.as_bytes()).map_err(|_e| {
+    let pem = wallet_secret_to_pem(wallet_secret);
+    let key = EncodingKey::from_ec_pem(pem.as_bytes()).map_err(|_e| {
         #[cfg(feature = "unsafe-debug")]
         log::error!("Failed to parse Openfort wallet secret as EC key: {_e}");
         SignerError::InvalidPrivateKey(
-            "Failed to parse Openfort wallet secret as EC private key (expected PEM PKCS#8)"
+            "Failed to parse Openfort wallet secret as EC P-256 private key (expected base64 PKCS#8 DER or PEM)"
                 .to_string(),
         )
     })?;
@@ -152,9 +169,10 @@ pub struct OpenfortSignerConfig {
     pub secret_key: String,
     /// Backend wallet account ID (`acc_<uuid>`).
     pub account_id: String,
-    /// PEM-encoded PKCS#8 ECDSA P-256 private key issued by the Openfort
-    /// dashboard. Used to sign the `x-wallet-auth` JWT on every request.
-    pub wallet_secret_pem: String,
+    /// ECDSA P-256 PKCS#8 private key issued by the Openfort dashboard,
+    /// used to sign the `x-wallet-auth` JWT. Accepts either the bare base64
+    /// DER body (single-line, env-var-friendly) or a full PEM string.
+    pub wallet_secret: String,
     /// Base URL (defaults to `https://api.openfort.io`).
     pub api_base_url: Option<String>,
     pub http_client_config: Option<HttpClientConfig>,
@@ -165,7 +183,7 @@ pub struct OpenfortSignerConfig {
 pub struct OpenfortSigner {
     secret_key: String,
     account_id: String,
-    wallet_secret_pem: String,
+    wallet_secret: String,
     /// Resolved by [`OpenfortSigner::init`] before any signing call.
     public_key: Option<Pubkey>,
     api_base_url: String,
@@ -189,12 +207,12 @@ impl OpenfortSigner {
     pub fn new(
         secret_key: String,
         account_id: String,
-        wallet_secret_pem: String,
+        wallet_secret: String,
     ) -> Result<Self, SignerError> {
         Self::from_config(OpenfortSignerConfig {
             secret_key,
             account_id,
-            wallet_secret_pem,
+            wallet_secret,
             api_base_url: None,
             http_client_config: None,
         })
@@ -212,9 +230,9 @@ impl OpenfortSigner {
                 "account_id must not be empty".to_string(),
             ));
         }
-        if config.wallet_secret_pem.is_empty() {
+        if config.wallet_secret.is_empty() {
             return Err(SignerError::ConfigError(
-                "wallet_secret_pem must not be empty".to_string(),
+                "wallet_secret must not be empty".to_string(),
             ));
         }
 
@@ -233,7 +251,7 @@ impl OpenfortSigner {
         Ok(Self {
             secret_key: config.secret_key,
             account_id: config.account_id,
-            wallet_secret_pem: config.wallet_secret_pem,
+            wallet_secret: config.wallet_secret,
             public_key: None,
             api_base_url: base_url,
             api_host,
@@ -321,7 +339,7 @@ impl OpenfortSigner {
         request_body: &Value,
     ) -> Result<reqwest::header::HeaderMap, SignerError> {
         let wallet_token = create_wallet_jwt(
-            &self.wallet_secret_pem,
+            &self.wallet_secret,
             &self.api_host,
             method,
             path,
@@ -489,6 +507,42 @@ mod tests {
     const TEST_PUBKEY: &str = "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV";
     const TEST_ACCOUNT_ID: &str = "acc_e0b84653-1741-4a3d-9e91-2b0fd2942f60";
 
+    /// Minimal valid P-256 PKCS#8 DER, base64-encoded.
+    /// Scalar is `[0x01; 32]`, which is in the valid range `[1, n-1]`.
+    fn test_wallet_secret_b64() -> String {
+        #[rustfmt::skip]
+        const P256_PKCS8_DER: &[u8] = &[
+            0x30, 0x41,
+            0x02, 0x01, 0x00,
+            0x30, 0x13,
+            0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+            0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
+            0x04, 0x27,
+            0x30, 0x25,
+            0x02, 0x01, 0x01,
+            0x04, 0x20,
+            0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+        ];
+        STANDARD.encode(P256_PKCS8_DER)
+    }
+
+    /// Same key wrapped in PEM headers — used to exercise the PEM-input path.
+    fn test_wallet_secret_pem() -> String {
+        format!(
+            "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
+            test_wallet_secret_b64()
+        )
+    }
+
+    /// Default fixture used across most tests — bare base64 form, the same
+    /// shape the Openfort dashboard and env vars deliver.
+    fn test_wallet_secret() -> String {
+        test_wallet_secret_b64()
+    }
+
     /// Build a signer pointing at the mock server, with `public_key` pre-set
     /// so individual tests can skip exercising `init()`.
     fn create_test_signer(base_url: &str) -> OpenfortSigner {
@@ -496,7 +550,7 @@ mod tests {
         OpenfortSigner {
             secret_key: "sk_test_secret".to_string(),
             account_id: TEST_ACCOUNT_ID.to_string(),
-            wallet_secret_pem: test_wallet_secret_pem(),
+            wallet_secret: test_wallet_secret(),
             public_key: Some(Pubkey::from_str(TEST_PUBKEY).unwrap()),
             api_base_url: base_url.to_string(),
             api_host,
@@ -509,7 +563,7 @@ mod tests {
         let signer = OpenfortSigner::new(
             "sk_test_secret".to_string(),
             TEST_ACCOUNT_ID.to_string(),
-            test_wallet_secret_pem(),
+            test_wallet_secret(),
         );
         assert!(signer.is_ok());
         // Public key stays None until init() runs.
@@ -519,8 +573,8 @@ mod tests {
     #[test]
     fn test_new_rejects_empty_fields() {
         let cases = [
-            ("", TEST_ACCOUNT_ID, test_wallet_secret_pem()),
-            ("sk_test_secret", "", test_wallet_secret_pem()),
+            ("", TEST_ACCOUNT_ID, test_wallet_secret()),
+            ("sk_test_secret", "", test_wallet_secret()),
             ("sk_test_secret", TEST_ACCOUNT_ID, String::new()),
         ];
 
@@ -539,7 +593,7 @@ mod tests {
         let signer = create_test_signer("http://localhost");
         let debug_str = format!("{signer:?}");
         assert!(!debug_str.contains("sk_test_secret"));
-        assert!(!debug_str.contains(&test_wallet_secret_pem()));
+        assert!(!debug_str.contains(&test_wallet_secret()));
         assert!(debug_str.contains("OpenfortSigner"));
     }
 
@@ -550,7 +604,7 @@ mod tests {
         OpenfortSigner {
             secret_key: "sk_test_secret".to_string(),
             account_id: TEST_ACCOUNT_ID.to_string(),
-            wallet_secret_pem: test_wallet_secret_pem(),
+            wallet_secret: test_wallet_secret(),
             public_key: None,
             api_base_url: base_url.to_string(),
             api_host,
@@ -616,7 +670,7 @@ mod tests {
         let signer = OpenfortSigner::new(
             "sk_test_secret".to_string(),
             TEST_ACCOUNT_ID.to_string(),
-            test_wallet_secret_pem(),
+            test_wallet_secret(),
         )
         .unwrap();
 
@@ -627,7 +681,7 @@ mod tests {
     #[tokio::test]
     async fn test_sign_message_invalid_wallet_secret() {
         let mut signer = create_test_signer("http://localhost");
-        signer.wallet_secret_pem = "not-a-pem-key".to_string();
+        signer.wallet_secret = "not-a-pem-key".to_string();
 
         let result = signer.sign_message(b"test").await;
         assert!(matches!(
@@ -801,6 +855,31 @@ mod tests {
     fn test_jwt_uri_format() {
         let uri = jwt_uri("api.openfort.io", "POST", "/v2/accounts/backend/acc_abc/sign");
         assert_eq!(uri, "POST api.openfort.io/v2/accounts/backend/acc_abc/sign");
+    }
+
+    #[test]
+    fn test_wallet_secret_to_pem_passthrough_for_pem_input() {
+        let pem = test_wallet_secret_pem();
+        assert_eq!(wallet_secret_to_pem(&pem), pem);
+    }
+
+    #[test]
+    fn test_wallet_secret_to_pem_wraps_bare_base64() {
+        let bare = test_wallet_secret_b64();
+        let pem = wallet_secret_to_pem(&bare);
+        assert!(pem.starts_with("-----BEGIN PRIVATE KEY-----\n"));
+        assert!(pem.contains(&bare));
+        assert!(pem.trim_end().ends_with("-----END PRIVATE KEY-----"));
+        // The wrapped form must still be parseable by jsonwebtoken — exercise it.
+        EncodingKey::from_ec_pem(pem.as_bytes()).expect("wrapped PEM should parse");
+    }
+
+    #[test]
+    fn test_wallet_secret_to_pem_strips_whitespace_in_bare_input() {
+        let bare = test_wallet_secret_b64();
+        let with_whitespace = format!(" {}\n  {}  ", &bare[..20], &bare[20..]);
+        let pem = wallet_secret_to_pem(&with_whitespace);
+        EncodingKey::from_ec_pem(pem.as_bytes()).expect("whitespaced base64 should still parse");
     }
 
     #[test]

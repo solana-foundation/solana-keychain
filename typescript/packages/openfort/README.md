@@ -15,7 +15,7 @@ Three required inputs:
 | ----------------- | ------------------------------------------ |
 | `secretKey`       | Openfort project secret (`sk_test_*` / `sk_live_*`) |
 | `accountId`       | Backend wallet account ID (`acc_<uuid>`)   |
-| `walletSecretPem` | PEM PKCS#8 ECDSA P-256 private key from the Openfort dashboard |
+| `walletSecret`    | ECDSA P-256 PKCS#8 private key from the Openfort dashboard (base64 DER or PEM) |
 
 ## Usage
 
@@ -26,7 +26,7 @@ import { signTransactionMessageWithSigners } from '@solana/transactions';
 const signer = await createOpenfortSigner({
     accountId: process.env.OPENFORT_ACCOUNT_ID!,
     secretKey: process.env.OPENFORT_SECRET_KEY!,
-    walletSecretPem: process.env.OPENFORT_WALLET_SECRET!,
+    walletSecret: process.env.OPENFORT_WALLET_SECRET!,
 });
 
 const signed = await signTransactionMessageWithSigners(transactionMessage, [signer]);

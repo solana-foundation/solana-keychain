@@ -23,7 +23,7 @@ import type { AccountResponse, OpenfortSignerConfig, SignResponse } from './type
  * Create and initialize an Openfort backend wallet signer.
  *
  * Fetches the wallet's Solana address from `GET /v1/accounts/{accountId}`
- * during initialization and validates the wallet secret PEM.
+ * during initialization and loads the wallet secret.
  *
  * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
  * @throws {SignerError} `SIGNER_HTTP_ERROR`, `SIGNER_REMOTE_API_ERROR`, or `SIGNER_PARSING_ERROR`
@@ -62,7 +62,7 @@ let utf8Encoder: TextEncoder | undefined;
  * const signer = await OpenfortSigner.create({
  *   secretKey: process.env.OPENFORT_SECRET_KEY!,
  *   accountId: process.env.OPENFORT_ACCOUNT_ID!,
- *   walletSecretPem: process.env.OPENFORT_WALLET_SECRET!,
+ *   walletSecret: process.env.OPENFORT_WALLET_SECRET!,
  * });
  * const signed = await signTransactionMessageWithSigners(transactionMessage, [signer]);
  * ```
@@ -99,7 +99,7 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
     /**
      * Create and initialize an OpenfortSigner.
      *
-     * Loads the P-256 wallet key from the supplied PEM and fetches the wallet's
+     * Loads the P-256 wallet key (base64 DER or PEM) and fetches the wallet's
      * Solana address from `GET /v1/accounts/{accountId}`.
      *
      * @deprecated Use `createOpenfortSigner()` instead.
@@ -117,9 +117,9 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
                 message: 'Missing required accountId field',
             });
         }
-        if (!config.walletSecretPem) {
+        if (!config.walletSecret) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'Missing required walletSecretPem field',
+                message: 'Missing required walletSecret field',
             });
         }
 
@@ -139,7 +139,7 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
             );
         }
 
-        const walletKey = await loadWalletKey(config.walletSecretPem);
+        const walletKey = await loadWalletKey(config.walletSecret);
         const address = await fetchAddress<TAddress>({
             accountId: config.accountId,
             baseUrl,
@@ -360,13 +360,14 @@ async function createWalletJwt(
 // --- Key + URL helpers ---
 
 /**
- * Decode a PEM-encoded PKCS#8 P-256 private key into a Web Crypto `CryptoKey`.
- * Accepts either a PEM string (`-----BEGIN PRIVATE KEY-----` ... `-----END PRIVATE KEY-----`)
- * or a bare base64 PKCS#8 DER blob (no headers).
+ * Decode a P-256 PKCS#8 private key into a Web Crypto `CryptoKey`. Accepts
+ * either a bare base64 DER body (the convenient single-line env-var form) or
+ * a full PEM string (`-----BEGIN PRIVATE KEY-----` ... `-----END PRIVATE KEY-----`).
+ * In both cases the headers and any whitespace are stripped before base64 decoding.
  */
-async function loadWalletKey(walletSecretPem: string): Promise<CryptoKey> {
+async function loadWalletKey(walletSecret: string): Promise<CryptoKey> {
     try {
-        const base64Body = walletSecretPem
+        const base64Body = walletSecret
             .replace(/-----BEGIN [^-]+-----/g, '')
             .replace(/-----END [^-]+-----/g, '')
             .replace(/\s+/g, '');
@@ -383,7 +384,7 @@ async function loadWalletKey(walletSecretPem: string): Promise<CryptoKey> {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
             cause: error,
             message:
-                'Failed to load P-256 PKCS#8 key from walletSecretPem (expected PEM PKCS#8 ECDSA P-256 private key)',
+                'Failed to load P-256 PKCS#8 key from walletSecret (expected PEM PKCS#8 ECDSA P-256 private key)',
         });
     }
 }

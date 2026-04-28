@@ -4,8 +4,9 @@
  * Three required inputs:
  * 1. `secretKey` — Openfort project secret key (`sk_test_*` / `sk_live_*`).
  * 2. `accountId` — Backend wallet account ID (`acc_<uuid>`).
- * 3. `walletSecretPem` — PEM-encoded PKCS#8 ECDSA P-256 private key issued by
- *    the Openfort dashboard, used to sign the `x-wallet-auth` JWT.
+ * 3. `walletSecret` — ECDSA P-256 PKCS#8 private key issued by the Openfort
+ *    dashboard, used to sign the `x-wallet-auth` JWT. Accepts either the
+ *    bare base64 DER body (single-line, env-var-friendly) or a full PEM string.
  *
  * The wallet's Solana address is fetched automatically from
  * `GET /v1/accounts/{accountId}` during `create()`.
@@ -30,10 +31,11 @@ export interface OpenfortSignerConfig {
     secretKey: string;
 
     /**
-     * PEM-encoded PKCS#8 ECDSA P-256 private key issued by the Openfort
-     * dashboard. Used to sign the `x-wallet-auth` JWT on every request.
+     * ECDSA P-256 PKCS#8 private key issued by the Openfort dashboard,
+     * used to sign the `x-wallet-auth` JWT. Accepts either the bare base64
+     * DER body (single-line, env-var-friendly) or a full PEM string.
      */
-    walletSecretPem: string;
+    walletSecret: string;
 }
 
 /** Response from `GET /v1/accounts/{id}` — only the fields we need. */

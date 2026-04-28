@@ -341,13 +341,13 @@ impl Signer {
     pub async fn from_openfort(
         secret_key: String,
         account_id: String,
-        wallet_secret_pem: String,
+        wallet_secret: String,
         http_client_config: Option<HttpClientConfig>,
     ) -> Result<Self, SignerError> {
         let mut signer = OpenfortSigner::from_config(OpenfortSignerConfig {
             secret_key,
             account_id,
-            wallet_secret_pem,
+            wallet_secret,
             api_base_url: None,
             http_client_config,
         })?;
