@@ -37,11 +37,6 @@ const BACKEND_PATH = '/v2/accounts/backend';
 const JWT_LIFETIME_SECS = 120;
 const ED25519_SIGNATURE_LENGTH = 64;
 
-const base16Decoder = getBase16Decoder();
-const base16Encoder = getBase16Encoder();
-const base64Encoder = getBase64Encoder();
-const utf8Encoder = new TextEncoder();
-
 /**
  * Openfort backend wallet signer.
  *
@@ -165,7 +160,7 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
      * bytes as-is (no hashing) and returns a 64-byte ed25519 signature.
      */
     private async signBytes(message: Uint8Array): Promise<SignatureBytes> {
-        const dataHex = `0x${base16Decoder.decode(message)}`;
+        const dataHex = `0x${getBase16Decoder().decode(message)}`;
         const path = `${BACKEND_PATH}/${this.accountId}/sign`;
         const url = `${this.baseUrl}${path}`;
         const body = { data: dataHex };
@@ -221,7 +216,7 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
         const sigHex = data.signature.startsWith('0x') ? data.signature.slice(2) : data.signature;
         let signatureBytes: SignatureBytes;
         try {
-            signatureBytes = base16Encoder.encode(sigHex) as SignatureBytes;
+            signatureBytes = getBase16Encoder().encode(sigHex) as SignatureBytes;
         } catch (error) {
             throwSignerError(SignerErrorCode.PARSING_ERROR, {
                 cause: error,
@@ -313,9 +308,9 @@ function sortJson(value: unknown): unknown {
 
 async function computeReqHash(body: unknown): Promise<string> {
     const json = JSON.stringify(sortJson(body));
-    const data = utf8Encoder.encode(json);
+    const data = new TextEncoder().encode(json);
     const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', data);
-    return base16Decoder.decode(new Uint8Array(hashBuffer));
+    return getBase16Decoder().decode(new Uint8Array(hashBuffer));
 }
 
 async function createWalletJwt(
@@ -336,6 +331,7 @@ async function createWalletJwt(
     };
     const header = { alg: 'ES256', typ: 'JWT' };
 
+    const utf8Encoder = new TextEncoder();
     const headerB64 = base64UrlDecoder(utf8Encoder.encode(JSON.stringify(header)));
     const payloadB64 = base64UrlDecoder(utf8Encoder.encode(JSON.stringify(payload)));
     const signingInput = `${headerB64}.${payloadB64}`;
@@ -361,7 +357,7 @@ async function loadWalletKey(walletSecret: string): Promise<CryptoKey> {
             .replace(/-----BEGIN [^-]+-----/g, '')
             .replace(/-----END [^-]+-----/g, '')
             .replace(/\s+/g, '');
-        const der = base64Encoder.encode(base64Body);
+        const der = getBase64Encoder().encode(base64Body);
         return await globalThis.crypto.subtle.importKey('pkcs8', der, { name: 'ECDSA', namedCurve: 'P-256' }, false, [
             'sign',
         ]);
