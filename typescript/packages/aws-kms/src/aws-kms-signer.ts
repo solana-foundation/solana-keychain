@@ -3,6 +3,7 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import {
     assertSignatureValid,
     createSignatureDictionary,
+    ED25519_SIGNATURE_LENGTH,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -142,11 +143,10 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
                 });
             }
 
-            // Ed25519 signatures are 64 bytes
             const signature = new Uint8Array(response.Signature);
-            if (signature.length !== 64) {
+            if (signature.length !== ED25519_SIGNATURE_LENGTH) {
                 throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                    message: `Invalid signature length: expected 64 bytes, got ${signature.length}`,
+                    message: `Invalid signature length: expected ${ED25519_SIGNATURE_LENGTH} bytes, got ${signature.length}`,
                 });
             }
 

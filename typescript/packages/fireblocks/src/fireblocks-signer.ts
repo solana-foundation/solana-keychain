@@ -3,6 +3,7 @@ import { getBase16Decoder, getBase16Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
     createSignatureDictionary,
+    ED25519_SIGNATURE_LENGTH,
     sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
@@ -363,9 +364,9 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                     }
                     base16Encoder ||= getBase16Encoder();
                     const sigBytes = new Uint8Array(base16Encoder.encode(cleanHex.toLowerCase()));
-                    if (sigBytes.length !== 64) {
+                    if (sigBytes.length !== ED25519_SIGNATURE_LENGTH) {
                         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                            message: `Invalid signature length: expected 64 bytes, got ${sigBytes.length}`,
+                            message: `Invalid signature length: expected ${ED25519_SIGNATURE_LENGTH} bytes, got ${sigBytes.length}`,
                         });
                     }
                     return sigBytes as SignatureBytes;

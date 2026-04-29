@@ -1,3 +1,4 @@
+import { ED25519_SIGNATURE_LENGTH } from '@solana/keychain-core';
 import type { SignatureBytes, SignaturesMap } from '@solana/kit';
 import {
     appendTransactionMessageInstructions,
@@ -193,8 +194,8 @@ async function testSignMessage<T extends TestSigner>(context: TestContext<T>): P
         throw new Error(`Missing signature for signer address ${signer.address}`);
     }
 
-    if (signature.length !== 64) {
-        throw new Error(`Invalid signature length: expected 64, got ${signature.length}`);
+    if (signature.length !== ED25519_SIGNATURE_LENGTH) {
+        throw new Error(`Invalid signature length: expected ${ED25519_SIGNATURE_LENGTH}, got ${signature.length}`);
     }
 
     if (options.verbose) {

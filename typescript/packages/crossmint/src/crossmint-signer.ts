@@ -6,6 +6,7 @@ import {
     assertSignatureValid,
     createSignatureDictionary,
     createSignerError,
+    ED25519_SIGNATURE_LENGTH,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -497,7 +498,7 @@ function decodeSignatureString(value?: string): SignatureBytes | undefined {
     base58Encoder ||= getBase58Encoder();
     try {
         const bytes = base58Encoder.encode(value);
-        return bytes.length === 64 ? (bytes as SignatureBytes) : undefined;
+        return bytes.length === ED25519_SIGNATURE_LENGTH ? (bytes as SignatureBytes) : undefined;
     } catch {
         return undefined;
     }
