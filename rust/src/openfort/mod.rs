@@ -240,6 +240,14 @@ impl OpenfortSigner {
             .api_base_url
             .unwrap_or_else(|| format!("https://{OPENFORT_API_HOST}"));
         let base_url = base_url.trim_end_matches('/').to_string();
+        let parsed_url = reqwest::Url::parse(&base_url).map_err(|_| {
+            SignerError::ConfigError(format!("Invalid Openfort base URL: {base_url}"))
+        })?;
+        if parsed_url.scheme() != "https" {
+            return Err(SignerError::ConfigError(
+                "Openfort base URL must use HTTPS".to_string(),
+            ));
+        }
         let api_host = extract_host(&base_url)?;
         let http_client_config = config.http_client_config.unwrap_or_default();
         let client = reqwest::Client::builder()
@@ -894,6 +902,23 @@ mod tests {
         })
         .unwrap();
         assert_eq!(signer.api_base_url, "https://api.openfort.io");
+    }
+
+    #[test]
+    fn test_from_config_rejects_non_https_base_url() {
+        let result = OpenfortSigner::from_config(OpenfortSignerConfig {
+            secret_key: "sk_test_secret".to_string(),
+            account_id: TEST_ACCOUNT_ID.to_string(),
+            wallet_secret: test_wallet_secret(),
+            api_base_url: Some("http://api.openfort.io".to_string()),
+            http_client_config: None,
+        });
+        match result {
+            Err(SignerError::ConfigError(msg)) => {
+                assert!(msg.contains("HTTPS"), "unexpected error message: {msg}");
+            }
+            other => panic!("expected ConfigError for non-HTTPS base URL, got {other:?}"),
+        }
     }
 
     #[test]
