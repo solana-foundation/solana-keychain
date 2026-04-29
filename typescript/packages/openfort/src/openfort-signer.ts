@@ -11,11 +11,7 @@ import {
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import type { SignableMessage, SignatureDictionary } from '@solana/signers';
-import {
-    type Transaction,
-    type TransactionWithinSizeLimit,
-    type TransactionWithLifetime,
-} from '@solana/transactions';
+import { type Transaction, type TransactionWithinSizeLimit, type TransactionWithLifetime } from '@solana/transactions';
 
 import type { AccountResponse, OpenfortSignerConfig, SignResponse } from './types.js';
 
@@ -366,18 +362,13 @@ async function loadWalletKey(walletSecret: string): Promise<CryptoKey> {
             .replace(/-----END [^-]+-----/g, '')
             .replace(/\s+/g, '');
         const der = base64Encoder.encode(base64Body);
-        return await globalThis.crypto.subtle.importKey(
-            'pkcs8',
-            der,
-            { name: 'ECDSA', namedCurve: 'P-256' },
-            false,
-            ['sign'],
-        );
+        return await globalThis.crypto.subtle.importKey('pkcs8', der, { name: 'ECDSA', namedCurve: 'P-256' }, false, [
+            'sign',
+        ]);
     } catch (error) {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
             cause: error,
-            message:
-                'Failed to load P-256 PKCS#8 key from walletSecret (expected PEM PKCS#8 ECDSA P-256 private key)',
+            message: 'Failed to load P-256 PKCS#8 key from walletSecret (expected PEM PKCS#8 ECDSA P-256 private key)',
         });
     }
 }

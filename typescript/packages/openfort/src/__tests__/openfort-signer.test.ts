@@ -1,10 +1,6 @@
 import { Address } from '@solana/addresses';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
-import {
-    type Transaction,
-    type TransactionWithinSizeLimit,
-    type TransactionWithLifetime,
-} from '@solana/transactions';
+import { type Transaction, type TransactionWithinSizeLimit, type TransactionWithLifetime } from '@solana/transactions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
@@ -128,9 +124,9 @@ describe('OpenfortSigner', () => {
         });
 
         it('throws CONFIG_ERROR when walletSecret is not a valid P-256 key', async () => {
-            await expect(
-                OpenfortSigner.create(makeConfig({ walletSecret: 'not-a-pem-key' })),
-            ).rejects.toThrow('Failed to load P-256 PKCS#8 key');
+            await expect(OpenfortSigner.create(makeConfig({ walletSecret: 'not-a-pem-key' }))).rejects.toThrow(
+                'Failed to load P-256 PKCS#8 key',
+            );
         });
 
         it('also accepts walletSecret in PEM form', async () => {
@@ -161,9 +157,7 @@ describe('OpenfortSigner', () => {
 
         it('throws CONFIG_ERROR when /v2/accounts returns a non-Solana address', async () => {
             mockGetAccount('0x742d35Cc6634C0532925a3b844Bc454e4438f44e');
-            await expect(OpenfortSigner.create(makeConfig())).rejects.toThrow(
-                'Openfort returned non-Solana address',
-            );
+            await expect(OpenfortSigner.create(makeConfig())).rejects.toThrow('Openfort returned non-Solana address');
         });
     });
 

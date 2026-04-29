@@ -64,9 +64,8 @@ fn jwt_uri(host: &str, method: &str, path: &str) -> String {
 
 /// Extract host (with port if present) from a base URL.
 fn extract_host(base_url: &str) -> Result<String, SignerError> {
-    let url = reqwest::Url::parse(base_url).map_err(|_| {
-        SignerError::ConfigError(format!("Invalid Openfort base URL: {base_url}"))
-    })?;
+    let url = reqwest::Url::parse(base_url)
+        .map_err(|_| SignerError::ConfigError(format!("Invalid Openfort base URL: {base_url}")))?;
 
     let host = url.host_str().ok_or_else(|| {
         SignerError::ConfigError(format!("Missing host in Openfort base URL: {base_url}"))
@@ -115,7 +114,10 @@ fn wallet_secret_to_pem(wallet_secret: &str) -> String {
         return wallet_secret.to_string();
     }
 
-    let stripped: String = wallet_secret.chars().filter(|c| !c.is_whitespace()).collect();
+    let stripped: String = wallet_secret
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
     format!("-----BEGIN PRIVATE KEY-----\n{stripped}\n-----END PRIVATE KEY-----\n")
 }
 
@@ -316,7 +318,9 @@ impl OpenfortSigner {
                 .unwrap_or_else(|_| "Failed to read error response".to_string());
 
             #[cfg(feature = "unsafe-debug")]
-            log::error!("Openfort fetch_public_key error - status: {status}, response: {_error_text}");
+            log::error!(
+                "Openfort fetch_public_key error - status: {status}, response: {_error_text}"
+            );
             #[cfg(not(feature = "unsafe-debug"))]
             log::error!("Openfort fetch_public_key error - status: {status}");
 
@@ -328,9 +332,7 @@ impl OpenfortSigner {
         let info: types::AccountInfo = response.json().await.map_err(|_e| {
             #[cfg(feature = "unsafe-debug")]
             log::error!("Failed to parse Openfort account response: {_e}");
-            SignerError::SerializationError(
-                "Failed to parse Openfort account response".to_string(),
-            )
+            SignerError::SerializationError("Failed to parse Openfort account response".to_string())
         })?;
 
         Pubkey::from_str(&info.address).map_err(|_| {
@@ -433,9 +435,7 @@ impl OpenfortSigner {
         let sig_bytes = hex::decode(sig_hex).map_err(|_e| {
             #[cfg(feature = "unsafe-debug")]
             log::error!("Failed to hex-decode Openfort signature: {_e}");
-            SignerError::SerializationError(
-                "Failed to hex-decode Openfort signature".to_string(),
-            )
+            SignerError::SerializationError("Failed to hex-decode Openfort signature".to_string())
         })?;
 
         let sig_array: [u8; EXPECTED_SIGNATURE_LENGTH] = sig_bytes.try_into().map_err(|_| {
@@ -905,7 +905,11 @@ mod tests {
             .await;
 
         let result = signer.sign_transaction(&mut tx).await;
-        assert!(result.is_ok(), "sign_transaction failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "sign_transaction failed: {:?}",
+            result.err()
+        );
 
         let (returned_base64, returned_sig) = result.unwrap().into_signed_transaction();
         assert!(!returned_base64.is_empty());
@@ -921,7 +925,11 @@ mod tests {
 
     #[test]
     fn test_jwt_uri_format() {
-        let uri = jwt_uri("api.openfort.io", "POST", "/v2/accounts/backend/acc_abc/sign");
+        let uri = jwt_uri(
+            "api.openfort.io",
+            "POST",
+            "/v2/accounts/backend/acc_abc/sign",
+        );
         assert_eq!(uri, "POST api.openfort.io/v2/accounts/backend/acc_abc/sign");
     }
 
