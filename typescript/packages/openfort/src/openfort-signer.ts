@@ -4,11 +4,11 @@ import {
     assertSignatureValid,
     base64UrlDecoder,
     createSignatureDictionary,
+    ED25519_SIGNATURE_LENGTH,
     sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
-    ED25519_SIGNATURE_LENGTH,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import type { SignableMessage, SignatureDictionary } from '@solana/signers';
