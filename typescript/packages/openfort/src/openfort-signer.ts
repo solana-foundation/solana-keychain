@@ -41,10 +41,10 @@ const BACKEND_PATH = '/v2/accounts/backend';
 const JWT_LIFETIME_SECS = 120;
 const ED25519_SIGNATURE_LENGTH = 64;
 
-let base16Decoder: ReturnType<typeof getBase16Decoder> | undefined;
-let base16Encoder: ReturnType<typeof getBase16Encoder> | undefined;
-let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
-let utf8Encoder: TextEncoder | undefined;
+const base16Decoder = getBase16Decoder();
+const base16Encoder = getBase16Encoder();
+const base64Encoder = getBase64Encoder();
+const utf8Encoder = new TextEncoder();
 
 /**
  * Openfort backend wallet signer.
@@ -169,9 +169,6 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
      * bytes as-is (no hashing) and returns a 64-byte ed25519 signature.
      */
     private async signBytes(message: Uint8Array): Promise<SignatureBytes> {
-        base16Decoder ||= getBase16Decoder();
-        base16Encoder ||= getBase16Encoder();
-
         const dataHex = `0x${base16Decoder.decode(message)}`;
         const path = `${BACKEND_PATH}/${this.accountId}/sign`;
         const url = `${this.baseUrl}${path}`;
@@ -319,8 +316,6 @@ function sortJson(value: unknown): unknown {
 }
 
 async function computeReqHash(body: unknown): Promise<string> {
-    base16Decoder ||= getBase16Decoder();
-    utf8Encoder ||= new TextEncoder();
     const json = JSON.stringify(sortJson(body));
     const data = utf8Encoder.encode(json);
     const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', data);
@@ -345,7 +340,6 @@ async function createWalletJwt(
     };
     const header = { alg: 'ES256', typ: 'JWT' };
 
-    utf8Encoder ||= new TextEncoder();
     const headerB64 = base64UrlDecoder(utf8Encoder.encode(JSON.stringify(header)));
     const payloadB64 = base64UrlDecoder(utf8Encoder.encode(JSON.stringify(payload)));
     const signingInput = `${headerB64}.${payloadB64}`;
@@ -371,7 +365,6 @@ async function loadWalletKey(walletSecret: string): Promise<CryptoKey> {
             .replace(/-----BEGIN [^-]+-----/g, '')
             .replace(/-----END [^-]+-----/g, '')
             .replace(/\s+/g, '');
-        base64Encoder ||= getBase64Encoder();
         const der = base64Encoder.encode(base64Body);
         return await globalThis.crypto.subtle.importKey(
             'pkcs8',
