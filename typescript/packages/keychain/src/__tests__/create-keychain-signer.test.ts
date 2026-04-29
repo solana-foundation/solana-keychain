@@ -24,6 +24,7 @@ vi.mock('@solana/keychain-crossmint', () => ({ createCrossmintSigner: vi.fn() })
 vi.mock('@solana/keychain-dfns', () => ({ createDfnsSigner: vi.fn() }));
 vi.mock('@solana/keychain-fireblocks', () => ({ createFireblocksSigner: vi.fn() }));
 vi.mock('@solana/keychain-gcp-kms', () => ({ createGcpKmsSigner: vi.fn() }));
+vi.mock('@solana/keychain-memory', () => ({ createMemorySigner: vi.fn() }));
 vi.mock('@solana/keychain-para', () => ({ createParaSigner: vi.fn() }));
 vi.mock('@solana/keychain-privy', () => ({ createPrivySigner: vi.fn() }));
 vi.mock('@solana/keychain-turnkey', () => ({ createTurnkeySigner: vi.fn() }));
@@ -66,6 +67,11 @@ const BACKEND_CONFIGS: Record<string, { config: KeychainSignerConfig; modulePath
         config: { backend: 'gcp-kms', keyName: 'key', publicKey: TEST_ADDRESS },
         factoryName: 'createGcpKmsSigner',
         modulePath: '@solana/keychain-gcp-kms',
+    },
+    memory: {
+        config: { backend: 'memory', privateKeyString: 'irrelevant-mocked-string' },
+        factoryName: 'createMemorySigner',
+        modulePath: '@solana/keychain-memory',
     },
     para: {
         config: { backend: 'para', apiKey: 'key', walletId: 'w' },

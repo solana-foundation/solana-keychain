@@ -93,8 +93,8 @@ describe('resolveAddress', () => {
         });
     });
 
-    describe('async backends (fetch from API)', () => {
-        it.each(['crossmint', 'dfns', 'fireblocks', 'para', 'privy'] as const)(
+    describe('async backends (fetch from API or derive locally)', () => {
+        it.each(['crossmint', 'dfns', 'fireblocks', 'memory', 'para', 'privy'] as const)(
             '%s delegates to createKeychainSigner',
             async backend => {
                 const config = {
@@ -105,6 +105,7 @@ describe('resolveAddress', () => {
                     authToken: 't',
                     credId: 'c',
                     privateKeyPem: 'p',
+                    privateKeyString: 'irrelevant-mocked-string',
                     vaultAccountId: 'v',
                     walletId: 'w',
                     walletLocator: 'l',

@@ -17,6 +17,7 @@ on:
           - dfns
           - fireblocks
           - gcp-kms
+          - memory
           - openfort
           - para
           - privy
@@ -54,6 +55,7 @@ env:
     dfns
     fireblocks
     gcp-kms
+    memory
     openfort
     para
     privy
@@ -335,6 +337,7 @@ jobs:
               '@solana/keychain-dfns',
               '@solana/keychain-fireblocks',
               '@solana/keychain-gcp-kms',
+              '@solana/keychain-memory',
               '@solana/keychain-openfort',
               '@solana/keychain-para',
               '@solana/keychain-privy',

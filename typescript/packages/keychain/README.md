@@ -74,7 +74,7 @@ The `KeychainSignerConfig` discriminated union and individual config types are e
 ```typescript
 import type { KeychainSignerConfig, BackendName, PrivySignerConfig } from '@solana/keychain';
 
-// BackendName = 'aws-kms' | 'cdp' | 'crossmint' | 'dfns' | 'fireblocks' | 'gcp-kms' | 'para' | 'privy' | 'turnkey' | 'vault'
+// BackendName = 'aws-kms' | 'cdp' | 'crossmint' | 'dfns' | 'fireblocks' | 'gcp-kms' | 'memory' | 'openfort' | 'para' | 'privy' | 'turnkey' | 'vault'
 
 function loadConfig(json: unknown): KeychainSignerConfig {
     // Parse and validate your config...
@@ -154,6 +154,7 @@ try {
 | `dfns` | [@solana/keychain-dfns](../dfns/README.md) | API |
 | `fireblocks` | [@solana/keychain-fireblocks](../fireblocks/README.md) | API |
 | `gcp-kms` | [@solana/keychain-gcp-kms](../gcp-kms/README.md) | Config (`publicKey`) |
+| `memory` | [@solana/keychain-memory](../memory/README.md) | Derived from local keypair |
 | `para` | [@solana/keychain-para](../para/README.md) | API |
 | `privy` | [@solana/keychain-privy](../privy/README.md) | API |
 | `turnkey` | [@solana/keychain-turnkey](../turnkey/README.md) | Config (`publicKey`) |

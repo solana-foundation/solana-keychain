@@ -1,0 +1,64 @@
+{
+    "name": "@solana/keychain-memory",
+    "author": "Solana Foundation",
+    "version": "1.1.0",
+    "description": "In-memory Ed25519 keypair signer for Solana transactions",
+    "license": "MIT",
+    "repository": "https://github.com/solana-foundation/solana-keychain",
+    "keywords": [
+        "solana",
+        "signing",
+        "wallet",
+        "memory",
+        "keypair",
+        "ed25519",
+        "eddsa"
+    ],
+    "type": "module",
+    "sideEffects": false,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "src"
+    ],
+    "scripts": {
+        "build": "tsc --build",
+        "clean": "rm -rf dist *.tsbuildinfo",
+        "prepack": "pnpm run build",
+        "test": "vitest run",
+        "test:unit": "vitest run --config ../../vitest.config.unit.ts",
+        "test:watch": "vitest",
+        "test:watch:unit": "vitest --config ../../vitest.config.unit.ts",
+        "typecheck": "tsc --noEmit",
+        "test:treeshakability": "agadoo dist/index.js"
+    },
+    "dependencies": {
+        "@solana/keychain-core": "workspace:*"
+    },
+    "peerDependencies": {
+        "@solana/addresses": ">=6.0.1",
+        "@solana/codecs-strings": ">=6.0.1",
+        "@solana/keys": ">=6.0.1",
+        "@solana/signers": ">=6.0.1",
+        "@solana/transactions": ">=6.0.1"
+    },
+    "devDependencies": {
+        "@solana/addresses": "^6.0.1",
+        "@solana/codecs-strings": "^6.0.1",
+        "@solana/keychain-test-utils": "workspace:*",
+        "@solana/keys": "^6.0.1",
+        "@solana/kit": "^6.0.1",
+        "@solana/signers": "^6.0.1",
+        "@solana/transactions": "^6.0.1"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}

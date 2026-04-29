@@ -41,10 +41,11 @@ export async function resolveAddress(config: KeychainSignerConfig): Promise<Addr
             assertIsAddress(config.address);
             return config.address;
 
-        // Backends that fetch the address from a remote API
+        // Backends that derive or fetch the address from key/api material
         case 'crossmint':
         case 'dfns':
         case 'fireblocks':
+        case 'memory':
         case 'openfort':
         case 'para':
         case 'privy': {

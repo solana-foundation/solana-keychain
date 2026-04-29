@@ -15,6 +15,7 @@
         { "path": "../dfns" },
         { "path": "../fireblocks" },
         { "path": "../gcp-kms" },
+        { "path": "../memory" },
         { "path": "../openfort" },
         { "path": "../para" },
         { "path": "../privy" },

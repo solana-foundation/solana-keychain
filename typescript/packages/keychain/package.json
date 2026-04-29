@@ -53,6 +53,7 @@
         "@solana/keychain-dfns": "workspace:*",
         "@solana/keychain-fireblocks": "workspace:*",
         "@solana/keychain-gcp-kms": "workspace:*",
+        "@solana/keychain-memory": "workspace:*",
         "@solana/keychain-openfort": "workspace:*",
         "@solana/keychain-para": "workspace:*",
         "@solana/keychain-privy": "workspace:*",

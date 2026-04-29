@@ -53,6 +53,7 @@ See the [`@solana/keychain` README](./packages/keychain/README.md) for more usag
 | Package | Description |
 |---------|-------------|
 | [@solana/keychain-core](./packages/core) | Core interfaces, types, and utilities for building custom signers |
+| [@solana/keychain-memory](./packages/memory) | In-memory keypair signer (local Ed25519 signing) |
 | [@solana/keychain-privy](./packages/privy) | Privy wallet signer implementation |
 | [@solana/keychain-turnkey](./packages/turnkey) | Turnkey wallet signer implementation |
 | [@solana/keychain-vault](./packages/vault) | HashiCorp Vault signer implementation |
@@ -79,6 +80,7 @@ pnpm add @solana/keychain-crossmint   # Crossmint signer
 pnpm add @solana/keychain-dfns        # Dfns signer
 pnpm add @solana/keychain-fireblocks  # Fireblocks signer
 pnpm add @solana/keychain-gcp-kms    # Google Cloud KMS signer
+pnpm add @solana/keychain-memory      # In-memory keypair signer (local)
 pnpm add @solana/keychain-openfort    # Openfort backend wallet signer
 pnpm add @solana/keychain-para        # Para MPC signer
 pnpm add @solana/keychain-privy       # Privy signer
