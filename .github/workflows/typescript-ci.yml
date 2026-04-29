@@ -32,6 +32,7 @@ jobs:
           CI_SIGNER_CDP_ENABLED: ${{ vars.CI_SIGNER_CDP_ENABLED }}
           CI_SIGNER_DFNS_ENABLED: ${{ vars.CI_SIGNER_DFNS_ENABLED }}
           CI_SIGNER_CROSSMINT_ENABLED: ${{ vars.CI_SIGNER_CROSSMINT_ENABLED }}
+          CI_SIGNER_OPENFORT_ENABLED: ${{ vars.CI_SIGNER_OPENFORT_ENABLED }}
         with:
           script: |
             const parseVar = (name) => {
@@ -58,6 +59,7 @@ jobs:
               cdp: parseVar('CI_SIGNER_CDP_ENABLED'),
               dfns: parseVar('CI_SIGNER_DFNS_ENABLED'),
               crossmint: parseVar('CI_SIGNER_CROSSMINT_ENABLED'),
+              openfort: parseVar('CI_SIGNER_OPENFORT_ENABLED'),
             };
 
             const packageBySigner = {
@@ -71,6 +73,7 @@ jobs:
               cdp: 'cdp',
               dfns: 'dfns',
               crossmint: 'crossmint',
+              openfort: 'openfort',
             };
 
             const unitSignerOrder = [
@@ -84,6 +87,7 @@ jobs:
               'cdp',
               'dfns',
               'crossmint',
+              'openfort',
             ];
 
             const integrationSignerOrder = [
@@ -96,6 +100,7 @@ jobs:
               'cdp',
               'dfns',
               'crossmint',
+              'openfort',
             ];
 
             const unitPackages = unitSignerOrder

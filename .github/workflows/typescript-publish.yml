@@ -17,6 +17,7 @@ on:
           - dfns
           - fireblocks
           - gcp-kms
+          - openfort
           - para
           - privy
           - turnkey
@@ -53,6 +54,7 @@ env:
     dfns
     fireblocks
     gcp-kms
+    openfort
     para
     privy
     turnkey
@@ -333,6 +335,7 @@ jobs:
               '@solana/keychain-dfns',
               '@solana/keychain-fireblocks',
               '@solana/keychain-gcp-kms',
+              '@solana/keychain-openfort',
               '@solana/keychain-para',
               '@solana/keychain-privy',
               '@solana/keychain-turnkey',
