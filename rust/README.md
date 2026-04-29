@@ -27,6 +27,7 @@
 | **Para** | MPC wallets with Para infrastructure | `para` |
 | **CDP** | Coinbase Developer Platform managed wallet infrastructure | `cdp` |
 | **Crossmint** | Crossmint managed wallets (`smart` and `mpc`) | `crossmint` |
+| **Openfort** | Openfort backend wallets with TEE-stored keys | `openfort` |
 
 ## Installation
 
@@ -43,6 +44,9 @@ solana-keychain = { version = "0.5", features = ["vault"] }
 
 # With Crossmint support
 solana-keychain = { version = "0.5", features = ["crossmint"] }
+
+# With Openfort support
+solana-keychain = { version = "0.5", features = ["openfort"] }
 
 # All backends
 solana-keychain = { version = "0.5", features = ["all"] }
@@ -216,6 +220,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 **Note:** Crossmint `sign_message` is intentionally unsupported in this signer and returns `SigningFailed`.
+
+### Openfort Signer
+
+```rust
+use solana_keychain::{Signer, SolanaSigner};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create signer using an Openfort backend wallet.
+    // The wallet's Solana address is fetched automatically during init.
+    let signer = Signer::from_openfort(
+        std::env::var("OPENFORT_SECRET_KEY")?,    // sk_test_* / sk_live_*
+        std::env::var("OPENFORT_ACCOUNT_ID")?,    // acc_<uuid>
+        std::env::var("OPENFORT_WALLET_SECRET")?, // base64 PKCS#8 DER or PEM
+        None, // defaults to https://api.openfort.io with default timeouts
+    ).await?;
+
+    let message = b"Hello Solana!";
+    let signature = signer.sign_message(message).await?;
+    println!("Signature: {}", signature);
+
+    Ok(())
+}
+```
 
 ## Core API
 

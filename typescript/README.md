@@ -62,6 +62,7 @@ See the [`@solana/keychain` README](./packages/keychain/README.md) for more usag
 | [@solana/keychain-gcp-kms](./packages/gcp-kms) | Google Cloud KMS signer implementation |
 | [@solana/keychain-cdp](./packages/cdp) | Coinbase Developer Platform (CDP) signer implementation |
 | [@solana/keychain-crossmint](./packages/crossmint) | Crossmint wallet signer implementation |
+| [@solana/keychain-openfort](./packages/openfort) | Openfort backend wallet signer implementation |
 | [@solana/keychain-para](./packages/para) | Para MPC signer implementation |
 
 ## Installation
@@ -78,6 +79,7 @@ pnpm add @solana/keychain-crossmint   # Crossmint signer
 pnpm add @solana/keychain-dfns        # Dfns signer
 pnpm add @solana/keychain-fireblocks  # Fireblocks signer
 pnpm add @solana/keychain-gcp-kms    # Google Cloud KMS signer
+pnpm add @solana/keychain-openfort    # Openfort backend wallet signer
 pnpm add @solana/keychain-para        # Para MPC signer
 pnpm add @solana/keychain-privy       # Privy signer
 pnpm add @solana/keychain-turnkey     # Turnkey signer
