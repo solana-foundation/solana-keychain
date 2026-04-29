@@ -239,6 +239,7 @@ impl OpenfortSigner {
         let base_url = config
             .api_base_url
             .unwrap_or_else(|| format!("https://{OPENFORT_API_HOST}"));
+        let base_url = base_url.trim_end_matches('/').to_string();
         let api_host = extract_host(&base_url)?;
         let http_client_config = config.http_client_config.unwrap_or_default();
         let client = reqwest::Client::builder()
@@ -880,6 +881,19 @@ mod tests {
         let with_whitespace = format!(" {}\n  {}  ", &bare[..20], &bare[20..]);
         let pem = wallet_secret_to_pem(&with_whitespace);
         EncodingKey::from_ec_pem(pem.as_bytes()).expect("whitespaced base64 should still parse");
+    }
+
+    #[test]
+    fn test_from_config_trims_trailing_slashes() {
+        let signer = OpenfortSigner::from_config(OpenfortSignerConfig {
+            secret_key: "sk_test_secret".to_string(),
+            account_id: TEST_ACCOUNT_ID.to_string(),
+            wallet_secret: test_wallet_secret(),
+            api_base_url: Some("https://api.openfort.io///".to_string()),
+            http_client_config: None,
+        })
+        .unwrap();
+        assert_eq!(signer.api_base_url, "https://api.openfort.io");
     }
 
     #[test]
