@@ -8,6 +8,7 @@ import {
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    ED25519_SIGNATURE_LENGTH,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import type { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -35,7 +36,6 @@ const DEFAULT_BASE_URL = 'https://api.openfort.io';
 const ACCOUNTS_PATH = '/v2/accounts';
 const BACKEND_PATH = '/v2/accounts/backend';
 const JWT_LIFETIME_SECS = 120;
-const ED25519_SIGNATURE_LENGTH = 64;
 
 /**
  * Openfort backend wallet signer.

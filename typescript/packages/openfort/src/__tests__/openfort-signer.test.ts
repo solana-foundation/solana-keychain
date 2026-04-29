@@ -159,6 +159,30 @@ describe('OpenfortSigner', () => {
             mockGetAccount('0x742d35Cc6634C0532925a3b844Bc454e4438f44e');
             await expect(OpenfortSigner.create(makeConfig())).rejects.toThrow('Openfort returned non-Solana address');
         });
+
+        it('throws PARSING_ERROR when /v2/accounts response is invalid JSON', async () => {
+            mockFetch.mockResolvedValueOnce({
+                json: () => Promise.reject(new Error('Invalid JSON')),
+                ok: true,
+                status: 200,
+            });
+            await expect(OpenfortSigner.create(makeConfig())).rejects.toMatchObject({
+                code: 'SIGNER_PARSING_ERROR',
+                message: expect.stringContaining('Failed to parse Openfort getAccount response'),
+            });
+        });
+
+        it('throws REMOTE_API_ERROR when /v2/accounts response is missing the address field', async () => {
+            mockFetch.mockResolvedValueOnce({
+                json: () => Promise.resolve({}),
+                ok: true,
+                status: 200,
+            });
+            await expect(OpenfortSigner.create(makeConfig())).rejects.toMatchObject({
+                code: 'SIGNER_REMOTE_API_ERROR',
+                message: expect.stringContaining('Missing address in Openfort getAccount response'),
+            });
+        });
     });
 
     describe('signMessages', () => {
@@ -218,6 +242,74 @@ describe('OpenfortSigner', () => {
             await expect(
                 signer.signMessages([{ content: new TextEncoder().encode('hi'), signatures: {} }]),
             ).rejects.toThrow('Openfort sign network request failed');
+        });
+
+        it('throws PARSING_ERROR when sign response is invalid JSON', async () => {
+            mockGetAccount();
+            const signer = await OpenfortSigner.create(makeConfig());
+
+            mockFetch.mockResolvedValueOnce({
+                json: () => Promise.reject(new Error('Invalid JSON')),
+                ok: true,
+                status: 200,
+            });
+            await expect(
+                signer.signMessages([{ content: new TextEncoder().encode('hi'), signatures: {} }]),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_PARSING_ERROR',
+                message: expect.stringContaining('Failed to parse Openfort sign response'),
+            });
+        });
+
+        it('throws REMOTE_API_ERROR when sign response is missing the signature field', async () => {
+            mockGetAccount();
+            const signer = await OpenfortSigner.create(makeConfig());
+
+            mockFetch.mockResolvedValueOnce({
+                json: () => Promise.resolve({}),
+                ok: true,
+                status: 200,
+            });
+            await expect(
+                signer.signMessages([{ content: new TextEncoder().encode('hi'), signatures: {} }]),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_REMOTE_API_ERROR',
+                message: expect.stringContaining('Missing signature in Openfort response'),
+            });
+        });
+
+        it('delays subsequent requests by requestDelayMs', async () => {
+            mockGetAccount();
+            const signer = await OpenfortSigner.create(makeConfig({ requestDelayMs: 30 }));
+
+            // mockImplementation so each concurrent call gets a fresh Response (body can only be read once).
+            mockFetch.mockImplementation(() =>
+                Promise.resolve(
+                    new Response(
+                        JSON.stringify({
+                            account: TEST_ACCOUNT_ID,
+                            object: 'signature',
+                            signature: TEST_SIGNATURE_HEX,
+                        }),
+                        { status: 200 },
+                    ),
+                ),
+            );
+
+            const messages = [
+                { content: new TextEncoder().encode('one'), signatures: {} },
+                { content: new TextEncoder().encode('two'), signatures: {} },
+                { content: new TextEncoder().encode('three'), signatures: {} },
+            ];
+
+            const startTime = Date.now();
+            const result = await signer.signMessages(messages);
+            const elapsed = Date.now() - startTime;
+
+            expect(result).toHaveLength(3);
+            // Indexes 0, 1, 2 → delays 0, 30, 60ms. Total wall time is dominated by the longest.
+            // Allow a small slop below 60 to avoid timer flakiness.
+            expect(elapsed).toBeGreaterThanOrEqual(55);
         });
     });
 

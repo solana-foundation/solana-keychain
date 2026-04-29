@@ -223,6 +223,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Openfort Signer
 
+[Openfort backend wallet](https://www.openfort.io/docs/products/server) signer for Solana transactions.
+
 ```rust
 use solana_keychain::{Signer, SolanaSigner};
 
