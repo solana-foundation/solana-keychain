@@ -675,6 +675,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_is_available_uninitialized_returns_false() {
+        // No mock server needed — uninitialized signers must short-circuit
+        // without issuing a request.
+        let signer = create_uninitialized_test_signer("http://localhost");
+        assert!(!signer.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_is_available_returns_true_when_address_matches() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(format!(r"^/v2/accounts/{TEST_ACCOUNT_ID}$")))
+            .and(header_exists("authorization"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "address": TEST_PUBKEY,
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let signer = create_test_signer(&mock_server.uri());
+        assert!(signer.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_is_available_returns_false_when_address_changed() {
+        let mock_server = MockServer::start().await;
+        let other_pubkey = keypair_pubkey(&Keypair::new()).to_string();
+
+        Mock::given(method("GET"))
+            .and(path_regex(format!(r"^/v2/accounts/{TEST_ACCOUNT_ID}$")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "address": other_pubkey,
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let signer = create_test_signer(&mock_server.uri());
+        assert!(!signer.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_is_available_returns_false_on_remote_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(format!(r"^/v2/accounts/{TEST_ACCOUNT_ID}$")))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let signer = create_test_signer(&mock_server.uri());
+        assert!(!signer.is_available().await);
+    }
+
+    #[tokio::test]
     async fn test_sign_message_requires_init() {
         let signer = OpenfortSigner::new(
             "sk_test_secret".to_string(),
