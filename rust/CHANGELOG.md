@@ -1,3 +1,11 @@
+## 1.2.0 - 2026-04-30
+
+
+### Features
+
+- accept caller-built reqwest::Client in VaultSigner (#103)
+- add open fort signer (#111)
+
 ## 1.1.0 - 2026-04-13
 
 
