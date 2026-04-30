@@ -1,238 +1,121 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code working in this repo.
 
 ## Project Overview
 
-`solana-keychain` is a Rust library providing a unified interface for signing Solana transactions across multiple backend implementations. The architecture centers around a single `SolanaSigner` trait that abstracts over nine different signing backends: Memory (local keypairs), Vault (HashiCorp), Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, and Crossmint.
+`solana-keychain` is a Rust + TypeScript library providing a unified `SolanaSigner` interface across twelve backends, with full Rust/TS parity:
 
-## Common Commands
+Memory · Vault · Privy · Turnkey · AWS KMS · Fireblocks · GCP KMS · Dfns · Crossmint · CDP · Para · Openfort
 
-### Build and Test
+## Repo Layout
+
+- `rust/` — Rust crate, feature-gated per backend. See [rust/README.md](rust/README.md).
+- `typescript/` — pnpm monorepo, one package per backend plus core/keychain umbrella. See [typescript/README.md](typescript/README.md).
+- `docs/ADDING_SIGNERS.md` — full guide for adding a new backend (Rust + TS + CI).
+- `audits/AUDIT_STATUS.md` — audited-through commit and unaudited delta.
+- `justfile` — top-level dev commands. Prefer these over raw `cargo`/`pnpm` since they encode the right flags (e.g., `just rust-test` runs both `sdk-v2` and `sdk-v3` matrices — `cargo test --all-features` fails because the SDK features are mutually exclusive).
+
+### Common commands
+
+Always prefer `just` recipes. They encode the right flags (e.g., `just rust-test` runs both `sdk-v2` and `sdk-v3` matrices — `cargo test --all-features` fails because the SDK features are mutually exclusive). Run `just` with no args to list every recipe.
+
 ```bash
-# Build the project (default features only - memory signer)
-cd rust && cargo build
-
-# Build with all features
-cd rust && cargo build --all-features
-
-# Run tests (requires all features for complete test coverage)
-cd rust && cargo test --all-features
-
-# Run tests for a specific signer backend
-cd rust && cargo test --features memory
-cd rust && cargo test --features vault
-cd rust && cargo test --features privy
-cd rust && cargo test --features turnkey
-cd rust && cargo test --features aws_kms
-cd rust && cargo test --features fireblocks
-cd rust && cargo test --features gcp_kms
-cd rust && cargo test --features dfns
-cd rust && cargo test --features crossmint
-
-# Run a single test
-cd rust && cargo test test_name --all-features
-
-# Or use just (runs from project root)
-just build
-just test
+just build              # rust-build + ts-build
+just test               # unit tests (rust + ts)
+just test-integration   # spins up local Vault, runs integration tests (both sides)
+just test-all           # test + test-integration
+just fmt                # cargo fmt/clippy + pnpm lint:fix/format
 ```
 
-### Linting and Formatting
+Per-side recipes (use these to scope work to one language):
+
+| Task | Rust | TypeScript |
+| --- | --- | --- |
+| Build | `just rust-build` | `just ts-build` |
+| Unit tests | `just rust-test` | `just ts-test` |
+| Format + lint | `just rust-fmt` | `just ts-fmt` |
+| Integration tests | `just rust-test-integration` | `just ts-test-integration` |
+| Other | — | `just ts-treeshake` (verifies `@solana/keychain` umbrella + per-pkg tree-shakability) |
+
+Integration recipes auto-spawn a local `vault server -dev` and load `.env` from the repo root — do not run vault yourself or pass secrets via shell.
+
+For releases: `just release` (Rust), `just release-ts`, `just hotfix`, `just publish-ts`. See [RELEASING.md](RELEASING.md) for the full runbook (normal flow, partial-publish recovery, new-package onboarding, concurrency notes). Always check **all** crates/packages in the monorepo for version consistency.
+
+## Repo skills
+
+This repo ships Claude Code skills in [.claude/skills/](.claude/skills/) — invoke them whenever you're starting one of these workflows instead of reinventing the steps:
+
+| Skill | When to use |
+| --- | --- |
+| [`add-signer`](.claude/skills/add-signer/SKILL.md) | Adding a new signing backend (Rust + TS + CI). Pair with [docs/ADDING_SIGNERS.md](docs/ADDING_SIGNERS.md). |
+| [`release`](.claude/skills/release/SKILL.md) | Cutting a new Rust and/or TS release (PR-based flow, version bumps). |
+| [`complete-release`](.claude/skills/complete-release/SKILL.md) | Finalizing an approved release PR — merge, then trigger publish workflows from `main`. |
+
+## Rust
+
+Use `just rust-*` for the common workflows. For a single-backend slice (no `just` recipe), drop to cargo:
+
 ```bash
-# Format and lint code (runs clippy with all warnings as errors)
-just fmt
-
-# Just format code
-cd rust && cargo fmt
-
-# Just run clippy
-cd rust && cargo clippy --all-targets --all-features -- -D warnings
+cd rust && cargo test --no-default-features --features <backend>,sdk-v2 <backend>::tests
 ```
 
-### Branch Workflow
-```bash
-# Show branch workflow guidance
-just branch-info
+Remember to also run `sdk-v3` if your change touches SDK-version-sensitive code — `just rust-test` does both for you.
 
-# Branch strategy:
-#   main                → Integration branch (audited + unaudited commits)
-#   feat/*,fix/*,chore/* → Topic branches from main
-#   hotfix/*            → Urgent fixes from deployed stable tag
+### Architecture
+
+- **Trait** ([rust/src/traits.rs](rust/src/traits.rs)): `SolanaSigner` with `pubkey()`, `sign_transaction()`, `sign_message()`, `is_available()`.
+- **Unified enum** ([rust/src/lib.rs](rust/src/lib.rs)): `Signer` enum wraps every backend, each variant `#[cfg(feature = "...")]`-gated. `Signer::from_<backend>(...)` constructors return a ready-to-use signer (calling `init()` internally where needed).
+- **Errors** ([rust/src/error.rs](rust/src/error.rs)): centralized `SignerError` via `thiserror`.
+
+Per-backend implementation details live in each module's source. See [rust/README.md](rust/README.md) for the supported-backend table and usage examples.
+
+### Feature flags
+
+One feature per backend (`memory` is default), `all` enables everything. At least one is required (enforced by `compile_error!` in `lib.rs`). SDK selection is mutually exclusive: `sdk-v2` (default) or `sdk-v3`.
+
+### Gotchas
+
+- **`init()` required before use:** `PrivySigner`, `FireblocksSigner`, `DfnsSigner`, `CrossmintSigner`, `ParaSigner`, `OpenfortSigner`. The others are ready after construction. The `Signer::from_*` factories handle `init()` for you.
+- **`sign_message` quirks:** `CrossmintSigner` returns `SigningFailed` (intentionally unsupported). `CdpSigner` only accepts UTF-8 payloads.
+- **Turnkey signature padding:** response `r,s` components must be left-padded to 32 bytes each before concatenation ([rust/src/turnkey/mod.rs](rust/src/turnkey/mod.rs)).
+- **GCP KMS:** PureEdDSA mode with `EC_SIGN_ED25519`.
+- **Transaction serialization:** all backends use `bincode` before signing.
+- **Remote-signer tests** use `wiremock`; no live API calls in unit tests.
+
+## TypeScript
+
+Use `just ts-*` for build/test/fmt/treeshake. For a single-package slice (no `just` recipe), drop to pnpm:
+
+```bash
+cd typescript && pnpm install
+cd typescript && pnpm --filter @solana/keychain-<name> <script>   # e.g. test, build, typecheck
+cd typescript && pnpm typecheck                                    # workspace-wide
 ```
 
-### Publishing a Rust Release (Mainline)
-```bash
-# Prepare a new release (prompts for version, generates CHANGELOG, stages changes)
-# Mainline path: run from main after release PR merge
-just release
+### Architecture
 
-# Review the CHANGELOG.md, then commit
-git commit -m "chore: release vX.Y.Z"
+- **Monorepo** ([typescript/](typescript/)): pnpm workspace, one package per backend plus `core` (interfaces) and `keychain` (umbrella factory).
+- **Interface** (`@solana/keychain-core`): every signer implements `SolanaSigner<TAddress>` — `address`, `signMessages()`, `signTransactions()`, `isAvailable()`. Compatible with `@solana/kit` and `@solana/signers`.
+- **Async factory pattern:** each package exports `async createXSigner(config)` returning a ready-to-use `SolanaSigner` (the factory awaits any `init()` internally — TS parity with Rust's `Signer::from_*`). The umbrella `@solana/keychain` exports `createKeychainSigner({ backend, ...config })` that dispatches to the per-backend factory.
+- **Package naming:** `@solana/keychain-<backend>` (e.g. `@solana/keychain-privy`, `@solana/keychain-aws-kms`).
 
-# Push to GitHub
-git push origin HEAD
+See [typescript/README.md](typescript/README.md) for the full package list and usage. When adding a backend, follow [docs/ADDING_SIGNERS.md](docs/ADDING_SIGNERS.md) — the umbrella package needs updates in 6 places.
 
-# Manually trigger "Publish Rust Crate" from main
-# Publish workflows run from the ref you dispatch
-```
+### Gotchas
 
-### Publishing a TypeScript Release (Mainline)
-```bash
-# Prepare a new TypeScript SDK release (prompts for version)
-# Mainline path: run from main after release PR merge
-just release-ts
+- **Async construction:** always `await createXSigner(...)` — direct class construction is deprecated and skips `init()`.
+- **`signMessages` quirks (parity with Rust):** `CrossmintSigner` rejects with "not supported". `CdpSigner` requires UTF-8 message bytes.
+- **HTTPS enforced:** all `apiBaseUrl` config fields must reject non-HTTPS URLs.
+- **Error sanitization:** wrap remote API error text with `sanitizeRemoteErrorResponse()` from `@solana/keychain-core` before surfacing.
+- **Integration tests:** use `runSignerIntegrationTest` + per-package `setup.ts`; spun up via `just ts-test-integration` (loads `.env`, starts local Vault).
+- **Tree-shakability:** run `just ts-treeshake` after touching exports — every package and the umbrella must stay tree-shakable.
+- **Adding a backend:** the umbrella package, `typescript-ci.yml`, and `typescript-publish.yml` all need updates (see [docs/ADDING_SIGNERS.md](docs/ADDING_SIGNERS.md)).
 
-# Commit and push
-git commit -m "chore: release ts-keychain vX.Y.Z"
-git push origin HEAD
+## Branch Workflow
 
-# Manually trigger "Publish TypeScript Packages (Manual)" from main
-```
+- `main` — integration branch (audited + unaudited).
+- `feat/*`, `fix/*`, `chore/*` — topic branches from `main`.
+- `hotfix/*` — urgent fixes from a deployed stable tag (use `just hotfix`).
 
-### Creating a Hotfix Release
-```bash
-# Create a hotfix branch from a deployed stable tag
-just hotfix              # prompts for name
-just hotfix fix-auth     # pass name directly
-just hotfix fix-auth v1.2.3 # optionally pass base tag
-
-# On hotfix/*: apply fixes and prepare release
-just release             # required for Rust publish
-just release-ts          # if TypeScript packages changed
-
-# Commit and push hotfix branch
-git push origin HEAD
-
-# Trigger publish workflows from hotfix/* before merge-back
-# Then open PR from hotfix/* to main and merge back
-```
-
-Release skill references for agents:
-- `.claude/skills/release/SKILL.md`
-- `.claude/skills/complete-release/SKILL.md`
-
-## Architecture
-
-### Core Trait System
-
-The library is built around the `SolanaSigner` trait ([rust/src/traits.rs](rust/src/traits.rs)) which defines the interface all signers must implement:
-- `pubkey()` - Returns the signer's public key
-- `sign_transaction()` - Signs a Solana transaction, modifying it in place
-- `sign_message()` - Signs arbitrary bytes
-- `is_available()` - Checks if the signer backend is healthy/reachable
-
-### Unified Signer Enum
-
-[rust/src/lib.rs](rust/src/lib.rs) provides a `Signer` enum that wraps all backend implementations, allowing runtime selection of signing backends while maintaining a single interface. Each variant corresponds to a feature-gated backend.
-
-### Backend Implementations
-
-All signers follow a consistent pattern but differ in where keys are stored:
-
-1. **MemorySigner** ([rust/src/memory/mod.rs](rust/src/memory/mod.rs))
-   - Stores keypair in memory
-   - Supports multiple input formats: Base58, U8Array string, or JSON file path
-   - Always available (no remote dependencies)
-   - See [rust/src/memory/keypair_util.rs](rust/src/memory/keypair_util.rs) for key parsing logic
-
-2. **VaultSigner** ([rust/src/vault/mod.rs](rust/src/vault/mod.rs))
-   - Uses HashiCorp Vault's Transit engine for signing
-   - Public key provided at construction (must match Vault key)
-   - Uses `vaultrs` client library
-   - Availability checked via key metadata read
-
-3. **PrivySigner** ([rust/src/privy/mod.rs](rust/src/privy/mod.rs))
-   - Requires `init()` call after construction to fetch public key
-   - Uses Basic Auth with app_id:app_secret
-   - RPC-style API with `signTransaction` method
-   - Returns full signed transaction, extracts signature
-
-4. **TurnkeySigner** ([rust/src/turnkey/mod.rs](rust/src/turnkey/mod.rs))
-   - Uses P256 ECDSA signing for API authentication (X-Stamp header)
-   - Signs raw payloads with hex encoding
-   - Response contains r,s signature components that must be padded to 32 bytes each
-   - Availability checked via `whoami` endpoint
-
-5. **AWS KMS** ([rust/src/aws_kms/mod.rs](rust/src/aws_kms/mod.rs))
-   - Uses AWS SDK with EdDSA (Ed25519) signing
-   - Automatic credential discovery via environment or IAM
-   - Availability checked via `DescribeKey`
-
-6. **FireblocksSigner** ([rust/src/fireblocks/mod.rs](rust/src/fireblocks/mod.rs))
-   - Uses Fireblocks API with EdDSA (Ed25519) signing
-   - Requires `init()` to fetch public key before use
-   - JWT-based authentication
-   - Availability checked via user details endpoint
-
-7. **GCP KMS** ([rust/src/gcp_kms/mod.rs](rust/src/gcp_kms/mod.rs))
-   - Uses Google Cloud SDK with EdDSA (Ed25519) signing
-   - PureEdDSA mode with `EC_SIGN_ED25519` algorithm
-   - Automatic credential discovery via ADC
-   - Availability checked via `GetCryptoKeyVersion`
-
-8. **DfnsSigner** ([rust/src/dfns/mod.rs](rust/src/dfns/mod.rs))
-     - Uses Dfns API signing
-     - Requires `init()` to fetch wallet public key before use
-     - User Action Signing flow: 3-step challenge/response
-     - Signature returned as r+s hex components, concatenated to 64-byte Ed25519 signature
-     - Authentication via private key in PEM format
-     - Availability checked via wallet GET endpoint
-
-9. **CrossmintSigner** ([rust/src/crossmint/mod.rs](rust/src/crossmint/mod.rs))
-    - Uses Crossmint Wallets API with managed transaction signing flow
-    - Supports Solana `smart` and `mpc` wallet types
-    - Requires `init()` to resolve wallet and signer public key before use
-    - `sign_message` is intentionally unsupported and returns a signing error
-    - Availability checked via wallet GET endpoint
-
-### Error Handling
-
-All errors are centralized in [rust/src/error.rs](rust/src/error.rs) using `thiserror`. The `SignerError` enum covers key formats, signing failures, remote API errors, serialization, and configuration issues.
-
-### Feature Flags
-
-The library uses Cargo features for zero-cost abstraction:
-- `memory` (default) - Only includes MemorySigner
-- `vault` - Adds VaultSigner with reqwest, vaultrs, base64
-- `privy` - Adds PrivySigner with reqwest, base64
-- `turnkey` - Adds TurnkeySigner with reqwest, base64, p256, hex, chrono
-- `aws_kms` - Adds KmsSigner with aws-sdk-kms
-- `fireblocks` - Adds FireblocksSigner with reqwest, jsonwebtoken
-- `gcp_kms` - Adds GcpKmsSigner with google-cloud-kms-v1, google-cloud-auth
-- `dfns` - Adds DfnsSigner with reqwest, hex, ed25519-dalek
-- `crossmint` - Adds CrossmintSigner with reqwest
-- `all` - Enables all backends
-
-At least one feature must be enabled (enforced by `compile_error!` in lib.rs).
-
-## Testing
-
-Tests are co-located with implementation code in each module. Remote signers (Vault, Privy, Turnkey, AWS, Fireblocks, GCP, DFNS, Crossmint) use `wiremock` to mock HTTP endpoints, avoiding actual API calls during testing. Tests cover:
-- Constructor validation (invalid keys, etc.)
-- Successful signing operations
-- Error cases (unauthorized, malformed responses)
-- Availability checks
-
-Run specific backend tests:
-```bash
-cd rust && cargo test --features vault vault::tests
-cd rust && cargo test --features privy privy::tests
-cd rust && cargo test --features turnkey turnkey::tests
-cd rust && cargo test --features aws_kms aws_kms::tests
-cd rust && cargo test --features fireblocks fireblocks::tests
-cd rust && cargo test --features gcp_kms gcp_kms::tests
-cd rust && cargo test --features dfns dfns::tests
-cd rust && cargo test --features crossmint crossmint::tests
-```
-
-## Key Implementation Notes
-
-- All signers serialize transactions with `bincode` before signing
-- Privy and Turnkey use Base64 encoding for payloads/responses
-- Vault uses Base64 for both input and output
-- Turnkey requires special handling for signature component padding (see [rust/src/turnkey/mod.rs:125-136](rust/src/turnkey/mod.rs))
-- PrivySigner, FireblocksSigner, DfnsSigner, and CrossmintSigner must call `init()` before use; other signers are ready after construction
-- AWS KMS and GCP KMS use official cloud SDKs with automatic credential discovery
-- GCP KMS operates in PureEdDSA mode with `EC_SIGN_ED25519` algorithm
-- The unified `Signer` enum uses conditional compilation extensively with `#[cfg(feature = "...")]`
+`just branch-info` prints the full guidance.

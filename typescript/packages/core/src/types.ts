@@ -23,7 +23,7 @@ export interface SolanaSigner<TAddress extends string = string>
 
     /**
      * Check if the signer is available and healthy.
-     * For remote signers (Vault, Privy, Turnkey), this performs an API health check.
+     * For remote signers (Vault, Privy, Turnkey, AWS KMS, GCP KMS, Fireblocks, Dfns, Crossmint, CDP, Para, Openfort), this performs an API health check.
      *
      * @throws {SignerError} Some implementations may throw for configuration or initialization errors.
      */

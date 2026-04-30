@@ -1,7 +1,8 @@
 //! Framework-agnostic Solana signing abstractions
 //!
 //! This crate provides a unified interface for signing Solana transactions
-//! with multiple backend implementations (memory, Vault, Privy, Turnkey, AWS KMS, Para).
+//! with multiple backend implementations (memory, Vault, Privy, Turnkey, AWS KMS,
+//! Fireblocks, GCP KMS, Dfns, Crossmint, CDP, Para, Openfort).
 //!
 //! # Features
 //!

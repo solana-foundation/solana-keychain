@@ -358,6 +358,33 @@ release-ts: _check-ts-release
     git add .
 
     echo ""
+    echo "==> Checking npm registry for each target package..."
+    MISSING=""
+    for pkg in $PACKAGES; do
+        [ "$pkg" = "test-utils" ] && continue
+        if [ "$pkg" = "keychain" ]; then NPM_NAME="@solana/keychain"
+        else NPM_NAME="@solana/keychain-$pkg"; fi
+        if npm view "$NPM_NAME" version >/dev/null 2>&1; then
+            echo "  [ok] $NPM_NAME exists on npm"
+        else
+            echo "  [warn] $NPM_NAME not found on npm — needs first-publish by an org maintainer"
+            MISSING="$MISSING $NPM_NAME"
+        fi
+    done
+    if [ -n "$MISSING" ]; then
+        echo ""
+        echo "==> WARNING: the following packages need a manual first-publish before CI can publish them:"
+        echo "   $MISSING"
+        echo ""
+        echo "   For each, after building the workspace:"
+        echo "     cd typescript/packages/<name> && npm publish --access public"
+        echo "   Then verify with 'npm view <NPM_NAME>' before triggering CI."
+        echo ""
+        read -p "Continue with version bump anyway? [y/N] " ok
+        [[ "$ok" =~ ^[Yy]$ ]] || exit 1
+    fi
+
+    echo ""
     echo "TypeScript release prepared! Next steps:"
     echo "  1. git commit -m 'chore(ts): release v$version'"
     echo "  2. git push origin HEAD"
@@ -367,6 +394,38 @@ release-ts: _check-ts-release
     else
         echo "  3. Trigger 'Publish TypeScript Packages' workflow in GitHub Actions"
     fi
+
+# Trigger TypeScript publish workflow and watch until it finishes.
+# Pass a single package name, or "all" (default). For partial recovery,
+# trigger one run per package via the GitHub Actions UI or repeated calls.
+publish-ts package="all" branch="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v gh >/dev/null || { echo "Install gh: https://cli.github.com"; exit 1; }
+    valid="all core aws-kms cdp crossmint dfns fireblocks gcp-kms memory openfort para privy turnkey vault keychain"
+    if ! echo " $valid " | grep -q " {{package}} "; then
+        echo "Error: invalid package '{{package}}'. Valid: $valid"
+        exit 1
+    fi
+    ref="{{branch}}"
+    [ -z "$ref" ] && ref=$(git rev-parse --abbrev-ref HEAD)
+    case "$ref" in
+        main|hotfix/*) ;;
+        *) echo "Error: publish-ts must run from main or hotfix/* (got: $ref)"; exit 1 ;;
+    esac
+    echo "==> Triggering TypeScript publish (package={{package}}, ref=$ref)"
+    before=$(gh run list --workflow=typescript-publish.yml --limit 1 --json databaseId -q '.[0].databaseId')
+    gh workflow run typescript-publish.yml --ref "$ref" \
+        -f package="{{package}}" \
+        -f publish-to-npm=true \
+        -f create-github-release=true
+    for _ in {1..15}; do
+        sleep 2
+        run_id=$(gh run list --workflow=typescript-publish.yml --limit 1 --json databaseId -q '.[0].databaseId')
+        [ "$run_id" != "$before" ] && break
+    done
+    echo "==> Watching run $run_id (https://github.com/solana-foundation/solana-keychain/actions/runs/$run_id)"
+    gh run watch "$run_id" --exit-status
 
 [private]
 _check-ts-release:

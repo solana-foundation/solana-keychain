@@ -18,7 +18,7 @@ pub enum SignerError {
     #[error("Signing failed")]
     SigningFailed(String),
 
-    /// Remote API error (Vault, Privy, Turnkey)
+    /// Remote API error (any remote signer backend: Vault, Privy, Turnkey, Fireblocks, AWS/GCP KMS, Dfns, Crossmint, CDP, Para, Openfort)
     #[error("Remote API error")]
     RemoteApiError(String),
 

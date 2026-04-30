@@ -16,6 +16,8 @@ This installs all signer implementations. For a smaller bundle, install individu
 - `@solana/keychain-dfns` - Dfns signer
 - `@solana/keychain-fireblocks` - Fireblocks signer
 - `@solana/keychain-gcp-kms` - GCP KMS signer
+- `@solana/keychain-memory` - In-memory keypair signer (local Ed25519 signing)
+- `@solana/keychain-openfort` - Openfort backend wallet signer
 - `@solana/keychain-para` - Para MPC signer
 - `@solana/keychain-privy` - Privy signer
 - `@solana/keychain-turnkey` - Turnkey signer
