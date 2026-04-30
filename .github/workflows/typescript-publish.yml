@@ -286,8 +286,6 @@ jobs:
       - name: Pre-flight - npm publish dry-run for all targets
         if: ${{ github.event.inputs.publish-to-npm == 'true' }}
         working-directory: typescript
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           echo "==> Pre-flight: npm publish --dry-run for each target"
           echo "    Validates tarballs, version conflicts, and registry auth"
