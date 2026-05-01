@@ -7,23 +7,24 @@ import {
     generateKeyPairSigner,
     pipe,
     setTransactionMessageFeePayerSigner,
-    setTransactionMessageLifetimeUsingBlockhash,
     signTransactionMessageWithSigners,
 } from '@solana/kit';
 import { getTransferSolInstruction } from '@solana-program/system';
+import { LiteSVM } from 'litesvm';
 
-import { airdropLamports, formatSimulationResult, LiteSVM, truncateAddress } from './litesvm-helpers.js';
+import { airdropLamports, formatSimulationResult, truncateAddress } from './litesvm-helpers.js';
 import type { SignerTestConfig, TestContext, TestOptions, TestScenario, TestSigner } from './types.js';
 
 const DEFAULT_AIRDROP = BigInt(1_000_000_000);
 const DEFAULT_TRANSFER = BigInt(100_000_000);
+// Buffer that the faucet must retain after airdropping: tx fee + rent-exempt minimum (~890k for a 0-byte account).
+const FAUCET_RESERVE = BigInt(10_000_000);
 
 const DEFAULT_OPTIONS: Required<TestOptions> = {
     airdropAmount: DEFAULT_AIRDROP,
     transferAmount: DEFAULT_TRANSFER,
     verbose: false,
 };
-const AIRDROP_FEE_BUFFER = BigInt(50_000);
 
 const ALL_SCENARIOS: TestScenario[] = ['signTransaction', 'signMessage', 'simulateTransaction', 'badSignature'];
 
@@ -32,7 +33,6 @@ const ALL_SCENARIOS: TestScenario[] = ['signTransaction', 'signMessage', 'simula
  * Use this in your test files with your test framework's assertions
  *
  * @param config - Test configuration including signer factory and env vars
- * @param litesvm - LiteSVM instance (must be provided by consuming project)
  * @param options - Optional test configuration
  */
 export async function runSignerIntegrationTest<T extends TestSigner>(
@@ -40,15 +40,14 @@ export async function runSignerIntegrationTest<T extends TestSigner>(
     options: TestOptions = {},
 ): Promise<void> {
     const opts = { ...DEFAULT_OPTIONS, ...options };
-    const airdropSourceLamports = opts.airdropAmount + AIRDROP_FEE_BUFFER;
 
     // Validate environment
     validateEnvironment(config.requiredEnvVars);
 
-    // Create LiteSVM instance with minimal setup to avoid OOM on constrained CI runners.
-    // The full constructor loads SPL programs which require significantly more memory.
+    // Minimal SVM: sysvars + builtins + sigverify + precompiles. No SPL programs (unused) — keeps startup small.
+    // The faucet pool is sized to the signer airdrop plus a reserve so the faucet stays rent-exempt after.
     const litesvm = LiteSVM.default()
-        .withLamports(airdropSourceLamports)
+        .withLamports(opts.airdropAmount + FAUCET_RESERVE)
         .withSysvars()
         .withBuiltins()
         .withSigverify(true)
@@ -62,11 +61,11 @@ export async function runSignerIntegrationTest<T extends TestSigner>(
         console.log(`Address: ${truncateAddress(signer.address)}`);
     }
 
-    // Setup test environment
+    // Setup test environment. The recipient is funded by the test transfer itself,
+    // so only the signer needs an airdrop here.
     const recipientAddress = config.recipientAddress ?? (await generateKeyPairSigner()).address;
 
     airdropLamports(litesvm, signer.address, opts.airdropAmount);
-    airdropLamports(litesvm, recipientAddress, BigInt(1));
 
     const context: TestContext<T> = {
         litesvm,
@@ -135,13 +134,12 @@ async function testSignTransaction<T extends TestSigner>(context: TestContext<T>
         source: signer,
     });
     litesvm.expireBlockhash();
-    const blockhash = litesvm.latestBlockhash();
 
     const transaction = pipe(
         createTransactionMessage({ version: 0 }),
         tx => setTransactionMessageFeePayerSigner(signer, tx),
         tx => appendTransactionMessageInstructions([instruction], tx),
-        tx => setTransactionMessageLifetimeUsingBlockhash(blockhash, tx),
+        tx => litesvm.setTransactionMessageLifetimeUsingLatestBlockhash(tx),
     );
 
     const signedTransaction = await signTransactionMessageWithSigners(transaction);
@@ -219,13 +217,12 @@ async function testSimulateTransaction<T extends TestSigner>(context: TestContex
         source: signer,
     });
     litesvm.expireBlockhash();
-    const blockhash = litesvm.latestBlockhash();
 
     const transaction = pipe(
         createTransactionMessage({ version: 0 }),
         tx => setTransactionMessageFeePayerSigner(signer, tx),
         tx => appendTransactionMessageInstructions([instruction], tx),
-        tx => setTransactionMessageLifetimeUsingBlockhash(blockhash, tx),
+        tx => litesvm.setTransactionMessageLifetimeUsingLatestBlockhash(tx),
     );
 
     const signedTransaction = await signTransactionMessageWithSigners(transaction);
@@ -262,13 +259,12 @@ async function testBadSignature<T extends TestSigner>(context: TestContext<T>): 
         source: signer,
     });
     litesvm.expireBlockhash();
-    const blockhash = litesvm.latestBlockhash();
 
     const transaction = pipe(
         createTransactionMessage({ version: 0 }),
         tx => setTransactionMessageFeePayerSigner(signer, tx),
         tx => appendTransactionMessageInstructions([instruction], tx),
-        tx => setTransactionMessageLifetimeUsingBlockhash(blockhash, tx),
+        tx => litesvm.setTransactionMessageLifetimeUsingLatestBlockhash(tx),
     );
 
     const signedTransaction = await signTransactionMessageWithSigners(transaction);
@@ -290,7 +286,8 @@ async function testBadSignature<T extends TestSigner>(context: TestContext<T>): 
     const result = litesvm.simulateTransaction(badTransaction);
     const formatted = formatSimulationResult(result);
 
-    // Bad signature should cause failure
+    // Bad signature should cause failure. Sigverify is explicitly enabled at SVM construction,
+    // so a successful simulation here means sigverify was bypassed — surface that loud.
     if (formatted.success) {
         throw new Error('Expected transaction with bad signature to fail, but it succeeded');
     }
