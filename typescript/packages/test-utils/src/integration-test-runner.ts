@@ -17,7 +17,8 @@ import type { SignerTestConfig, TestContext, TestOptions, TestScenario, TestSign
 
 const DEFAULT_AIRDROP = BigInt(1_000_000_000);
 const DEFAULT_TRANSFER = BigInt(100_000_000);
-// Buffer that the faucet must retain after airdropping: tx fee + rent-exempt minimum (~890k for a 0-byte account).
+// Conservative buffer (≥10× the ~890k rent-exempt minimum for a 0-byte account) so the faucet
+// stays rent-exempt after the airdrop tx fee is taken.
 const FAUCET_RESERVE = BigInt(10_000_000);
 
 const DEFAULT_OPTIONS: Required<TestOptions> = {

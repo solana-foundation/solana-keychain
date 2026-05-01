@@ -6,12 +6,10 @@ export { LiteSVM };
 type SimulateResult = ReturnType<LiteSVM['simulateTransaction']>;
 type SimError = ReturnType<FailedTransactionMetadata['err']>;
 
-const DEFAULT_AIRDROP = 10_000_000_000n;
-
 /**
  * Airdrops lamports to an address in the test environment
  */
-export function airdropLamports(litesvm: LiteSVM, address: Address, amount: bigint = DEFAULT_AIRDROP): void {
+export function airdropLamports(litesvm: LiteSVM, address: Address, amount: bigint): void {
     const result = litesvm.airdrop(address, lamports(amount));
     if (result == null) {
         throw new Error(`Airdrop to ${address} failed: returned null`);
