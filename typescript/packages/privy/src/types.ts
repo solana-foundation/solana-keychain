@@ -13,6 +13,7 @@ export interface SignTransactionParams {
 }
 
 export interface SignTransactionRequest {
+    chain_type: 'solana';
     method: 'signTransaction';
     params: SignTransactionParams;
 }
@@ -37,6 +38,7 @@ export interface SignMessageParams {
 }
 
 export interface SignMessageRequest {
+    chain_type: 'solana';
     method: 'signMessage';
     params: SignMessageParams;
 }

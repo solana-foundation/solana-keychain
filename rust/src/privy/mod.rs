@@ -1,11 +1,18 @@
 //! Privy API signer integration
 
+mod authorization;
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, Transaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
+use authorization::prepare_privy_authorization_headers;
+pub use authorization::{
+    default_privy_authorization_request_expiry_ms, format_privy_authorization_signature_payload,
+    generate_privy_authorization_signatures, PrivyAuthorizationConfig, PrivyAuthorizationContext,
+    PrivyAuthorizationContextProvider, PrivyAuthorizationRequestInput, PrivyAuthorizationSignFn,
+};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::str::FromStr;
 use types::{SignMessageParams, SignMessageRequest, SignMessageResponse, WalletResponse};
@@ -19,6 +26,8 @@ pub struct PrivySigner {
     api_base_url: String,
     client: reqwest::Client,
     public_key: Option<Pubkey>,
+    authorization_context: Option<PrivyAuthorizationConfig>,
+    authorization_request_expiry_ms: Option<u64>,
 }
 
 /// Configuration for creating a PrivySigner.
@@ -77,7 +86,30 @@ impl PrivySigner {
             client,
             // Public key is resolved during init().
             public_key: None,
+            authorization_context: None,
+            authorization_request_expiry_ms: Some(default_privy_authorization_request_expiry_ms()),
         }
+    }
+
+    /// Configure Privy wallet authorization context for signing requests.
+    pub fn with_authorization_context(
+        mut self,
+        authorization_context: impl Into<PrivyAuthorizationConfig>,
+    ) -> Self {
+        self.authorization_context = Some(authorization_context.into());
+        self
+    }
+
+    /// Configure request-expiry window in milliseconds for authorization signatures.
+    pub fn with_authorization_request_expiry_ms(mut self, request_expiry_ms: u64) -> Self {
+        self.authorization_request_expiry_ms = Some(request_expiry_ms);
+        self
+    }
+
+    /// Omit `privy-request-expiry` from authorization signatures and request headers.
+    pub fn without_authorization_request_expiry(mut self) -> Self {
+        self.authorization_request_expiry_ms = None;
+        self
     }
 
     /// Initialize the signer by fetching the public key
@@ -147,21 +179,37 @@ impl PrivySigner {
 
         let request = SignMessageRequest {
             method: "signMessage",
+            chain_type: "solana",
             params: SignMessageParams {
                 message: STANDARD.encode(serialized),
                 encoding: "base64",
             },
         };
 
-        let response = self
+        let authorization_headers = prepare_privy_authorization_headers(
+            &self.app_id,
+            self.authorization_context.as_ref(),
+            "POST",
+            &url,
+            &request,
+            self.authorization_request_expiry_ms,
+        )?;
+
+        let mut request_builder = self
             .client
             .post(&url)
             .header("Authorization", self.get_privy_auth_header())
             .header("privy-app-id", &self.app_id)
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
-            .await?;
+            .header("Content-Type", "application/json");
+        if let Some(authorization_signature) = authorization_headers.authorization_signature {
+            request_builder =
+                request_builder.header("privy-authorization-signature", authorization_signature);
+        }
+        if let Some(request_expiry) = authorization_headers.request_expiry {
+            request_builder = request_builder.header("privy-request-expiry", request_expiry);
+        }
+
+        let response = request_builder.json(&request).send().await?;
 
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -261,7 +309,7 @@ mod tests {
     use crate::test_util::create_test_transaction;
     use std::panic::{self, AssertUnwindSafe};
     use wiremock::{
-        matchers::{header, method, path},
+        matchers::{body_json, header, method, path},
         Mock, MockServer, ResponseTemplate,
     };
 
@@ -354,6 +402,57 @@ mod tests {
         signer.public_key = Some(keypair.pubkey());
 
         let result = signer.sign_message(&tx.message_data()).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), signature);
+    }
+
+    #[tokio::test]
+    async fn test_privy_sign_message_authorization_context_headers() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let message = [1, 2, 3, 4];
+        let signature = keypair.sign_message(&message);
+
+        Mock::given(method("POST"))
+            .and(path("/wallets/test-wallet-id/rpc"))
+            .and(header(
+                "privy-authorization-signature",
+                "authorization-signature",
+            ))
+            .and(body_json(serde_json::json!({
+                "method": "signMessage",
+                "chain_type": "solana",
+                "params": {
+                    "message": "AQIDBA==",
+                    "encoding": "base64"
+                }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "method": "signMessage",
+                "data": {
+                    "signature": STANDARD.encode(signature),
+                    "encoding": "base64"
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let mut signer = PrivySigner::new(
+            "test-app-id".to_string(),
+            "test-app-secret".to_string(),
+            "test-wallet-id".to_string(),
+        )
+        .with_authorization_context(PrivyAuthorizationContext {
+            signatures: vec!["authorization-signature".to_string()],
+            ..Default::default()
+        })
+        .without_authorization_request_expiry();
+        signer.client = reqwest::Client::new();
+        signer.api_base_url = mock_server.uri();
+        signer.public_key = Some(keypair.pubkey());
+
+        let result = signer.sign_message(&message).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), signature);
     }

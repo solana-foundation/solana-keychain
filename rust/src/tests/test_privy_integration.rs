@@ -1,6 +1,8 @@
 pub const PRIVY_APP_ID: &str = "PRIVY_APP_ID";
 pub const PRIVY_APP_SECRET: &str = "PRIVY_APP_SECRET";
 pub const PRIVY_WALLET_ID: &str = "PRIVY_WALLET_ID";
+pub const PRIVY_API_BASE_URL: &str = "PRIVY_API_BASE_URL";
+pub const PRIVY_AUTHORIZATION_PRIVATE_KEY: &str = "PRIVY_AUTHORIZATION_PRIVATE_KEY";
 
 #[cfg(feature = "privy")]
 #[cfg(test)]
@@ -9,7 +11,7 @@ mod tests {
     use dotenvy::dotenv;
 
     use super::*;
-    use crate::privy::PrivySigner;
+    use crate::privy::{PrivyAuthorizationContext, PrivySigner, PrivySignerConfig};
     use crate::test_util::create_test_transaction;
     use crate::traits::SolanaSigner;
     use std::env;
@@ -24,7 +26,20 @@ mod tests {
         let wallet_id =
             env::var(PRIVY_WALLET_ID).expect("PRIVY_WALLET_ID must be set for integration tests");
 
-        let mut signer = PrivySigner::new(app_id, app_secret, wallet_id);
+        let mut signer = PrivySigner::from_config(PrivySignerConfig {
+            app_id,
+            app_secret,
+            wallet_id,
+            api_base_url: env::var(PRIVY_API_BASE_URL).ok(),
+            http_client_config: None,
+        });
+
+        if let Ok(authorization_private_key) = env::var(PRIVY_AUTHORIZATION_PRIVATE_KEY) {
+            signer = signer.with_authorization_context(PrivyAuthorizationContext {
+                authorization_private_keys: vec![authorization_private_key],
+                ..Default::default()
+            });
+        }
 
         signer
             .init()

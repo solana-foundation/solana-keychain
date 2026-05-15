@@ -41,6 +41,36 @@ const [signatures] = await signer.signMessages([message]);
 const [signatures] = await signer.signTransactions([transaction]);
 ```
 
+### Authorization Context
+
+For Privy wallets that enforce authorization controls, pass an authorization context. The signer mirrors the REST signing behavior used by Privy's SDK for wallet RPC requests: it signs the exact `POST /wallets/{walletId}/rpc` body and injects `privy-authorization-signature` plus `privy-request-expiry`.
+
+```typescript
+const signer = await createPrivySigner({
+    appId: 'your-privy-app-id',
+    appSecret: 'your-privy-app-secret',
+    walletId: 'user-wallet-id',
+    authorizationContext: {
+        authorization_private_keys: ['wallet-auth:...'],
+    },
+});
+```
+
+You can also use `sign_fns` when signing must happen in another system such as KMS, passkeys, or a service that performs Privy's JWT exchange:
+
+```typescript
+const signer = await createPrivySigner({
+    appId: 'your-privy-app-id',
+    appSecret: 'your-privy-app-secret',
+    walletId: 'user-wallet-id',
+    authorizationContext: {
+        sign_fns: [async payload => signPayloadAndReturnBase64DerSignature(payload)],
+    },
+});
+```
+
+This package intentionally does not implement Privy's `user_jwts` exchange flow, because that requires HPKE key exchange and caching. Use `sign_fns` for that path.
+
 ### Check Availability
 
 ```typescript
@@ -61,6 +91,8 @@ Creates and initializes a new PrivySigner instance.
 - `walletId` (string, required): The Privy wallet ID to use for signing
 - `apiBaseUrl` (string, optional): Custom API base URL (defaults to `https://api.privy.io/v1`)
 - `requestDelayMs` (number, optional): Delay in ms between concurrent signing requests to avoid rate limits (default: 0)
+- `authorizationContext` (object or function, optional): Privy wallet authorization context with `authorization_private_keys`, `signatures`, or `sign_fns`
+- `authorizationRequestExpiryMs` (number or null, optional): Request-expiry window for authorization signatures (defaults to 15 minutes when authorization context is configured; set to `null` to omit)
 
 **Example:**
 

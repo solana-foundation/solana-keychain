@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize)]
 pub struct SignMessageRequest {
     pub method: &'static str,
+    pub chain_type: &'static str,
     pub params: SignMessageParams,
 }
 

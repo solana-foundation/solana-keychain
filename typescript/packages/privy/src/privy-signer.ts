@@ -28,6 +28,8 @@ import {
     SignTransactionResponse,
     WalletResponse,
 } from './types.js';
+import type { PrivyAuthorizationConfig } from './authorization.js';
+import { getDefaultPrivyAuthorizationRequestExpiryMs, preparePrivyAuthorizationHeaders } from './authorization.js';
 
 /**
  * Create and initialize a Privy-backed signer.
@@ -60,6 +62,19 @@ export interface PrivySignerConfig {
     requestDelayMs?: number;
     /** Privy wallet ID */
     walletId: string;
+    /**
+     * Optional Privy wallet authorization context.
+     *
+     * Mirrors the lightweight parts of Privy's SDK AuthorizationContext:
+     * authorization_private_keys, signatures, and sign_fns. JWT exchange is intentionally
+     * left to caller-provided sign_fns so this package can stay REST-only and lightweight.
+     */
+    authorizationContext?: PrivyAuthorizationConfig;
+    /**
+     * Request-expiry window in milliseconds for authorization signatures.
+     * Defaults to 15 minutes when authorizationContext is configured. Set to null to omit it.
+     */
+    authorizationRequestExpiryMs?: number | null;
 }
 
 /**
@@ -75,6 +90,8 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
     private readonly appSecret: string;
     private readonly walletId: string;
     private readonly apiBaseUrl: string;
+    private readonly authorizationContext: PrivyAuthorizationConfig | undefined;
+    private readonly authorizationRequestExpiryMs: number | null;
     private readonly requestDelayMs: number;
 
     private constructor(config: PrivySignerConfig, address: Address<TAddress>) {
@@ -83,8 +100,12 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
         this.appSecret = config.appSecret;
         this.walletId = config.walletId;
         this.apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
+        this.authorizationContext = config.authorizationContext;
+        this.authorizationRequestExpiryMs =
+            config.authorizationRequestExpiryMs ?? getDefaultPrivyAuthorizationRequestExpiryMs();
         this.requestDelayMs = config.requestDelayMs ?? 0;
         this.validateRequestDelayMs(this.requestDelayMs);
+        this.validateAuthorizationRequestExpiryMs(this.authorizationRequestExpiryMs);
     }
 
     /**
@@ -128,6 +149,14 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
         }
     }
 
+    private validateAuthorizationRequestExpiryMs(authorizationRequestExpiryMs: number | null): void {
+        if (authorizationRequestExpiryMs !== null && authorizationRequestExpiryMs < 0) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'authorizationRequestExpiryMs must not be negative',
+            });
+        }
+    }
+
     private async delay(index: number): Promise<void> {
         if (this.requestDelayMs > 0 && index > 0) {
             await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
@@ -156,12 +185,21 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
         const url = `${this.apiBaseUrl}/wallets/${this.walletId}/rpc`;
 
         const request: SignTransactionRequest = {
+            chain_type: 'solana',
             method: 'signTransaction',
             params: {
                 encoding: 'base64',
                 transaction: base64WireTransaction,
             },
         };
+        const authorizationHeaders = await preparePrivyAuthorizationHeaders({
+            appId: this.appId,
+            authorizationContext: this.authorizationContext,
+            body: request,
+            method: 'POST',
+            requestExpiryMs: this.authorizationRequestExpiryMs,
+            url,
+        });
 
         let response: Response;
         try {
@@ -171,6 +209,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
                     Authorization: getAuthHeader(this.appId, this.appSecret),
                     'Content-Type': 'application/json',
                     'privy-app-id': this.appId,
+                    ...authorizationHeaders,
                 },
                 method: 'POST',
             });
@@ -219,12 +258,21 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
         const url = `${this.apiBaseUrl}/wallets/${this.walletId}/rpc`;
 
         const request: SignMessageRequest = {
+            chain_type: 'solana',
             method: 'signMessage',
             params: {
                 encoding: 'base64',
                 message: base64EncodedMessage,
             },
         };
+        const authorizationHeaders = await preparePrivyAuthorizationHeaders({
+            appId: this.appId,
+            authorizationContext: this.authorizationContext,
+            body: request,
+            method: 'POST',
+            requestExpiryMs: this.authorizationRequestExpiryMs,
+            url,
+        });
 
         let response: Response;
         try {
@@ -234,6 +282,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
                     Authorization: getAuthHeader(this.appId, this.appSecret),
                     'Content-Type': 'application/json',
                     'privy-app-id': this.appId,
+                    ...authorizationHeaders,
                 },
                 method: 'POST',
             });
