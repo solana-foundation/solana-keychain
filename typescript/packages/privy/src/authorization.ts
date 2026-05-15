@@ -8,13 +8,13 @@ export interface PrivyAuthorizationContext {
      * `wallet-auth:` and `wallet-api:` prefixes are accepted.
      */
     authorization_private_keys?: readonly string[];
+    /** External signers that receive the exact canonical payload bytes. */
+    sign_fns?: readonly PrivyAuthorizationSignFn[];
     /**
      * Precomputed base64 authorization signatures for this exact request.
      * Prefer `sign_fns` for reusable signer configs.
      */
     signatures?: readonly string[];
-    /** External signers that receive the exact canonical payload bytes. */
-    sign_fns?: readonly PrivyAuthorizationSignFn[];
 }
 
 export interface PrivyAuthorizationRequestInput {
@@ -24,14 +24,14 @@ export interface PrivyAuthorizationRequestInput {
         'privy-idempotency-key'?: string;
         'privy-request-expiry'?: string;
     };
-    method: 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+    method: 'DELETE' | 'PATCH' | 'POST' | 'PUT';
     url: string;
     version: 1;
 }
 
 export type PrivyAuthorizationContextProvider = (
     request: PrivyAuthorizationRequestInput,
-) => Promise<PrivyAuthorizationContext | undefined> | PrivyAuthorizationContext | undefined;
+) => PrivyAuthorizationContext | Promise<PrivyAuthorizationContext | undefined> | undefined;
 
 export type PrivyAuthorizationConfig = PrivyAuthorizationContext | PrivyAuthorizationContextProvider;
 
@@ -114,7 +114,9 @@ export async function generatePrivyAuthorizationSignatures(
             generatePrivyAuthorizationSignature(privateKey, payload),
         ),
     );
-    const signFnSignatures = await Promise.all((authorizationContext.sign_fns ?? []).map(signFn => signFn(payload)));
+    const signFnSignatures = await Promise.all(
+        (authorizationContext.sign_fns ?? []).map(signFn => Promise.resolve(signFn(payload))),
+    );
 
     return [...providedSignatures, ...privateKeySignatures, ...signFnSignatures];
 }
@@ -159,13 +161,11 @@ function parseP256PrivateKey(
     nodeCrypto: typeof import('node:crypto'),
     authorizationPrivateKey: string,
 ): import('node:crypto').KeyObject {
-    const normalized = authorizationPrivateKey
-        .replace(/^wallet-auth:/, '')
-        .replace(/^wallet-api:/, '')
-        .replace(/\s+/g, '');
+    const unprefixed = authorizationPrivateKey.replace(/^wallet-auth:/, '').replace(/^wallet-api:/, '');
+    const normalized = unprefixed.replace(/\s+/g, '');
 
-    if (authorizationPrivateKey.includes('-----BEGIN')) {
-        return nodeCrypto.createPrivateKey(authorizationPrivateKey.replace(/\\n/g, '\n').trim());
+    if (unprefixed.includes('-----BEGIN')) {
+        return nodeCrypto.createPrivateKey(unprefixed.replace(/\\n/g, '\n').trim());
     }
 
     return nodeCrypto.createPrivateKey({

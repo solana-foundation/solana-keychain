@@ -20,6 +20,8 @@ import {
     TransactionWithLifetime,
 } from '@solana/transactions';
 
+import type { PrivyAuthorizationConfig } from './authorization.js';
+import { getDefaultPrivyAuthorizationRequestExpiryMs, preparePrivyAuthorizationHeaders } from './authorization.js';
 import {
     SignatureBytesBase64,
     SignMessageRequest,
@@ -28,8 +30,6 @@ import {
     SignTransactionResponse,
     WalletResponse,
 } from './types.js';
-import type { PrivyAuthorizationConfig } from './authorization.js';
-import { getDefaultPrivyAuthorizationRequestExpiryMs, preparePrivyAuthorizationHeaders } from './authorization.js';
 
 /**
  * Create and initialize a Privy-backed signer.
@@ -58,10 +58,6 @@ export interface PrivySignerConfig {
     appId: string;
     /** Privy application secret */
     appSecret: string;
-    /** Optional delay in ms between concurrent signing requests to avoid rate limits (default: 0) */
-    requestDelayMs?: number;
-    /** Privy wallet ID */
-    walletId: string;
     /**
      * Optional Privy wallet authorization context.
      *
@@ -75,6 +71,10 @@ export interface PrivySignerConfig {
      * Defaults to 15 minutes when authorizationContext is configured. Set to null to omit it.
      */
     authorizationRequestExpiryMs?: number | null;
+    /** Optional delay in ms between concurrent signing requests to avoid rate limits (default: 0) */
+    requestDelayMs?: number;
+    /** Privy wallet ID */
+    walletId: string;
 }
 
 /**
@@ -102,7 +102,9 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
         this.apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
         this.authorizationContext = config.authorizationContext;
         this.authorizationRequestExpiryMs =
-            config.authorizationRequestExpiryMs ?? getDefaultPrivyAuthorizationRequestExpiryMs();
+            config.authorizationRequestExpiryMs === undefined
+                ? getDefaultPrivyAuthorizationRequestExpiryMs()
+                : config.authorizationRequestExpiryMs;
         this.requestDelayMs = config.requestDelayMs ?? 0;
         this.validateRequestDelayMs(this.requestDelayMs);
         this.validateAuthorizationRequestExpiryMs(this.authorizationRequestExpiryMs);
