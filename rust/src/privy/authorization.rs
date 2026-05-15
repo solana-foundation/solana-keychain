@@ -35,6 +35,17 @@ pub enum PrivyAuthorizationConfig {
     Provider(PrivyAuthorizationContextProvider),
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PrivyAuthorizationRequestExpiry {
+    /// Use the default 15-minute authorization request-expiry window.
+    #[default]
+    Default,
+    /// Use a custom authorization request-expiry window in milliseconds.
+    Milliseconds(u64),
+    /// Omit `privy-request-expiry` from the signed payload and request headers.
+    Omit,
+}
+
 impl From<PrivyAuthorizationContext> for PrivyAuthorizationConfig {
     fn from(value: PrivyAuthorizationContext) -> Self {
         Self::Context(value)

@@ -234,8 +234,8 @@ describe('PrivySigner', () => {
     describe('signMessages', () => {
         it('signs a message via Privy API', async () => {
             const keyPair = await generateKeyPair();
-            const keyPaierSigner = await createSignerFromKeyPair(keyPair);
-            const address = keyPaierSigner.address;
+            const keyPairSigner = await createSignerFromKeyPair(keyPair);
+            const address = keyPairSigner.address;
 
             setupMockWalletResponse(address);
 
@@ -256,8 +256,8 @@ describe('PrivySigner', () => {
         it('injects Privy authorization context headers into signMessage requests', async () => {
             const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
             const keyPair = await generateKeyPair();
-            const keyPaierSigner = await createSignerFromKeyPair(keyPair);
-            const address = keyPaierSigner.address;
+            const keyPairSigner = await createSignerFromKeyPair(keyPair);
+            const address = keyPairSigner.address;
             const signFn = vi.fn((payload: Uint8Array) => {
                 void payload;
                 return 'authorization-signature';
@@ -309,8 +309,8 @@ describe('PrivySigner', () => {
 
         it('preserves null authorizationRequestExpiryMs as a no-expiry authorization request', async () => {
             const keyPair = await generateKeyPair();
-            const keyPaierSigner = await createSignerFromKeyPair(keyPair);
-            const address = keyPaierSigner.address;
+            const keyPairSigner = await createSignerFromKeyPair(keyPair);
+            const address = keyPairSigner.address;
             const signFn = vi.fn((payload: Uint8Array) => {
                 void payload;
                 return 'authorization-signature';
@@ -363,6 +363,28 @@ describe('PrivySigner', () => {
             expect(new TextDecoder().decode(payload)).toBe(
                 '{"body":"","headers":{"privy-app-id":"test-app-id"},"method":"POST","url":"https://api.privy.test/v1/wallets","version":1}',
             );
+        });
+
+        it('throws SERIALIZATION_ERROR for non-serializable array items', () => {
+            try {
+                formatPrivyAuthorizationSignaturePayload({
+                    body: {
+                        items: [Number.POSITIVE_INFINITY],
+                    },
+                    headers: {
+                        'privy-app-id': 'test-app-id',
+                    },
+                    method: 'POST',
+                    url: 'https://api.privy.test/v1/wallets',
+                    version: 1,
+                });
+                throw new Error('Expected serialization to fail');
+            } catch (error) {
+                expect(error).toMatchObject({
+                    code: 'SIGNER_SERIALIZATION_ERROR',
+                    message: expect.stringContaining('Failed to serialize Privy authorization request'),
+                });
+            }
         });
 
         it('generates base64 DER authorization signatures from Privy private keys', async () => {

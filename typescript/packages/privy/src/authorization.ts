@@ -141,8 +141,9 @@ async function generatePrivyAuthorizationSignature(
     authorizationPrivateKey: string,
     payload: Uint8Array,
 ): Promise<string> {
+    const nodeCrypto = await importNodeCryptoForAuthorizationPrivateKeys();
+
     try {
-        const nodeCrypto = await import('node:crypto');
         const privateKey = parseP256PrivateKey(nodeCrypto, authorizationPrivateKey);
         const signature = nodeCrypto.sign('sha256', payload, {
             dsaEncoding: 'der',
@@ -153,6 +154,17 @@ async function generatePrivyAuthorizationSignature(
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
             cause: error,
             message: 'Failed to create Privy authorization signature',
+        });
+    }
+}
+
+async function importNodeCryptoForAuthorizationPrivateKeys(): Promise<typeof import('node:crypto')> {
+    try {
+        return await import('node:crypto');
+    } catch (error) {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            cause: error,
+            message: 'authorization_private_keys requires Node.js crypto support; use sign_fns instead',
         });
     }
 }
@@ -185,7 +197,14 @@ function canonicalizeJson(value: unknown): string | undefined {
     }
 
     if (Array.isArray(value)) {
-        const items = value.map(item => canonicalizeJson(item) ?? 'null');
+        const items: string[] = [];
+        for (const item of value) {
+            const serializedItem = canonicalizeJson(item);
+            if (serializedItem === undefined) {
+                return undefined;
+            }
+            items.push(serializedItem);
+        }
         return `[${items.join(',')}]`;
     }
 

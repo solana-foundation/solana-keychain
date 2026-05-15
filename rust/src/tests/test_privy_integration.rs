@@ -11,7 +11,10 @@ mod tests {
     use dotenvy::dotenv;
 
     use super::*;
-    use crate::privy::{PrivyAuthorizationContext, PrivySigner, PrivySignerConfig};
+    use crate::privy::{
+        PrivyAuthorizationConfig, PrivyAuthorizationContext, PrivyAuthorizationRequestExpiry,
+        PrivySigner, PrivySignerConfig,
+    };
     use crate::test_util::create_test_transaction;
     use crate::traits::SolanaSigner;
     use std::env;
@@ -26,20 +29,25 @@ mod tests {
         let wallet_id =
             env::var(PRIVY_WALLET_ID).expect("PRIVY_WALLET_ID must be set for integration tests");
 
+        let authorization_context =
+            env::var(PRIVY_AUTHORIZATION_PRIVATE_KEY)
+                .ok()
+                .map(|authorization_private_key| {
+                    PrivyAuthorizationConfig::from(PrivyAuthorizationContext {
+                        authorization_private_keys: vec![authorization_private_key],
+                        ..Default::default()
+                    })
+                });
+
         let mut signer = PrivySigner::from_config(PrivySignerConfig {
             app_id,
             app_secret,
             wallet_id,
             api_base_url: env::var(PRIVY_API_BASE_URL).ok(),
             http_client_config: None,
+            authorization_context,
+            authorization_request_expiry: PrivyAuthorizationRequestExpiry::Default,
         });
-
-        if let Ok(authorization_private_key) = env::var(PRIVY_AUTHORIZATION_PRIVATE_KEY) {
-            signer = signer.with_authorization_context(PrivyAuthorizationContext {
-                authorization_private_keys: vec![authorization_private_key],
-                ..Default::default()
-            });
-        }
 
         signer
             .init()

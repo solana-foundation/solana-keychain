@@ -56,6 +56,8 @@ const signer = await createPrivySigner({
 });
 ```
 
+`authorization_private_keys` uses Node.js `node:crypto` support to parse and sign with P-256 keys. In browser, Cloudflare Workers, or Deno runtimes without Node compatibility, use `sign_fns` instead.
+
 You can also use `sign_fns` when signing must happen in another system such as KMS, passkeys, or a service that performs Privy's JWT exchange:
 
 ```typescript

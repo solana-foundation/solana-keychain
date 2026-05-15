@@ -11,7 +11,8 @@ use authorization::prepare_privy_authorization_headers;
 pub use authorization::{
     default_privy_authorization_request_expiry_ms, format_privy_authorization_signature_payload,
     generate_privy_authorization_signatures, PrivyAuthorizationConfig, PrivyAuthorizationContext,
-    PrivyAuthorizationContextProvider, PrivyAuthorizationRequestInput, PrivyAuthorizationSignFn,
+    PrivyAuthorizationContextProvider, PrivyAuthorizationRequestExpiry,
+    PrivyAuthorizationRequestInput, PrivyAuthorizationSignFn,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::str::FromStr;
@@ -38,6 +39,8 @@ pub struct PrivySignerConfig {
     pub wallet_id: String,
     pub api_base_url: Option<String>,
     pub http_client_config: Option<HttpClientConfig>,
+    pub authorization_context: Option<PrivyAuthorizationConfig>,
+    pub authorization_request_expiry: PrivyAuthorizationRequestExpiry,
 }
 
 impl std::fmt::Debug for PrivySigner {
@@ -63,6 +66,8 @@ impl PrivySigner {
             wallet_id,
             api_base_url: None,
             http_client_config: None,
+            authorization_context: None,
+            authorization_request_expiry: PrivyAuthorizationRequestExpiry::Default,
         })
     }
 
@@ -76,6 +81,16 @@ impl PrivySigner {
             .https_only(true);
         let client = builder.build().expect("Failed to build HTTP client");
 
+        let authorization_request_expiry_ms = match config.authorization_request_expiry {
+            PrivyAuthorizationRequestExpiry::Default => {
+                Some(default_privy_authorization_request_expiry_ms())
+            }
+            PrivyAuthorizationRequestExpiry::Milliseconds(request_expiry_ms) => {
+                Some(request_expiry_ms)
+            }
+            PrivyAuthorizationRequestExpiry::Omit => None,
+        };
+
         Self {
             app_id: config.app_id,
             app_secret: config.app_secret,
@@ -86,8 +101,8 @@ impl PrivySigner {
             client,
             // Public key is resolved during init().
             public_key: None,
-            authorization_context: None,
-            authorization_request_expiry_ms: Some(default_privy_authorization_request_expiry_ms()),
+            authorization_context: config.authorization_context,
+            authorization_request_expiry_ms,
         }
     }
 
@@ -438,18 +453,21 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let mut signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        )
-        .with_authorization_context(PrivyAuthorizationContext {
-            signatures: vec!["authorization-signature".to_string()],
-            ..Default::default()
-        })
-        .without_authorization_request_expiry();
+        let mut signer = PrivySigner::from_config(PrivySignerConfig {
+            app_id: "test-app-id".to_string(),
+            app_secret: "test-app-secret".to_string(),
+            wallet_id: "test-wallet-id".to_string(),
+            api_base_url: Some(mock_server.uri()),
+            http_client_config: None,
+            authorization_context: Some(PrivyAuthorizationConfig::from(
+                PrivyAuthorizationContext {
+                    signatures: vec!["authorization-signature".to_string()],
+                    ..Default::default()
+                },
+            )),
+            authorization_request_expiry: PrivyAuthorizationRequestExpiry::Omit,
+        });
         signer.client = reqwest::Client::new();
-        signer.api_base_url = mock_server.uri();
         signer.public_key = Some(keypair.pubkey());
 
         let result = signer.sign_message(&message).await;

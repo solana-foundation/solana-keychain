@@ -213,6 +213,8 @@ impl Signer {
             wallet_id,
             api_base_url: None,
             http_client_config,
+            authorization_context: None,
+            authorization_request_expiry: crate::privy::PrivyAuthorizationRequestExpiry::Default,
         });
         signer.init().await?;
         Ok(Self::Privy(signer))
