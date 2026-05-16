@@ -7,7 +7,7 @@ import {
     TransactionWithLifetime,
 } from '@solana/transactions';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PrivySigner } from '../privy-signer.js';
 import { formatPrivyAuthorizationSignaturePayload, generatePrivyAuthorizationSignatures } from '../authorization.js';
@@ -49,6 +49,11 @@ describe('PrivySigner', () => {
     beforeEach(() => {
         vi.resetAllMocks();
     });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
     const mockConfig = {
         apiBaseUrl: 'https://api.privy.test',
         appId: 'test-app-id',
@@ -168,9 +173,6 @@ describe('PrivySigner', () => {
             });
 
             it('throws CONFIG_ERROR when authorizationRequestExpiryMs is negative', async () => {
-                const keyPair = await generateKeyPairSigner();
-                setupMockWalletResponse(keyPair.address);
-
                 const invalidConfig = {
                     ...mockConfig,
                     authorizationContext: { sign_fns: [() => 'signature'] },
@@ -181,6 +183,20 @@ describe('PrivySigner', () => {
                     code: 'SIGNER_CONFIG_ERROR',
                     message: expect.stringContaining('authorizationRequestExpiryMs must not be negative'),
                 });
+                expect(global.fetch).not.toHaveBeenCalled();
+            });
+
+            it('throws CONFIG_ERROR when requestDelayMs is negative', async () => {
+                const invalidConfig = {
+                    ...mockConfig,
+                    requestDelayMs: -1,
+                };
+
+                await expect(PrivySigner.create(invalidConfig)).rejects.toMatchObject({
+                    code: 'SIGNER_CONFIG_ERROR',
+                    message: expect.stringContaining('requestDelayMs must not be negative'),
+                });
+                expect(global.fetch).not.toHaveBeenCalled();
             });
         });
 
@@ -254,7 +270,7 @@ describe('PrivySigner', () => {
         });
 
         it('injects Privy authorization context headers into signMessage requests', async () => {
-            const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+            vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
             const keyPair = await generateKeyPair();
             const keyPairSigner = await createSignerFromKeyPair(keyPair);
             const address = keyPairSigner.address;
@@ -303,8 +319,6 @@ describe('PrivySigner', () => {
                 },
                 method: 'POST',
             });
-
-            nowSpy.mockRestore();
         });
 
         it('preserves null authorizationRequestExpiryMs as a no-expiry authorization request', async () => {
@@ -547,7 +561,7 @@ describe('PrivySigner', () => {
         });
 
         it('injects Privy authorization context headers into signTransaction requests', async () => {
-            const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+            vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
             const keyPair = await generateKeyPairSigner();
             const signFn = vi.fn((payload: Uint8Array) => {
                 void payload;
@@ -594,8 +608,6 @@ describe('PrivySigner', () => {
                 },
                 method: 'POST',
             });
-
-            nowSpy.mockRestore();
         });
 
         it('sanitizes remote API error text in error context', async () => {

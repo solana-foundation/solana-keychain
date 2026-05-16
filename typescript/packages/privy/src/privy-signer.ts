@@ -77,6 +77,12 @@ export interface PrivySignerConfig {
     walletId: string;
 }
 
+type ResolvedPrivySignerConfig = PrivySignerConfig & {
+    apiBaseUrl: string;
+    authorizationRequestExpiryMs: number | null;
+    requestDelayMs: number;
+};
+
 /**
  * Privy-based signer using Privy's wallet API
  *
@@ -94,20 +100,15 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
     private readonly authorizationRequestExpiryMs: number | null;
     private readonly requestDelayMs: number;
 
-    private constructor(config: PrivySignerConfig, address: Address<TAddress>) {
+    private constructor(config: ResolvedPrivySignerConfig, address: Address<TAddress>) {
         this.address = address;
         this.appId = config.appId;
         this.appSecret = config.appSecret;
         this.walletId = config.walletId;
-        this.apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
+        this.apiBaseUrl = config.apiBaseUrl;
         this.authorizationContext = config.authorizationContext;
-        this.authorizationRequestExpiryMs =
-            config.authorizationRequestExpiryMs === undefined
-                ? getDefaultPrivyAuthorizationRequestExpiryMs()
-                : config.authorizationRequestExpiryMs;
-        this.requestDelayMs = config.requestDelayMs ?? 0;
-        this.validateRequestDelayMs(this.requestDelayMs);
-        this.validateAuthorizationRequestExpiryMs(this.authorizationRequestExpiryMs);
+        this.authorizationRequestExpiryMs = config.authorizationRequestExpiryMs;
+        this.requestDelayMs = config.requestDelayMs;
     }
 
     /**
@@ -123,6 +124,13 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
         }
         const apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
         validateHttpsApiBaseUrl(apiBaseUrl);
+        const requestDelayMs = config.requestDelayMs ?? 0;
+        const authorizationRequestExpiryMs =
+            config.authorizationRequestExpiryMs === undefined
+                ? getDefaultPrivyAuthorizationRequestExpiryMs()
+                : config.authorizationRequestExpiryMs;
+        validateRequestDelayMs(requestDelayMs);
+        validateAuthorizationRequestExpiryMs(authorizationRequestExpiryMs);
 
         const address = await fetchPublicKey<TAddress>({
             ...config,
@@ -133,30 +141,11 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
             {
                 ...config,
                 apiBaseUrl,
+                authorizationRequestExpiryMs,
+                requestDelayMs,
             },
             address,
         );
-    }
-
-    private validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
-    }
-
-    private validateAuthorizationRequestExpiryMs(authorizationRequestExpiryMs: number | null): void {
-        if (authorizationRequestExpiryMs !== null && authorizationRequestExpiryMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'authorizationRequestExpiryMs must not be negative',
-            });
-        }
     }
 
     private async delay(index: number): Promise<void> {
@@ -423,6 +412,27 @@ function validateHttpsApiBaseUrl(apiBaseUrl: string): void {
     if (parsedUrl.protocol !== 'https:') {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
             message: 'apiBaseUrl must use HTTPS',
+        });
+    }
+}
+
+function validateRequestDelayMs(requestDelayMs: number): void {
+    if (requestDelayMs < 0) {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'requestDelayMs must not be negative',
+        });
+    }
+    if (requestDelayMs > 3000) {
+        console.warn(
+            'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
+        );
+    }
+}
+
+function validateAuthorizationRequestExpiryMs(authorizationRequestExpiryMs: number | null): void {
+    if (authorizationRequestExpiryMs !== null && authorizationRequestExpiryMs < 0) {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'authorizationRequestExpiryMs must not be negative',
         });
     }
 }
