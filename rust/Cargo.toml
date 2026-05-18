@@ -114,7 +114,7 @@ zeroize = "1.8.2"
 tokio = { version = "1.52", features = ["test-util", "macros", "rt"] }
 wiremock = "0.6"
 dotenvy = "0.15.7"
-litesvm = "0.7.0"
+litesvm = "0.8.1"
 litesvm-v3 = { package = "litesvm", version = "=0.8.1" }
 # Pins the agave-* / solana-*-program cluster to 3.0.11 (last known-good).
 # v3.0.14 is partially migrated to solana-hash v4 which causes type mismatches.
