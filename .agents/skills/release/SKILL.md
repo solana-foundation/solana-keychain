@@ -147,13 +147,27 @@ EOF
 For urgent fixes to a deployed stable version:
 
 ```bash
-just hotfix <fix-name>   # creates hotfix/<fix-name> from latest stable tag
-# apply fixes on hotfix/* and run release prep on hotfix/*
-just release             # required for Rust publish
-just release-ts          # if TypeScript packages changed
-# commit and push hotfix/*
-# publish from hotfix/* before merge-back
-# then open PR to main and merge hotfix back
+git fetch --tags origin
+git checkout -b hotfix/<fix-name> vX.Y.Z   # use the deployed stable tag
+
+# Apply the urgent fix commits on hotfix/<fix-name>.
+
+# Rust release prep: run Step 2 through Step 4 above with the hotfix patch version.
+# TypeScript release prep, if packages changed: run Step 5 above with the TS hotfix patch version.
+
+git push -u origin hotfix/<fix-name>
+
+# Publish from hotfix/<fix-name> before merge-back:
+gh workflow run rust-publish.yml --ref hotfix/<fix-name> \
+  -f publish-to-crates=true \
+  -f create-github-release=true
+
+gh workflow run typescript-publish.yml --ref hotfix/<fix-name> \
+  -f package=all \
+  -f publish-to-npm=true \
+  -f create-github-release=true
+
+# Then open a PR to main and merge the hotfix branch back.
 ```
 
 Hotfix patch releases are published from `hotfix/*` before merge-back to `main`.

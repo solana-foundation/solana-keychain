@@ -20,7 +20,7 @@ Orchestrate adding a new signing backend to solana-keychain. Delegate to existin
 - **Trait definition (source of truth)**: `rust/src/traits.rs`
 - **Shared HTTP config**: `rust/src/http_client_config.rs`
 - **Transaction utilities**: `rust/src/transaction_util.rs`
-- **Unified TS factory**: `typescript/packages/keychain/src/create-signer.ts`
+- **Unified TS factory**: `typescript/packages/keychain/src/create-keychain-signer.ts`
 - **TS address resolver**: `typescript/packages/keychain/src/resolve-address.ts`
 - **TS config union**: `typescript/packages/keychain/src/types.ts`
 
