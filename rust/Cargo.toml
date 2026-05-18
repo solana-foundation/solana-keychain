@@ -102,7 +102,7 @@ uuid = { version = "1.23", optional = true, features = ["v4"] }
 google-cloud-kms-v1 = { version = "1.9.0", optional = true }
 google-cloud-auth = { version = "1.4.0", optional = true }
 ed25519-dalek = { version = "2", optional = true, features = ["pem"] }
-hkdf = { version = "0.12", optional = true }
+hkdf = { version = "0.13", optional = true }
 rsa = { version = "0.9", optional = true }
 
 # Core dependencies (used by all signers for transaction serialization)
