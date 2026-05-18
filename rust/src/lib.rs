@@ -27,6 +27,7 @@
 //!
 //! **Note**: Only one SDK version can be enabled at a time.
 
+mod bincode_compat;
 pub mod error;
 pub mod http_client_config;
 mod sdk_adapter;

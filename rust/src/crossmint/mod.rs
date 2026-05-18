@@ -524,11 +524,12 @@ impl CrossmintSigner {
                 ))
             })?;
 
-        let transaction: VersionedTransaction = bincode::deserialize(&bytes).map_err(|e| {
-            SignerError::SerializationError(format!(
-                "Failed to deserialize Crossmint onChain.transaction: {e}"
-            ))
-        })?;
+        let transaction: VersionedTransaction = crate::bincode_compat::deserialize(&bytes)
+            .map_err(|e| {
+                SignerError::SerializationError(format!(
+                    "Failed to deserialize Crossmint onChain.transaction: {e}"
+                ))
+            })?;
 
         let required_signers = usize::from(transaction.message.header().num_required_signatures);
         let signer_keys = transaction.message.static_account_keys();
@@ -608,7 +609,7 @@ impl CrossmintSigner {
         }
 
         let expected_message = transaction.message_data();
-        let serialized = bincode::serialize(transaction).map_err(|e| {
+        let serialized = crate::bincode_compat::serialize(transaction).map_err(|e| {
             SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
         })?;
         let transaction_b58 = bs58::encode(serialized).into_string();
@@ -931,7 +932,8 @@ mod tests {
         .unwrap();
 
         let on_chain_transaction =
-            bs58::encode(bincode::serialize(&signed_remote_tx).unwrap()).into_string();
+            bs58::encode(crate::bincode_compat::serialize(&signed_remote_tx).unwrap())
+                .into_string();
 
         Mock::given(method("POST"))
             .and(path("/2025-06-09/wallets/test-wallet/transactions"))
@@ -1033,7 +1035,7 @@ mod tests {
         )
         .unwrap();
         let remote_on_chain_transaction =
-            bs58::encode(bincode::serialize(&remote_tx).unwrap()).into_string();
+            bs58::encode(crate::bincode_compat::serialize(&remote_tx).unwrap()).into_string();
 
         Mock::given(method("POST"))
             .and(path("/2025-06-09/wallets/test-wallet/transactions"))
@@ -1081,7 +1083,7 @@ mod tests {
         TransactionUtil::add_signature_to_transaction(&mut remote_tx, &signer_pubkey, remote_sig)
             .unwrap();
         let remote_on_chain_transaction =
-            bs58::encode(bincode::serialize(&remote_tx).unwrap()).into_string();
+            bs58::encode(crate::bincode_compat::serialize(&remote_tx).unwrap()).into_string();
 
         // onChain.txId is only valid for the remote transaction bytes, not the local ones.
         let tx_id = bs58::encode(remote_sig.as_ref()).into_string();

@@ -9,7 +9,7 @@ impl TransactionUtil {
     /// Encodes a Transaction to a base64 serialized String
     pub fn serialize_transaction(transaction: &Transaction) -> Result<String, SignerError> {
         Ok(
-            STANDARD.encode(bincode::serialize(transaction).map_err(|e| {
+            STANDARD.encode(crate::bincode_compat::serialize(transaction).map_err(|e| {
                 SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
             })?),
         )
