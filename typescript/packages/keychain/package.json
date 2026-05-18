@@ -45,7 +45,7 @@
         "test:treeshakability": "agadoo dist/index.js"
     },
     "dependencies": {
-        "@solana/addresses": "^6.0.1",
+        "@solana/addresses": "^6.9.0",
         "@solana/keychain-core": "workspace:*",
         "@solana/keychain-aws-kms": "workspace:*",
         "@solana/keychain-cdp": "workspace:*",
