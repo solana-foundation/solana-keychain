@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Resolve enabled signers from repository variables
         id: resolve
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           CI_SIGNER_MEMORY_ENABLED: ${{ vars.CI_SIGNER_MEMORY_ENABLED }}
           CI_SIGNER_VAULT_ENABLED: ${{ vars.CI_SIGNER_VAULT_ENABLED }}
@@ -132,7 +132,7 @@ jobs:
     steps:
       - name: Validate PR and capture head SHA
         id: pr
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const rawPrNumber = '${{ inputs.pr_number }}';
@@ -164,7 +164,7 @@ jobs:
 
       - name: Checkout PR head SHA
         if: ${{ needs.resolve-signers.outputs.rust_live_test_count != '0' || needs.resolve-signers.outputs.ts_live_package_count != '0' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ steps.pr.outputs.head_sha }}
 
@@ -172,12 +172,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
       - if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v6.0.7
         with:
           version: 10.14.0
 
@@ -192,7 +192,7 @@ jobs:
 
       - name: Configure AWS credentials
         if: ${{ needs.resolve-signers.outputs.aws_kms_enabled == 'true' }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ steps.doppler.outputs.AWS_ROLE_ARN }}
           aws-region: ${{ steps.doppler.outputs.AWS_KMS_REGION }}
@@ -264,7 +264,7 @@ jobs:
 
       - name: Verify PR head SHA is unchanged
         id: verify-sha
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const prNumber = Number('${{ steps.pr.outputs.pr_number }}');
@@ -287,7 +287,7 @@ jobs:
 
       - name: Post marker and rerun gate
         if: success()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const prNumber = Number('${{ steps.pr.outputs.pr_number }}');

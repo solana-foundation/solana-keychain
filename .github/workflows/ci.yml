@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Resolve enabled signers from repository variables
         id: resolve
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           CI_SIGNER_MEMORY_ENABLED: ${{ vars.CI_SIGNER_MEMORY_ENABLED || 'true' }}
           CI_SIGNER_VAULT_ENABLED: ${{ vars.CI_SIGNER_VAULT_ENABLED || 'true' }}
@@ -114,7 +114,7 @@ jobs:
         sdk_version: [v2, v3]
         backend: ${{ fromJSON(needs.resolve-signers.outputs.rust_unit_backends_json) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Build and test with SDK ${{ matrix.sdk_version }}
         run: |
@@ -141,7 +141,7 @@ jobs:
         sdk_version: [v2, v3]
         test: ${{ fromJSON(needs.resolve-signers.outputs.rust_integration_tests_json) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: dopplerhq/secrets-fetch-action@v2.0.0
         id: doppler
@@ -153,12 +153,12 @@ jobs:
           inject-env-vars: true
       - name: Setup GCP credentials
         if: matrix.test == 'test_gcp_kms_integration'
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           credentials_json: ${{ steps.doppler.outputs.GCP_SERVICE_ACCOUNT_KEY }}
       - name: Configure AWS credentials
         if: matrix.test == 'test_aws_kms_integration'
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ steps.doppler.outputs.AWS_ROLE_ARN }}
           aws-region: ${{ steps.doppler.outputs.AWS_KMS_REGION }}
@@ -179,7 +179,7 @@ jobs:
       run:
         working-directory: rust
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -193,7 +193,7 @@ jobs:
       run:
         working-directory: rust
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
