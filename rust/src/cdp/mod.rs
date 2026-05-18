@@ -360,7 +360,7 @@ impl CdpSigner {
             TransactionUtil::get_signing_keypair_position(transaction, &self.public_key)?;
 
         // Serialize the full transaction to bytes (Solana wire format)
-        let serialized = bincode::serialize(transaction).map_err(|e| {
+        let serialized = crate::bincode_compat::serialize(transaction).map_err(|e| {
             SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
         })?;
         let base64_tx = STANDARD.encode(&serialized);
@@ -378,13 +378,14 @@ impl CdpSigner {
                 )
             })?;
 
-        let signed_tx: Transaction = bincode::deserialize(&signed_bytes).map_err(|_e| {
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Failed to deserialize signed transaction: {_e}");
-            SignerError::SerializationError(
-                "Failed to deserialize signed transaction from CDP".to_string(),
-            )
-        })?;
+        let signed_tx: Transaction =
+            crate::bincode_compat::deserialize(&signed_bytes).map_err(|_e| {
+                #[cfg(feature = "unsafe-debug")]
+                log::error!("Failed to deserialize signed transaction: {_e}");
+                SignerError::SerializationError(
+                    "Failed to deserialize signed transaction from CDP".to_string(),
+                )
+            })?;
 
         // Extract only our signature from the response and apply it to the original transaction.
         let signature = *signed_tx.signatures.get(signer_position).ok_or_else(|| {
@@ -758,7 +759,7 @@ mod tests {
         signed_tx.signatures = vec![signature];
 
         // Serialize the signed transaction to get the base64 wire format
-        let serialized = bincode::serialize(&signed_tx).unwrap();
+        let serialized = crate::bincode_compat::serialize(&signed_tx).unwrap();
         let base64_signed_tx = STANDARD.encode(&serialized);
 
         let mut signer = create_test_signer(&mock_server.uri());
@@ -804,7 +805,7 @@ mod tests {
         let tampered_signature = keypair_sign_message(&keypair, &tampered_tx.message_data());
         tampered_tx.signatures = vec![tampered_signature];
 
-        let serialized = bincode::serialize(&tampered_tx).unwrap();
+        let serialized = crate::bincode_compat::serialize(&tampered_tx).unwrap();
         let base64_signed_tx = STANDARD.encode(&serialized);
 
         let mut signer = create_test_signer(&mock_server.uri());
