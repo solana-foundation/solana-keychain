@@ -42,7 +42,7 @@
     },
     "dependencies": {
         "@solana/keychain-core": "workspace:*",
-        "jose": "^6.1.3"
+        "jose": "^6.2.3"
     },
     "peerDependencies": {
         "@solana/addresses": ">=6.0.1",
@@ -52,15 +52,15 @@
         "@solana/transactions": ">=6.0.1"
     },
     "devDependencies": {
-        "@solana/addresses": "^6.0.1",
-        "@solana/codecs-strings": "^6.0.1",
+        "@solana/addresses": "^6.9.0",
+        "@solana/codecs-strings": "^6.9.0",
         "@solana/keychain-test-utils": "workspace:*",
-        "@solana/keys": "^6.0.1",
-        "@solana/signers": "^6.0.1",
-        "@solana/transactions": "^6.0.1",
+        "@solana/keys": "^6.9.0",
+        "@solana/signers": "^6.9.0",
+        "@solana/transactions": "^6.9.0",
         "@solana-program/memo": "^0.11.0",
-        "@solana/kit": "^6.0.1",
-        "dotenv": "^17.2.3"
+        "@solana/kit": "^6.9.0",
+        "dotenv": "^17.4.2"
     },
     "publishConfig": {
         "access": "public"
