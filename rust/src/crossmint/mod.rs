@@ -434,7 +434,7 @@ impl CrossmintSigner {
         api_key: &str,
     ) -> Result<ed25519_dalek::SigningKey, SignerError> {
         use hkdf::Hkdf;
-        use sha2::Sha256;
+        use sha2_v11::Sha256;
 
         let (project_id, environment) = Self::parse_api_key(api_key)?;
 
