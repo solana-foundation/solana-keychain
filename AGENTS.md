@@ -49,6 +49,8 @@ This repo ships Codex skills in [.agents/skills/](.agents/skills/) — invoke th
 | Skill | When to use |
 | --- | --- |
 | [`add-signer`](.agents/skills/add-signer/SKILL.md) | Adding a new signing backend (Rust + TS + CI). Pair with [docs/ADDING_SIGNERS.md](docs/ADDING_SIGNERS.md). |
+| [`release`](.agents/skills/release/SKILL.md) | Cutting a new Rust and/or TS release (PR-based flow, version bumps). |
+| [`complete-release`](.agents/skills/complete-release/SKILL.md) | Finalizing an approved release PR — merge, then trigger publish workflows from `main`. |
 
 ## Rust
 
