@@ -151,7 +151,7 @@ fn sign_challenge(private_key_pem: &str, data: &[u8]) -> Result<Vec<u8>, SignerE
     }
     // Try RSA (PKCS#8)
     if let Ok(rsa_key) = rsa::RsaPrivateKey::from_pkcs8_pem(private_key_pem) {
-        let signing_key = rsa::pkcs1v15::SigningKey::<sha2_v10::Sha256>::new(rsa_key);
+        let signing_key = rsa::pkcs1v15::SigningKey::<sha2::Sha256>::new(rsa_key);
         let sig = signing_key.sign(data);
         return Ok(sig.to_vec());
     }
