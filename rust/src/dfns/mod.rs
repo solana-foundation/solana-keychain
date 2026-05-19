@@ -244,7 +244,7 @@ impl DfnsSigner {
         &self,
         transaction: &Transaction,
     ) -> Result<Signature, SignerError> {
-        let tx_bytes = crate::bincode_compat::serialize(transaction).map_err(|e| {
+        let tx_bytes = bincode::serialize(transaction).map_err(|e| {
             SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
         })?;
         let request = GenerateSignatureRequest::Transaction {

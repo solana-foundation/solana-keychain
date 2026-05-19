@@ -231,7 +231,7 @@ impl FireblocksSigner {
     ) -> Result<String, SignerError> {
         self.initialized_pubkey()?;
 
-        let serialized = crate::bincode_compat::serialize(transaction).map_err(|e| {
+        let serialized = bincode::serialize(transaction).map_err(|e| {
             SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
         })?;
         let base64_content = STANDARD.encode(&serialized);

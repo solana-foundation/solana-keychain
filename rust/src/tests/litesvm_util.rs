@@ -22,11 +22,10 @@ pub async fn simulate_transaction(
     litesvm: &LiteSVM,
     transaction: &Transaction,
 ) -> Result<(), Box<dyn Error>> {
-    let tx_bytes =
-        crate::bincode_compat::serialize(transaction).expect("Failed to serialize transaction");
+    let tx_bytes = bincode::serialize(transaction).expect("Failed to serialize transaction");
 
     let tx_for_litesvm: sdk_adapter::Transaction =
-        crate::bincode_compat::deserialize(&tx_bytes).expect("Failed to deserialize transaction");
+        bincode::deserialize(&tx_bytes).expect("Failed to deserialize transaction");
 
     let result = litesvm.simulate_transaction(tx_for_litesvm);
 

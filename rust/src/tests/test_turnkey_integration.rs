@@ -101,8 +101,7 @@ mod tests {
             .expect("Failed to decode base64 transaction");
 
         let decoded_transaction: crate::sdk_adapter::Transaction =
-            crate::bincode_compat::deserialize(&decoded_bytes)
-                .expect("Failed to deserialize transaction");
+            bincode::deserialize(&decoded_bytes).expect("Failed to deserialize transaction");
 
         assert_eq!(
             decoded_transaction.message_data(),

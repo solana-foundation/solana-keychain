@@ -116,8 +116,8 @@ mod tests {
             .decode(&base64_txn)
             .expect("Failed to decode base64 transaction");
 
-        let _: crate::sdk_adapter::Transaction = crate::bincode_compat::deserialize(&decoded_bytes)
-            .expect("Failed to deserialize transaction");
+        let _: crate::sdk_adapter::Transaction =
+            bincode::deserialize(&decoded_bytes).expect("Failed to deserialize transaction");
     }
 
     #[tokio::test]

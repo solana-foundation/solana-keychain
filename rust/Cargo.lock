@@ -59,7 +59,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc6e14bdcc7aefb67a9f88d2fc4a4a580b7183e39cb39f1a2cd983a209120af8"
 dependencies = [
  "agave-feature-set",
- "bincode 1.3.3",
+ "bincode",
  "digest 0.10.7",
  "ed25519-dalek 1.0.1",
  "libsecp256k1",
@@ -91,7 +91,7 @@ version = "3.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c95d5cb21cb06f1d1b990186db11c7b61cac3884dd817792f85b5955ed084104"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "libsecp256k1",
  "num-traits",
  "solana-account",
@@ -903,16 +903,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "bincode"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36eaf5d7b090263e8150820482d5d93cd964a81e4019913c972f4edcc6edb740"
-dependencies = [
- "serde",
- "unty",
 ]
 
 [[package]]
@@ -2897,7 +2887,7 @@ dependencies = [
  "agave-reserved-account-keys",
  "agave-syscalls",
  "ansi_term",
- "bincode 1.3.3",
+ "bincode",
  "indexmap 2.13.0",
  "itertools 0.14.0",
  "log",
@@ -4441,7 +4431,7 @@ version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "efc0ed36decb689413b9da5d57f2be49eea5bebb3cf7897015167b0c4336e731"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "serde",
  "serde_bytes",
  "serde_derive",
@@ -4459,7 +4449,7 @@ version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc3397241392f5756925029acaa8515dc70fcbe3d8059d4885d7d6533baf64fd"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "serde_core",
  "solana-address 2.2.0",
  "solana-program-error",
@@ -4505,7 +4495,7 @@ version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e8df0b083c10ce32490410f3795016b1b5d9b4d094658c0a5e496753645b7cd"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "bytemuck",
  "serde",
  "serde_derive",
@@ -4543,7 +4533,7 @@ version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "278a1a5bad62cd9da89ac8d4b7ec444e83caa8ae96aa656dfc27684b28d49a5d"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "serde_core",
  "solana-instruction-error",
 ]
@@ -4590,7 +4580,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c38c8edc40c7dc6914be6384276f00202987fc6beb400ffe45cc920530d2f9a"
 dependencies = [
  "agave-syscalls",
- "bincode 1.3.3",
+ "bincode",
  "qualifier_attr",
  "solana-account",
  "solana-bincode",
@@ -4731,7 +4721,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e401ae56aed512821cc7a0adaa412ff97fecd2dff4602be7b1330d2daec0c4"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "serde",
  "serde_derive",
  "solana-account",
@@ -4928,7 +4918,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "749eccc960e85c9b33608450093d256006253e1cb436b8380e71777840a3f675"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "chrono",
  "memmap2",
  "solana-account",
@@ -4997,7 +4987,7 @@ version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6a6d22d0a6fdf345be294bb9afdcd40c296cdc095e64e7ceaa3bb3c2f608c1c"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "borsh",
  "serde",
  "serde_derive",
@@ -5056,7 +5046,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-kms",
  "base64 0.22.1",
- "bincode 2.0.1",
+ "bincode",
  "bs58",
  "chrono",
  "dotenvy",
@@ -5178,7 +5168,7 @@ version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0448b1fd891c5f46491e5dc7d9986385ba3c852c340db2911dd29faa01d2b08d"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "blake3",
  "lazy_static",
  "serde",
@@ -5397,7 +5387,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "54ab02892f976d84cb231af7fd3a21f1ce682b2ff14dc22239a0a705f0b7fc53"
 dependencies = [
  "base64 0.22.1",
- "bincode 1.3.3",
+ "bincode",
  "itertools 0.12.1",
  "log",
  "percentage",
@@ -5492,7 +5482,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f03df7969f5e723ad31b6c9eadccc209037ac4caa34d8dc259316b05c11e82b"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "bs58",
  "serde",
  "solana-account",
@@ -5751,7 +5741,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a04c39613aa831ce50e8f472f8a59f4cb625eb70fcc13ed938299dba83dc5c0"
 dependencies = [
  "agave-feature-set",
- "bincode 1.3.3",
+ "bincode",
  "log",
  "solana-account",
  "solana-bincode",
@@ -5861,7 +5851,7 @@ version = "3.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "341665a757dfa087fdd22c02f626ab68959cac05b0622d34b25adb73304ce521"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "log",
  "serde",
  "serde_derive",
@@ -5889,7 +5879,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6690d3dd88f15c21edff68eb391ef8800df7a1f5cec84ee3e8d1abf05affdf74"
 dependencies = [
  "base64 0.22.1",
- "bincode 1.3.3",
+ "bincode",
  "bytemuck",
  "bytemuck_derive",
  "lazy_static",
@@ -5938,7 +5928,7 @@ version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96697cff5075a028265324255efed226099f6d761ca67342b230d09f72cc48d2"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "serde",
  "serde_derive",
  "solana-address 2.2.0",
@@ -5960,7 +5950,7 @@ version = "3.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de76c1564bd447a6bbc17a219400c1de9924e9ea24fe7642f672979f856490ac"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "serde",
  "serde_derive",
  "solana-account",
@@ -5990,7 +5980,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66631ddbe889dab5ec663294648cd1df395ec9df7a4476e7b3e095604cfdb539"
 dependencies = [
- "bincode 1.3.3",
+ "bincode",
  "cfg_eval",
  "num-derive",
  "num-traits",
@@ -6017,7 +6007,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd237f970b02ebd79e43614851ed1125e301cc903501b90a4ca0b1352d4fb290"
 dependencies = [
  "agave-feature-set",
- "bincode 1.3.3",
+ "bincode",
  "log",
  "num-derive",
  "num-traits",
@@ -6068,7 +6058,7 @@ checksum = "9602bcb1f7af15caef92b91132ec2347e1c51a72ecdbefdaefa3eac4b8711475"
 dependencies = [
  "aes-gcm-siv",
  "base64 0.22.1",
- "bincode 1.3.3",
+ "bincode",
  "bytemuck",
  "bytemuck_derive",
  "curve25519-dalek 4.1.3",
@@ -6122,7 +6112,7 @@ checksum = "5a48fff5e8ceafc0b071416d94b19f476f582fd9a9ddb477db4db7e04777c746"
 dependencies = [
  "aes-gcm-siv",
  "base64 0.22.1",
- "bincode 1.3.3",
+ "bincode",
  "bytemuck",
  "bytemuck_derive",
  "curve25519-dalek 4.1.3",
@@ -6619,12 +6609,6 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
-
-[[package]]
-name = "unty"
-version = "0.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
 
 [[package]]
 name = "uriparse"

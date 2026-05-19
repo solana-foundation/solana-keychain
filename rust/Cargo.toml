@@ -107,7 +107,7 @@ hkdf = { version = "0.13", optional = true }
 rsa = { version = "0.9", optional = true }
 
 # Core dependencies (used by all signers for transaction serialization)
-bincode = { version = "2.0.1", default-features = false, features = ["std", "serde"] }
+bincode = "1.3.3"
 base64 = "0.22.1"
 zeroize = "1.8.2"
 
