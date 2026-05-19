@@ -14,8 +14,7 @@ pub use solana_sdk::transaction::{Transaction, VersionedTransaction};
 
 /// Parse a keypair from bytes (v2 adapter)
 pub fn keypair_from_bytes(bytes: &[u8]) -> Result<Keypair, String> {
-    #[allow(deprecated)]
-    Keypair::from_bytes(bytes).map_err(|e| e.to_string())
+    Keypair::try_from(bytes).map_err(|e| format!("Invalid keypair bytes: {}", e))
 }
 
 /// Get the public key from a keypair (v2 adapter)

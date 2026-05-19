@@ -1,10 +1,7 @@
 use crate::sdk_adapter::{self, Hash, Pubkey, Transaction};
 use std::error::Error;
 
-#[cfg(feature = "sdk-v2")]
 use litesvm::LiteSVM;
-#[cfg(feature = "sdk-v3")]
-use litesvm_v3::LiteSVM;
 
 pub async fn start_litesvm(payer: &Pubkey) -> Result<LiteSVM, Box<dyn Error>> {
     let mut svm = LiteSVM::new()
