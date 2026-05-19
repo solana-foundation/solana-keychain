@@ -73,7 +73,7 @@ integration-tests = []
 
 [dependencies]
 # Solana SDK (version selected by feature flags)
-solana-sdk = { version = "3.0.0", optional = true }
+solana-sdk = { version = "2.3.0", optional = true }
 solana-sdk-v3 = { package = "solana-sdk", version = "=3.0.0", optional = true }
 # Pinned to =3.0.0 to avoid broken transitive deps (solana-signature v3.3 / solana-hash v3 vs v4)
 solana-shred-version-v3 = { package = "solana-shred-version", version = "=3.0.0", optional = true }
@@ -114,7 +114,8 @@ zeroize = "1.8.2"
 tokio = { version = "1.52", features = ["test-util", "macros", "rt"] }
 wiremock = "0.6"
 dotenvy = "0.15.7"
-litesvm = "0.8.1"
+litesvm = "0.7.0"
+litesvm-v3 = { package = "litesvm", version = "=0.8.1" }
 # Pins the agave-* / solana-*-program cluster to 3.0.11 (last known-good).
 # v3.0.14 is partially migrated to solana-hash v4 which causes type mismatches.
 # All packages in this cluster have exact cross-version pins, so a single
