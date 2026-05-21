@@ -1,9 +1,15 @@
 [advisories]
 ignore = [
+    # curve25519-dalek 3.x comes from the Solana/litesvm stack.
     "RUSTSEC-2024-0344",
+    # ed25519-dalek 1.x comes from the Solana/litesvm stack.
     "RUSTSEC-2022-0093",
+    # rsa has no patched release; reached through transitive auth dependencies.
     "RUSTSEC-2023-0071",
+    # rustls-webpki 0.101.x is pinned by the transitive rustls 0.21 TLS stack.
     "RUSTSEC-2026-0104",
+    # rustls-webpki 0.101.x is pinned by the transitive rustls 0.21 TLS stack.
     "RUSTSEC-2026-0098",
+    # rustls-webpki 0.101.x is pinned by the transitive rustls 0.21 TLS stack.
     "RUSTSEC-2026-0099",
 ]
