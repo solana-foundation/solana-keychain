@@ -50,6 +50,7 @@
         "@solana/keys": "^6.9.0",
         "@solana/signers": "^6.9.0",
         "@solana/transactions": "^6.9.0",
+        "vite": "^7.3.2",
         "vitest": "^4.1.6"
     },
     "publishConfig": {
