@@ -60,6 +60,4 @@ jobs:
             ~/.cache/org.rust-lang.miri
           key: miri-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
       - run: cargo +nightly miri setup
-      - run: cargo +nightly miri test --locked --lib error::tests
-      - run: cargo +nightly miri test --locked --lib http_client_config::tests
-      - run: cargo +nightly miri test --locked --lib memory::keypair_util::tests::test_from_json_keypair
+      - run: cargo +nightly miri test --locked --lib

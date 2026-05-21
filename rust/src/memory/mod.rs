@@ -124,6 +124,7 @@ mod tests {
         assert!(signer.is_ok());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn test_create_from_file() {
         let tmp_dir = std::env::temp_dir();
@@ -148,6 +149,7 @@ mod tests {
         assert_eq!(pubkey.to_string(), TEST_PUBKEY);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn test_sign_message() {
         let signer = create_test_signer();
@@ -160,12 +162,14 @@ mod tests {
         assert_eq!(sig.as_ref().len(), 64);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn test_is_available() {
         let signer = create_test_signer();
         assert!(signer.is_available().await);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn test_sign_transaction() {
         let signer = create_test_signer();
