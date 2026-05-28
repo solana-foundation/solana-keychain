@@ -192,7 +192,7 @@ jobs:
 
       - name: Configure AWS credentials
         if: ${{ needs.resolve-signers.outputs.aws_kms_enabled == 'true' }}
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@v6.1.1
         with:
           role-to-assume: ${{ steps.doppler.outputs.AWS_ROLE_ARN }}
           aws-region: ${{ steps.doppler.outputs.AWS_KMS_REGION }}
