@@ -21,6 +21,7 @@ This installs all signer implementations. For a smaller bundle, install individu
 - `@solana/keychain-para` - Para MPC signer
 - `@solana/keychain-privy` - Privy signer
 - `@solana/keychain-turnkey` - Turnkey signer
+- `@solana/keychain-utila` - Utila wallet signer
 - `@solana/keychain-vault` - HashiCorp Vault signer
 
 ## Usage
@@ -60,7 +61,7 @@ const address = await resolveAddress({
     publicKey: '4Nd1m...',
 });
 
-// Async backends (Privy, Para, Fireblocks, Crossmint, Dfns) fetch from the API
+// Async backends (Privy, Para, Fireblocks, Crossmint, Dfns, Utila) fetch from the API
 const address2 = await resolveAddress({
     backend: 'privy',
     appId: '...',
@@ -76,7 +77,7 @@ The `KeychainSignerConfig` discriminated union and individual config types are e
 ```typescript
 import type { KeychainSignerConfig, BackendName, PrivySignerConfig } from '@solana/keychain';
 
-// BackendName = 'aws-kms' | 'cdp' | 'crossmint' | 'dfns' | 'fireblocks' | 'gcp-kms' | 'memory' | 'openfort' | 'para' | 'privy' | 'turnkey' | 'vault'
+// BackendName = 'aws-kms' | 'cdp' | 'crossmint' | 'dfns' | 'fireblocks' | 'gcp-kms' | 'memory' | 'openfort' | 'para' | 'privy' | 'turnkey' | 'utila' | 'vault'
 
 function loadConfig(json: unknown): KeychainSignerConfig {
     // Parse and validate your config...

@@ -6,7 +6,7 @@ on:
       package:
         description: 'Package to publish (or "all")'
         required: true
-        default: 'all'
+        default: "all"
         type: choice
         options:
           - all
@@ -22,15 +22,16 @@ on:
           - para
           - privy
           - turnkey
+          - utila
           - vault
           - keychain
       publish-to-npm:
-        description: 'Publish to npm registry'
+        description: "Publish to npm registry"
         required: true
         default: true
         type: boolean
       create-github-release:
-        description: 'Create GitHub release'
+        description: "Create GitHub release"
         required: true
         default: true
         type: boolean
@@ -60,6 +61,7 @@ env:
     para
     privy
     turnkey
+    utila
     vault
     keychain
 
@@ -100,8 +102,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 'lts/*'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "lts/*"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6.0.7
@@ -421,6 +423,7 @@ jobs:
               '@solana/keychain-para',
               '@solana/keychain-privy',
               '@solana/keychain-turnkey',
+              '@solana/keychain-utila',
               '@solana/keychain-vault',
             ];
 

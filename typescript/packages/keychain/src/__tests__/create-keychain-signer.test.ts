@@ -28,6 +28,7 @@ vi.mock('@solana/keychain-memory', () => ({ createMemorySigner: vi.fn() }));
 vi.mock('@solana/keychain-para', () => ({ createParaSigner: vi.fn() }));
 vi.mock('@solana/keychain-privy', () => ({ createPrivySigner: vi.fn() }));
 vi.mock('@solana/keychain-turnkey', () => ({ createTurnkeySigner: vi.fn() }));
+vi.mock('@solana/keychain-utila', () => ({ createUtilaSigner: vi.fn() }));
 vi.mock('@solana/keychain-vault', () => ({ createVaultSigner: vi.fn() }));
 
 // Table-driven test configs — one per backend
@@ -94,6 +95,18 @@ const BACKEND_CONFIGS: Record<string, { config: KeychainSignerConfig; modulePath
         },
         factoryName: 'createTurnkeySigner',
         modulePath: '@solana/keychain-turnkey',
+    },
+    utila: {
+        config: {
+            backend: 'utila',
+            network: 'networks/solana-devnet',
+            serviceAccountEmail: 'service-account@example.com',
+            serviceAccountPrivateKeyPem: 'pem',
+            vaultId: 'vault',
+            walletId: 'wallet',
+        },
+        factoryName: 'createUtilaSigner',
+        modulePath: '@solana/keychain-utila',
     },
     vault: {
         config: {

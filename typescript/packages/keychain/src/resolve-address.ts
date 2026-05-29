@@ -11,7 +11,7 @@ import type { KeychainSignerConfig } from './types.js';
  * For backends that include the public key in their config (AWS KMS,
  * CDP, GCP KMS, Turnkey, Vault), this returns the address directly
  * with no network call. For backends that must fetch the public key
- * from a remote API (Crossmint, Dfns, Fireblocks, Openfort, Para, Privy),
+ * from a remote API (Crossmint, Dfns, Fireblocks, Openfort, Para, Privy, Utila),
  * this initialises the signer and reads its address.
  *
  * @example
@@ -48,7 +48,8 @@ export async function resolveAddress(config: KeychainSignerConfig): Promise<Addr
         case 'memory':
         case 'openfort':
         case 'para':
-        case 'privy': {
+        case 'privy':
+        case 'utila': {
             const signer = await createKeychainSigner(config);
             return signer.address;
         }

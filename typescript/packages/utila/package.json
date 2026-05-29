@@ -1,0 +1,65 @@
+{
+    "name": "@solana/keychain-utila",
+    "author": "Solana Foundation",
+    "version": "1.2.0",
+    "description": "Utila wallet signer for Solana transactions",
+    "license": "MIT",
+    "repository": "https://github.com/solana-foundation/solana-keychain",
+    "keywords": [
+        "solana",
+        "signing",
+        "wallet",
+        "utila"
+    ],
+    "type": "module",
+    "sideEffects": false,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "src"
+    ],
+    "scripts": {
+        "build": "tsc --build",
+        "clean": "rm -rf dist *.tsbuildinfo",
+        "prepack": "pnpm run build",
+        "test": "vitest run",
+        "test:unit": "vitest run --config ../../vitest.config.unit.ts",
+        "test:integration": "vitest run --config ../../vitest.config.integration.ts",
+        "test:watch": "vitest",
+        "test:watch:unit": "vitest --config ../../vitest.config.unit.ts",
+        "test:watch:integration": "vitest --config ../../vitest.config.integration.ts",
+        "typecheck": "tsc --noEmit",
+        "test:treeshakability": "agadoo dist/index.js"
+    },
+    "dependencies": {
+        "@solana/keychain-core": "workspace:*",
+        "jose": "^6.2.3"
+    },
+    "peerDependencies": {
+        "@solana/addresses": ">=6.0.1",
+        "@solana/codecs-strings": ">=6.0.1",
+        "@solana/keys": ">=6.0.1",
+        "@solana/signers": ">=6.0.1",
+        "@solana/transactions": ">=6.0.1"
+    },
+    "devDependencies": {
+        "@solana/addresses": "^6.9.0",
+        "@solana/codecs-strings": "^6.9.0",
+        "@solana/keychain-test-utils": "workspace:*",
+        "@solana/keys": "^6.9.0",
+        "@solana/signers": "^6.9.0",
+        "@solana/transactions": "^6.9.0",
+        "@solana/kit": "^6.9.0",
+        "dotenv": "^17.4.2"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}

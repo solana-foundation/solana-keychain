@@ -6,8 +6,8 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'typescript/**'
-      - '.github/workflows/typescript-ci.yml'
+      - "typescript/**"
+      - ".github/workflows/typescript-ci.yml"
 
 jobs:
   resolve-signers:
@@ -36,6 +36,7 @@ jobs:
           CI_SIGNER_DFNS_ENABLED: ${{ vars.CI_SIGNER_DFNS_ENABLED || 'true' }}
           CI_SIGNER_CROSSMINT_ENABLED: ${{ vars.CI_SIGNER_CROSSMINT_ENABLED || 'true' }}
           CI_SIGNER_OPENFORT_ENABLED: ${{ vars.CI_SIGNER_OPENFORT_ENABLED || 'true' }}
+          CI_SIGNER_UTILA_ENABLED: ${{ vars.CI_SIGNER_UTILA_ENABLED || 'true' }}
         with:
           script: |
             const parseVar = (name) => {
@@ -61,6 +62,7 @@ jobs:
               dfns: parseVar('CI_SIGNER_DFNS_ENABLED'),
               crossmint: parseVar('CI_SIGNER_CROSSMINT_ENABLED'),
               openfort: parseVar('CI_SIGNER_OPENFORT_ENABLED'),
+              utila: parseVar('CI_SIGNER_UTILA_ENABLED'),
             };
 
             const packageBySigner = {
@@ -76,6 +78,7 @@ jobs:
               dfns: 'dfns',
               crossmint: 'crossmint',
               openfort: 'openfort',
+              utila: 'utila',
             };
 
             const unitSignerOrder = [
@@ -91,6 +94,7 @@ jobs:
               'dfns',
               'crossmint',
               'openfort',
+              'utila',
             ];
 
             const integrationSignerOrder = [
@@ -104,6 +108,7 @@ jobs:
               'dfns',
               'crossmint',
               'openfort',
+              'utila',
             ];
 
             const unitPackages = unitSignerOrder

@@ -65,6 +65,7 @@ See the [`@solana/keychain` README](./packages/keychain/README.md) for more usag
 | [@solana/keychain-crossmint](./packages/crossmint) | Crossmint wallet signer implementation |
 | [@solana/keychain-openfort](./packages/openfort) | Openfort backend wallet signer implementation |
 | [@solana/keychain-para](./packages/para) | Para MPC signer implementation |
+| [@solana/keychain-utila](./packages/utila) | Utila wallet signer implementation |
 
 ## Installation
 
@@ -85,5 +86,6 @@ pnpm add @solana/keychain-openfort    # Openfort backend wallet signer
 pnpm add @solana/keychain-para        # Para MPC signer
 pnpm add @solana/keychain-privy       # Privy signer
 pnpm add @solana/keychain-turnkey     # Turnkey signer
+pnpm add @solana/keychain-utila       # Utila signer
 pnpm add @solana/keychain-vault       # HashiCorp Vault signer
 ```

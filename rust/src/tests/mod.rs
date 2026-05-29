@@ -11,4 +11,5 @@ pub mod test_openfort_integration;
 pub mod test_para_integration;
 pub mod test_privy_integration;
 pub mod test_turnkey_integration;
+pub mod test_utila_integration;
 pub mod test_vault_integration;

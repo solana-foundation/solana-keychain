@@ -44,6 +44,7 @@ openfort = [
     "dep:sha2",
     "dep:hex",
 ]
+utila = ["dep:reqwest", "dep:jsonwebtoken", "dep:chrono"]
 all = [
     "memory",
     "vault",
@@ -57,6 +58,7 @@ all = [
     "crossmint",
     "dfns",
     "openfort",
+    "utila",
 ]
 
 # SDK version selection (mutually exclusive)

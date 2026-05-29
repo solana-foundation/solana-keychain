@@ -94,7 +94,7 @@ describe('resolveAddress', () => {
     });
 
     describe('async backends (fetch from API or derive locally)', () => {
-        it.each(['crossmint', 'dfns', 'fireblocks', 'memory', 'para', 'privy'] as const)(
+        it.each(['crossmint', 'dfns', 'fireblocks', 'memory', 'para', 'privy', 'utila'] as const)(
             '%s delegates to createKeychainSigner',
             async backend => {
                 const config = {
@@ -106,7 +106,11 @@ describe('resolveAddress', () => {
                     credId: 'c',
                     privateKeyPem: 'p',
                     privateKeyString: 'irrelevant-mocked-string',
+                    serviceAccountEmail: 'service-account@example.com',
+                    serviceAccountPrivateKeyPem: 'pem',
+                    network: 'networks/solana-devnet',
                     vaultAccountId: 'v',
+                    vaultId: 'vault',
                     walletId: 'w',
                     walletLocator: 'l',
                 } as KeychainSignerConfig;

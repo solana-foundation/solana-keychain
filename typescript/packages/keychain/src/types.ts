@@ -9,6 +9,7 @@ import type { OpenfortSignerConfig } from '@solana/keychain-openfort';
 import type { ParaSignerConfig } from '@solana/keychain-para';
 import type { PrivySignerConfig } from '@solana/keychain-privy';
 import type { TurnkeySignerConfig } from '@solana/keychain-turnkey';
+import type { UtilaSignerConfig } from '@solana/keychain-utila';
 import type { VaultSignerConfig } from '@solana/keychain-vault';
 
 /**
@@ -27,6 +28,7 @@ export type KeychainSignerConfig =
     | (ParaSignerConfig & { backend: 'para' })
     | (PrivySignerConfig & { backend: 'privy' })
     | (TurnkeySignerConfig & { backend: 'turnkey' })
+    | (UtilaSignerConfig & { backend: 'utila' })
     | (VaultSignerConfig & { backend: 'vault' });
 
 /** String literal union of all supported backend names, derived from {@link KeychainSignerConfig}. */

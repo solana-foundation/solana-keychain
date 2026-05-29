@@ -20,7 +20,8 @@
         "para",
         "dfns",
         "crossmint",
-        "openfort"
+        "openfort",
+        "utila"
     ],
     "type": "module",
     "sideEffects": false,
@@ -58,6 +59,7 @@
         "@solana/keychain-para": "workspace:*",
         "@solana/keychain-privy": "workspace:*",
         "@solana/keychain-turnkey": "workspace:*",
+        "@solana/keychain-utila": "workspace:*",
         "@solana/keychain-vault": "workspace:*"
     },
     "peerDependencies": {
