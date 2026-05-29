@@ -6,8 +6,8 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "typescript/**"
-      - ".github/workflows/typescript-ci.yml"
+      - 'typescript/**'
+      - '.github/workflows/typescript-ci.yml'
 
 jobs:
   resolve-signers:

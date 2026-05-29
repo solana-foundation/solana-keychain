@@ -6,8 +6,8 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "rust/**"
-      - ".github/workflows/ci.yml"
+      - 'rust/**'
+      - '.github/workflows/ci.yml'
 
 jobs:
   resolve-signers:
