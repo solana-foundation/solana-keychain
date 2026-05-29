@@ -10,7 +10,6 @@ import {
     type SolanaSigner,
     throwSignerError,
 } from '@solana/keychain-core';
-import type { SignatureBytes } from '@solana/keys';
 import type { SignableMessage, SignatureDictionary } from '@solana/signers';
 import {
     getBase64EncodedWireTransaction,
@@ -145,7 +144,7 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
             vaultId,
             walletId,
         });
-        const address = wallet.wallet?.solanaDetails?.address;
+        const address = wallet?.wallet?.solanaDetails?.address;
         if (!address) {
             throwSignerError(SignerErrorCode.INVALID_PUBLIC_KEY, {
                 message: 'Utila wallet response missing solanaDetails.address',
@@ -210,15 +209,7 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            transactions.map(async transaction => {
-                const signature = await this.signTransactionWithUtila(transaction);
-                return createSignatureDictionary({
-                    signature,
-                    signerAddress: this.address,
-                });
-            }),
-        );
+        return await Promise.all(transactions.map(transaction => this.signTransactionWithUtila(transaction)));
     }
 
     async isAvailable(): Promise<boolean> {
@@ -238,7 +229,7 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
 
     private async signTransactionWithUtila(
         transaction: Transaction & TransactionWithinSizeLimit & TransactionWithLifetime,
-    ): Promise<SignatureBytes> {
+    ): Promise<SignatureDictionary> {
         const rawTransaction = getBase64EncodedWireTransaction(transaction);
         const initiated = await this.initiateTransaction(rawTransaction);
         const signed = await this.pollSignedTransaction(initiated);
@@ -360,7 +351,7 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
     private async extractSignatureFromRawTransaction(
         rawTransaction: string,
         expectedMessageBytes: ReadonlyBytes,
-    ): Promise<SignatureBytes> {
+    ): Promise<SignatureDictionary> {
         base64Encoder ||= getBase64Encoder();
         let decodedTransaction: Transaction;
         try {
@@ -392,7 +383,7 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
             signature,
             signerAddress: this.address,
         });
-        return signature;
+        return createSignatureDictionary({ signature, signerAddress: this.address });
     }
 }
 
@@ -448,7 +439,7 @@ async function fetchWallet({
 }
 
 function parseTransactionEnvelope(payload: UtilaTransactionEnvelope, context: string): UtilaTransaction {
-    const transaction = payload.transaction;
+    const transaction = payload?.transaction;
     if (!transaction?.name || !transaction.state) {
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `Failed to ${context}: missing transaction name/state`,
