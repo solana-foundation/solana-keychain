@@ -232,6 +232,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_gcp_kms_new_invalid_pubkey() {
         let client = KeyManagementService::builder().build().await.unwrap();
         let result = GcpKmsSigner::with_client(
@@ -247,6 +248,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_gcp_kms_new_empty_pubkey() {
         let client = KeyManagementService::builder().build().await.unwrap();
         let result = GcpKmsSigner::with_client(client, TEST_KEY_NAME.to_string(), "".to_string());
