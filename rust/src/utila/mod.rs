@@ -105,10 +105,11 @@ impl UtilaSigner {
             ));
         }
 
-        let signing_key = EncodingKey::from_rsa_pem(
-            config.service_account_private_key_pem.as_bytes(),
-        )
-        .map_err(|_| {
+        let pem = config
+            .service_account_private_key_pem
+            .replace("\\n", "\n")
+            .replace('\r', "");
+        let signing_key = EncodingKey::from_rsa_pem(pem.trim().as_bytes()).map_err(|_| {
             SignerError::InvalidPrivateKey(
                 "Failed to parse Utila service account RSA private key".to_string(),
             )
@@ -309,7 +310,7 @@ impl UtilaSigner {
                 transaction.state
             )))
         } else {
-            Err(SignerError::SigningFailed(format!(
+            Err(SignerError::RemoteApiError(format!(
                 "Utila transaction polling timed out after {} attempts",
                 self.max_poll_attempts
             )))
@@ -714,6 +715,13 @@ p6B5CCtpBPgD01Vm+bT/JQ==
         assert!(payload["exp"].as_i64().is_some());
     }
 
+    #[test]
+    fn test_new_accepts_escaped_newline_pem() {
+        let mut config = config();
+        config.service_account_private_key_pem = TEST_RSA_KEY.replace('\n', "\\n");
+        assert!(UtilaSigner::new(config).is_ok());
+    }
+
     #[tokio::test]
     async fn test_init_fetches_solana_address() {
         let server = MockServer::start().await;
@@ -921,7 +929,7 @@ p6B5CCtpBPgD01Vm+bT/JQ==
 
         let signer = create_test_signer(&server.uri(), Some(keypair_pubkey(&keypair)));
         let result = signer.sign_transaction(&mut transaction).await;
-        assert!(matches!(result, Err(SignerError::SigningFailed(_))));
+        assert!(matches!(result, Err(SignerError::RemoteApiError(_))));
     }
 
     #[tokio::test]

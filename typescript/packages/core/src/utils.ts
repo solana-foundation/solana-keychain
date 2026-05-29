@@ -166,3 +166,14 @@ export function assertIsSolanaSigner<TAddress extends string>(value: {
         });
     }
 }
+
+/**
+ * Normalizes a PEM private key for parsing by crypto libraries.
+ * CI secrets are often stored as single-line values with escaped newlines.
+ *
+ * @param privateKeyPem - The PEM private key, possibly with escaped `\n` or `\r`
+ * @returns The PEM with real newlines, no carriage returns, and trimmed
+ */
+export function normalizePrivateKeyPem(privateKeyPem: string): string {
+    return privateKeyPem.replace(/\\n/g, '\n').replace(/\r/g, '').trim();
+}

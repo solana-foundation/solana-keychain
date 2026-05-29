@@ -36,24 +36,23 @@ export interface UtilaTransactionEnvelope {
 }
 
 export type UtilaTransactionState =
-    | 'AWAITING_APPROVAL'
     | 'AWAITING_AML_POLICY_CHECK'
-    | 'DECLINED_BY_AML_POLICY'
+    | 'AWAITING_APPROVAL'
     | 'AWAITING_POLICY_CHECK'
-    | 'AWAITING_SIGNATURE'
-    | 'SIGNED'
     | 'AWAITING_PUBLISH'
-    | 'PUBLISHED'
-    | 'MINED'
-    | 'MINED_FAILED'
-    | 'FAILED'
-    | 'DECLINED'
-    | 'REPLACED'
+    | 'AWAITING_SIGNATURE'
     | 'CANCELED'
-    | 'DROPPED'
     | 'CONFIRMED'
+    | 'DECLINED_BY_AML_POLICY'
+    | 'DECLINED'
+    | 'DROPPED'
     | 'EXPIRED'
-    | string;
+    | 'FAILED'
+    | 'MINED_FAILED'
+    | 'MINED'
+    | 'PUBLISHED'
+    | 'REPLACED'
+    | 'SIGNED';
 
 export interface UtilaTransaction {
     name?: string;

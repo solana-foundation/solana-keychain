@@ -148,6 +148,17 @@ describe('UtilaSigner', () => {
                 code: 'SIGNER_INVALID_PUBLIC_KEY',
             });
         });
+
+        it('accepts a PEM with escaped newlines', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
+
+            const signer = await createUtilaSigner({
+                ...mockConfig,
+                serviceAccountPrivateKeyPem: TEST_RSA_PRIVATE_KEY.replace(/\n/g, '\\n'),
+            });
+
+            expect(signer.address).toBe(MOCK_ADDRESS);
+        });
     });
 
     describe('signMessages', () => {
@@ -289,6 +300,33 @@ describe('UtilaSigner', () => {
             await expect(signer.signTransactions([createMockTransaction()])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
                 message: expect.stringContaining('rawTransaction'),
+            });
+        });
+
+        it('throws a parsing error when the signed raw transaction cannot be decoded', async () => {
+            vi.mocked(getTransactionDecoder).mockReturnValue({
+                decode: vi.fn(() => {
+                    throw new Error('bad bytes');
+                }),
+            } as any);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse())
+                .mockResolvedValueOnce(
+                    jsonResponse({
+                        transaction: {
+                            name: 'vaults/vault-test/transactions/tx-1',
+                            solanaTransaction: {
+                                rawTransaction: MOCK_RAW_TRANSACTION,
+                            },
+                            state: 'SIGNED',
+                        },
+                    }),
+                );
+
+            const signer = await createUtilaSigner(mockConfig);
+            await expect(signer.signTransactions([createMockTransaction()])).rejects.toMatchObject({
+                code: 'SIGNER_PARSING_ERROR',
+                message: expect.stringContaining('decode'),
             });
         });
 

@@ -1,6 +1,7 @@
 import { getBase64Encoder } from '@solana/codecs-strings';
 import {
     base64UrlDecoder,
+    normalizePrivateKeyPem,
     sanitizeRemoteErrorResponse,
     SignerErrorCode,
     throwSignerError,
@@ -204,11 +205,6 @@ async function signClientData(clientData: Uint8Array, privateKeyPem: string): Pr
         cause: latestError,
         message: 'Failed to sign Dfns auth challenge',
     });
-}
-
-function normalizePrivateKeyPem(privateKeyPem: string): string {
-    // CI secrets are often stored as single-line values with escaped newlines.
-    return privateKeyPem.replace(/\\n/g, '\n').replace(/\r/g, '').trim();
 }
 
 async function signClientDataWithWebCrypto(

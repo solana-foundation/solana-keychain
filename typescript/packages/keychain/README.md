@@ -158,9 +158,11 @@ try {
 | `fireblocks` | [@solana/keychain-fireblocks](../fireblocks/README.md) | API |
 | `gcp-kms` | [@solana/keychain-gcp-kms](../gcp-kms/README.md) | Config (`publicKey`) |
 | `memory` | [@solana/keychain-memory](../memory/README.md) | Derived from local keypair |
+| `openfort` | [@solana/keychain-openfort](../openfort/README.md) | API |
 | `para` | [@solana/keychain-para](../para/README.md) | API |
 | `privy` | [@solana/keychain-privy](../privy/README.md) | API |
 | `turnkey` | [@solana/keychain-turnkey](../turnkey/README.md) | Config (`publicKey`) |
+| `utila` | [@solana/keychain-utila](../utila/README.md) | API |
 | `vault` | [@solana/keychain-vault](../vault/README.md) | Config (`publicKey`) |
 
 ## Common Interface

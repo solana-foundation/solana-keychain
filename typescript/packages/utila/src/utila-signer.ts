@@ -1,8 +1,10 @@
-import { assertIsAddress, type Address } from '@solana/addresses';
+import { type Address, assertIsAddress } from '@solana/addresses';
 import { getBase64Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
     createSignatureDictionary,
+    createSignerError,
+    normalizePrivateKeyPem,
     sanitizeRemoteErrorResponse,
     SignerErrorCode,
     type SolanaSigner,
@@ -14,8 +16,8 @@ import {
     getBase64EncodedWireTransaction,
     getTransactionDecoder,
     type Transaction,
-    type TransactionWithLifetime,
     type TransactionWithinSizeLimit,
+    type TransactionWithLifetime,
 } from '@solana/transactions';
 import { importPKCS8, SignJWT } from 'jose';
 
@@ -124,7 +126,8 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
 
         let privateKey: ImportedPrivateKey;
         try {
-            privateKey = await importPKCS8(config.serviceAccountPrivateKeyPem, 'RS256');
+            const pem = normalizePrivateKeyPem(config.serviceAccountPrivateKeyPem);
+            privateKey = await importPKCS8(pem, 'RS256');
         } catch (error) {
             throwSignerError(SignerErrorCode.INVALID_PRIVATE_KEY, {
                 cause: error,
@@ -197,9 +200,11 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
     }
 
     async signMessages(_messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-            message: 'Utila signMessages is not supported for Solana wallets in this signer',
-        });
+        return await Promise.reject(
+            createSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message: 'Utila signMessages is not supported for Solana wallets in this signer',
+            }),
+        );
     }
 
     async signTransactions(
@@ -357,8 +362,16 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
         expectedMessageBytes: ReadonlyBytes,
     ): Promise<SignatureBytes> {
         base64Encoder ||= getBase64Encoder();
-        const transactionBytes = base64Encoder.encode(rawTransaction);
-        const decodedTransaction = getTransactionDecoder().decode(transactionBytes);
+        let decodedTransaction: Transaction;
+        try {
+            const transactionBytes = base64Encoder.encode(rawTransaction);
+            decodedTransaction = getTransactionDecoder().decode(transactionBytes);
+        } catch (error) {
+            throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                cause: error,
+                message: 'Failed to decode Utila signed transaction',
+            });
+        }
 
         if (!bytesEqual(decodedTransaction.messageBytes, expectedMessageBytes)) {
             throwSignerError(SignerErrorCode.SIGNING_FAILED, {
