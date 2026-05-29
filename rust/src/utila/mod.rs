@@ -187,7 +187,11 @@ impl UtilaSigner {
     }
 
     async fn fetch_wallet(&self) -> Result<WalletResponse, SignerError> {
-        let path = format!("/v2/vaults/{}/wallets/{}", self.vault_id, self.wallet_id);
+        let path = format!(
+            "/v2/vaults/{}/wallets/{}",
+            encode_uri_component(&self.vault_id),
+            encode_uri_component(&self.wallet_id)
+        );
         self.get_json(&path, "fetch_wallet").await
     }
 
@@ -195,7 +199,10 @@ impl UtilaSigner {
         &self,
         raw_transaction: String,
     ) -> Result<UtilaTransaction, SignerError> {
-        let path = format!("/v2/vaults/{}{}", self.vault_id, "/transactions:initiate");
+        let path = format!(
+            "/v2/vaults/{}/transactions:initiate",
+            encode_uri_component(&self.vault_id)
+        );
         let request = InitiateTransactionRequest {
             details: InitiateTransactionDetails {
                 solana_serialized_transaction: SolanaSerializedTransaction {
@@ -218,7 +225,7 @@ impl UtilaSigner {
     async fn get_transaction(&self, transaction_id: &str) -> Result<UtilaTransaction, SignerError> {
         let path = format!(
             "/v2/vaults/{}/transactions/{}?view=FULL",
-            self.vault_id,
+            encode_uri_component(&self.vault_id),
             encode_uri_component(transaction_id)
         );
         let envelope: TransactionEnvelope = self.get_json(&path, "get_transaction").await?;
@@ -722,6 +729,59 @@ p6B5CCtpBPgD01Vm+bT/JQ==
         let mut signer = create_test_signer(&server.uri(), None);
         signer.init().await.expect("init should fetch address");
         assert_eq!(signer.pubkey(), public_key);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_wallet_encodes_resource_ids() {
+        let server = MockServer::start().await;
+        let keypair = Keypair::new();
+        let public_key = keypair_pubkey(&keypair);
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/v2/vaults/vault%2Fwith%20space/wallets/wallet%2Fwith%20space",
+            ))
+            .respond_with(wallet_response(&public_key.to_string()))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), None);
+        signer.vault_id = "vault/with space".to_string();
+        signer.wallet_id = "wallet/with space".to_string();
+
+        signer.init().await.expect("init should fetch address");
+        assert_eq!(signer.pubkey(), public_key);
+    }
+
+    #[tokio::test]
+    async fn test_initiate_transaction_encodes_vault_id() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path(
+                "/v2/vaults/vault%2Fwith%20space/transactions:initiate",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "transaction": {
+                    "name": "vaults/vault/with space/transactions/tx-1",
+                    "state": "AWAITING_SIGNATURE"
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), None);
+        signer.vault_id = "vault/with space".to_string();
+
+        let transaction = signer
+            .initiate_transaction("raw-transaction".to_string())
+            .await
+            .expect("transaction should be initiated");
+
+        assert_eq!(
+            transaction.name,
+            "vaults/vault/with space/transactions/tx-1"
+        );
     }
 
     #[tokio::test]
