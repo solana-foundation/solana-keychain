@@ -1,9 +1,8 @@
 import { type Address, assertIsAddress } from '@solana/addresses';
-import { getBase64Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
-    createSignatureDictionary,
     createSignerError,
+    extractSignatureFromWireTransaction,
     normalizePrivateKeyPem,
     sanitizeRemoteErrorResponse,
     SignerErrorCode,
@@ -12,8 +11,8 @@ import {
 } from '@solana/keychain-core';
 import type { SignableMessage, SignatureDictionary } from '@solana/signers';
 import {
+    type Base64EncodedWireTransaction,
     getBase64EncodedWireTransaction,
-    getTransactionDecoder,
     type Transaction,
     type TransactionWithinSizeLimit,
     type TransactionWithLifetime,
@@ -29,7 +28,6 @@ import type {
 } from './types.js';
 
 type ImportedPrivateKey = Awaited<ReturnType<typeof importPKCS8>>;
-type ReadonlyBytes = ArrayLike<number> & { readonly byteLength: number };
 
 const DEFAULT_API_BASE_URL = 'https://api.utila.io';
 const UTILA_API_AUDIENCE = 'https://api.utila.io/';
@@ -47,8 +45,6 @@ const TERMINAL_FAILURE_STATES = new Set([
     'DROPPED',
     'EXPIRED',
 ]);
-
-let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
 
 /**
  * Create and initialize a Utila-backed signer.
@@ -240,7 +236,23 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
             });
         }
 
-        return await this.extractSignatureFromRawTransaction(rawSignedTransaction, transaction.messageBytes);
+        const sigDict = extractSignatureFromWireTransaction({
+            base64WireTransaction: rawSignedTransaction as Base64EncodedWireTransaction,
+            signerAddress: this.address,
+        });
+        const signatureBytes = Object.values(sigDict)[0];
+        if (!signatureBytes) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                address: this.address,
+                message: 'No signature bytes found in extracted signature dictionary',
+            });
+        }
+        await assertSignatureValid({
+            data: transaction.messageBytes,
+            signature: signatureBytes,
+            signerAddress: this.address,
+        });
+        return sigDict;
     }
 
     private async initiateTransaction(rawTransaction: string): Promise<UtilaTransaction> {
@@ -346,44 +358,6 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
                 message: 'Failed to parse Utila response',
             });
         }
-    }
-
-    private async extractSignatureFromRawTransaction(
-        rawTransaction: string,
-        expectedMessageBytes: ReadonlyBytes,
-    ): Promise<SignatureDictionary> {
-        base64Encoder ||= getBase64Encoder();
-        let decodedTransaction: Transaction;
-        try {
-            const transactionBytes = base64Encoder.encode(rawTransaction);
-            decodedTransaction = getTransactionDecoder().decode(transactionBytes);
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to decode Utila signed transaction',
-            });
-        }
-
-        if (!bytesEqual(decodedTransaction.messageBytes, expectedMessageBytes)) {
-            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                message: 'Utila returned a signed transaction with different message bytes',
-            });
-        }
-
-        const signature = decodedTransaction.signatures[this.address];
-        if (!signature) {
-            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                address: this.address,
-                message: `No signature found for address ${this.address}`,
-            });
-        }
-
-        await assertSignatureValid({
-            data: new Uint8Array(expectedMessageBytes),
-            signature,
-            signerAddress: this.address,
-        });
-        return createSignatureDictionary({ signature, signerAddress: this.address });
     }
 }
 
@@ -496,12 +470,4 @@ function trimWalletId(value: string): string {
     const marker = '/wallets/';
     const markerIndex = value.lastIndexOf(marker);
     return markerIndex === -1 ? value : value.slice(markerIndex + marker.length);
-}
-
-function bytesEqual(a: ReadonlyBytes, b: ReadonlyBytes): boolean {
-    if (a.byteLength !== b.byteLength) return false;
-    for (let i = 0; i < a.byteLength; i++) {
-        if (a[i] !== b[i]) return false;
-    }
-    return true;
 }

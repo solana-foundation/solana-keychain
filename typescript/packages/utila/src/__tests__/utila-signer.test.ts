@@ -303,36 +303,11 @@ describe('UtilaSigner', () => {
             });
         });
 
-        it('throws a parsing error when the signed raw transaction cannot be decoded', async () => {
+        it('throws when the signed transaction has no signature for the signer address', async () => {
             vi.mocked(getTransactionDecoder).mockReturnValue({
-                decode: vi.fn(() => {
-                    throw new Error('bad bytes');
-                }),
-            } as any);
-            vi.mocked(fetch)
-                .mockResolvedValueOnce(mockWalletResponse())
-                .mockResolvedValueOnce(
-                    jsonResponse({
-                        transaction: {
-                            name: 'vaults/vault-test/transactions/tx-1',
-                            solanaTransaction: {
-                                rawTransaction: MOCK_RAW_TRANSACTION,
-                            },
-                            state: 'SIGNED',
-                        },
-                    }),
-                );
-
-            const signer = await createUtilaSigner(mockConfig);
-            await expect(signer.signTransactions([createMockTransaction()])).rejects.toMatchObject({
-                code: 'SIGNER_PARSING_ERROR',
-                message: expect.stringContaining('decode'),
-            });
-        });
-
-        it('throws when Utila returns transaction bytes for a different message', async () => {
-            vi.mocked(getTransactionDecoder).mockReturnValue({
-                decode: vi.fn(() => createDecodedTransaction({ messageBytes: new Uint8Array([9, 9, 9]) })),
+                decode: vi.fn(() =>
+                    createDecodedTransaction({ signerAddress: 'So11111111111111111111111111111111111111112' }),
+                ),
             } as any);
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse())
@@ -351,7 +326,7 @@ describe('UtilaSigner', () => {
             const signer = await createUtilaSigner(mockConfig);
             await expect(signer.signTransactions([createMockTransaction()])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
-                message: expect.stringContaining('different message bytes'),
+                message: expect.stringContaining('No signature found'),
             });
         });
     });
