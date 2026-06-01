@@ -108,7 +108,6 @@ jobs:
               'dfns',
               'crossmint',
               'openfort',
-              'utila',
             ];
 
             const unitPackages = unitSignerOrder

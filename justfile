@@ -4,7 +4,7 @@ sdkv2 := "all,sdk-v2,unsafe-debug"
 sdkv3 := "all,sdk-v3,unsafe-debug"
 sdkv2_int := "all,sdk-v2,unsafe-debug,integration-tests"
 sdkv3_int := "all,sdk-v3,unsafe-debug,integration-tests"
-integration_tests := "test_fireblocks_integration test_privy_integration test_turnkey_integration test_vault_integration test_aws_kms_integration test_utila_integration"
+integration_tests := "test_fireblocks_integration test_privy_integration test_turnkey_integration test_vault_integration test_aws_kms_integration"
 
 default:
     @just --list

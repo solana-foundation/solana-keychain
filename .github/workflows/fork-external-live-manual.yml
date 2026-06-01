@@ -91,7 +91,6 @@ jobs:
               ['dfns', 'test_dfns_integration'],
               ['crossmint', 'test_crossmint_integration'],
               ['openfort', 'test_openfort_integration'],
-              ['utila', 'test_utila_integration'],
             ];
 
             const tsLivePackageMap = [
@@ -105,7 +104,6 @@ jobs:
               ['dfns', 'dfns'],
               ['crossmint', 'crossmint'],
               ['openfort', 'openfort'],
-              ['utila', 'utila'],
             ];
 
             const rustFeatures = rustFeatureOrder.filter((backend) => enabled[backend]);
