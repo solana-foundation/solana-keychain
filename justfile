@@ -175,7 +175,7 @@ ts-test-integration:
     vault write transit/restore/solana-test-key backup=@"../rust/src/tests/vault-test-key.b64" >/dev/null 2>&1 || true
 
     echo "Running TypeScript integration tests..."
-    pnpm -F @solana/keychain-fireblocks -F @solana/keychain-privy -F @solana/keychain-turnkey -F @solana/keychain-vault test:integration
+    pnpm -F @solana/keychain-fireblocks -F @solana/keychain-privy -F @solana/keychain-turnkey -F @solana/keychain-utila -F @solana/keychain-vault test:integration
 
 # ===========================================================
 # ========================= Release =========================
@@ -344,7 +344,7 @@ release-ts: _check-ts-release
     echo "Updating to $version..."
 
     # Update version in all packages
-    PACKAGES="core aws-kms cdp dfns fireblocks gcp-kms memory openfort para privy turnkey vault keychain test-utils crossmint"
+    PACKAGES="core aws-kms cdp dfns fireblocks gcp-kms memory openfort para privy turnkey utila vault keychain test-utils crossmint"
     for pkg in $PACKAGES; do
         echo "  Updating packages/${pkg}..."
         cd packages/${pkg}
@@ -402,7 +402,7 @@ publish-ts package="all" branch="":
     #!/usr/bin/env bash
     set -euo pipefail
     command -v gh >/dev/null || { echo "Install gh: https://cli.github.com"; exit 1; }
-    valid="all core aws-kms cdp crossmint dfns fireblocks gcp-kms memory openfort para privy turnkey vault keychain"
+    valid="all core aws-kms cdp crossmint dfns fireblocks gcp-kms memory openfort para privy turnkey utila vault keychain"
     if ! echo " $valid " | grep -q " {{package}} "; then
         echo "Error: invalid package '{{package}}'. Valid: $valid"
         exit 1

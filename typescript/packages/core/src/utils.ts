@@ -166,3 +166,7 @@ export function assertIsSolanaSigner<TAddress extends string>(value: {
         });
     }
 }
+
+export function normalizePrivateKeyPem(privateKeyPem: string): string {
+    return privateKeyPem.replace(/\\n/g, '\n').replace(/\r/g, '').trim();
+}

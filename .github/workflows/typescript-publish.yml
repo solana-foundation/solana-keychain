@@ -22,6 +22,7 @@ on:
           - para
           - privy
           - turnkey
+          - utila
           - vault
           - keychain
       publish-to-npm:
@@ -60,6 +61,7 @@ env:
     para
     privy
     turnkey
+    utila
     vault
     keychain
 
@@ -421,6 +423,7 @@ jobs:
               '@solana/keychain-para',
               '@solana/keychain-privy',
               '@solana/keychain-turnkey',
+              '@solana/keychain-utila',
               '@solana/keychain-vault',
             ];
 

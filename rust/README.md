@@ -28,6 +28,7 @@
 | **CDP** | Coinbase Developer Platform managed wallet infrastructure | `cdp` |
 | **Crossmint** | Crossmint managed wallets (`smart` and `mpc`) | `crossmint` |
 | **Openfort** | Openfort backend wallets with TEE-stored keys | `openfort` |
+| **Utila** | Utila MPC wallets and automated co-signer flow | `utila` |
 
 ## Installation
 
@@ -47,6 +48,9 @@ solana-keychain = { version = "0.5", features = ["crossmint"] }
 
 # With Openfort support
 solana-keychain = { version = "0.5", features = ["openfort"] }
+
+# With Utila support
+solana-keychain = { version = "0.5", features = ["utila"] }
 
 # All backends
 solana-keychain = { version = "0.5", features = ["all"] }
@@ -220,6 +224,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 **Note:** Crossmint `sign_message` is intentionally unsupported in this signer and returns `SigningFailed`.
+
+### Utila Signer
+
+[Utila](https://www.utila.io/) signer for existing Solana wallets.
+
+```rust
+use solana_keychain::{Signer, SolanaSigner, UtilaSignerConfig};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let signer = Signer::from_utila(UtilaSignerConfig {
+        service_account_email: std::env::var("UTILA_SERVICE_ACCOUNT_EMAIL")?,
+        service_account_private_key_pem: std::env::var("UTILA_SERVICE_ACCOUNT_PRIVATE_KEY")?,
+        vault_id: std::env::var("UTILA_VAULT_ID")?,
+        wallet_id: std::env::var("UTILA_WALLET_ID")?,
+        network: std::env::var("UTILA_NETWORK")?,
+        api_base_url: std::env::var("UTILA_API_BASE_URL").ok(),
+        poll_interval_ms: None,
+        max_poll_attempts: None,
+        designated_signers: None,
+        http_client_config: None,
+    }).await?;
+
+    println!("Public key: {}", signer.pubkey());
+    Ok(())
+}
+```
+
+**Note:** Utila `sign_message` is intentionally unsupported in this signer and returns `SigningFailed`. Transaction signing requests are created with `publish=false`; callers remain responsible for broadcasting.
 
 ### Openfort Signer
 

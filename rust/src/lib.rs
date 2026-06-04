@@ -2,7 +2,7 @@
 //!
 //! This crate provides a unified interface for signing Solana transactions
 //! with multiple backend implementations (memory, Vault, Privy, Turnkey, AWS KMS,
-//! Fireblocks, GCP KMS, Dfns, Crossmint, CDP, Para, Openfort).
+//! Fireblocks, GCP KMS, Dfns, Crossmint, CDP, Para, Openfort, Utila).
 //!
 //! # Features
 //!
@@ -19,6 +19,7 @@
 //! - `dfns`: Dfns Wallet API integration
 //! - `crossmint`: Crossmint wallet integration
 //! - `openfort`: Openfort backend wallet integration
+//! - `utila`: Utila MPC wallet integration
 //! - `all`: Enable all signer backends
 //!
 //! ## SDK Version Selection
@@ -69,6 +70,8 @@ pub mod dfns;
 pub mod openfort;
 #[cfg(feature = "para")]
 pub mod para;
+#[cfg(feature = "utila")]
+pub mod utila;
 
 // Re-export core types
 pub use error::SignerError;
@@ -107,6 +110,8 @@ pub use dfns::{DfnsSigner, DfnsSignerConfig};
 pub use openfort::{OpenfortSigner, OpenfortSignerConfig};
 #[cfg(feature = "para")]
 pub use para::{ParaSigner, ParaSignerConfig};
+#[cfg(feature = "utila")]
+pub use utila::{UtilaSigner, UtilaSignerConfig};
 
 // Ensure at least one signer backend is enabled
 #[cfg(not(any(
@@ -121,10 +126,11 @@ pub use para::{ParaSigner, ParaSignerConfig};
     feature = "dfns",
     feature = "para",
     feature = "crossmint",
-    feature = "openfort"
+    feature = "openfort",
+    feature = "utila"
 )))]
 compile_error!(
-    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, cdp, para, dfns, crossmint, or openfort"
+    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, cdp, para, dfns, crossmint, openfort, or utila"
 );
 
 /// Unified signer enum supporting multiple backends
@@ -160,6 +166,8 @@ pub enum Signer {
     Para(ParaSigner),
     #[cfg(feature = "crossmint")]
     Crossmint(CrossmintSigner),
+    #[cfg(feature = "utila")]
+    Utila(UtilaSigner),
 }
 
 impl Signer {
@@ -357,6 +365,16 @@ impl Signer {
         signer.init().await?;
         Ok(Self::Openfort(signer))
     }
+
+    /// Create a Utila signer from an existing Solana wallet.
+    ///
+    /// Fetches the wallet's Solana address from Utila during initialization.
+    #[cfg(feature = "utila")]
+    pub async fn from_utila(config: UtilaSignerConfig) -> Result<Self, SignerError> {
+        let mut signer = UtilaSigner::new(config)?;
+        signer.init().await?;
+        Ok(Self::Utila(signer))
+    }
 }
 
 #[async_trait::async_trait]
@@ -394,6 +412,8 @@ impl SolanaSigner for Signer {
             Signer::Para(s) => s.pubkey(),
             #[cfg(feature = "crossmint")]
             Signer::Crossmint(s) => s.pubkey(),
+            #[cfg(feature = "utila")]
+            Signer::Utila(s) => s.pubkey(),
         }
     }
 
@@ -433,6 +453,8 @@ impl SolanaSigner for Signer {
             Signer::Para(s) => s.sign_transaction(tx).await,
             #[cfg(feature = "crossmint")]
             Signer::Crossmint(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "utila")]
+            Signer::Utila(s) => s.sign_transaction(tx).await,
         }
     }
 
@@ -469,6 +491,8 @@ impl SolanaSigner for Signer {
             Signer::Para(s) => s.sign_message(message).await,
             #[cfg(feature = "crossmint")]
             Signer::Crossmint(s) => s.sign_message(message).await,
+            #[cfg(feature = "utila")]
+            Signer::Utila(s) => s.sign_message(message).await,
         }
     }
 
@@ -505,6 +529,8 @@ impl SolanaSigner for Signer {
             Signer::Para(s) => s.is_available().await,
             #[cfg(feature = "crossmint")]
             Signer::Crossmint(s) => s.is_available().await,
+            #[cfg(feature = "utila")]
+            Signer::Utila(s) => s.is_available().await,
         }
     }
 }

@@ -206,6 +206,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn test_from_private_key_string_does_not_read_file_path() {
         let tmp_dir = std::env::temp_dir();
@@ -224,6 +225,7 @@ mod tests {
         let _ = std::fs::remove_file(&file_path);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn test_from_private_key_file_json_keypair() {
         let tmp_dir = std::env::temp_dir();
@@ -243,6 +245,7 @@ mod tests {
         let _ = std::fs::remove_file(&file_path);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn test_from_private_key_file_missing_file() {
         let result =

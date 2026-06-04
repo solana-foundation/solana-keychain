@@ -11,6 +11,7 @@ import { createOpenfortSigner } from '@solana/keychain-openfort';
 import { createParaSigner } from '@solana/keychain-para';
 import { createPrivySigner } from '@solana/keychain-privy';
 import { createTurnkeySigner } from '@solana/keychain-turnkey';
+import { createUtilaSigner } from '@solana/keychain-utila';
 import { createVaultSigner } from '@solana/keychain-vault';
 
 import type { KeychainSignerConfig } from './types.js';
@@ -59,6 +60,8 @@ export async function createKeychainSigner(config: KeychainSignerConfig): Promis
             return await createPrivySigner(stripBackend(config));
         case 'turnkey':
             return createTurnkeySigner(stripBackend(config));
+        case 'utila':
+            return await createUtilaSigner(stripBackend(config));
         case 'vault':
             return createVaultSigner(stripBackend(config));
         default: {
