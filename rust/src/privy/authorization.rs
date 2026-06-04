@@ -219,7 +219,7 @@ fn canonicalize_json(value: &Value) -> Option<String> {
         }
         Value::Object(values) => {
             let mut entries = values.iter().collect::<Vec<_>>();
-            entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+            entries.sort_by_key(|(key, _)| *key);
             let entries = entries
                 .into_iter()
                 .map(|(key, value)| {
