@@ -187,20 +187,20 @@ fn parse_p256_private_key(
 
     if normalized.contains("-----BEGIN") {
         let pem = normalized.replace("\\n", "\n");
-        return p256::ecdsa::SigningKey::from_pkcs8_pem(&pem).map_err(|e| {
-            SignerError::InvalidPrivateKey(format!("Invalid Privy authorization private key: {e}"))
+        return p256::ecdsa::SigningKey::from_pkcs8_pem(&pem).map_err(|_| {
+            SignerError::InvalidPrivateKey("Invalid Privy authorization private key".to_string())
         });
     }
 
     let compact = normalized.split_whitespace().collect::<String>();
-    let der = STANDARD.decode(compact).map_err(|e| {
-        SignerError::InvalidPrivateKey(format!(
-            "Invalid Privy authorization private key encoding: {e}"
-        ))
+    let der = STANDARD.decode(compact).map_err(|_| {
+        SignerError::InvalidPrivateKey(
+            "Invalid Privy authorization private key encoding".to_string(),
+        )
     })?;
 
-    p256::ecdsa::SigningKey::from_pkcs8_der(&der).map_err(|e| {
-        SignerError::InvalidPrivateKey(format!("Invalid Privy authorization private key: {e}"))
+    p256::ecdsa::SigningKey::from_pkcs8_der(&der).map_err(|_| {
+        SignerError::InvalidPrivateKey("Invalid Privy authorization private key".to_string())
     })
 }
 
@@ -323,5 +323,36 @@ mod tests {
         let signatures = generate_privy_authorization_signatures(&request, &context).unwrap();
 
         assert_eq!(signatures, vec!["provided", "sign-fn"]);
+    }
+
+    #[test]
+    fn invalid_privy_private_key_errors_do_not_include_parser_details() {
+        let invalid_der = STANDARD.encode("not-secret-but-sensitive");
+        let cases = [
+            (
+                "wallet-auth:not-secret-but-sensitive",
+                "Invalid Privy authorization private key encoding",
+            ),
+            (
+                "-----BEGIN PRIVATE KEY-----\nnot-secret-but-sensitive\n-----END PRIVATE KEY-----",
+                "Invalid Privy authorization private key",
+            ),
+            (
+                invalid_der.as_str(),
+                "Invalid Privy authorization private key",
+            ),
+        ];
+
+        for (invalid_key, expected_message) in cases {
+            let err = parse_p256_private_key(invalid_key).unwrap_err();
+
+            match err {
+                SignerError::InvalidPrivateKey(message) => {
+                    assert_eq!(message, expected_message);
+                    assert!(!message.contains(invalid_key));
+                }
+                other => panic!("expected InvalidPrivateKey, got {other:?}"),
+            }
+        }
     }
 }
