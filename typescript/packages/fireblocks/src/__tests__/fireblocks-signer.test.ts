@@ -2,15 +2,7 @@ import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
 
-vi.mock('@solana/transactions', async importOriginal => {
-    const mod = await importOriginal<typeof import('@solana/transactions')>();
-    return {
-        ...mod,
-        getBase64EncodedWireTransaction: vi.fn(() => 'base64-wire-transaction'),
-    };
-});
-
-import { FireblocksSigner } from '../fireblocks-signer.js';
+import { createFireblocksSigner, FireblocksSigner } from '../fireblocks-signer.js';
 import type { FireblocksSignerConfig } from '../types.js';
 import { TEST_API_KEY, TEST_RSA_PRIVATE_KEY, TEST_VAULT_ACCOUNT_ID } from './setup.js';
 
@@ -146,6 +138,46 @@ describe('FireblocksSigner', () => {
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
                 assetId: 'SOL_TEST',
+            });
+
+            expect(signer).toBeDefined();
+        });
+
+        it('should reject useProgramCall:true with CONFIG_ERROR and never make a network call', () => {
+            expect(() => {
+                new FireblocksSigner({
+                    apiKey: TEST_API_KEY,
+                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                    useProgramCall: true,
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                });
+            }).toThrow(/useProgramCall.*not supported/);
+
+            expect(mockFetch).not.toHaveBeenCalled();
+        });
+
+        it('should reject useProgramCall:true via createFireblocksSigner before any broadcast', async () => {
+            await expect(
+                createFireblocksSigner({
+                    apiKey: TEST_API_KEY,
+                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                    useProgramCall: true,
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                }),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_CONFIG_ERROR',
+                message: expect.stringContaining('useProgramCall'),
+            });
+
+            expect(mockFetch).not.toHaveBeenCalled();
+        });
+
+        it('should allow useProgramCall:false', () => {
+            const signer = new FireblocksSigner({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                useProgramCall: false,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
 
             expect(signer).toBeDefined();
@@ -548,7 +580,7 @@ describe('FireblocksSigner', () => {
             expect(result[0]).toHaveProperty(signer.address);
         });
 
-        it('should reject PROGRAM_CALL txHash because it is not a reusable signer-bound signature', async () => {
+        it('should throw when COMPLETED response has no signedMessages', async () => {
             const keyPair = await generateKeyPairSigner();
 
             // Mock init fetch
@@ -563,21 +595,18 @@ describe('FireblocksSigner', () => {
                 json: async () => ({ id: 'tx-123', status: 'SUBMITTED' }),
             });
 
-            // Mock poll for completion - PROGRAM_CALL returns txHash after broadcast,
-            // which must not be treated as a reusable signer-bound signature.
+            // Mock poll for completion with no signedMessages
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({
                     id: 'tx-123',
                     status: 'COMPLETED',
-                    txHash: '5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW',
                 }),
             });
 
             const signer = new FireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                useProgramCall: true,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
 
@@ -589,52 +618,7 @@ describe('FireblocksSigner', () => {
             } as unknown as Parameters<typeof signer.signTransactions>[0][0];
 
             await expect(signer.signTransactions([transaction])).rejects.toThrow(
-                'Fireblocks PROGRAM_CALL returned txHash without a reusable signer-bound signature',
-            );
-        });
-
-        it('should still reject malformed txHash in PROGRAM_CALL because it is not a reusable signer-bound signature', async () => {
-            const keyPair = await generateKeyPairSigner();
-
-            // Mock init fetch
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ addresses: [{ address: keyPair.address }] }),
-            });
-
-            // Mock create transaction
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ id: 'tx-123', status: 'SUBMITTED' }),
-            });
-
-            // Mock poll for completion - txHash remains a broadcast transaction id,
-            // regardless of whether it would decode to a valid signature length.
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    id: 'tx-123',
-                    status: 'COMPLETED',
-                    txHash: '2abc',
-                }),
-            });
-
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                useProgramCall: true,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            await signer.init();
-
-            const transaction = {
-                messageBytes: new Uint8Array([1, 2, 3, 4]),
-                signatures: {},
-            } as unknown as Parameters<typeof signer.signTransactions>[0][0];
-
-            await expect(signer.signTransactions([transaction])).rejects.toThrow(
-                'Fireblocks PROGRAM_CALL returned txHash without a reusable signer-bound signature',
+                'No signature found in response (no signedMessages)',
             );
         });
     });

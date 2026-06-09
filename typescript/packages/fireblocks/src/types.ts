@@ -24,10 +24,19 @@ export interface FireblocksSignerConfig {
     requestDelayMs?: number;
 
     /**
-     * Use PROGRAM_CALL operation for signing transactions (default: false)
-     * When true, Fireblocks signs and broadcasts the transaction to Solana,
-     * but callers must not treat the broadcast response as a reusable local signature.
-     * When false, uses RAW signing (signs message bytes only, caller broadcasts).
+     * @deprecated Unsupported and slated for removal. Setting this to `true` is
+     * rejected at construction with a `CONFIG_ERROR`; omit it (RAW signing is
+     * always used).
+     *
+     * Fireblocks PROGRAM_CALL signing broadcasts the transaction on-chain and
+     * only returns a broadcast transaction id, not a reusable signer-bound
+     * signature over the local message bytes. That violates the `SolanaSigner`
+     * contract and risks duplicate spends, so the signer always uses RAW signing
+     * (signs message bytes only; the caller broadcasts).
+     *
+     * The field key is retained for now so existing callers passing `true` get a
+     * clear error instead of silently different behavior; it will be removed in a
+     * future major version.
      */
     useProgramCall?: boolean;
 
@@ -40,8 +49,8 @@ export interface FireblocksSignerConfig {
  */
 export interface CreateTransactionRequest {
     assetId: string;
-    extraParameters: ProgramCallExtraParameters | RawExtraParameters;
-    operation: 'PROGRAM_CALL' | 'RAW';
+    extraParameters: RawExtraParameters;
+    operation: 'RAW';
     source: TransactionSource;
 }
 
@@ -55,13 +64,6 @@ export interface TransactionSource {
  */
 export interface RawExtraParameters {
     rawMessageData: RawMessageData;
-}
-
-/**
- * Extra parameters for PROGRAM_CALL signing operation
- */
-export interface ProgramCallExtraParameters {
-    programCallData: string;
 }
 
 export interface RawMessageData {
@@ -87,11 +89,6 @@ export interface TransactionResponse {
     id: string;
     signedMessages?: SignedMessage[];
     status: string;
-    /**
-     * Transaction id returned for PROGRAM_CALL after broadcast.
-     * This is a broadcast artifact, not a reusable signer-bound signature.
-     */
-    txHash?: string;
 }
 
 export interface SignedMessage {

@@ -11,12 +11,7 @@ import {
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
-import {
-    getBase64EncodedWireTransaction,
-    Transaction,
-    TransactionWithinSizeLimit,
-    TransactionWithLifetime,
-} from '@solana/transactions';
+import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
 
 import { createJwt } from './jwt.js';
 import type {
@@ -76,7 +71,6 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     private readonly pollIntervalMs: number;
     private readonly maxPollAttempts: number;
     private readonly requestDelayMs: number;
-    private readonly useProgramCall: boolean;
     private initialized = false;
 
     /**
@@ -113,6 +107,13 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
             });
         }
 
+        if (config.useProgramCall === true) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message:
+                    'useProgramCall (Fireblocks PROGRAM_CALL signing) is not supported: it broadcasts the transaction on-chain without producing a reusable signer-bound signature, which violates the SolanaSigner contract and risks duplicate spends. Use RAW signing (the default, omit useProgramCall) instead.',
+            });
+        }
+
         this.apiKey = config.apiKey;
         this.privateKeyPem = config.privateKeyPem;
         this.vaultAccountId = config.vaultAccountId;
@@ -124,7 +125,6 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         this.pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
         this.maxPollAttempts = config.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS;
         this.requestDelayMs = config.requestDelayMs ?? 0;
-        this.useProgramCall = config.useProgramCall ?? false;
 
         this.validateRequestDelayMs(this.requestDelayMs);
     }
@@ -315,33 +315,6 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     }
 
     /**
-     * Sign a transaction using Fireblocks PROGRAM_CALL operation.
-     * This broadcasts the transaction through Fireblocks but does not yield a
-     * reusable signer-bound signature artifact for the local signer address.
-     */
-    private async signWithProgramCall(
-        transaction: Transaction & TransactionWithinSizeLimit & TransactionWithLifetime,
-    ): Promise<SignatureBytes> {
-        // Use the same serialization as Privy - proper wire format with all signatures
-        const base64WireTransaction = getBase64EncodedWireTransaction(transaction);
-
-        const request: CreateTransactionRequest = {
-            assetId: this.assetId,
-            extraParameters: {
-                programCallData: base64WireTransaction,
-            },
-            operation: 'PROGRAM_CALL',
-            source: {
-                id: this.vaultAccountId,
-                type: 'VAULT_ACCOUNT',
-            },
-        };
-
-        const createResponse = await this.request<CreateTransactionResponse>('POST', '/v1/transactions', request);
-        return await this.pollForSignature(createResponse.id);
-    }
-
-    /**
      * Poll for transaction completion and extract a reusable signer-bound signature.
      */
     private async pollForSignature(transactionId: string): Promise<SignatureBytes> {
@@ -353,7 +326,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
             const status = txResponse.status as FireblocksTransactionStatus;
 
             if (txResponse.status === 'COMPLETED') {
-                // Try signedMessages first (RAW signing - hex encoded)
+                // RAW signing returns the signature in signedMessages (hex encoded)
                 const fullSig = txResponse.signedMessages?.[0]?.signature?.fullSig;
                 if (fullSig) {
                     const cleanHex = fullSig.startsWith('0x') || fullSig.startsWith('0X') ? fullSig.slice(2) : fullSig;
@@ -372,17 +345,8 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                     return sigBytes as SignatureBytes;
                 }
 
-                // PROGRAM_CALL only returns a broadcast transaction id, not a
-                // reusable signer-bound signature over the local message bytes.
-                if (txResponse.txHash) {
-                    throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                        message:
-                            'Fireblocks PROGRAM_CALL returned txHash without a reusable signer-bound signature; use RAW signing for local signature artifacts',
-                    });
-                }
-
                 throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                    message: 'No signature found in response (no signedMessages or txHash)',
+                    message: 'No signature found in response (no signedMessages)',
                 });
             }
 
@@ -440,9 +404,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         return await Promise.all(
             transactions.map(async (transaction, index) => {
                 await this.delay(index);
-                const signatureBytes = this.useProgramCall
-                    ? await this.signWithProgramCall(transaction)
-                    : await this.signRawBytes(new Uint8Array(transaction.messageBytes));
+                const signatureBytes = await this.signRawBytes(new Uint8Array(transaction.messageBytes));
                 await assertSignatureValid({
                     data: transaction.messageBytes,
                     signature: signatureBytes,

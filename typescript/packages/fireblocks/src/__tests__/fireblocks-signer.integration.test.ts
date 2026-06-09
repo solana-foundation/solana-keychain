@@ -1,26 +1,15 @@
 /**
- * Fireblocks PROGRAM_CALL integration tests (devnet, not LiteSVM)
+ * Fireblocks integration tests.
  *
- * Unlike other signers, Fireblocks PROGRAM_CALL mode signs AND broadcasts
- * the transaction to Solana through Fireblocks' infrastructure. The signed
- * transaction never returns to the caller, and the broadcast transaction id
- * is not a reusable signer-bound signature artifact. This means LiteSVM
- * (used by runSignerIntegrationTest) can never observe a signer-specific
- * transaction signature from PROGRAM_CALL, so we test against devnet directly.
+ * The signer only supports Fireblocks RAW signing. Fireblocks PROGRAM_CALL
+ * signing is unsupported: it broadcasts the transaction on-chain and only
+ * returns a broadcast transaction id, not a reusable signer-bound signature.
+ * `useProgramCall: true` is therefore rejected at construction, before any
+ * network call or broadcast can occur (fail closed).
  *
  * RAW mode returns a raw signature but is not available on the Fireblocks
- * sandbox/testnet environment used in CI.
+ * sandbox/testnet environment used in CI, so it is not exercised here.
  */
-import {
-    appendTransactionMessageInstructions,
-    createSolanaRpc,
-    createTransactionMessage,
-    pipe,
-    setTransactionMessageFeePayerSigner,
-    setTransactionMessageLifetimeUsingBlockhash,
-    signTransactionMessageWithSigners,
-} from '@solana/kit';
-import { getAddMemoInstruction } from '@solana-program/memo';
 import { config } from 'dotenv';
 import { describe, expect, it } from 'vitest';
 
@@ -36,32 +25,20 @@ function hasRequiredEnvVars(): boolean {
 
 describe('FireblocksSigner Integration', () => {
     it.skipIf(!hasRequiredEnvVars())(
-        'fails closed for PROGRAM_CALL because Fireblocks only returns a broadcast transaction id',
+        'fails closed for PROGRAM_CALL by rejecting at construction before any broadcast',
         async () => {
-            const signer = await createFireblocksSigner({
-                apiKey: process.env.FIREBLOCKS_API_KEY!,
-                assetId: process.env.FIREBLOCKS_ASSET_ID ?? 'SOL_TEST',
-                privateKeyPem: process.env.FIREBLOCKS_PRIVATE_KEY_PEM!,
-                useProgramCall: true,
-                vaultAccountId: process.env.FIREBLOCKS_VAULT_ACCOUNT_ID!,
+            await expect(
+                createFireblocksSigner({
+                    apiKey: process.env.FIREBLOCKS_API_KEY!,
+                    assetId: process.env.FIREBLOCKS_ASSET_ID ?? 'SOL_TEST',
+                    privateKeyPem: process.env.FIREBLOCKS_PRIVATE_KEY_PEM!,
+                    useProgramCall: true,
+                    vaultAccountId: process.env.FIREBLOCKS_VAULT_ACCOUNT_ID!,
+                }),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_CONFIG_ERROR',
+                message: expect.stringContaining('useProgramCall'),
             });
-            const rpcUrl = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
-
-            const rpc = createSolanaRpc(rpcUrl);
-            const {
-                value: { blockhash, lastValidBlockHeight },
-            } = await rpc.getLatestBlockhash().send();
-
-            const transaction = pipe(
-                createTransactionMessage({ version: 0 }),
-                tx => setTransactionMessageFeePayerSigner(signer, tx),
-                tx => appendTransactionMessageInstructions([getAddMemoInstruction({ memo: 'Fireblocks test' })], tx),
-                tx => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, tx),
-            );
-
-            await expect(signTransactionMessageWithSigners(transaction)).rejects.toThrow(
-                'Fireblocks PROGRAM_CALL returned txHash without a reusable signer-bound signature',
-            );
         },
         120_000,
     );
