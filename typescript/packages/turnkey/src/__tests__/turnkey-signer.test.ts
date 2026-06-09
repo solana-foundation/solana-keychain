@@ -1,3 +1,4 @@
+import { address } from '@solana/addresses';
 import { generateKeyPair, signBytes } from '@solana/keys';
 import { createSignableMessage, createSignerFromKeyPair, generateKeyPairSigner } from '@solana/signers';
 import {
@@ -9,7 +10,7 @@ import {
 import { assertIsSolanaSigner } from '@solana/keychain-core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { TurnkeySigner } from '../turnkey-signer.js';
+import { createTurnkeySigner, TurnkeySigner } from '../turnkey-signer.js';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
@@ -440,6 +441,83 @@ describe('TurnkeySigner', () => {
     });
 
     describe('signTransactions', () => {
+        // A real, decodable signed wire transaction with TWO signer slots:
+        //   slot 0 = fee payer (FEE_PAYER_ADDRESS), left as the all-zero placeholder
+        //   slot 1 = the Turnkey key (TURNKEY_SIGNER_ADDRESS), holding a real Ed25519 signature
+        // This models sponsored-fee / multisig co-signing where the Turnkey key is NOT the fee
+        // payer. The old `slice(1, 65)` logic would have grabbed the fee payer's (zero) slot.
+        const FEE_PAYER_ADDRESS = address('2K1mFVAUfz2AGDkwHd4Lc8NKjtsb7w6rCcXCsd34nqFF');
+        const TURNKEY_SIGNER_ADDRESS = address('HiEnCtcxb2bPFDgdv2EoxP3pH9ZPm29zv6Y7LqU4Pp9U');
+        const SIGNED_TX_HEX =
+            '020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000088ce9ac014b1544ab4b9328468aa9615646548ff74e0425b9e62b827551a6bb4ee77f1c2135ba3498c4d41dfbb2ddaf2e22f3b2cf23be662cacc44f94c9dd90c80020001031379010ee868dc7569eacfc0a074ce344bf308d67dc53fe40d0637a6e3999e72f84b62688063feb19e1290051c460e3a4df872a091f66cc7eb7861df06d645870000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001020101040000000000';
+        // The Ed25519 signature held in slot 1 (the Turnkey key), as raw bytes.
+        const EXPECTED_TURNKEY_SIGNATURE = Uint8Array.from(
+            Buffer.from(
+                '88ce9ac014b1544ab4b9328468aa9615646548ff74e0425b9e62b827551a6bb4ee77f1c2135ba3498c4d41dfbb2ddaf2e22f3b2cf23be662cacc44f94c9dd90c',
+                'hex',
+            ),
+        );
+
+        const setupMockSignTransactionResponse = (signedTransactionHex: string) => {
+            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+                json: () =>
+                    Promise.resolve({
+                        activity: {
+                            result: {
+                                signTransactionResult: {
+                                    signedTransaction: signedTransactionHex,
+                                },
+                            },
+                            status: 'COMPLETED',
+                        },
+                    }),
+                ok: true,
+                status: 200,
+            });
+        };
+
+        it('extracts the signature by signer address when the Turnkey key is not the fee payer', async () => {
+            const config = {
+                ...mockConfig,
+                publicKey: TURNKEY_SIGNER_ADDRESS,
+            };
+
+            const signer = createTurnkeySigner(config);
+
+            setupMockSignTransactionResponse(SIGNED_TX_HEX);
+
+            const mockTx = createMockTransaction();
+            const [sigDict] = await signer.signTransactions([mockTx]);
+
+            // The extracted signature must be the Turnkey key's slot-1 signature,
+            // NOT the fee payer's all-zero slot-0 placeholder.
+            const extracted = sigDict?.[TURNKEY_SIGNER_ADDRESS];
+            expect(extracted).toBeTruthy();
+            expect(Array.from(extracted ?? [])).toEqual(Array.from(EXPECTED_TURNKEY_SIGNATURE));
+            // Guard against regressing to the fee-payer slot.
+            expect(sigDict?.[FEE_PAYER_ADDRESS]).toBeUndefined();
+            expect(Array.from(extracted ?? []).some(b => b !== 0)).toBe(true);
+        });
+
+        it('throws SIGNING_FAILED when the signed transaction lacks this signer slot', async () => {
+            const keyPair = await generateKeyPairSigner();
+            const config = {
+                ...mockConfig,
+                // A signer address that is not present in SIGNED_TX_HEX.
+                publicKey: keyPair.address,
+            };
+
+            const signer = createTurnkeySigner(config);
+
+            setupMockSignTransactionResponse(SIGNED_TX_HEX);
+
+            const mockTx = createMockTransaction();
+
+            await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+        });
+
         it('handles API errors during transaction signing', async () => {
             const keyPair = await generateKeyPairSigner();
 

@@ -1,8 +1,9 @@
 import { Address, assertIsAddress } from '@solana/addresses';
-import { getBase16Decoder, getBase16Encoder, getBase64Encoder } from '@solana/codecs-strings';
+import { getBase16Decoder, getBase16Encoder, getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
     createSignatureDictionary,
+    extractSignatureFromWireTransaction,
     sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
@@ -11,6 +12,7 @@ import {
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import {
+    Base64EncodedWireTransaction,
     getBase64EncodedWireTransaction,
     Transaction,
     TransactionWithinSizeLimit,
@@ -360,22 +362,28 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                 // Use Turnkey's sign_transaction endpoint which returns the full signed transaction
                 const signedTransactionHex = await this.signTransaction(hexTx);
 
-                // Convert signed transaction hex back to bytes
+                // Convert signed transaction hex back to bytes, then to the base64 wire form
                 const hexToBytes = getBase16Encoder().encode;
                 const signedTxBytes = hexToBytes(signedTransactionHex);
-
-                // Extract the signature from the signed transaction
-                // In Solana, signatures are at the beginning of the serialized transaction
-                // First byte is the signature count, then 64 bytes per signature
-                const signature = signedTxBytes.slice(1, 65) as SignatureBytes;
-
-                await assertSignatureValid({ data: transaction.messageBytes, signature, signerAddress: this.address });
-
-                // Create a signature dictionary from the extracted signature
-                return createSignatureDictionary({
-                    signature,
+                const bytesToBase64 = getBase64Decoder().decode;
+                const signedWireTransaction = bytesToBase64(signedTxBytes) as Base64EncodedWireTransaction;
+                const sigDict = extractSignatureFromWireTransaction({
+                    base64WireTransaction: signedWireTransaction,
                     signerAddress: this.address,
                 });
+                const signatureBytes = Object.values(sigDict)[0];
+                if (!signatureBytes) {
+                    throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                        address: this.address,
+                        message: 'No signature bytes found in extracted signature dictionary',
+                    });
+                }
+                await assertSignatureValid({
+                    data: transaction.messageBytes,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
+                return sigDict;
             }),
         );
     }
