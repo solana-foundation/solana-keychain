@@ -46,6 +46,11 @@ let base58Decoder: ReturnType<typeof getBase58Decoder> | undefined;
 let base58Encoder: ReturnType<typeof getBase58Encoder> | undefined;
 let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
 
+/**
+ * Crossmint is a broadcast-managed signer: it rewrites the transaction (gas
+ * sponsorship, priority fee, its own blockhash) and broadcasts server-side, so
+ * returned signatures cover Crossmint's bytes, not the caller's `messageBytes`.
+ */
 class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly apiKey: string;
@@ -438,9 +443,9 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
             });
         }
 
-        // Verify against the message bytes that Crossmint actually signed.
-        // Crossmint may refresh the blockhash before signing, so these may
-        // differ from the original transaction.messageBytes.
+        // Verify against the bytes Crossmint actually signed, not the caller's
+        // messageBytes: Crossmint rewrites the tx (blockhash/fees) before signing,
+        // so a strict check against caller bytes would reject legitimately landed txs.
         await assertSignatureValid({
             data: decodedTransaction.messageBytes,
             signature,
