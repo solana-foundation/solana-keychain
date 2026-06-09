@@ -176,7 +176,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
 }
 
-async function signClientData(clientData: Uint8Array, privateKeyPem: string): Promise<Uint8Array> {
+export async function signClientData(clientData: Uint8Array, privateKeyPem: string): Promise<Uint8Array> {
     const normalizedPem = normalizePrivateKeyPem(privateKeyPem);
 
     let latestError: unknown;
@@ -217,15 +217,22 @@ async function signClientDataWithWebCrypto(
 
     const attempts: ReadonlyArray<{
         importAlgorithm: AlgorithmIdentifier | EcKeyImportParams | RsaHashedImportParams;
+        // When true, the WebCrypto output is an IEEE-P1363 (raw r||s) ECDSA
+        // signature that must be re-encoded as ASN.1 DER before returning, since
+        // Dfns user-action verification expects DER (parity with node:crypto and
+        // the Rust implementation). See rust/src/dfns/auth.rs.
+        isEcdsa: boolean;
         signAlgorithm: AlgorithmIdentifier | EcdsaParams;
     }> = [
-        { importAlgorithm: 'Ed25519', signAlgorithm: 'Ed25519' },
+        { importAlgorithm: 'Ed25519', isEcdsa: false, signAlgorithm: 'Ed25519' },
         {
             importAlgorithm: { name: 'ECDSA', namedCurve: 'P-256' },
+            isEcdsa: true,
             signAlgorithm: { hash: 'SHA-256', name: 'ECDSA' },
         },
         {
             importAlgorithm: { hash: 'SHA-256', name: 'RSASSA-PKCS1-v1_5' },
+            isEcdsa: false,
             signAlgorithm: 'RSASSA-PKCS1-v1_5',
         },
     ];
@@ -233,14 +240,59 @@ async function signClientDataWithWebCrypto(
     for (const attempt of attempts) {
         try {
             const privateKey = await subtle.importKey('pkcs8', privateKeyDer, attempt.importAlgorithm, false, ['sign']);
-            const signature = await subtle.sign(attempt.signAlgorithm, privateKey, input);
-            return new Uint8Array(signature);
+            const signature = new Uint8Array(await subtle.sign(attempt.signAlgorithm, privateKey, input));
+            return attempt.isEcdsa ? p1363ToDer(signature) : signature;
         } catch {
             // Try the next key algorithm.
         }
     }
 
     return undefined;
+}
+
+/**
+ * Convert an IEEE-P1363 (raw r||s) P-256 ECDSA signature into an ASN.1
+ * DER-encoded `SEQUENCE { INTEGER r, INTEGER s }`. WebCrypto's
+ * `subtle.sign({ name: 'ECDSA' }, ...)` returns the 64-byte P1363 form, but
+ * Dfns (and node:crypto's default) expect DER.
+ */
+export function p1363ToDer(raw: Uint8Array): Uint8Array {
+    const half = raw.length / 2;
+    const r = encodeDerInteger(raw.subarray(0, half));
+    const s = encodeDerInteger(raw.subarray(half));
+    const body = new Uint8Array(r.length + s.length);
+    body.set(r, 0);
+    body.set(s, r.length);
+
+    const out = new Uint8Array(2 + body.length);
+    out[0] = 0x30; // SEQUENCE
+    out[1] = body.length; // P-256 bodies are always < 128 bytes (single-byte length)
+    out.set(body, 2);
+    return out;
+}
+
+/**
+ * DER-encode a single unsigned big-endian integer (an ECDSA `r` or `s`
+ * component): strip leading zero bytes to the minimal length, then prepend a
+ * `0x00` byte when the high bit of the first content byte is set so the value
+ * is interpreted as positive.
+ */
+function encodeDerInteger(value: Uint8Array): Uint8Array {
+    let start = 0;
+    while (start < value.length - 1 && value[start] === 0x00) {
+        start += 1;
+    }
+    let content = value.subarray(start);
+    if (((content[0] ?? 0) & 0x80) !== 0) {
+        const padded = new Uint8Array(content.length + 1);
+        padded.set(content, 1);
+        content = padded;
+    }
+    const out = new Uint8Array(2 + content.length);
+    out[0] = 0x02; // INTEGER
+    out[1] = content.length;
+    out.set(content, 2);
+    return out;
 }
 
 async function signClientDataWithNodeCrypto(
