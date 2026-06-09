@@ -36,7 +36,9 @@ export interface CrossmintTransactionOnChain {
 export interface CrossmintTransactionApprovals {
     pending?: Array<{
         message?: string;
-        signer?: unknown;
+        // The response-side signer is a nested object; the matchable locator
+        // string (e.g. `server:<address>`) lives at `signer.locator`.
+        signer?: { locator?: string };
     }>;
     submitted?: Array<{
         signature?: string;

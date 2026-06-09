@@ -673,8 +673,8 @@ describe('CrossmintSigner', () => {
                             approvals: {
                                 // pending[0] belongs to ANOTHER approver.
                                 pending: [
-                                    { signer: OTHER_SIGNER, message: OTHER_MESSAGE_B58 },
-                                    { signer: OUR_SIGNER, message: OUR_MESSAGE_B58 },
+                                    { signer: { locator: OTHER_SIGNER }, message: OTHER_MESSAGE_B58 },
+                                    { signer: { locator: OUR_SIGNER }, message: OUR_MESSAGE_B58 },
                                 ],
                             },
                         }),
@@ -728,7 +728,7 @@ describe('CrossmintSigner', () => {
                         JSON.stringify({
                             id: 'tx-happy',
                             status: 'awaiting-approval',
-                            approvals: { pending: [{ signer: OUR_SIGNER, message: OUR_MESSAGE_B58 }] },
+                            approvals: { pending: [{ signer: { locator: OUR_SIGNER }, message: OUR_MESSAGE_B58 }] },
                         }),
                         { status: 201 },
                     ),
@@ -761,7 +761,7 @@ describe('CrossmintSigner', () => {
                             id: 'tx-other-only',
                             status: 'awaiting-approval',
                             // Only OTHER approver pending; nothing for us.
-                            approvals: { pending: [{ signer: OTHER_SIGNER, message: OTHER_MESSAGE_B58 }] },
+                            approvals: { pending: [{ signer: { locator: OTHER_SIGNER }, message: OTHER_MESSAGE_B58 }] },
                         }),
                         { status: 201 },
                     ),
@@ -787,7 +787,7 @@ describe('CrossmintSigner', () => {
                         JSON.stringify({
                             id: 'tx-persist',
                             status: 'awaiting-approval',
-                            approvals: { pending: [{ signer: OUR_SIGNER, message: OUR_MESSAGE_B58 }] },
+                            approvals: { pending: [{ signer: { locator: OUR_SIGNER }, message: OUR_MESSAGE_B58 }] },
                         }),
                         { status: 201 },
                     ),
@@ -799,7 +799,7 @@ describe('CrossmintSigner', () => {
                         JSON.stringify({
                             id: 'tx-persist',
                             status: 'awaiting-approval',
-                            approvals: { pending: [{ signer: OUR_SIGNER, message: OUR_MESSAGE_B58 }] },
+                            approvals: { pending: [{ signer: { locator: OUR_SIGNER }, message: OUR_MESSAGE_B58 }] },
                         }),
                         { status: 200 },
                     ),

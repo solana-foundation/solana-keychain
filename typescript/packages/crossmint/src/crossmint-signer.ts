@@ -296,8 +296,10 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
      */
     private findPendingApprovalForSigner(
         response: CrossmintTransactionResponse,
-    ): { message?: string; signer?: unknown } | undefined {
-        return response.approvals?.pending?.find(entry => entry.signer === this.signer);
+    ): { message?: string; signer?: { locator?: string } } | undefined {
+        // The response-side signer is a nested object; match on its `locator`
+        // string (the same value we submit as `signer` when approving).
+        return response.approvals?.pending?.find(entry => entry.signer?.locator === this.signer);
     }
 
     private async submitApproval(response: CrossmintTransactionResponse): Promise<CrossmintTransactionResponse> {
