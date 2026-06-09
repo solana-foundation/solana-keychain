@@ -257,6 +257,9 @@ async function signClientDataWithWebCrypto(
  * Dfns (and node:crypto's default) expect DER.
  */
 export function p1363ToDer(raw: Uint8Array): Uint8Array {
+    if (raw.length === 0 || raw.length % 2 !== 0) {
+        throw new Error(`p1363ToDer: expected an even-length byte array, got ${raw.length}`);
+    }
     const half = raw.length / 2;
     const r = encodeDerInteger(raw.subarray(0, half));
     const s = encodeDerInteger(raw.subarray(half));

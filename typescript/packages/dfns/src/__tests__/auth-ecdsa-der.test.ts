@@ -82,6 +82,11 @@ describe('p1363ToDer', () => {
         expect(parsed.r).toStrictEqual(new Uint8Array([0x05])); // minimal length
         expect(toFixed(parsed.s, 32)).toStrictEqual(s);
     });
+
+    it('rejects odd-length and empty inputs', () => {
+        expect(() => p1363ToDer(new Uint8Array(0))).toThrow(/even-length/);
+        expect(() => p1363ToDer(new Uint8Array(63))).toThrow(/even-length/);
+    });
 });
 
 describe('signClientData', () => {
