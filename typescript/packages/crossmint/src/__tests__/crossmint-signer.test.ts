@@ -212,6 +212,40 @@ describe('CrossmintSigner', () => {
             });
         });
 
+        it('signs sequentially and stops creating transactions after a failure', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse()) // create()
+                // tx 0: create -> success
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({ id: 'tx-0', status: 'success', onChain: { txId: MOCK_SIGNATURE_B58 } }),
+                        { status: 201 },
+                    ),
+                )
+                // tx 1: create -> 500 (fails the batch)
+                .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'boom' }), { status: 500 }))
+                // tx 2: should NEVER be created (would only be reached under concurrent Promise.all)
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({ id: 'tx-2', status: 'success', onChain: { txId: MOCK_SIGNATURE_B58 } }),
+                        { status: 201 },
+                    ),
+                );
+
+            const signer = await createCrossmintSigner({
+                ...mockConfig,
+                maxPollAttempts: 1,
+                pollIntervalMs: 1,
+            });
+
+            await expect(
+                signer.signTransactions([createMockTransaction(), createMockTransaction(), createMockTransaction()]),
+            ).rejects.toMatchObject({ code: 'SIGNER_REMOTE_API_ERROR' });
+
+            // wallet create + tx0 create + tx1 create = 3 fetches; tx2 must not be created.
+            expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
+        });
+
         it('signs via managed flow and extracts signature from serialized transaction', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()

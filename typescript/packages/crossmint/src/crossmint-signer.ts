@@ -193,18 +193,22 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                if (this.requestDelayMs > 0 && index > 0) {
-                    await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-                }
-                const signature = await this.signTransactionManaged(transaction);
-                return createSignatureDictionary({
-                    signature,
-                    signerAddress: this.address,
-                });
-            }),
-        );
+        // Sign sequentially, not via Promise.all: each transaction has
+        // irreversible server-side effects (createTransaction, and auto-approval
+        // when signerSecret is set). Concurrent submission means a failure in one
+        // transaction would abandon siblings that Crossmint has already created
+        // and may execute, leading to duplicate spends on retry. Sequential
+        // execution stops on the first error before any further transaction is
+        // created.
+        const results: SignatureDictionary[] = [];
+        for (const [index, transaction] of transactions.entries()) {
+            if (this.requestDelayMs > 0 && index > 0) {
+                await new Promise(resolve => setTimeout(resolve, this.requestDelayMs));
+            }
+            const signature = await this.signTransactionManaged(transaction);
+            results.push(createSignatureDictionary({ signature, signerAddress: this.address }));
+        }
+        return results;
     }
 
     async isAvailable(): Promise<boolean> {
