@@ -224,10 +224,21 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         transaction: Transaction & TransactionWithinSizeLimit & TransactionWithLifetime,
     ): Promise<SignatureBytes> {
         let response = await this.createTransaction(transaction);
+        let approvalSubmitted = false;
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
-            if (response.status === 'awaiting-approval' && this.signerSeed && this.signer) {
+            if (
+                response.status === 'awaiting-approval' &&
+                this.signerSeed &&
+                this.signer &&
+                !approvalSubmitted &&
+                this.findPendingApprovalForSigner(response) !== undefined
+            ) {
                 response = await this.submitApproval(response);
+                approvalSubmitted = true;
+                // Re-evaluate the new status immediately; the approvalSubmitted
+                // guard prevents this branch from re-running, so we cannot
+                // busy-loop re-signing/re-submitting the same approval.
                 continue;
             }
             const terminalSignature = await this.resolveTerminalStatus(response, transaction);
@@ -271,8 +282,29 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         }
     }
 
+    /**
+     * Finds the pending approval entry that belongs to this signer's locator.
+     * On a multi-approver wallet, `pending` may contain challenges for other
+     * approvers; signing the wrong one with our key and submitting it under our
+     * locator yields a vendor 4xx. Returns `undefined` when there is nothing for
+     * us to approve.
+     */
+    private findPendingApprovalForSigner(
+        response: CrossmintTransactionResponse,
+    ): { message?: string; signer?: unknown } | undefined {
+        return response.approvals?.pending?.find(entry => entry.signer === this.signer);
+    }
+
     private async submitApproval(response: CrossmintTransactionResponse): Promise<CrossmintTransactionResponse> {
-        const message = response.approvals?.pending?.[0]?.message;
+        const pending = this.findPendingApprovalForSigner(response);
+        // Nothing pending for us: do not sign another approver's challenge.
+        // Return the response unchanged so the caller falls through to
+        // resolveTerminalStatus (which surfaces the awaiting-approval error).
+        if (!pending) {
+            return response;
+        }
+
+        const message = pending.message;
         if (!message) {
             throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                 message: 'Crossmint transaction awaiting approval but no pending message found',

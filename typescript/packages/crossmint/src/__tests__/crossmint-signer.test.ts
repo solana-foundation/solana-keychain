@@ -1,5 +1,7 @@
+import { createPrivateKey, createPublicKey, hkdfSync, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getBase58Decoder } from '@solana/codecs-strings';
+import { getBase16Encoder, getBase58Decoder, getBase58Encoder } from '@solana/codecs-strings';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
@@ -29,6 +31,34 @@ const mockConfig = {
 };
 
 const base58Decoder = getBase58Decoder();
+const base58Encoder = getBase58Encoder();
+const base16Encoder = getBase16Encoder();
+
+const PKCS8_ED25519_PREFIX = new Uint8Array([
+    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+]);
+
+// Mirror of the source's deriveSignerSeed so tests can reconstruct the signing
+// key and assert WHICH message bytes the submitted approval signature covers.
+function deriveTestSeed(secret: string, apiKey: string): Uint8Array {
+    const rawSecret = secret.startsWith('xmsk1_') ? secret.slice(6) : secret;
+    const ikm = Buffer.from(base16Encoder.encode(rawSecret));
+    const parts = apiKey.split('_');
+    const environment = parts[1];
+    const base58Data = parts.slice(2).join('_');
+    const decoded = base58Encoder.encode(base58Data);
+    const projectId = new TextDecoder().decode(decoded).split(':')[0];
+    const info = `${projectId}:${environment}:solana-ed25519`;
+    return new Uint8Array(hkdfSync('sha256', ikm, 'crossmint', info, 32));
+}
+
+function testPrivateKey(seed: Uint8Array) {
+    return createPrivateKey({
+        format: 'der',
+        key: Buffer.concat([PKCS8_ED25519_PREFIX, seed]),
+        type: 'pkcs8',
+    });
+}
 const MOCK_SIGNATURE_BYTES = new Uint8Array(64).fill(7);
 const MOCK_SIGNATURE_B58 = base58Decoder.decode(MOCK_SIGNATURE_BYTES);
 const MOCK_MESSAGE_BYTES = new Uint8Array([1, 2, 3]);
@@ -606,6 +636,184 @@ describe('CrossmintSigner', () => {
             const createCall = vi.mocked(fetch).mock.calls[1]!;
             const body = JSON.parse(createCall[1]?.body as string);
             expect(body.params.signer).toBe('my-signer-id');
+        });
+    });
+
+    describe('approvals', () => {
+        // Real Crossmint API key so deriveSignerSeed() succeeds:
+        // {ck|sk}_{env}_{base58(projectId:nacl_signature)}.
+        const SIGNER_API_KEY = `sk_staging_${base58Decoder.decode(new TextEncoder().encode('proj:sig'))}`;
+        const SIGNER_SECRET = 'a'.repeat(64);
+        const OUR_SIGNER = 'server:our-signer-locator';
+        const OTHER_SIGNER = 'server:other-approver-locator';
+
+        const OUR_MESSAGE_B58 = base58Decoder.decode(new Uint8Array([10, 20, 30]));
+        const OTHER_MESSAGE_B58 = base58Decoder.decode(new Uint8Array([40, 50, 60]));
+
+        function approvalConfig(overrides?: Record<string, unknown>) {
+            return {
+                ...mockConfig,
+                apiKey: SIGNER_API_KEY,
+                signer: OUR_SIGNER,
+                signerSecret: SIGNER_SECRET,
+                maxPollAttempts: 3,
+                pollIntervalMs: 1,
+                ...overrides,
+            };
+        }
+
+        it('signs the pending message belonging to ITS signer locator, not pending[0]', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse()) // create()
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-multi',
+                            status: 'awaiting-approval',
+                            approvals: {
+                                // pending[0] belongs to ANOTHER approver.
+                                pending: [
+                                    { signer: OTHER_SIGNER, message: OTHER_MESSAGE_B58 },
+                                    { signer: OUR_SIGNER, message: OUR_MESSAGE_B58 },
+                                ],
+                            },
+                        }),
+                        { status: 201 },
+                    ),
+                )
+                // approvals POST response -> success
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-multi',
+                            status: 'success',
+                            onChain: { txId: MOCK_SIGNATURE_B58 },
+                        }),
+                        { status: 200 },
+                    ),
+                );
+
+            const signer = await createCrossmintSigner(approvalConfig());
+            const results = await signer.signTransactions([createMockTransaction()]);
+            expect(results).toHaveLength(1);
+
+            // The approval POST must carry OUR signer locator, and the signature
+            // must be over OUR message bytes (not pending[0]'s).
+            const approvalCall = vi.mocked(fetch).mock.calls[2]!;
+            expect(approvalCall[0]).toContain('/transactions/tx-multi/approvals');
+            const body = JSON.parse(approvalCall[1]?.body as string);
+            expect(body.approvals).toHaveLength(1);
+            expect(body.approvals[0].signer).toBe(OUR_SIGNER);
+
+            // The submitted signature must be over OUR message bytes, not the
+            // other approver's (pending[0]) bytes. Reconstruct the signing key
+            // and verify the signature covers OUR message and NOT the other.
+            const ourMessageBytes = Buffer.from(base58Encoder.encode(OUR_MESSAGE_B58));
+            const otherMessageBytes = Buffer.from(base58Encoder.encode(OTHER_MESSAGE_B58));
+            const sigBytes = Buffer.from(base58Encoder.encode(body.approvals[0].signature));
+
+            const privateKey = testPrivateKey(deriveTestSeed(SIGNER_SECRET, SIGNER_API_KEY));
+            const pub = createPublicKey(privateKey);
+            const expectedOur = Buffer.from(cryptoSign(null, ourMessageBytes, privateKey));
+            expect(cryptoVerify(null, ourMessageBytes, pub, sigBytes)).toBe(true);
+            expect(cryptoVerify(null, otherMessageBytes, pub, sigBytes)).toBe(false);
+            expect(sigBytes.equals(expectedOur)).toBe(true);
+        });
+
+        it('drives the tx to success after a single sufficient approval (happy path)', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse()) // create()
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-happy',
+                            status: 'awaiting-approval',
+                            approvals: { pending: [{ signer: OUR_SIGNER, message: OUR_MESSAGE_B58 }] },
+                        }),
+                        { status: 201 },
+                    ),
+                )
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-happy',
+                            status: 'success',
+                            onChain: { txId: MOCK_SIGNATURE_B58 },
+                        }),
+                        { status: 200 },
+                    ),
+                );
+
+            const signer = await createCrossmintSigner(approvalConfig());
+            const results = await signer.signTransactions([createMockTransaction()]);
+            expect(results).toHaveLength(1);
+            expect(results[0]![signer.address]?.length).toBe(64);
+            // wallet + create + approvals = 3 fetches; no extra polling.
+            expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
+        });
+
+        it('does not resubmit in a loop when no pending entry is for us; errors with approvals-required', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse()) // create()
+                .mockResolvedValue(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-other-only',
+                            status: 'awaiting-approval',
+                            // Only OTHER approver pending; nothing for us.
+                            approvals: { pending: [{ signer: OTHER_SIGNER, message: OTHER_MESSAGE_B58 }] },
+                        }),
+                        { status: 201 },
+                    ),
+                );
+
+            const signer = await createCrossmintSigner(approvalConfig({ maxPollAttempts: 5 }));
+
+            await expect(signer.signTransactions([createMockTransaction()])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+                message: expect.stringContaining('additional signer approvals are required'),
+            });
+
+            // No approval POST should ever happen (nothing pending for us).
+            const approvalPosts = vi.mocked(fetch).mock.calls.filter(call => String(call[0]).includes('/approvals'));
+            expect(approvalPosts.length).toBe(0);
+        });
+
+        it('submits our approval at most once even when status persists as awaiting-approval', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse()) // create()
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-persist',
+                            status: 'awaiting-approval',
+                            approvals: { pending: [{ signer: OUR_SIGNER, message: OUR_MESSAGE_B58 }] },
+                        }),
+                        { status: 201 },
+                    ),
+                )
+                // approval POST response still awaiting-approval, and our entry
+                // still appears pending (vendor lag). We must NOT resubmit.
+                .mockResolvedValue(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-persist',
+                            status: 'awaiting-approval',
+                            approvals: { pending: [{ signer: OUR_SIGNER, message: OUR_MESSAGE_B58 }] },
+                        }),
+                        { status: 200 },
+                    ),
+                );
+
+            const signer = await createCrossmintSigner(approvalConfig({ maxPollAttempts: 5 }));
+
+            await expect(signer.signTransactions([createMockTransaction()])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+                message: expect.stringContaining('additional signer approvals are required'),
+            });
+
+            const approvalPosts = vi.mocked(fetch).mock.calls.filter(call => String(call[0]).includes('/approvals'));
+            expect(approvalPosts.length).toBe(1);
         });
     });
 
