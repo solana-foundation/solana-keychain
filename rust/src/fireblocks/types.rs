@@ -10,7 +10,7 @@ pub struct CreateTransactionRequest {
     pub operation: String,
     pub source: TransactionSource,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub extra_parameters: Option<ExtraParameters>,
+    pub extra_parameters: Option<RawExtraParameters>,
 }
 
 #[derive(Serialize)]
@@ -19,16 +19,6 @@ pub struct TransactionSource {
     #[serde(rename = "type")]
     pub source_type: String,
     pub id: String,
-}
-
-/// Extra parameters for Fireblocks signing operations
-#[derive(Serialize)]
-#[serde(untagged)]
-pub enum ExtraParameters {
-    /// RAW signing operation
-    Raw(RawExtraParameters),
-    /// PROGRAM_CALL signing operation
-    ProgramCall(ProgramCallExtraParameters),
 }
 
 /// Extra parameters for RAW signing
@@ -48,14 +38,6 @@ pub struct RawMessageData {
 #[serde(rename_all = "camelCase")]
 pub struct RawMessage {
     pub content: String,
-}
-
-/// Extra parameters for PROGRAM_CALL signing
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProgramCallExtraParameters {
-    /// Base64-encoded serialized Solana transaction
-    pub program_call_data: String,
 }
 
 /// Response from creating a transaction
@@ -79,10 +61,6 @@ pub struct TransactionResponse {
     pub sub_status: Option<String>,
     #[serde(default)]
     pub signed_messages: Vec<SignedMessage>,
-    /// Transaction hash returned for PROGRAM_CALL after broadcast.
-    /// This is a broadcast artifact, not a reusable signer-bound signature.
-    #[serde(default)]
-    pub tx_hash: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

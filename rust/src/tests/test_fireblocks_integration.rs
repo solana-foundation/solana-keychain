@@ -3,7 +3,6 @@ pub const FIREBLOCKS_PRIVATE_KEY_PEM: &str = "FIREBLOCKS_PRIVATE_KEY_PEM";
 pub const FIREBLOCKS_VAULT_ACCOUNT_ID: &str = "FIREBLOCKS_VAULT_ACCOUNT_ID";
 pub const FIREBLOCKS_API_BASE_URL: &str = "FIREBLOCKS_API_BASE_URL";
 pub const FIREBLOCKS_ASSET_ID: &str = "FIREBLOCKS_ASSET_ID";
-pub const SOLANA_RPC_URL: &str = "SOLANA_RPC_URL";
 
 #[cfg(feature = "fireblocks")]
 #[cfg(test)]
@@ -13,8 +12,7 @@ mod tests {
 
     use super::*;
     use crate::fireblocks::{FireblocksSigner, FireblocksSignerConfig};
-    use crate::test_util::{create_test_transaction, create_test_transaction_with_recipient};
-    use crate::tests::rpc_util::get_rpc_blockhash;
+    use crate::test_util::create_test_transaction;
     use crate::traits::SolanaSigner;
     use std::env;
 
@@ -46,7 +44,7 @@ mod tests {
             ),
             poll_interval_ms: None,
             max_poll_attempts: None,
-            use_program_call: Some(true),
+            use_program_call: None,
             http_client_config: None,
         };
 
@@ -80,33 +78,33 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
     #[serial]
-    async fn test_fireblocks_sign_transaction() {
-        let signer = get_signer().await;
-        let pubkey = signer.pubkey();
+    async fn test_fireblocks_rejects_program_call_before_broadcast() {
+        // PROGRAM_CALL is unsupported: init() must fail closed with ConfigError
+        // before any network call, so it can never broadcast on-chain. Uses dummy
+        // credentials because the rejection happens before any of them are used.
+        let config = FireblocksSignerConfig {
+            api_key: "test-api-key".to_string(),
+            private_key_pem: "test-private-key-pem".to_string(),
+            vault_account_id: "0".to_string(),
+            asset_id: Some("SOL_TEST".to_string()),
+            api_base_url: None,
+            poll_interval_ms: None,
+            max_poll_attempts: None,
+            use_program_call: Some(true),
+            http_client_config: None,
+        };
 
-        // Self-transfer: from vault to same vault address
-        let mut transaction = create_test_transaction_with_recipient(&pubkey, &pubkey);
-
-        // PROGRAM_CALL needs real devnet blockhash
-        let rpc_url = env::var(SOLANA_RPC_URL)
-            .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
-
-        transaction.message.recent_blockhash = get_rpc_blockhash(&rpc_url)
+        let mut signer = FireblocksSigner::new(config);
+        let error = signer
+            .init()
             .await
-            .expect("Failed to get blockhash from RPC");
-
-        let result = signer.sign_transaction(&mut transaction).await;
-
-        let error =
-            result.expect_err("PROGRAM_CALL should fail closed without a signer-bound signature");
+            .expect_err("init() must reject use_program_call before any broadcast");
         match error {
-            crate::error::SignerError::SigningFailed(message) => {
-                assert!(
-                    message.contains("Fireblocks PROGRAM_CALL returned broadcast transaction id"),
-                    "unexpected error message: {message}"
-                );
-            }
-            other => panic!("expected signing failure, got {other:?}"),
+            crate::error::SignerError::ConfigError(message) => assert!(
+                message.contains("use_program_call"),
+                "unexpected error message: {message}"
+            ),
+            other => panic!("expected ConfigError, got {other:?}"),
         }
     }
 
