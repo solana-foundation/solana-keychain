@@ -119,6 +119,25 @@ describe('CrossmintSigner', () => {
             );
         });
 
+        it('sanitizes remote API error messages before surfacing them', async () => {
+            const malicious = `evil\u0000\u0007control\nbreak ${'A'.repeat(400)}`;
+            vi.mocked(fetch).mockResolvedValueOnce(
+                new Response(JSON.stringify({ message: malicious }), { status: 400 }),
+            );
+
+            let thrown: Error | undefined;
+            try {
+                await createCrossmintSigner(mockConfig);
+            } catch (error) {
+                thrown = error as Error;
+            }
+
+            expect(thrown).toBeDefined();
+            // eslint-disable-next-line no-control-regex
+            expect(thrown?.message).not.toMatch(/[\u0000-\u001f]/);
+            expect(thrown?.message).toContain('[truncated]');
+        });
+
         it('throws config error when apiKey is missing', async () => {
             await expect(createCrossmintSigner({ ...mockConfig, apiKey: '' })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',

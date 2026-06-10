@@ -115,6 +115,21 @@ describe('PrivySigner', () => {
             expect(signer.address).toBe(keyPair.address);
         });
 
+        it('URL-encodes walletId in the request path and disables redirect following', async () => {
+            const keyPair = await generateKeyPairSigner();
+            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+                json: () => Promise.resolve({ address: keyPair.address, chain_type: 'solana', id: '../../evil' }),
+                ok: true,
+                status: 200,
+            });
+
+            await PrivySigner.create({ ...mockConfig, walletId: '../../evil' });
+
+            const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+            expect(url).toBe('https://api.privy.test/wallets/..%2F..%2Fevil');
+            expect(init.redirect).toBe('error');
+        });
+
         it('throws error on API failure', async () => {
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 ok: false,

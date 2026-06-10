@@ -147,7 +147,7 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
      * Sign data using Vault's transit engine
      */
     private async signWithVault(base64Data: string): Promise<SignatureBytes> {
-        const url = `${this.vaultAddr}/v1/transit/sign/${this.keyName}`;
+        const url = `${this.vaultAddr}/v1/transit/sign/${encodeURIComponent(this.keyName)}`;
 
         const request: VaultSignRequest = {
             input: base64Data as VaultPayloadBase64,
@@ -162,6 +162,7 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
                     'X-Vault-Token': this.vaultToken,
                 },
                 method: 'POST',
+                redirect: 'error',
             });
         } catch (error) {
             return throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -267,7 +268,7 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
      * Check if the Vault signer is available by attempting to read key metadata
      */
     async isAvailable(): Promise<boolean> {
-        const url = `${this.vaultAddr}/v1/transit/keys/${this.keyName}`;
+        const url = `${this.vaultAddr}/v1/transit/keys/${encodeURIComponent(this.keyName)}`;
 
         try {
             const response = await fetch(url, {
@@ -275,6 +276,7 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
                     'X-Vault-Token': this.vaultToken,
                 },
                 method: 'GET',
+                redirect: 'error',
             });
 
             if (!response.ok) {

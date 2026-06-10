@@ -360,6 +360,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
                 body: JSON.stringify(body),
                 headers,
                 method: 'POST',
+                redirect: 'error',
             });
         } catch (error) {
             throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -419,6 +420,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
                 body: JSON.stringify(body),
                 headers,
                 method: 'POST',
+                redirect: 'error',
             });
         } catch (error) {
             throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -516,6 +518,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
             const response = await fetch(`${this.baseUrl}${path}`, {
                 headers,
                 method: 'GET',
+                redirect: 'error',
             });
             return response.ok;
         } catch {

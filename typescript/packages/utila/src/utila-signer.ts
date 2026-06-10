@@ -332,6 +332,7 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
                 body: body != null ? JSON.stringify(body) : undefined,
                 headers,
                 method,
+                redirect: 'error',
             });
         } catch (error) {
             throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -384,6 +385,7 @@ async function fetchWallet({
                 Authorization: `Bearer ${token}`,
             },
             method: 'GET',
+            redirect: 'error',
         });
     } catch (error) {
         throwSignerError(SignerErrorCode.HTTP_ERROR, {

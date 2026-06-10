@@ -173,7 +173,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
     private async signTransaction(
         base64WireTransaction: Base64EncodedWireTransaction,
     ): Promise<Base64EncodedWireTransaction> {
-        const url = `${this.apiBaseUrl}/wallets/${this.walletId}/rpc`;
+        const url = `${this.apiBaseUrl}/wallets/${encodeURIComponent(this.walletId)}/rpc`;
 
         const request: SignTransactionRequest = {
             chain_type: 'solana',
@@ -203,6 +203,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
                     ...authorizationHeaders,
                 },
                 method: 'POST',
+                redirect: 'error',
             });
         } catch (error) {
             throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -246,7 +247,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
      * @returns The signature bytes
      */
     private async signMessage(base64EncodedMessage: TransactionMessageBytesBase64): Promise<SignatureBytes> {
-        const url = `${this.apiBaseUrl}/wallets/${this.walletId}/rpc`;
+        const url = `${this.apiBaseUrl}/wallets/${encodeURIComponent(this.walletId)}/rpc`;
 
         const request: SignMessageRequest = {
             chain_type: 'solana',
@@ -276,6 +277,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
                     ...authorizationHeaders,
                 },
                 method: 'POST',
+                redirect: 'error',
             });
         } catch (error) {
             throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -444,7 +446,7 @@ async function fetchPublicKey<TAddress extends string = string>(config: {
     walletId: string;
 }): Promise<Address<TAddress>> {
     const apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
-    const url = `${apiBaseUrl}/wallets/${config.walletId}`;
+    const url = `${apiBaseUrl}/wallets/${encodeURIComponent(config.walletId)}`;
 
     let response: Response;
     try {
@@ -454,6 +456,7 @@ async function fetchPublicKey<TAddress extends string = string>(config: {
                 'privy-app-id': config.appId,
             },
             method: 'GET',
+            redirect: 'error',
         });
     } catch (error) {
         throwSignerError(SignerErrorCode.HTTP_ERROR, {

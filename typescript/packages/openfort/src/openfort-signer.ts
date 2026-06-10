@@ -161,7 +161,7 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
      */
     private async signBytes(message: Uint8Array): Promise<SignatureBytes> {
         const dataHex = `0x${getBase16Decoder().decode(message)}`;
-        const path = `${BACKEND_PATH}/${this.accountId}/sign`;
+        const path = `${BACKEND_PATH}/${encodeURIComponent(this.accountId)}/sign`;
         const url = `${this.baseUrl}${path}`;
         const body = { data: dataHex };
 
@@ -178,6 +178,7 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
                 body: JSON.stringify(body),
                 headers,
                 method: 'POST',
+                redirect: 'error',
             });
         } catch (error) {
             throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -394,7 +395,7 @@ async function fetchAddress<TAddress extends string = string>(config: {
     baseUrl: string;
     secretKey: string;
 }): Promise<Address<TAddress>> {
-    const url = `${config.baseUrl}${ACCOUNTS_PATH}/${config.accountId}`;
+    const url = `${config.baseUrl}${ACCOUNTS_PATH}/${encodeURIComponent(config.accountId)}`;
 
     let response: Response;
     try {
@@ -403,6 +404,7 @@ async function fetchAddress<TAddress extends string = string>(config: {
                 Authorization: `Bearer ${config.secretKey}`,
             },
             method: 'GET',
+            redirect: 'error',
         });
     } catch (error) {
         throwSignerError(SignerErrorCode.HTTP_ERROR, {

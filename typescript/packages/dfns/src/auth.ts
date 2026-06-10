@@ -41,6 +41,7 @@ export async function signUserAction(
                 'Content-Type': 'application/json',
             },
             method: 'POST',
+            redirect: 'error',
         });
     } catch (error) {
         throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -113,6 +114,7 @@ export async function signUserAction(
                 'Content-Type': 'application/json',
             },
             method: 'POST',
+            redirect: 'error',
         });
     } catch (error) {
         throwSignerError(SignerErrorCode.HTTP_ERROR, {

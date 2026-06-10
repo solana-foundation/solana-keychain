@@ -136,7 +136,7 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
             headers.set('content-type', 'application/json');
         }
 
-        return await fetch(url, { ...init, headers });
+        return await fetch(url, { ...init, headers, redirect: 'error' });
     }
 
     private async request<TResponse>(url: string, init: RequestInit): Promise<TResponse> {

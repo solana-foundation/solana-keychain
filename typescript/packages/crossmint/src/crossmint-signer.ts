@@ -7,6 +7,7 @@ import {
     createSignatureDictionary,
     createSignerError,
     ED25519_SIGNATURE_LENGTH,
+    sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -374,6 +375,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
                 body: body != null ? JSON.stringify(body) : undefined,
                 headers,
                 method,
+                redirect: 'error',
             });
         } catch (error) {
             throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -474,6 +476,7 @@ async function fetchWallet(
                 'X-API-KEY': apiKey,
             },
             method: 'GET',
+            redirect: 'error',
         });
     } catch (error) {
         throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -526,11 +529,11 @@ function parseTransactionResponse(payload: unknown, context: string): CrossmintT
 function extractApiErrorMessage(payload: unknown, fallback: string): string {
     if (payload && typeof payload === 'object') {
         const obj = payload as Record<string, unknown>;
-        if (typeof obj.message === 'string') return obj.message;
-        if (typeof obj.error === 'string') return obj.error;
+        if (typeof obj.message === 'string') return sanitizeRemoteErrorResponse(obj.message);
+        if (typeof obj.error === 'string') return sanitizeRemoteErrorResponse(obj.error);
         if (obj.error && typeof obj.error === 'object') {
             const errorObj = obj.error as Record<string, unknown>;
-            if (typeof errorObj.message === 'string') return errorObj.message;
+            if (typeof errorObj.message === 'string') return sanitizeRemoteErrorResponse(errorObj.message);
         }
     }
     return fallback;
@@ -598,16 +601,16 @@ function ed25519Sign(seed: Uint8Array, message: Uint8Array): Uint8Array {
 }
 
 function stringifyError(error: unknown): string {
-    if (typeof error === 'string') return error;
+    if (typeof error === 'string') return sanitizeRemoteErrorResponse(error);
     if (typeof error === 'number' || typeof error === 'boolean' || typeof error === 'bigint') {
         return String(error);
     }
     if (error instanceof Error) {
-        return error.message;
+        return sanitizeRemoteErrorResponse(error.message);
     }
     if (error == null) return 'unknown error';
     try {
-        return JSON.stringify(error);
+        return sanitizeRemoteErrorResponse(JSON.stringify(error));
     } catch {
         return 'unknown error';
     }

@@ -185,7 +185,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
      * Fetch the public key from Fireblocks API
      */
     private async fetchPublicKey(): Promise<Address> {
-        const uri = `/v1/vault/accounts/${this.vaultAccountId}/${this.assetId}/addresses_paginated`;
+        const uri = `/v1/vault/accounts/${encodeURIComponent(this.vaultAccountId)}/${encodeURIComponent(this.assetId)}/addresses_paginated`;
         const token = await createJwt(this.apiKey, this.privateKeyPem, uri, '');
 
         const url = `${this.apiBaseUrl}${uri}`;
@@ -197,6 +197,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                     'X-API-Key': this.apiKey,
                 },
                 method: 'GET',
+                redirect: 'error',
             });
         } catch (error) {
             throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -261,6 +262,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                     'X-API-Key': this.apiKey,
                 },
                 method,
+                redirect: 'error',
             });
         } catch (error) {
             throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -345,7 +347,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
      * Poll for transaction completion and extract a reusable signer-bound signature.
      */
     private async pollForSignature(transactionId: string): Promise<SignatureBytes> {
-        const uri = `/v1/transactions/${transactionId}`;
+        const uri = `/v1/transactions/${encodeURIComponent(transactionId)}`;
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
             const txResponse = await this.request<TransactionResponse>('GET', uri);
@@ -461,7 +463,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
      */
     async isAvailable(): Promise<boolean> {
         try {
-            const uri = `/v1/vault/accounts/${this.vaultAccountId}`;
+            const uri = `/v1/vault/accounts/${encodeURIComponent(this.vaultAccountId)}`;
             const token = await createJwt(this.apiKey, this.privateKeyPem, uri, '');
 
             const url = `${this.apiBaseUrl}${uri}`;
@@ -471,6 +473,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                     'X-API-Key': this.apiKey,
                 },
                 method: 'GET',
+                redirect: 'error',
             });
 
             return response.ok;

@@ -115,6 +115,7 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
                     'X-API-Key': config.apiKey,
                 },
                 method: 'GET',
+                redirect: 'error',
             });
         } catch (error) {
             return throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -178,6 +179,7 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
             const response = await fetch(url, {
                 headers: { 'X-API-Key': this.apiKey },
                 method: 'GET',
+                redirect: 'error',
                 signal: AbortSignal.timeout(5_000),
             });
 
@@ -258,6 +260,7 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
                     'X-API-Key': this.apiKey,
                 },
                 method: 'POST',
+                redirect: 'error',
             });
         } catch (error) {
             return throwSignerError(SignerErrorCode.HTTP_ERROR, {

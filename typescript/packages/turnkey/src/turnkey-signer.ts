@@ -195,6 +195,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                     [stamp.stampHeaderName]: stamp.stampHeaderValue,
                 },
                 method: 'POST',
+                redirect: 'error',
             });
         } catch (error) {
             throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -301,6 +302,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                     [stamp.stampHeaderName]: stamp.stampHeaderValue,
                 },
                 method: 'POST',
+                redirect: 'error',
             });
         } catch (error) {
             throwSignerError(SignerErrorCode.HTTP_ERROR, {
@@ -409,6 +411,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                     [stamp.stampHeaderName]: stamp.stampHeaderValue,
                 },
                 method: 'POST',
+                redirect: 'error',
             });
             if (!response.ok) {
                 return false;
