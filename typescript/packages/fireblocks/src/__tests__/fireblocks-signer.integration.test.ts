@@ -24,24 +24,20 @@ function hasRequiredEnvVars(): boolean {
 }
 
 describe('FireblocksSigner Integration', () => {
-    it.skipIf(!hasRequiredEnvVars())(
-        'fails closed for PROGRAM_CALL by rejecting at construction before any broadcast',
-        async () => {
-            await expect(
-                createFireblocksSigner({
-                    apiKey: process.env.FIREBLOCKS_API_KEY!,
-                    assetId: process.env.FIREBLOCKS_ASSET_ID ?? 'SOL_TEST',
-                    privateKeyPem: process.env.FIREBLOCKS_PRIVATE_KEY_PEM!,
-                    useProgramCall: true,
-                    vaultAccountId: process.env.FIREBLOCKS_VAULT_ACCOUNT_ID!,
-                }),
-            ).rejects.toMatchObject({
-                code: 'SIGNER_CONFIG_ERROR',
-                message: expect.stringContaining('useProgramCall'),
-            });
-        },
-        120_000,
-    );
+    it('fails closed for PROGRAM_CALL by rejecting at construction before any broadcast', async () => {
+        await expect(
+            createFireblocksSigner({
+                apiKey: 'test-api-key',
+                assetId: 'SOL_TEST',
+                privateKeyPem: 'test-private-key-pem',
+                useProgramCall: true,
+                vaultAccountId: '0',
+            }),
+        ).rejects.toMatchObject({
+            code: 'SIGNER_CONFIG_ERROR',
+            message: expect.stringContaining('useProgramCall'),
+        });
+    });
 
     // RAW signing not available on Fireblocks testnet/sandbox
     it.skip('signs messages with real API', () => {});
