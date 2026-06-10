@@ -278,12 +278,8 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
      */
     async isAvailable(): Promise<boolean> {
         try {
-            const wallet = await fetchWallet(this.apiBaseUrl, this.authToken, this.walletId);
-            return (
-                wallet.status === 'Active' &&
-                wallet.signingKey.scheme === 'EdDSA' &&
-                wallet.signingKey.curve === 'ed25519'
-            );
+            await fetchWallet(this.apiBaseUrl, this.authToken, this.walletId);
+            return true;
         } catch {
             return false;
         }

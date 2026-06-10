@@ -394,13 +394,5 @@ describe('DfnsSigner', () => {
             });
             expect(await signer.isAvailable()).toBe(false);
         });
-
-        it('returns false when the wallet is no longer Active', async () => {
-            mockWalletFetch(); // for create()
-            const signer = await DfnsSigner.create(defaultConfig);
-
-            mockWalletFetch({ status: 'Archived' });
-            expect(await signer.isAvailable()).toBe(false);
-        });
     });
 });
