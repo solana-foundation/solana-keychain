@@ -438,6 +438,26 @@ describe('TurnkeySigner', () => {
                 message: expect.stringContaining('Missing signature components'),
             });
         });
+
+        it('throws REMOTE_API_ERROR when a signature component is odd-length hex', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            const config = {
+                ...mockConfig,
+                publicKey: keyPair.address,
+            };
+
+            const signer = new TurnkeySigner(config);
+
+            setupMockSignResponse('abc', 'de');
+
+            const message = createSignableMessage(new Uint8Array([1, 2, 3, 4]));
+
+            await expect(signer.signMessages([message])).rejects.toMatchObject({
+                code: 'SIGNER_REMOTE_API_ERROR',
+                message: expect.stringContaining('odd-length hex'),
+            });
+        });
     });
 
     describe('signTransactions', () => {

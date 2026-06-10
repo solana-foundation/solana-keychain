@@ -144,8 +144,8 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
      */
     private padSignatureComponent(hex: string): Uint8Array {
         if (hex.length % 2 !== 0) {
-            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                message: `Invalid signature component: odd-length hex string (${hex.length} chars)`,
+            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+                message: `Invalid signature component from Turnkey API: odd-length hex string (${hex.length} chars)`,
             });
         }
         const hexToBytes = getBase16Encoder().encode;

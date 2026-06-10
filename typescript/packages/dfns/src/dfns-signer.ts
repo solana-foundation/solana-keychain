@@ -48,8 +48,8 @@ function hexToBytes(hex: string): Uint8Array {
     base16Encoder ||= getBase16Encoder();
     const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
     if (clean.length % 2 !== 0) {
-        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-            message: `Invalid hex string: odd length (${clean.length} chars)`,
+        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+            message: `Invalid hex string from Dfns API: odd length (${clean.length} chars)`,
         });
     }
     return new Uint8Array(base16Encoder.encode(clean));
