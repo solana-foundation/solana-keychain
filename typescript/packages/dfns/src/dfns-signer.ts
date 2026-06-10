@@ -284,7 +284,10 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
      * Send a signature request to the Dfns Keys API
      */
     private async sendSignatureRequest(request: GenerateSignatureRequest): Promise<SignatureBytes> {
-        const httpPath = `/keys/${encodeURIComponent(this.keyId)}/signatures`;
+        // keyId is server-issued (from the wallet response) and this path is signed into the
+        // Dfns user-action challenge, which must match the routed request path verbatim — so it
+        // is interpolated raw rather than percent-encoded.
+        const httpPath = `/keys/${this.keyId}/signatures`;
         const requestBody = JSON.stringify(request);
 
         const userAction = await signUserAction(

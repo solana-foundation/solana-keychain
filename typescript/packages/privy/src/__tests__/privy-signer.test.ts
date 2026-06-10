@@ -333,6 +333,7 @@ describe('PrivySigner', () => {
                     'privy-request-expiry': '1900000',
                 },
                 method: 'POST',
+                redirect: 'error',
             });
         });
 
