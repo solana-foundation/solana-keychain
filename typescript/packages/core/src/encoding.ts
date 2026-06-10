@@ -1,5 +1,7 @@
 import { getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
 
+import { SignerErrorCode, throwSignerError } from './errors.js';
+
 let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
 let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
 
@@ -10,6 +12,11 @@ let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
 export function base64UrlEncoder(value: string): Uint8Array {
     base64Encoder ||= getBase64Encoder();
     const m = value.length % 4;
+    if (m === 1) {
+        throwSignerError(SignerErrorCode.SERIALIZATION_ERROR, {
+            message: 'Invalid base64url string: length leaves a single trailing character with no valid padding',
+        });
+    }
     const base64Value = value
         .replace(/-/g, '+')
         .replace(/_/g, '/')

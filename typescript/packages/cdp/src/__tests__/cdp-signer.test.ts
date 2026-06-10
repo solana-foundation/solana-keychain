@@ -273,6 +273,18 @@ describe('CdpSigner', () => {
                 'CDP signMessage requires a valid UTF-8 message',
             );
         });
+
+        it('throws REMOTE_API_ERROR when the response is missing the signature field', async () => {
+            mockFetch.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+
+            const signer = await CdpSigner.create(makeConfig());
+            const message = { content: new TextEncoder().encode('hello'), signatures: {} };
+
+            await expect(signer.signMessages([message])).rejects.toMatchObject({
+                code: 'SIGNER_REMOTE_API_ERROR',
+                message: expect.stringContaining('Missing signature in CDP signMessage response'),
+            });
+        });
     });
 
     describe('signTransactions', () => {
@@ -318,6 +330,18 @@ describe('CdpSigner', () => {
             const mockTx = createMockTransaction();
 
             await expect(signer.signTransactions([mockTx])).rejects.toThrow('CDP signTransaction API error: 403');
+        });
+
+        it('throws REMOTE_API_ERROR when the response is missing the signedTransaction field', async () => {
+            mockFetch.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+
+            const signer = await CdpSigner.create(makeConfig());
+            const mockTx = createMockTransaction();
+
+            await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
+                code: 'SIGNER_REMOTE_API_ERROR',
+                message: expect.stringContaining('Missing signedTransaction in CDP signTransaction response'),
+            });
         });
     });
 

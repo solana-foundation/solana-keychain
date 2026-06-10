@@ -60,6 +60,42 @@ export async function assertSignatureValid({
     }
 }
 
+interface ExtractSignatureFromTransactionBytesOptions {
+    signerAddress: Address;
+    transactionBytes: ReadonlyUint8Array;
+}
+
+/**
+ * Extracts a specific signer's signature from decoded wire-transaction bytes.
+ * Useful for remote signers that return the signed transaction as raw bytes,
+ * avoiding a base64 encode/decode round-trip.
+ *
+ * @param transactionBytes - The serialized wire transaction
+ * @param signerAddress - The address of the signer whose signature to extract
+ * @returns SignatureDictionary with only the specified signer's signature
+ * @throws {SignerError} If no signature is found for the given address
+ */
+export function extractSignatureFromTransactionBytes({
+    signerAddress,
+    transactionBytes,
+}: ExtractSignatureFromTransactionBytesOptions): SignatureDictionary {
+    assertIsAddress(signerAddress);
+    const { signatures } = getTransactionDecoder().decode(transactionBytes);
+
+    const signature = signatures[signerAddress];
+    if (!signature) {
+        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            address: signerAddress,
+            message: `No signature found for address ${signerAddress}`,
+        });
+    }
+
+    return createSignatureDictionary({
+        signature,
+        signerAddress,
+    });
+}
+
 interface ExtractSignatureFromWireTransactionOptions {
     base64WireTransaction: Base64EncodedWireTransaction;
     signerAddress: Address;
@@ -85,23 +121,9 @@ export function extractSignatureFromWireTransaction({
     base64WireTransaction,
     signerAddress,
 }: ExtractSignatureFromWireTransactionOptions): SignatureDictionary {
-    assertIsAddress(signerAddress);
-    const encoder = getBase64Encoder();
-    const decoder = getTransactionDecoder();
-    const transactionBytes = encoder.encode(base64WireTransaction);
-    const { signatures } = decoder.decode(transactionBytes);
-
-    const signature = signatures[signerAddress];
-    if (!signature) {
-        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-            address: signerAddress,
-            message: `No signature found for address ${signerAddress}`,
-        });
-    }
-
-    return createSignatureDictionary({
-        signature,
+    return extractSignatureFromTransactionBytes({
         signerAddress,
+        transactionBytes: getBase64Encoder().encode(base64WireTransaction),
     });
 }
 

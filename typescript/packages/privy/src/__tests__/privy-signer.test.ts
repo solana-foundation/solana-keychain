@@ -125,10 +125,31 @@ describe('PrivySigner', () => {
             await expect(PrivySigner.create(mockConfig)).rejects.toThrow();
         });
 
-        it('throws error on invalid public key', async () => {
+        it('throws INVALID_PUBLIC_KEY (not a raw kit error) on invalid public key', async () => {
             setupMockWalletResponse('not-a-valid-address');
 
-            await expect(PrivySigner.create(mockConfig)).rejects.toThrow();
+            await expect(PrivySigner.create(mockConfig)).rejects.toMatchObject({
+                code: 'SIGNER_INVALID_PUBLIC_KEY',
+                message: expect.stringContaining('Invalid Solana address in Privy wallet response'),
+            });
+        });
+
+        it('throws REMOTE_API_ERROR when wallet chain_type is not solana', async () => {
+            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+                json: () =>
+                    Promise.resolve({
+                        address: '0x1234567890abcdef',
+                        chain_type: 'ethereum',
+                        id: mockConfig.walletId,
+                    }),
+                ok: true,
+                status: 200,
+            });
+
+            await expect(PrivySigner.create(mockConfig)).rejects.toMatchObject({
+                code: 'SIGNER_REMOTE_API_ERROR',
+                message: expect.stringContaining('Expected Solana wallet, got chain_type=ethereum'),
+            });
         });
 
         describe('config validation', () => {

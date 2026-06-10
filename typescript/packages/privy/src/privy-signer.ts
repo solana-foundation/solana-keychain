@@ -355,16 +355,9 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
                     base64WireTransaction: signedTx,
                     signerAddress: this.address,
                 });
-                const signatureBytes = Object.values(sigDict)[0];
-                if (!signatureBytes) {
-                    throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                        address: this.address,
-                        message: 'No signature bytes found in extracted signature dictionary',
-                    });
-                }
                 await assertSignatureValid({
                     data: transaction.messageBytes,
-                    signature: signatureBytes,
+                    signature: sigDict[this.address],
                     signerAddress: this.address,
                 });
                 return sigDict;
@@ -488,6 +481,19 @@ async function fetchPublicKey<TAddress extends string = string>(config: {
         });
     }
 
-    assertIsAddress(walletInfo.address);
+    if (walletInfo.chain_type !== 'solana') {
+        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+            message: `Expected Solana wallet, got chain_type=${walletInfo.chain_type}`,
+        });
+    }
+
+    try {
+        assertIsAddress(walletInfo.address);
+    } catch (error) {
+        throwSignerError(SignerErrorCode.INVALID_PUBLIC_KEY, {
+            cause: error,
+            message: 'Invalid Solana address in Privy wallet response',
+        });
+    }
     return walletInfo.address;
 }

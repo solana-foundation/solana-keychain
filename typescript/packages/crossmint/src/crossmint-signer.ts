@@ -1,5 +1,3 @@
-import { createPrivateKey, createPublicKey, hkdfSync, sign as cryptoSign } from 'node:crypto';
-
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Encoder, getBase58Decoder, getBase58Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
@@ -144,10 +142,10 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         let signerSeed: Uint8Array | undefined;
         let signer = config.signer;
         if (config.signerSecret) {
-            signerSeed = deriveSignerSeed(config.signerSecret, config.apiKey);
+            signerSeed = await deriveSignerSeed(config.signerSecret, config.apiKey);
             if (!signer) {
                 base58Decoder ||= getBase58Decoder();
-                signer = `server:${base58Decoder.decode(ed25519PublicKeyFromSeed(signerSeed))}`;
+                signer = `server:${base58Decoder.decode(await ed25519PublicKeyFromSeed(signerSeed))}`;
             }
         }
 
@@ -232,14 +230,15 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         let approvalSubmitted = false;
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
+            const pending = this.findPendingApprovalForSigner(response);
             if (
                 response.status === 'awaiting-approval' &&
                 this.signerSeed &&
                 this.signer &&
                 !approvalSubmitted &&
-                this.findPendingApprovalForSigner(response) !== undefined
+                pending !== undefined
             ) {
-                response = await this.submitApproval(response);
+                response = await this.submitApproval(response, pending);
                 approvalSubmitted = true;
                 // Re-evaluate the new status immediately; the approvalSubmitted
                 // guard prevents this branch from re-running, so we cannot
@@ -302,15 +301,10 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         return response.approvals?.pending?.find(entry => entry.signer?.locator === this.signer);
     }
 
-    private async submitApproval(response: CrossmintTransactionResponse): Promise<CrossmintTransactionResponse> {
-        const pending = this.findPendingApprovalForSigner(response);
-        // Nothing pending for us: do not sign another approver's challenge.
-        // Return the response unchanged so the caller falls through to
-        // resolveTerminalStatus (which surfaces the awaiting-approval error).
-        if (!pending) {
-            return response;
-        }
-
+    private async submitApproval(
+        response: CrossmintTransactionResponse,
+        pending: { message?: string; signer?: { locator?: string } },
+    ): Promise<CrossmintTransactionResponse> {
         const message = pending.message;
         if (!message) {
             throwSignerError(SignerErrorCode.SIGNING_FAILED, {
@@ -320,7 +314,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
 
         base58Encoder ||= getBase58Encoder();
         const messageBytes = new Uint8Array(base58Encoder.encode(message));
-        const signatureBytes = ed25519Sign(this.signerSeed!, messageBytes);
+        const signatureBytes = await ed25519Sign(this.signerSeed!, messageBytes);
 
         base58Decoder ||= getBase58Decoder();
         const signatureB58 = base58Decoder.decode(signatureBytes);
@@ -551,7 +545,8 @@ const PKCS8_ED25519_PREFIX = new Uint8Array([
     0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
 ]);
 
-function deriveSignerSeed(secret: string, apiKey: string): Uint8Array {
+async function deriveSignerSeed(secret: string, apiKey: string): Promise<Uint8Array> {
+    const { hkdfSync } = await import('node:crypto');
     const rawSecret = secret.startsWith('xmsk1_') ? secret.slice(6) : secret;
     if (rawSecret.length !== 64) {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
@@ -578,7 +573,8 @@ function buildPkcs8Der(seed: Uint8Array): Buffer {
     return Buffer.concat([PKCS8_ED25519_PREFIX, seed]);
 }
 
-function ed25519PublicKeyFromSeed(seed: Uint8Array): Uint8Array {
+async function ed25519PublicKeyFromSeed(seed: Uint8Array): Promise<Uint8Array> {
+    const { createPrivateKey, createPublicKey } = await import('node:crypto');
     const privateKey = createPrivateKey({
         format: 'der',
         key: buildPkcs8Der(seed),
@@ -588,7 +584,8 @@ function ed25519PublicKeyFromSeed(seed: Uint8Array): Uint8Array {
     return new Uint8Array(spki.slice(-32));
 }
 
-function ed25519Sign(seed: Uint8Array, message: Uint8Array): Uint8Array {
+async function ed25519Sign(seed: Uint8Array, message: Uint8Array): Promise<Uint8Array> {
+    const { createPrivateKey, sign: cryptoSign } = await import('node:crypto');
     const privateKey = createPrivateKey({
         format: 'der',
         key: buildPkcs8Der(seed),

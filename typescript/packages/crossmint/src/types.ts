@@ -3,6 +3,12 @@ export interface CrossmintSignerConfig {
     apiKey: string;
     maxPollAttempts?: number;
     pollIntervalMs?: number;
+    /**
+     * Delay in ms applied before each transaction after the first. Transactions
+     * are signed sequentially (not concurrently) because Crossmint creates and
+     * may execute each one server-side, so the wall-clock cost is the sum of the
+     * per-transaction delays plus signing time. Default: 0 (no delay).
+     */
     requestDelayMs?: number;
     signer?: string;
     /** Server signer secret (`xmsk1_<64hex>`). When set, automatically signs awaiting-approval transactions. */

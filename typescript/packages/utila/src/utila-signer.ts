@@ -240,16 +240,9 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
             base64WireTransaction: rawSignedTransaction as Base64EncodedWireTransaction,
             signerAddress: this.address,
         });
-        const signatureBytes = Object.values(sigDict)[0];
-        if (!signatureBytes) {
-            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                address: this.address,
-                message: 'No signature bytes found in extracted signature dictionary',
-            });
-        }
         await assertSignatureValid({
             data: transaction.messageBytes,
-            signature: signatureBytes,
+            signature: sigDict[this.address],
             signerAddress: this.address,
         });
         return sigDict;

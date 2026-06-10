@@ -47,6 +47,11 @@ let base58Decoder: ReturnType<typeof getBase58Decoder> | undefined;
 function hexToBytes(hex: string): Uint8Array {
     base16Encoder ||= getBase16Encoder();
     const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+    if (clean.length % 2 !== 0) {
+        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            message: `Invalid hex string: odd length (${clean.length} chars)`,
+        });
+    }
     return new Uint8Array(base16Encoder.encode(clean));
 }
 
@@ -273,8 +278,12 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
      */
     async isAvailable(): Promise<boolean> {
         try {
-            await fetchWallet(this.apiBaseUrl, this.authToken, this.walletId);
-            return true;
+            const wallet = await fetchWallet(this.apiBaseUrl, this.authToken, this.walletId);
+            return (
+                wallet.status === 'Active' &&
+                wallet.signingKey.scheme === 'EdDSA' &&
+                wallet.signingKey.curve === 'ed25519'
+            );
         } catch {
             return false;
         }

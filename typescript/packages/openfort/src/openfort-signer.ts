@@ -36,6 +36,7 @@ const DEFAULT_BASE_URL = 'https://api.openfort.io';
 const ACCOUNTS_PATH = '/v2/accounts';
 const BACKEND_PATH = '/v2/accounts/backend';
 const JWT_LIFETIME_SECS = 120;
+const JWT_SKEW_LEEWAY_SECS = 60;
 
 /**
  * Openfort backend wallet signer.
@@ -321,11 +322,12 @@ async function createWalletJwt(
     body: unknown,
 ): Promise<string> {
     const now = Math.floor(Date.now() / 1000);
+    const issuedAt = now - JWT_SKEW_LEEWAY_SECS;
     const payload: Record<string, unknown> = {
         exp: now + JWT_LIFETIME_SECS,
-        iat: now,
+        iat: issuedAt,
         jti: globalThis.crypto.randomUUID(),
-        nbf: now,
+        nbf: issuedAt,
         reqHash: await computeReqHash(body),
         uris: [`${method} ${host}${path}`],
     };

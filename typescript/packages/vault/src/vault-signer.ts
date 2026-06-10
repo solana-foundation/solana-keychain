@@ -300,7 +300,7 @@ function validateHttpsVaultAddr(vaultAddr: string): void {
     }
 
     const isLocalhost =
-        parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1' || parsedUrl.hostname === '::1';
+        parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1' || parsedUrl.hostname === '[::1]';
     const allowHttpInTests = process.env.NODE_ENV === 'test' && isLocalhost;
 
     if (parsedUrl.protocol !== 'https:' && !allowHttpInTests) {
