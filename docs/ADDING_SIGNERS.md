@@ -554,7 +554,7 @@ CI is a two-phase process. Coordinate with maintainers to prepare `main` before 
 - [ ] Sanitize remote API error text with `sanitizeRemoteErrorResponse()`
 - [ ] Unit tests with vitest + mocks
 - [ ] Integration tests using `runSignerIntegrationTest` + `setup.ts`
-- [ ] Update umbrella package `typescript/packages/keychain/` (see [Umbrella Package](#umbrella-package) — 6 files)
+- [ ] Update umbrella package `typescript/packages/keychain/` (see [Umbrella Package](#umbrella-package) — 7 files)
 - [ ] README with `createXSigner()` as primary usage
 - [ ] `.env.example` with required env vars
 - [ ] CI updates (`typescript-ci.yml`, `typescript-publish.yml`)
@@ -788,7 +788,7 @@ describe('YourSigner Integration', () => {
 
 ### Umbrella Package
 
-Update `typescript/packages/keychain/` to register your signer in the unified factory. There are 6 files to modify:
+Update `typescript/packages/keychain/` to register your signer in the unified factory. There are 7 files to modify:
 
 **a) `keychain/src/types.ts`** — add your config to the discriminated union:
 
@@ -853,7 +853,9 @@ export { YourSigner } from '@solana/keychain-your-signer';
 { "path": "../your-signer" }
 ```
 
-> **Note:** The `createSigner()` and `resolveAddress()` switch statements have exhaustive `never` checks — TypeScript will emit a compile error if you add your config to the union but forget to handle it in the switch.
+> **Note:** The `createSigner()` and `resolveAddress()` switch statements have exhaustive `never` checks — TypeScript will emit a compile error if you add your config to the union but forget to handle it in the switch. The umbrella test tables are typed `satisfies Record<BackendName, …>`, so typecheck also fails until your backend is covered there.
+
+**g) `typescript/scripts/test-treeshake-umbrella.mjs`** — add your package to `SIGNER_MARKERS` (two distinctive strings that appear in your built `dist/` output — verify with grep before picking them) and your factory to the `FACTORIES` list. Without this, your backend leaking into other factories' bundles goes undetected.
 
 ### README
 
@@ -964,7 +966,7 @@ Before submitting your PR:
 - [ ] Added to README.md supported backends table
 - [ ] CI changes included
 - [ ] TypeScript package with unit + integration tests
-- [ ] Umbrella package updated (6 files — see [Umbrella Package](#umbrella-package))
+- [ ] Umbrella package updated (7 files — see [Umbrella Package](#umbrella-package))
 - [ ] Coordinated with maintainers on Phase 1 CI preparation
 
 ## Implementation Tips

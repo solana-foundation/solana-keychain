@@ -20,7 +20,7 @@ Orchestrate adding a new signing backend to solana-keychain. Delegate to existin
 - **Trait definition (source of truth)**: `rust/src/traits.rs`
 - **Shared HTTP config**: `rust/src/http_client_config.rs`
 - **Transaction utilities**: `rust/src/transaction_util.rs`
-- **Unified TS factory**: `typescript/packages/keychain/src/create-signer.ts`
+- **Unified TS factory**: `typescript/packages/keychain/src/create-keychain-signer.ts`
 - **TS address resolver**: `typescript/packages/keychain/src/resolve-address.ts`
 - **TS config union**: `typescript/packages/keychain/src/types.ts`
 
@@ -163,15 +163,17 @@ Also create: `package.json`, `tsconfig.json`, `README.md`
 
 ### Update Umbrella Package: `typescript/packages/keychain/`
 
-6 files to modify:
+7 files to modify:
 - `src/types.ts` — Add `YourSignerConfig` to `KeychainSignerConfig` discriminated union with `& { backend: '<name>' }`
-- `src/create-keychain-signer.ts` — Import `create<Name>Signer`, add switch case
+- `src/create-keychain-signer.ts` — Add a switch case with a dynamic `await import('@solana/keychain-<name>')` (match the existing cases — no static import; the dispatcher must stay backend-free for tree-shaking)
 - `src/resolve-address.ts` — Add to fast-path (if config has publicKey) or fetch-path (if async init) switch case
 - `src/index.ts` — Add 4 export lines: config type, namespace, factory fn, deprecated class
 - `package.json` — Add `@solana/keychain-<name>: "workspace:*"` dependency
 - `tsconfig.json` — Add `{ "path": "../<name>" }` reference
 
-The switch statements have exhaustive `never` checks — TypeScript will error if you add to the union but miss a case.
+The switch statements have exhaustive `never` checks — TypeScript will error if you add to the union but miss a case. The umbrella dispatch test tables and `resolve-address` test map are typed `satisfies Record<BackendName, …>`, so typecheck also fails until you add your backend there.
+
+Also update `typescript/scripts/test-treeshake-umbrella.mjs`: add your package to `SIGNER_MARKERS` (two distinctive strings that appear in your built `dist/` — verify with grep) and your factory to `FACTORIES`. Without this, leakage of your backend into other bundles is undetectable.
 
 ### Key TS Patterns
 
@@ -179,10 +181,11 @@ The switch statements have exhaustive `never` checks — TypeScript will error i
 - Class has `static async create()` method
 - Private constructor
 - Use `throwSignerError(SignerErrorCode.*, { cause, message })` from `@solana/keychain-core`
-- Wrap all `fetch()` calls in try/catch
-- Validate `apiBaseUrl` uses HTTPS: `new URL(url).protocol !== 'https:'` → throw `CONFIG_ERROR`
-- Sanitize remote error text: `sanitizeRemoteErrorResponse()` from `@solana/keychain-core`
-- Guard against malformed JSON: property access inside try/catch or use `?.`
+- Remote API calls go through `fetchSignerJson()` from `@solana/keychain-core` — never call `fetch()` directly. It owns the error pipeline (HTTP_ERROR / REMOTE_API_ERROR + sanitization / PARSING_ERROR), redirect rejection, and a default 60s timeout
+- Validate `apiBaseUrl` with `assertHttpsUrl(url, 'apiBaseUrl')` from core (returns the parsed URL); normalize first with `normalizeBaseUrl()` if the backend accepts trailing slashes
+- Support `requestDelayMs`: validate with `validateRequestDelayMs()`, batch with `signBatchStaggered()` from core
+- One-time crypto at construction: import/validate static key material (PEM parsing, `importPKCS8`, point decompression) once in `create()`/`init()` and store the result — only genuinely request-bound work (e.g. per-request JWT minting) belongs in the request path
+- Validate provider-specific response shape after `fetchSignerJson()` with `?.` guards
 - Add `@throws` JSDoc to factory functions listing error codes
 
 ## Step 5: Environment & Docs

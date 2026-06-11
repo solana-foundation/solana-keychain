@@ -100,7 +100,7 @@ cd typescript && pnpm typecheck                                    # workspace-w
 - **Async factory pattern:** each package exports `async createXSigner(config)` returning a ready-to-use `SolanaSigner` (the factory awaits any `init()` internally — TS parity with Rust's `Signer::from_*`). The umbrella `@solana/keychain` exports `createKeychainSigner({ backend, ...config })` that dispatches to the per-backend factory.
 - **Package naming:** `@solana/keychain-<backend>` (e.g. `@solana/keychain-privy`, `@solana/keychain-aws-kms`).
 
-See [typescript/README.md](typescript/README.md) for the full package list and usage. When adding a backend, follow [docs/ADDING_SIGNERS.md](docs/ADDING_SIGNERS.md) — the umbrella package needs updates in 6 places.
+See [typescript/README.md](typescript/README.md) for the full package list and usage. When adding a backend, follow [docs/ADDING_SIGNERS.md](docs/ADDING_SIGNERS.md) — the umbrella package needs updates in 7 places (including the treeshake script).
 
 ### Gotchas
 
