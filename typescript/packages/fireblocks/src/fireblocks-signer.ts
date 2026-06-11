@@ -66,7 +66,7 @@ const DEFAULT_MAX_POLL_ATTEMPTS = 60;
  */
 export class FireblocksSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     private _address: Address<TAddress> | null = null;
-    private privateKey: CryptoKey | null = null;
+    private privateKeyPromise: Promise<CryptoKey> | null = null;
     private readonly apiKey: string;
     private readonly privateKeyPem: string;
     private readonly vaultAccountId: string;
@@ -163,11 +163,13 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
 
     /**
      * Get the imported RSA signing key, importing it from the configured PEM
-     * on first use and caching it for all subsequent JWT mints.
+     * on first use and caching it for all subsequent JWT mints. The pending
+     * promise is cached (not the resolved key) so concurrent callers share a
+     * single import.
      */
-    private async getPrivateKey(): Promise<CryptoKey> {
-        this.privateKey ??= await importFireblocksPrivateKey(this.privateKeyPem);
-        return this.privateKey;
+    private getPrivateKey(): Promise<CryptoKey> {
+        this.privateKeyPromise ??= importFireblocksPrivateKey(this.privateKeyPem);
+        return this.privateKeyPromise;
     }
 
     /**

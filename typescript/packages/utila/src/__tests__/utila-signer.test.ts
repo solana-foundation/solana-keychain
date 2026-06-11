@@ -381,6 +381,37 @@ describe('UtilaSigner', () => {
             expect(signSpy).toHaveBeenCalledTimes(1);
         });
 
+        it('shares one mint between concurrent requests', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
+            const signer = await createUtilaSigner(mockConfig);
+
+            const signSpy = vi.spyOn(SignJWT.prototype, 'sign');
+            signSpy.mockClear();
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(signedTransactionResponse())
+                .mockResolvedValueOnce(signedTransactionResponse());
+
+            await Promise.all([
+                signer.signTransactions([createMockTransaction()]),
+                signer.signTransactions([createMockTransaction()]),
+            ]);
+
+            expect(signSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it('retries the mint after a failed mint', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
+            const signer = await createUtilaSigner(mockConfig);
+
+            const signSpy = vi.spyOn(SignJWT.prototype, 'sign').mockRejectedValueOnce(new Error('crypto unavailable'));
+            signSpy.mockClear();
+            vi.mocked(fetch).mockResolvedValueOnce(signedTransactionResponse());
+
+            await expect(signer.signTransactions([createMockTransaction()])).rejects.toThrow();
+            await expect(signer.signTransactions([createMockTransaction()])).resolves.toBeDefined();
+            expect(signSpy).toHaveBeenCalledTimes(2);
+        });
+
         it('re-mints the access token when the cached token is near expiry', async () => {
             vi.useFakeTimers();
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());

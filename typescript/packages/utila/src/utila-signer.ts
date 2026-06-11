@@ -103,7 +103,7 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
     private readonly serviceAccountPrivateKey: ImportedPrivateKey;
     private readonly vaultId: string;
     private readonly walletId: string;
-    private accessToken: { expiresAtMs: number; token: string } | null = null;
+    private accessToken: { expiresAtMs: number; tokenPromise: Promise<string> } | null = null;
 
     static async create<TAddress extends string = string>(config: UtilaSignerConfig): Promise<UtilaSigner<TAddress>> {
         validateRequired('serviceAccountEmail', config.serviceAccountEmail);
@@ -332,14 +332,24 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
     /**
      * Return a valid service-account access token, minting a new one only when
      * there is no cached token or the cached token is within
-     * {@link TOKEN_REFRESH_MARGIN_MS} of expiry.
+     * {@link TOKEN_REFRESH_MARGIN_MS} of expiry. The pending mint promise is
+     * cached (not the resolved token) so concurrent callers share one mint;
+     * a failed mint evicts itself so the next call retries.
      */
-    private async getAccessToken(): Promise<string> {
+    private getAccessToken(): Promise<string> {
         if (!this.accessToken || Date.now() >= this.accessToken.expiresAtMs - TOKEN_REFRESH_MARGIN_MS) {
-            const token = await createUtilaAccessToken(this.serviceAccountEmail, this.serviceAccountPrivateKey);
-            this.accessToken = { expiresAtMs: Date.now() + TOKEN_TTL_MS, token };
+            const entry = {
+                expiresAtMs: Date.now() + TOKEN_TTL_MS,
+                tokenPromise: createUtilaAccessToken(this.serviceAccountEmail, this.serviceAccountPrivateKey),
+            };
+            this.accessToken = entry;
+            entry.tokenPromise.catch(() => {
+                if (this.accessToken === entry) {
+                    this.accessToken = null;
+                }
+            });
         }
-        return this.accessToken.token;
+        return this.accessToken.tokenPromise;
     }
 
     private async request<T>(path: string, method: 'GET' | 'POST', body?: unknown): Promise<T> {
