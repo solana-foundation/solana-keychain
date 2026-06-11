@@ -5,6 +5,7 @@ import {
     createSignerError,
     extractSignatureFromWireTransaction,
     fetchSignerJson,
+    normalizeBaseUrl,
     normalizePrivateKeyPem,
     signBatchStaggered,
     SignerErrorCode,
@@ -418,10 +419,6 @@ function validateRequired(field: string, value: string | undefined): void {
             message: `Missing required ${field} field`,
         });
     }
-}
-
-function normalizeBaseUrl(baseUrl: string): string {
-    return baseUrl.replace(/\/+$/, '');
 }
 
 function trimResourcePrefix(value: string, prefix: string): string {

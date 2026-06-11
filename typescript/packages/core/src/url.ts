@@ -2,6 +2,14 @@ import { SignerErrorCode, throwSignerError } from './errors.js';
 
 const LOOPBACK_HOSTNAMES = ['localhost', '127.0.0.1', '[::1]'];
 
+/**
+ * Normalize a configured base URL: trims surrounding whitespace and strips
+ * all trailing slashes, so paths can be appended with a single `/`.
+ */
+export function normalizeBaseUrl(baseUrl: string): string {
+    return baseUrl.trim().replace(/\/+$/, '');
+}
+
 export interface AssertHttpsUrlOptions {
     /**
      * Permit plain-HTTP loopback URLs (localhost / 127.0.0.1 / [::1]) when

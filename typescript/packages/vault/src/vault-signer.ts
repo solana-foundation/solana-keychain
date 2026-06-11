@@ -5,6 +5,7 @@ import {
     assertSignatureValid,
     createSignatureDictionary,
     fetchSignerJson,
+    normalizeBaseUrl,
     signBatchStaggered,
     SignerErrorCode,
     SolanaSigner,
@@ -86,7 +87,7 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
             });
         }
 
-        const vaultAddr = config.vaultAddr.replace(/\/$/, ''); // Remove trailing slash
+        const vaultAddr = normalizeBaseUrl(config.vaultAddr);
         assertHttpsUrl(vaultAddr, 'vaultAddr', { allowHttpLoopbackInTests: true });
 
         this.vaultAddr = vaultAddr;

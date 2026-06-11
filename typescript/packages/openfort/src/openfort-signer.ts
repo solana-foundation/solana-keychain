@@ -7,6 +7,7 @@ import {
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
+    normalizeBaseUrl,
     signBatchStaggered,
     SignerErrorCode,
     SolanaSigner,
@@ -117,7 +118,7 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
             });
         }
 
-        const baseUrl = (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
+        const baseUrl = normalizeBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL);
         const parsedBaseUrl = assertHttpsUrl(baseUrl, 'baseUrl');
         const apiHost = parsedBaseUrl.host;
 

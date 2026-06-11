@@ -8,6 +8,7 @@ import {
     ED25519_SIGNATURE_LENGTH,
     extractSignatureFromWireTransaction,
     fetchSignerJson,
+    normalizeBaseUrl,
     signBatchStaggered,
     SignerErrorCode,
     SolanaSigner,
@@ -279,7 +280,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
             });
         }
 
-        const baseUrl = normalizeBaseUrl(config.baseUrl ?? CDP_DEFAULT_BASE_URL);
+        const baseUrl = normalizePlatformBaseUrl(config.baseUrl ?? CDP_DEFAULT_BASE_URL);
         const parsedBaseUrl = assertHttpsUrl(baseUrl, 'baseUrl');
         const apiHost = parsedBaseUrl.host;
 
@@ -476,17 +477,14 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
     }
 }
 
-function normalizeBaseUrl(baseUrl: string): string {
+function normalizePlatformBaseUrl(baseUrl: string): string {
     let normalized = baseUrl.trim();
     if (normalized.endsWith('/platform')) {
         normalized = normalized.slice(0, -'/platform'.length);
     } else if (normalized.endsWith('/platform/')) {
         normalized = normalized.slice(0, -'/platform/'.length);
     }
-    if (normalized.endsWith('/')) {
-        normalized = normalized.slice(0, -1);
-    }
-    return normalized;
+    return normalizeBaseUrl(normalized);
 }
 
 function shouldIncludeReqHash(body: unknown): boolean {

@@ -1,8 +1,17 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { assertHttpsUrl } from '../url.js';
+import { assertHttpsUrl, normalizeBaseUrl } from '../url.js';
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+
+describe('normalizeBaseUrl', () => {
+    it('strips all trailing slashes and surrounding whitespace', () => {
+        expect(normalizeBaseUrl('https://x.com/')).toBe('https://x.com');
+        expect(normalizeBaseUrl('https://x.com//')).toBe('https://x.com');
+        expect(normalizeBaseUrl('  https://x.com/base/ ')).toBe('https://x.com/base');
+        expect(normalizeBaseUrl('https://x.com')).toBe('https://x.com');
+    });
+});
 
 describe('assertHttpsUrl', () => {
     afterEach(() => {

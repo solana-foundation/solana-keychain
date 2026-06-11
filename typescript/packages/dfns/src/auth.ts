@@ -313,8 +313,7 @@ async function importWithNodeCrypto(privateKeyPem: string): Promise<DfnsCredenti
     };
 }
 
-function pemToDer(privateKeyPem: string): Uint8Array {
-    const normalizedPem = normalizePrivateKeyPem(privateKeyPem);
+function pemToDer(normalizedPem: string): Uint8Array {
     const pemBody = normalizedPem
         .replace(/-----BEGIN [^-]+-----/g, '')
         .replace(/-----END [^-]+-----/g, '')

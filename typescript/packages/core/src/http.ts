@@ -33,9 +33,9 @@ export async function fetchSignerJson<TResponse>(options: FetchSignerJsonOptions
     let response: Response;
     try {
         response = await fetch(url, {
-            redirect: 'error',
-            signal: AbortSignal.timeout(timeoutMs),
             ...init,
+            redirect: 'error',
+            signal: init.signal ?? AbortSignal.timeout(timeoutMs),
         });
     } catch (error) {
         throwSignerError(SignerErrorCode.HTTP_ERROR, {

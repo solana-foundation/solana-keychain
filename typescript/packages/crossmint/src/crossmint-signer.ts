@@ -7,6 +7,7 @@ import {
     createSignerError,
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
+    normalizeBaseUrl,
     sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
@@ -406,10 +407,6 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         });
         return signature;
     }
-}
-
-function normalizeBaseUrl(baseUrl: string): string {
-    return baseUrl.replace(/\/+$/, '');
 }
 
 async function fetchWallet(
