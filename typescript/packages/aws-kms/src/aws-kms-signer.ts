@@ -4,9 +4,11 @@ import {
     assertSignatureValid,
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
+    signBatchStaggered,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -79,7 +81,7 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
 
         this.keyId = config.keyId;
         this.requestDelayMs = config.requestDelayMs || 0;
-        this.validateRequestDelayMs(this.requestDelayMs);
+        validateRequestDelayMs(this.requestDelayMs);
 
         // Create AWS KMS client
         const clientConfig: {
@@ -96,31 +98,6 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
         }
 
         this.client = new KMSClient(clientConfig);
-    }
-
-    /**
-     * Validate request delay ms
-     */
-    private validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
-    }
-
-    /**
-     * Add delay between concurrent requests
-     */
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
     }
 
     /**
@@ -176,9 +153,9 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
      * Sign multiple messages using AWS KMS
      */
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            messages,
+            async message => {
                 const messageBytes =
                     message.content instanceof Uint8Array
                         ? message.content
@@ -193,7 +170,8 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -203,9 +181,9 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            transactions,
+            async transaction => {
                 // Sign the transaction message bytes
                 const txMessageBytes = new Uint8Array(transaction.messageBytes);
                 const signatureBytes = await this.signBytes(txMessageBytes);
@@ -218,7 +196,8 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 

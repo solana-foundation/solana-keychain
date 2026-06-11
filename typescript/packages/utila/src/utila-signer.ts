@@ -1,13 +1,16 @@
 import { type Address, assertIsAddress } from '@solana/addresses';
 import {
+    assertHttpsUrl,
     assertSignatureValid,
     createSignerError,
     extractSignatureFromWireTransaction,
+    fetchSignerJson,
     normalizePrivateKeyPem,
-    sanitizeRemoteErrorResponse,
+    signBatchStaggered,
     SignerErrorCode,
     type SolanaSigner,
     throwSignerError,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import type { SignableMessage, SignatureDictionary } from '@solana/signers';
 import {
@@ -33,7 +36,11 @@ const DEFAULT_API_BASE_URL = 'https://api.utila.io';
 const UTILA_API_AUDIENCE = 'https://api.utila.io/';
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 60;
-const TOKEN_TTL = '55m';
+const TOKEN_TTL_MINUTES = 55;
+const TOKEN_TTL = `${TOKEN_TTL_MINUTES}m`;
+const TOKEN_TTL_MS = TOKEN_TTL_MINUTES * 60 * 1000;
+/** Re-mint the cached access token when it is within this window of expiry. */
+const TOKEN_REFRESH_MARGIN_MS = 60_000;
 
 const TERMINAL_FAILURE_STATES = new Set([
     'DECLINED_BY_AML_POLICY',
@@ -90,10 +97,12 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
     private readonly maxPollAttempts: number;
     private readonly network: string;
     private readonly pollIntervalMs: number;
+    private readonly requestDelayMs: number;
     private readonly serviceAccountEmail: string;
     private readonly serviceAccountPrivateKey: ImportedPrivateKey;
     private readonly vaultId: string;
     private readonly walletId: string;
+    private accessToken: { expiresAtMs: number; token: string } | null = null;
 
     static async create<TAddress extends string = string>(config: UtilaSignerConfig): Promise<UtilaSigner<TAddress>> {
         validateRequired('serviceAccountEmail', config.serviceAccountEmail);
@@ -103,7 +112,10 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
         validateRequired('network', config.network);
 
         const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl ?? DEFAULT_API_BASE_URL);
-        validateHttpsApiBaseUrl(apiBaseUrl);
+        assertHttpsUrl(apiBaseUrl, 'apiBaseUrl');
+
+        const requestDelayMs = config.requestDelayMs ?? 0;
+        validateRequestDelayMs(requestDelayMs);
 
         const pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
         if (pollIntervalMs <= 0) {
@@ -164,6 +176,7 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
             network: config.network,
             pollIntervalMs,
             privateKey,
+            requestDelayMs,
             serviceAccountEmail: config.serviceAccountEmail,
             vaultId,
             walletId,
@@ -178,6 +191,7 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
         network: string;
         pollIntervalMs: number;
         privateKey: ImportedPrivateKey;
+        requestDelayMs: number;
         serviceAccountEmail: string;
         vaultId: string;
         walletId: string;
@@ -188,6 +202,7 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
         this.maxPollAttempts = config.maxPollAttempts;
         this.network = config.network;
         this.pollIntervalMs = config.pollIntervalMs;
+        this.requestDelayMs = config.requestDelayMs;
         this.serviceAccountEmail = config.serviceAccountEmail;
         this.serviceAccountPrivateKey = config.privateKey;
         this.vaultId = config.vaultId;
@@ -205,7 +220,11 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(transactions.map(transaction => this.signTransactionWithUtila(transaction)));
+        return await signBatchStaggered(
+            transactions,
+            transaction => this.signTransactionWithUtila(transaction),
+            this.requestDelayMs,
+        );
     }
 
     async isAvailable(): Promise<boolean> {
@@ -309,9 +328,22 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
         });
     }
 
+    /**
+     * Return a valid service-account access token, minting a new one only when
+     * there is no cached token or the cached token is within
+     * {@link TOKEN_REFRESH_MARGIN_MS} of expiry.
+     */
+    private async getAccessToken(): Promise<string> {
+        if (!this.accessToken || Date.now() >= this.accessToken.expiresAtMs - TOKEN_REFRESH_MARGIN_MS) {
+            const token = await createUtilaAccessToken(this.serviceAccountEmail, this.serviceAccountPrivateKey);
+            this.accessToken = { expiresAtMs: Date.now() + TOKEN_TTL_MS, token };
+        }
+        return this.accessToken.token;
+    }
+
     private async request<T>(path: string, method: 'GET' | 'POST', body?: unknown): Promise<T> {
         const url = `${this.apiBaseUrl}${path}`;
-        const token = await createUtilaAccessToken(this.serviceAccountEmail, this.serviceAccountPrivateKey);
+        const token = await this.getAccessToken();
         const headers: Record<string, string> = {
             Authorization: `Bearer ${token}`,
         };
@@ -319,39 +351,15 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
             headers['Content-Type'] = 'application/json';
         }
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        return await fetchSignerJson<T>({
+            init: {
                 body: body != null ? JSON.stringify(body) : undefined,
                 headers,
                 method,
-                redirect: 'error',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Utila network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Utila API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        try {
-            return (await response.json()) as T;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Utila response',
-            });
-        }
+            },
+            providerName: 'Utila',
+            url,
+        });
     }
 }
 
@@ -371,40 +379,16 @@ async function fetchWallet({
     const url = `${apiBaseUrl}/v2/vaults/${encodeURIComponent(vaultId)}/wallets/${encodeURIComponent(walletId)}`;
     const token = await createUtilaAccessToken(serviceAccountEmail, privateKey);
 
-    let response: Response;
-    try {
-        response = await fetch(url, {
+    return await fetchSignerJson<UtilaWalletResponse>({
+        init: {
             headers: {
                 Authorization: `Bearer ${token}`,
             },
             method: 'GET',
-            redirect: 'error',
-        });
-    } catch (error) {
-        throwSignerError(SignerErrorCode.HTTP_ERROR, {
-            cause: error,
-            message: 'Utila network request failed',
-            url,
-        });
-    }
-
-    if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Failed to read error response');
-        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-            message: `Utila API error: ${response.status}`,
-            response: sanitizeRemoteErrorResponse(errorText),
-            status: response.status,
-        });
-    }
-
-    try {
-        return (await response.json()) as UtilaWalletResponse;
-    } catch (error) {
-        throwSignerError(SignerErrorCode.PARSING_ERROR, {
-            cause: error,
-            message: 'Failed to parse Utila wallet response',
-        });
-    }
+        },
+        providerName: 'Utila',
+        url,
+    });
 }
 
 function parseTransactionEnvelope(payload: UtilaTransactionEnvelope, context: string): UtilaTransaction {
@@ -438,23 +422,6 @@ function validateRequired(field: string, value: string | undefined): void {
 
 function normalizeBaseUrl(baseUrl: string): string {
     return baseUrl.replace(/\/+$/, '');
-}
-
-function validateHttpsApiBaseUrl(apiBaseUrl: string): void {
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(apiBaseUrl);
-    } catch (error) {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            cause: error,
-            message: `Invalid apiBaseUrl: ${apiBaseUrl}`,
-        });
-    }
-    if (parsedUrl.protocol !== 'https:') {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'apiBaseUrl must use HTTPS',
-        });
-    }
 }
 
 function trimResourcePrefix(value: string, prefix: string): string {

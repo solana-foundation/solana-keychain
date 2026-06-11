@@ -113,12 +113,25 @@ describe('DfnsSigner', () => {
             await expect(DfnsSigner.create(defaultConfig)).rejects.toThrow('Unsupported key scheme');
         });
 
-        it('throws error for API failure', async () => {
+        it('throws REMOTE_API_ERROR for API failure', async () => {
             mockFetch.mockResolvedValueOnce({
                 ok: false,
                 status: 401,
+                text: async () => 'unauthorized',
             });
-            await expect(DfnsSigner.create(defaultConfig)).rejects.toThrow();
+            await expect(DfnsSigner.create(defaultConfig)).rejects.toMatchObject({
+                code: 'SIGNER_REMOTE_API_ERROR',
+                message: expect.stringContaining('Dfns API error: 401'),
+            });
+        });
+
+        it('throws INVALID_PRIVATE_KEY for an unparseable privateKeyPem', async () => {
+            await expect(DfnsSigner.create({ ...defaultConfig, privateKeyPem: 'not-a-pem-key' })).rejects.toMatchObject(
+                {
+                    code: 'SIGNER_INVALID_PRIVATE_KEY',
+                },
+            );
+            expect(mockFetch).not.toHaveBeenCalled();
         });
 
         it('throws PARSING_ERROR for malformed wallet response shape', async () => {
@@ -391,6 +404,7 @@ describe('DfnsSigner', () => {
             mockFetch.mockResolvedValueOnce({
                 ok: false,
                 status: 500,
+                text: async () => 'server error',
             });
             expect(await signer.isAvailable()).toBe(false);
         });

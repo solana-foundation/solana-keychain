@@ -3,9 +3,30 @@ import type { SolanaSigner } from '@solana/keychain-core';
 import { SignerErrorCode } from '@solana/keychain-core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { KeychainSignerConfig } from '../types.js';
+import type { BackendName, KeychainSignerConfig } from '../types.js';
 
 const TEST_ADDRESS = '11111111111111111111111111111111' as Address;
+
+// How resolveAddress obtains each backend's address; `satisfies` makes a missing backend a typecheck failure
+const BACKEND_RESOLUTION = {
+    'aws-kms': 'publicKey',
+    cdp: 'address',
+    crossmint: 'factory',
+    dfns: 'factory',
+    fireblocks: 'factory',
+    'gcp-kms': 'publicKey',
+    memory: 'factory',
+    openfort: 'factory',
+    para: 'factory',
+    privy: 'factory',
+    turnkey: 'publicKey',
+    utila: 'factory',
+    vault: 'publicKey',
+} satisfies Record<BackendName, 'address' | 'factory' | 'publicKey'>;
+
+function backendsResolvedVia(kind: 'address' | 'factory' | 'publicKey'): BackendName[] {
+    return (Object.keys(BACKEND_RESOLUTION) as BackendName[]).filter(backend => BACKEND_RESOLUTION[backend] === kind);
+}
 
 function makeMockSigner(address: Address = TEST_ADDRESS): SolanaSigner {
     return {
@@ -31,7 +52,7 @@ describe('resolveAddress', () => {
     });
 
     describe('sync backends (publicKey in config)', () => {
-        it.each(['aws-kms', 'gcp-kms', 'turnkey', 'vault'] as const)('%s returns publicKey directly', async backend => {
+        it.each(backendsResolvedVia('publicKey'))('%s returns publicKey directly', async backend => {
             const config = {
                 backend,
                 keyId: 'k',
@@ -94,33 +115,33 @@ describe('resolveAddress', () => {
     });
 
     describe('async backends (fetch from API or derive locally)', () => {
-        it.each(['crossmint', 'dfns', 'fireblocks', 'memory', 'para', 'privy', 'utila'] as const)(
-            '%s delegates to createKeychainSigner',
-            async backend => {
-                const config = {
-                    backend,
-                    apiKey: 'k',
-                    appId: 'a',
-                    appSecret: 's',
-                    authToken: 't',
-                    credId: 'c',
-                    privateKeyPem: 'p',
-                    privateKeyString: 'irrelevant-mocked-string',
-                    serviceAccountEmail: 'service-account@example.com',
-                    serviceAccountPrivateKeyPem: 'pem',
-                    network: 'networks/solana-devnet',
-                    vaultAccountId: 'v',
-                    vaultId: 'vault',
-                    walletId: 'w',
-                    walletLocator: 'l',
-                } as KeychainSignerConfig;
+        it.each(backendsResolvedVia('factory'))('%s delegates to createKeychainSigner', async backend => {
+            const config = {
+                backend,
+                accountId: 'acc_1',
+                apiKey: 'k',
+                appId: 'a',
+                appSecret: 's',
+                authToken: 't',
+                credId: 'c',
+                privateKeyPem: 'p',
+                privateKeyString: 'irrelevant-mocked-string',
+                secretKey: 'sk_test_1',
+                serviceAccountEmail: 'service-account@example.com',
+                serviceAccountPrivateKeyPem: 'pem',
+                network: 'networks/solana-devnet',
+                vaultAccountId: 'v',
+                vaultId: 'vault',
+                walletId: 'w',
+                walletLocator: 'l',
+                walletSecret: 'ws',
+            } as KeychainSignerConfig;
 
-                const address = await resolveAddress(config);
+            const address = await resolveAddress(config);
 
-                expect(address).toBe(TEST_ADDRESS);
-                expect(createKeychainSigner).toHaveBeenCalledWith(config);
-            },
-        );
+            expect(address).toBe(TEST_ADDRESS);
+            expect(createKeychainSigner).toHaveBeenCalledWith(config);
+        });
     });
 
     it('throws SignerError for unknown backend', async () => {

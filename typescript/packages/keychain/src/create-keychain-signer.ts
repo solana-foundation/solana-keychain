@@ -1,18 +1,5 @@
-import { createAwsKmsSigner } from '@solana/keychain-aws-kms';
-import { createCdpSigner } from '@solana/keychain-cdp';
 import type { SolanaSigner } from '@solana/keychain-core';
 import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
-import { createCrossmintSigner } from '@solana/keychain-crossmint';
-import { createDfnsSigner } from '@solana/keychain-dfns';
-import { createFireblocksSigner } from '@solana/keychain-fireblocks';
-import { createGcpKmsSigner } from '@solana/keychain-gcp-kms';
-import { createMemorySigner } from '@solana/keychain-memory';
-import { createOpenfortSigner } from '@solana/keychain-openfort';
-import { createParaSigner } from '@solana/keychain-para';
-import { createPrivySigner } from '@solana/keychain-privy';
-import { createTurnkeySigner } from '@solana/keychain-turnkey';
-import { createUtilaSigner } from '@solana/keychain-utila';
-import { createVaultSigner } from '@solana/keychain-vault';
 
 import type { KeychainSignerConfig } from './types.js';
 
@@ -24,7 +11,9 @@ function stripBackend<T extends { backend: string }>({ backend: _, ...rest }: T)
  * Create a {@link SolanaSigner} from a backend-tagged configuration.
  *
  * Dispatches to the correct `createXxxSigner()` factory based on
- * the `backend` discriminant.
+ * the `backend` discriminant. Each backend package is loaded with a
+ * dynamic `import()` so bundlers only include the backend(s) a
+ * program actually dispatches to, not every vendor SDK.
  *
  * @example
  * ```typescript
@@ -38,32 +27,58 @@ function stripBackend<T extends { backend: string }>({ backend: _, ...rest }: T)
  */
 export async function createKeychainSigner(config: KeychainSignerConfig): Promise<SolanaSigner> {
     switch (config.backend) {
-        case 'aws-kms':
+        case 'aws-kms': {
+            const { createAwsKmsSigner } = await import('@solana/keychain-aws-kms');
             return createAwsKmsSigner(stripBackend(config));
-        case 'cdp':
+        }
+        case 'cdp': {
+            const { createCdpSigner } = await import('@solana/keychain-cdp');
             return await createCdpSigner(stripBackend(config));
-        case 'crossmint':
+        }
+        case 'crossmint': {
+            const { createCrossmintSigner } = await import('@solana/keychain-crossmint');
             return await createCrossmintSigner(stripBackend(config));
-        case 'dfns':
+        }
+        case 'dfns': {
+            const { createDfnsSigner } = await import('@solana/keychain-dfns');
             return await createDfnsSigner(stripBackend(config));
-        case 'fireblocks':
+        }
+        case 'fireblocks': {
+            const { createFireblocksSigner } = await import('@solana/keychain-fireblocks');
             return await createFireblocksSigner(stripBackend(config));
-        case 'gcp-kms':
+        }
+        case 'gcp-kms': {
+            const { createGcpKmsSigner } = await import('@solana/keychain-gcp-kms');
             return createGcpKmsSigner(stripBackend(config));
-        case 'memory':
+        }
+        case 'memory': {
+            const { createMemorySigner } = await import('@solana/keychain-memory');
             return await createMemorySigner(stripBackend(config));
-        case 'openfort':
+        }
+        case 'openfort': {
+            const { createOpenfortSigner } = await import('@solana/keychain-openfort');
             return await createOpenfortSigner(stripBackend(config));
-        case 'para':
+        }
+        case 'para': {
+            const { createParaSigner } = await import('@solana/keychain-para');
             return await createParaSigner(stripBackend(config));
-        case 'privy':
+        }
+        case 'privy': {
+            const { createPrivySigner } = await import('@solana/keychain-privy');
             return await createPrivySigner(stripBackend(config));
-        case 'turnkey':
+        }
+        case 'turnkey': {
+            const { createTurnkeySigner } = await import('@solana/keychain-turnkey');
             return createTurnkeySigner(stripBackend(config));
-        case 'utila':
+        }
+        case 'utila': {
+            const { createUtilaSigner } = await import('@solana/keychain-utila');
             return await createUtilaSigner(stripBackend(config));
-        case 'vault':
+        }
+        case 'vault': {
+            const { createVaultSigner } = await import('@solana/keychain-vault');
             return createVaultSigner(stripBackend(config));
+        }
         default: {
             const _exhaustive: never = config;
             return throwSignerError(SignerErrorCode.CONFIG_ERROR, {

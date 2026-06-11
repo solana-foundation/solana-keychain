@@ -2,7 +2,7 @@ import * as nodeCrypto from 'node:crypto';
 
 import { describe, it, expect } from 'vitest';
 
-import { p1363ToDer, signClientData } from '../auth.js';
+import { importDfnsCredentialKey, p1363ToDer } from '../auth.js';
 
 /**
  * Parse a DER `SEQUENCE { INTEGER r, INTEGER s }` into its two unsigned
@@ -89,14 +89,15 @@ describe('p1363ToDer', () => {
     });
 });
 
-describe('signClientData', () => {
+describe('importDfnsCredentialKey', () => {
     const clientData = new TextEncoder().encode('{"challenge":"abc","type":"key.get"}');
 
     it('produces a DER-encoded signature for a P-256 (prime256v1) credential that node verifies', async () => {
         const { privateKey, publicKey } = nodeCrypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
         const pem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
 
-        const signature = await signClientData(clientData, pem);
+        const credentialKey = await importDfnsCredentialKey(pem);
+        const signature = await credentialKey.sign(clientData);
 
         // DER SEQUENCE tag.
         expect(signature[0]).toBe(0x30);
@@ -112,10 +113,42 @@ describe('signClientData', () => {
         const { privateKey, publicKey } = nodeCrypto.generateKeyPairSync('ed25519');
         const pem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
 
-        const signature = await signClientData(clientData, pem);
+        const credentialKey = await importDfnsCredentialKey(pem);
+        const signature = await credentialKey.sign(clientData);
 
         expect(signature.length).toBe(64); // raw Ed25519 signature, not DER-wrapped
         const verified = nodeCrypto.verify(null, clientData, publicKey, signature);
         expect(verified).toBe(true);
+    });
+
+    it('produces an RSASSA-PKCS1-v1_5/SHA-256 signature for an RSA credential that node verifies', async () => {
+        const { privateKey, publicKey } = nodeCrypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+        const pem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
+
+        const credentialKey = await importDfnsCredentialKey(pem);
+        const signature = await credentialKey.sign(clientData);
+
+        expect(signature.length).toBe(256); // 2048-bit RSA signature
+        const verified = nodeCrypto.verify('sha256', clientData, publicKey, signature);
+        expect(verified).toBe(true);
+    });
+
+    it('reuses the imported key across multiple sign calls', async () => {
+        const { privateKey, publicKey } = nodeCrypto.generateKeyPairSync('ed25519');
+        const pem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
+
+        const credentialKey = await importDfnsCredentialKey(pem);
+        const first = await credentialKey.sign(clientData);
+        const second = await credentialKey.sign(new TextEncoder().encode('other payload'));
+
+        expect(nodeCrypto.verify(null, clientData, publicKey, first)).toBe(true);
+        expect(nodeCrypto.verify(null, new TextEncoder().encode('other payload'), publicKey, second)).toBe(true);
+    });
+
+    it('throws INVALID_PRIVATE_KEY for a key that no supported algorithm can import', async () => {
+        await expect(importDfnsCredentialKey('not-a-pem-key')).rejects.toMatchObject({
+            code: 'SIGNER_INVALID_PRIVATE_KEY',
+            message: expect.stringContaining('not a supported'),
+        });
     });
 });

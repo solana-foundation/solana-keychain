@@ -7,19 +7,37 @@ const JWT_TTL_SECS = 120;
 const JWT_SKEW_LEEWAY_SECS = 60;
 
 /**
+ * Import a Fireblocks RSA 4096 private key from PEM (PKCS8) format.
+ *
+ * The returned key is reusable across requests and should be imported once
+ * per signer, not per JWT.
+ *
+ * @param privateKeyPem - RSA 4096 private key in PEM format
+ * @returns The imported RS256 signing key
+ * @throws {SignerError} `SIGNER_INVALID_PRIVATE_KEY` when the PEM cannot be parsed
+ */
+export async function importFireblocksPrivateKey(privateKeyPem: string): Promise<CryptoKey> {
+    try {
+        return await importPKCS8(privateKeyPem, 'RS256');
+    } catch (error) {
+        throwSignerError(SignerErrorCode.INVALID_PRIVATE_KEY, {
+            cause: error,
+            message: 'Failed to parse Fireblocks RSA private key',
+        });
+    }
+}
+
+/**
  * Create a JWT for Fireblocks API authentication
  *
  * @param apiKey - Fireblocks API key (used as subject)
- * @param privateKeyPem - RSA 4096 private key in PEM format
+ * @param privateKey - RSA signing key from {@link importFireblocksPrivateKey}
  * @param uri - API endpoint path (e.g., "/v1/transactions")
  * @param body - Request body as string (empty string for GET requests)
  * @returns JWT token string
  */
-export async function createJwt(apiKey: string, privateKeyPem: string, uri: string, body: string): Promise<string> {
+export async function createJwt(apiKey: string, privateKey: CryptoKey, uri: string, body: string): Promise<string> {
     try {
-        // Import the RSA private key
-        const privateKey = await importPKCS8(privateKeyPem, 'RS256');
-
         // SHA256 hash of body
         const bodyHash = await sha256Hex(body);
 

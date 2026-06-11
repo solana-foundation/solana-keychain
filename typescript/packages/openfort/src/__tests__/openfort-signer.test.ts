@@ -152,7 +152,7 @@ describe('OpenfortSigner', () => {
 
         it('throws REMOTE_API_ERROR when /v2/accounts returns 401', async () => {
             mockGetAccount(TEST_ADDRESS, 401);
-            await expect(OpenfortSigner.create(makeConfig())).rejects.toThrow('Openfort getAccount API error: 401');
+            await expect(OpenfortSigner.create(makeConfig())).rejects.toThrow('Openfort API error: 401');
         });
 
         it('throws CONFIG_ERROR when /v2/accounts returns a non-Solana address', async () => {
@@ -168,7 +168,7 @@ describe('OpenfortSigner', () => {
             });
             await expect(OpenfortSigner.create(makeConfig())).rejects.toMatchObject({
                 code: 'SIGNER_PARSING_ERROR',
-                message: expect.stringContaining('Failed to parse Openfort getAccount response'),
+                message: expect.stringContaining('Failed to parse Openfort response'),
             });
         });
 
@@ -231,7 +231,7 @@ describe('OpenfortSigner', () => {
             mockFetch.mockResolvedValueOnce(new Response('{"error":"unauthorized"}', { status: 401 }));
             await expect(
                 signer.signMessages([{ content: new TextEncoder().encode('hi'), signatures: {} }]),
-            ).rejects.toThrow('Openfort sign API error: 401');
+            ).rejects.toThrow('Openfort API error: 401');
         });
 
         it('throws HTTP_ERROR on network failure', async () => {
@@ -241,7 +241,7 @@ describe('OpenfortSigner', () => {
             mockFetch.mockRejectedValueOnce(new Error('Network error'));
             await expect(
                 signer.signMessages([{ content: new TextEncoder().encode('hi'), signatures: {} }]),
-            ).rejects.toThrow('Openfort sign network request failed');
+            ).rejects.toThrow('Openfort network request failed');
         });
 
         it('throws PARSING_ERROR when sign response is invalid JSON', async () => {
@@ -257,7 +257,7 @@ describe('OpenfortSigner', () => {
                 signer.signMessages([{ content: new TextEncoder().encode('hi'), signatures: {} }]),
             ).rejects.toMatchObject({
                 code: 'SIGNER_PARSING_ERROR',
-                message: expect.stringContaining('Failed to parse Openfort sign response'),
+                message: expect.stringContaining('Failed to parse Openfort response'),
             });
         });
 

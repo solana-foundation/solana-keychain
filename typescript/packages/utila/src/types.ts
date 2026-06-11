@@ -4,6 +4,8 @@ export interface UtilaSignerConfig {
     maxPollAttempts?: number;
     network: string;
     pollIntervalMs?: number;
+    /** Optional delay in ms between concurrent signing requests to avoid rate limits (default: 0) */
+    requestDelayMs?: number;
     serviceAccountEmail: string;
     serviceAccountPrivateKeyPem: string;
     vaultId: string;

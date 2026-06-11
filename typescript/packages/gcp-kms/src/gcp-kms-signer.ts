@@ -3,10 +3,12 @@ import {
     assertSignatureValid,
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
-    sanitizeRemoteErrorResponse,
+    fetchSignerJson,
+    signBatchStaggered,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -95,7 +97,7 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
         this.keyName = this.normalizeKeyName(config.keyName);
         this.keyNamePathSegments = this.keyName.split('/');
         this.requestDelayMs = config.requestDelayMs || 0;
-        this.validateRequestDelayMs(this.requestDelayMs);
+        validateRequestDelayMs(this.requestDelayMs);
         this.auth = new GoogleAuth({ scopes: [CLOUD_KMS_SCOPE] });
     }
 
@@ -124,7 +126,7 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
         return url.toString();
     }
 
-    private async authorizedFetch(url: string, init: RequestInit): Promise<Response> {
+    private async buildAuthorizedHeaders(url: string, init: RequestInit): Promise<Headers> {
         const authHeaders = await this.auth.getRequestHeaders(url);
         const headers = new Headers(init.headers);
 
@@ -136,66 +138,16 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
             headers.set('content-type', 'application/json');
         }
 
-        return await fetch(url, { ...init, headers, redirect: 'error' });
+        return headers;
     }
 
     private async request<TResponse>(url: string, init: RequestInit): Promise<TResponse> {
-        let response: Response;
-        try {
-            response = await this.authorizedFetch(url, init);
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'GCP KMS network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `GCP KMS API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let payload: TResponse;
-        try {
-            payload = (await response.json()) as TResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse GCP KMS response',
-            });
-        }
-
-        return payload;
-    }
-
-    /**
-     * Validate request delay ms
-     */
-    private validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
-    }
-
-    /**
-     * Add delay between concurrent requests
-     */
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
+        const headers = await this.buildAuthorizedHeaders(url, init);
+        return await fetchSignerJson<TResponse>({
+            init: { ...init, headers },
+            providerName: 'GCP KMS',
+            url,
+        });
     }
 
     /**
@@ -241,9 +193,9 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
      * Sign multiple messages using GCP KMS
      */
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            messages,
+            async message => {
                 const messageBytes =
                     message.content instanceof Uint8Array
                         ? message.content
@@ -258,7 +210,8 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -268,9 +221,9 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            transactions,
+            async transaction => {
                 // Sign the transaction message bytes
                 const txMessageBytes = new Uint8Array(transaction.messageBytes);
                 const signatureBytes = await this.signBytes(txMessageBytes);
@@ -283,7 +236,8 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 

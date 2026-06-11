@@ -1,19 +1,22 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder } from '@solana/codecs-strings';
 import {
+    assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
-    sanitizeRemoteErrorResponse,
+    fetchSignerJson,
+    signBatchStaggered,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
 
-import { createJwt } from './jwt.js';
+import { createJwt, importFireblocksPrivateKey } from './jwt.js';
 import type {
     CreateTransactionRequest,
     CreateTransactionResponse,
@@ -63,6 +66,7 @@ const DEFAULT_MAX_POLL_ATTEMPTS = 60;
  */
 export class FireblocksSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     private _address: Address<TAddress> | null = null;
+    private privateKey: CryptoKey | null = null;
     private readonly apiKey: string;
     private readonly privateKeyPem: string;
     private readonly vaultAccountId: string;
@@ -119,14 +123,14 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         this.vaultAccountId = config.vaultAccountId;
         this.assetId = config.assetId ?? DEFAULT_ASSET_ID;
         const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
-        validateHttpsApiBaseUrl(apiBaseUrl);
+        assertHttpsUrl(apiBaseUrl, 'apiBaseUrl');
 
         this.apiBaseUrl = apiBaseUrl;
         this.pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
         this.maxPollAttempts = config.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS;
         this.requestDelayMs = config.requestDelayMs ?? 0;
 
-        this.validateRequestDelayMs(this.requestDelayMs);
+        validateRequestDelayMs(this.requestDelayMs);
     }
 
     /**
@@ -151,34 +155,19 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
             return;
         }
 
+        await this.getPrivateKey();
         const pubkey = await this.fetchPublicKey();
         this._address = pubkey as Address<TAddress>;
         this.initialized = true;
     }
 
     /**
-     * Validate request delay ms
+     * Get the imported RSA signing key, importing it from the configured PEM
+     * on first use and caching it for all subsequent JWT mints.
      */
-    private validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
-    }
-
-    /**
-     * Add delay between concurrent requests
-     */
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
+    private async getPrivateKey(): Promise<CryptoKey> {
+        this.privateKey ??= await importFireblocksPrivateKey(this.privateKeyPem);
+        return this.privateKey;
     }
 
     /**
@@ -186,45 +175,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
      */
     private async fetchPublicKey(): Promise<Address> {
         const uri = `/v1/vault/accounts/${encodeURIComponent(this.vaultAccountId)}/${encodeURIComponent(this.assetId)}/addresses_paginated`;
-        const token = await createJwt(this.apiKey, this.privateKeyPem, uri, '');
-
-        const url = `${this.apiBaseUrl}${uri}`;
-        let response: Response;
-        try {
-            response = await fetch(url, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'X-API-Key': this.apiKey,
-                },
-                method: 'GET',
-                redirect: 'error',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Fireblocks network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Fireblocks API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let addressesResponse: VaultAddressesResponse;
-        try {
-            addressesResponse = (await response.json()) as VaultAddressesResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Fireblocks response',
-            });
-        }
+        const addressesResponse = await this.request<VaultAddressesResponse>('GET', uri);
 
         const firstAddress = addressesResponse.addresses?.[0]?.address;
         if (!firstAddress) {
@@ -249,12 +200,10 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
      */
     private async request<T>(method: string, uri: string, body?: unknown): Promise<T> {
         const bodyStr = body ? JSON.stringify(body) : '';
-        const token = await createJwt(this.apiKey, this.privateKeyPem, uri, bodyStr);
+        const token = await createJwt(this.apiKey, await this.getPrivateKey(), uri, bodyStr);
 
-        const url = `${this.apiBaseUrl}${uri}`;
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        return await fetchSignerJson<T>({
+            init: {
                 body: body ? bodyStr : undefined,
                 headers: {
                     Authorization: `Bearer ${token}`,
@@ -262,33 +211,10 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                     'X-API-Key': this.apiKey,
                 },
                 method,
-                redirect: 'error',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Fireblocks network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Fireblocks API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        try {
-            return (await response.json()) as T;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Fireblocks response',
-            });
-        }
+            },
+            providerName: 'Fireblocks',
+            url: `${this.apiBaseUrl}${uri}`,
+        });
     }
 
     /**
@@ -374,9 +300,9 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
         this.ensureInitialized();
 
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            messages,
+            async message => {
                 const messageBytes =
                     message.content instanceof Uint8Array
                         ? message.content
@@ -391,7 +317,8 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -403,9 +330,9 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     ): Promise<readonly SignatureDictionary[]> {
         this.ensureInitialized();
 
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            transactions,
+            async transaction => {
                 const signatureBytes = await this.signRawBytes(new Uint8Array(transaction.messageBytes));
                 await assertSignatureValid({
                     data: transaction.messageBytes,
@@ -416,7 +343,8 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -425,20 +353,8 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
      */
     async isAvailable(): Promise<boolean> {
         try {
-            const uri = `/v1/vault/accounts/${encodeURIComponent(this.vaultAccountId)}`;
-            const token = await createJwt(this.apiKey, this.privateKeyPem, uri, '');
-
-            const url = `${this.apiBaseUrl}${uri}`;
-            const response = await fetch(url, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'X-API-Key': this.apiKey,
-                },
-                method: 'GET',
-                redirect: 'error',
-            });
-
-            return response.ok;
+            await this.request<unknown>('GET', `/v1/vault/accounts/${encodeURIComponent(this.vaultAccountId)}`);
+            return true;
         } catch {
             return false;
         }
@@ -453,22 +369,5 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                 message: 'Signer not initialized. Call init() first.',
             });
         }
-    }
-}
-
-function validateHttpsApiBaseUrl(apiBaseUrl: string): void {
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(apiBaseUrl);
-    } catch {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'apiBaseUrl is not a valid URL',
-        });
-    }
-
-    if (parsedUrl.protocol !== 'https:') {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'apiBaseUrl must use HTTPS',
-        });
     }
 }

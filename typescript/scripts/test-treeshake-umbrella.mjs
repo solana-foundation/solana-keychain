@@ -25,11 +25,13 @@ const SIGNER_MARKERS = {
     crossmint: ['crossmint.com/api', 'Crossmint transaction polling timed out'],
     dfns: ['api.dfns.io', 'signUserAction'],
     fireblocks: ['api.fireblocks.io', 'PENDING_SIGNATURE'],
-    'gcp-kms': ['KeyManagementServiceClient', 'google-cloud'],
+    'gcp-kms': ['cloudkms.googleapis.com', 'asymmetricSign'],
     memory: ['Memory signer requires one of', 'U8Array string cannot be empty'],
+    openfort: ['api.openfort.io', 'x-wallet-auth'],
     para: ['para-signer', 'UUID_REGEX'],
     privy: ['api.privy.io', 'privy-app-id'],
     turnkey: ['api.turnkey.com', 'X-Stamp'],
+    utila: ['api.utila.io', 'Utila transaction polling timed out'],
     vault: ['transit/sign', 'vault-signer'],
 };
 
@@ -41,10 +43,15 @@ const FACTORIES = [
     { name: 'createFireblocksSigner', pkg: 'fireblocks' },
     { name: 'createGcpKmsSigner', pkg: 'gcp-kms' },
     { name: 'createMemorySigner', pkg: 'memory' },
+    { name: 'createOpenfortSigner', pkg: 'openfort' },
     { name: 'createParaSigner', pkg: 'para' },
     { name: 'createPrivySigner', pkg: 'privy' },
     { name: 'createTurnkeySigner', pkg: 'turnkey' },
+    { name: 'createUtilaSigner', pkg: 'utila' },
     { name: 'createVaultSigner', pkg: 'vault' },
+    // The dispatcher loads backends via dynamic import(), so its entry chunk
+    // must not contain ANY backend's markers ('__dispatcher__' matches no pkg).
+    { name: 'createKeychainSigner', pkg: '__dispatcher__' },
 ];
 
 async function bundleImport(importName) {

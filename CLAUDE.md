@@ -106,8 +106,8 @@ See [typescript/README.md](typescript/README.md) for the full package list and u
 
 - **Async construction:** always `await createXSigner(...)` — direct class construction is deprecated and skips `init()`.
 - **`signMessages` quirks (parity with Rust):** `CrossmintSigner` rejects with "not supported". `CdpSigner` requires UTF-8 message bytes.
-- **HTTPS enforced:** all `apiBaseUrl` config fields must reject non-HTTPS URLs.
-- **Error sanitization:** wrap remote API error text with `sanitizeRemoteErrorResponse()` from `@solana/keychain-core` before surfacing.
+- **HTTPS enforced:** all `apiBaseUrl` config fields must reject non-HTTPS URLs — validate with `assertHttpsUrl()` from `@solana/keychain-core`.
+- **Remote API calls:** go through `fetchSignerJson()` from `@solana/keychain-core` — it owns the HTTP_ERROR/REMOTE_API_ERROR/PARSING_ERROR pipeline, response sanitization (`sanitizeRemoteErrorResponse()`), redirect rejection, and a default 60s timeout. Batch signing uses core `signBatchStaggered()` + `validateRequestDelayMs()`.
 - **Integration tests:** use `runSignerIntegrationTest` + per-package `setup.ts`; spun up via `just ts-test-integration` (loads `.env`, starts local Vault).
 - **Tree-shakability:** run `just ts-treeshake` after touching exports — every package and the umbrella must stay tree-shakable.
 - **Adding a backend:** the umbrella package, `typescript-ci.yml`, and `typescript-publish.yml` all need updates (see [docs/ADDING_SIGNERS.md](docs/ADDING_SIGNERS.md)).

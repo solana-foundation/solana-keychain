@@ -4,7 +4,7 @@ import { SignerErrorCode } from '@solana/keychain-core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createKeychainSigner } from '../create-keychain-signer.js';
-import type { KeychainSignerConfig } from '../types.js';
+import type { BackendName, KeychainSignerConfig } from '../types.js';
 
 const TEST_ADDRESS = '11111111111111111111111111111111' as Address;
 
@@ -25,14 +25,15 @@ vi.mock('@solana/keychain-dfns', () => ({ createDfnsSigner: vi.fn() }));
 vi.mock('@solana/keychain-fireblocks', () => ({ createFireblocksSigner: vi.fn() }));
 vi.mock('@solana/keychain-gcp-kms', () => ({ createGcpKmsSigner: vi.fn() }));
 vi.mock('@solana/keychain-memory', () => ({ createMemorySigner: vi.fn() }));
+vi.mock('@solana/keychain-openfort', () => ({ createOpenfortSigner: vi.fn() }));
 vi.mock('@solana/keychain-para', () => ({ createParaSigner: vi.fn() }));
 vi.mock('@solana/keychain-privy', () => ({ createPrivySigner: vi.fn() }));
 vi.mock('@solana/keychain-turnkey', () => ({ createTurnkeySigner: vi.fn() }));
 vi.mock('@solana/keychain-utila', () => ({ createUtilaSigner: vi.fn() }));
 vi.mock('@solana/keychain-vault', () => ({ createVaultSigner: vi.fn() }));
 
-// Table-driven test configs — one per backend
-const BACKEND_CONFIGS: Record<string, { config: KeychainSignerConfig; modulePath: string; factoryName: string }> = {
+// Table-driven test configs — one per backend; `satisfies` makes a missing backend a typecheck failure
+const BACKEND_CONFIGS = {
     'aws-kms': {
         config: { backend: 'aws-kms', keyId: 'key-1', publicKey: TEST_ADDRESS },
         factoryName: 'createAwsKmsSigner',
@@ -73,6 +74,11 @@ const BACKEND_CONFIGS: Record<string, { config: KeychainSignerConfig; modulePath
         config: { backend: 'memory', privateKeyString: 'irrelevant-mocked-string' },
         factoryName: 'createMemorySigner',
         modulePath: '@solana/keychain-memory',
+    },
+    openfort: {
+        config: { backend: 'openfort', accountId: 'acc_1', secretKey: 'sk_test_1', walletSecret: 'ws' },
+        factoryName: 'createOpenfortSigner',
+        modulePath: '@solana/keychain-openfort',
     },
     para: {
         config: { backend: 'para', apiKey: 'key', walletId: 'w' },
@@ -119,7 +125,7 @@ const BACKEND_CONFIGS: Record<string, { config: KeychainSignerConfig; modulePath
         factoryName: 'createVaultSigner',
         modulePath: '@solana/keychain-vault',
     },
-};
+} satisfies Record<BackendName, { config: KeychainSignerConfig; factoryName: string; modulePath: string }>;
 
 describe('createKeychainSigner', () => {
     beforeEach(() => {

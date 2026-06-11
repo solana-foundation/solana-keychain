@@ -297,7 +297,7 @@ describe('VaultSigner', () => {
                 signatures: {},
             };
 
-            await expect(signer.signMessages([message])).rejects.toThrow('Vault API error: key not found');
+            await expect(signer.signMessages([message])).rejects.toThrow('Vault API error: 404');
         });
 
         it('should handle network errors', async () => {

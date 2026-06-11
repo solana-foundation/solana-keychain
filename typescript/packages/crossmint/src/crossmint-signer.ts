@@ -1,14 +1,17 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Encoder, getBase58Decoder, getBase58Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
+    assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
     createSignerError,
     ED25519_SIGNATURE_LENGTH,
+    fetchSignerJson,
     sanitizeRemoteErrorResponse,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -21,7 +24,6 @@ import {
 } from '@solana/transactions';
 
 import type {
-    CrossmintApiError,
     CrossmintCreateTransactionRequest,
     CrossmintSignerConfig,
     CrossmintTransactionResponse,
@@ -99,20 +101,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         }
 
         const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl ?? DEFAULT_API_BASE_URL);
-        let parsedUrl: URL;
-        try {
-            parsedUrl = new URL(apiBaseUrl);
-        } catch (error) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                cause: error,
-                message: `Invalid apiBaseUrl: ${apiBaseUrl}`,
-            });
-        }
-        if (parsedUrl.protocol !== 'https:') {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'apiBaseUrl must use HTTPS',
-            });
-        }
+        assertHttpsUrl(apiBaseUrl, 'apiBaseUrl');
 
         const pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
         if (pollIntervalMs <= 0) {
@@ -129,16 +118,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         }
 
         const requestDelayMs = config.requestDelayMs ?? 0;
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
+        validateRequestDelayMs(requestDelayMs);
 
         let signerSeed: Uint8Array | undefined;
         let signer = config.signer;
@@ -363,40 +343,15 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
             headers['Content-Type'] = 'application/json';
         }
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        return await fetchSignerJson<unknown>({
+            init: {
                 body: body != null ? JSON.stringify(body) : undefined,
                 headers,
                 method,
-                redirect: 'error',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Crossmint network request failed',
-                url,
-            });
-        }
-
-        let payload: unknown;
-        try {
-            payload = await response.json();
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Crossmint response',
-            });
-        }
-
-        if (!response.ok) {
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: extractApiErrorMessage(payload, `Crossmint API error: ${response.status}`),
-                status: response.status,
-            });
-        }
-
-        return payload;
+            },
+            providerName: 'Crossmint',
+            url,
+        });
     }
 
     private async extractSignature(
@@ -463,47 +418,20 @@ async function fetchWallet(
     walletLocator: string,
 ): Promise<CrossmintWalletResponse> {
     const url = `${apiBaseUrl}/${API_VERSION}/wallets/${encodeURIComponent(walletLocator)}`;
-    let response: Response;
-    try {
-        response = await fetch(url, {
+    const wallet = await fetchSignerJson<Partial<CrossmintWalletResponse>>({
+        init: {
             headers: {
                 'X-API-KEY': apiKey,
             },
             method: 'GET',
-            redirect: 'error',
-        });
-    } catch (error) {
-        throwSignerError(SignerErrorCode.HTTP_ERROR, {
-            cause: error,
-            message: 'Crossmint network request failed',
-            url,
-        });
-    }
+        },
+        providerName: 'Crossmint',
+        url,
+    });
 
-    let payload: unknown;
-    try {
-        payload = await response.json();
-    } catch (error) {
-        throwSignerError(SignerErrorCode.PARSING_ERROR, {
-            cause: error,
-            message: 'Failed to parse Crossmint wallet response',
-        });
-    }
-
-    if (!response.ok) {
-        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-            message: extractApiErrorMessage(payload, `Crossmint API error: ${response.status}`),
-            status: response.status,
-        });
-    }
-
-    const wallet = payload as Partial<CrossmintWalletResponse>;
     if (!wallet.address || !wallet.chainType || !wallet.type) {
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-            message: extractApiErrorMessage(
-                payload,
-                'Crossmint wallet response missing required fields (address, chainType, type)',
-            ),
+            message: 'Crossmint wallet response missing required fields (address, chainType, type)',
         });
     }
 
@@ -511,26 +439,13 @@ async function fetchWallet(
 }
 
 function parseTransactionResponse(payload: unknown, context: string): CrossmintTransactionResponse {
-    const transaction = payload as Partial<CrossmintApiError> & Partial<CrossmintTransactionResponse>;
+    const transaction = payload as Partial<CrossmintTransactionResponse>;
     if (!transaction.id || !transaction.status) {
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-            message: extractApiErrorMessage(payload, `Failed to ${context}: missing transaction id/status`),
+            message: `Failed to ${context}: missing transaction id/status`,
         });
     }
     return transaction as CrossmintTransactionResponse;
-}
-
-function extractApiErrorMessage(payload: unknown, fallback: string): string {
-    if (payload && typeof payload === 'object') {
-        const obj = payload as Record<string, unknown>;
-        if (typeof obj.message === 'string') return sanitizeRemoteErrorResponse(obj.message);
-        if (typeof obj.error === 'string') return sanitizeRemoteErrorResponse(obj.error);
-        if (obj.error && typeof obj.error === 'object') {
-            const errorObj = obj.error as Record<string, unknown>;
-            if (typeof errorObj.message === 'string') return sanitizeRemoteErrorResponse(errorObj.message);
-        }
-    }
-    return fallback;
 }
 
 function decodeSignatureString(value?: string): SignatureBytes | undefined {

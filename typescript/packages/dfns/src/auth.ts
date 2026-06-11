@@ -1,8 +1,8 @@
 import { getBase64Encoder } from '@solana/codecs-strings';
 import {
     base64UrlDecoder,
+    fetchSignerJson,
     normalizePrivateKeyPem,
-    sanitizeRemoteErrorResponse,
     SignerErrorCode,
     throwSignerError,
 } from '@solana/keychain-core';
@@ -10,6 +10,60 @@ import {
 import type { UserActionInitResponse, UserActionResponse } from './types.js';
 
 let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
+
+/** Payload signed once at key import to confirm the resolved algorithm can produce signatures. */
+function getProbePayload(): Uint8Array {
+    return new TextEncoder().encode('probe');
+}
+
+/**
+ * A Dfns credential private key that has been imported and bound to its
+ * signing algorithm, ready to sign user-action client data repeatedly without
+ * re-parsing the PEM.
+ */
+export interface DfnsCredentialKey {
+    /** Sign user-action client data, returning the signature bytes Dfns expects (DER for ECDSA). */
+    sign(clientData: Uint8Array): Promise<Uint8Array>;
+}
+
+/**
+ * Import a Dfns credential private key (PKCS#8 or SEC1 PEM) and resolve its
+ * signing algorithm (Ed25519, ECDSA P-256, or RSA). The returned handle reuses
+ * the imported key for every sign call.
+ *
+ * @throws `INVALID_PRIVATE_KEY` when the key cannot be imported with any
+ * supported algorithm.
+ */
+export async function importDfnsCredentialKey(privateKeyPem: string): Promise<DfnsCredentialKey> {
+    const normalizedPem = normalizePrivateKeyPem(privateKeyPem);
+
+    let latestError: unknown;
+    const subtle = globalThis.crypto?.subtle;
+    if (subtle) {
+        try {
+            const credentialKey = await importWithWebCrypto(subtle, normalizedPem);
+            if (credentialKey) {
+                return credentialKey;
+            }
+        } catch (error) {
+            latestError = error;
+        }
+    }
+
+    try {
+        const credentialKey = await importWithNodeCrypto(normalizedPem);
+        if (credentialKey) {
+            return credentialKey;
+        }
+    } catch (error) {
+        latestError = error;
+    }
+
+    throwSignerError(SignerErrorCode.INVALID_PRIVATE_KEY, {
+        cause: latestError,
+        message: 'privateKeyPem is not a supported Ed25519, ECDSA P-256, or RSA private key',
+    });
+}
 
 /**
  * Perform the Dfns User Action Signing flow. For more details, see https://docs.dfns.co/api-reference/auth/signing-flows#asymetric-keys-signing-flow
@@ -20,16 +74,14 @@ export async function signUserAction(
     apiBaseUrl: string,
     authToken: string,
     credId: string,
-    privateKeyPem: string,
+    credentialKey: DfnsCredentialKey,
     httpMethod: string,
     httpPath: string,
     body: string,
 ): Promise<string> {
     // Request a challenge
-    const initUrl = `${apiBaseUrl}/auth/action/init`;
-    let initResponse: Response;
-    try {
-        initResponse = await fetch(initUrl, {
+    const rawChallenge = await fetchSignerJson<unknown>({
+        init: {
             body: JSON.stringify({
                 userActionHttpMethod: httpMethod,
                 userActionHttpPath: httpPath,
@@ -41,34 +93,10 @@ export async function signUserAction(
                 'Content-Type': 'application/json',
             },
             method: 'POST',
-            redirect: 'error',
-        });
-    } catch (error) {
-        throwSignerError(SignerErrorCode.HTTP_ERROR, {
-            cause: error,
-            message: 'Dfns network request failed',
-            url: initUrl,
-        });
-    }
-
-    if (!initResponse.ok) {
-        const errorText = await initResponse.text().catch(() => 'Failed to read error response');
-        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-            message: `Dfns auth/action/init failed: ${initResponse.status}`,
-            response: sanitizeRemoteErrorResponse(errorText),
-            status: initResponse.status,
-        });
-    }
-
-    let rawChallenge: unknown;
-    try {
-        rawChallenge = await initResponse.json();
-    } catch (error) {
-        throwSignerError(SignerErrorCode.PARSING_ERROR, {
-            cause: error,
-            message: 'Failed to parse Dfns auth challenge response',
-        });
-    }
+        },
+        providerName: 'Dfns',
+        url: `${apiBaseUrl}/auth/action/init`,
+    });
 
     const challenge = parseUserActionInitResponse(rawChallenge);
 
@@ -91,13 +119,11 @@ export async function signUserAction(
     );
 
     const clientDataB64 = base64UrlDecoder(clientData);
-    const signatureB64 = base64UrlDecoder(await signClientData(clientData, privateKeyPem));
+    const signatureB64 = base64UrlDecoder(await credentialKey.sign(clientData));
 
     // Submit the signed challenge
-    const actionUrl = `${apiBaseUrl}/auth/action`;
-    let signResponse: Response;
-    try {
-        signResponse = await fetch(actionUrl, {
+    const rawActionResponse = await fetchSignerJson<unknown>({
+        init: {
             body: JSON.stringify({
                 challengeIdentifier: challenge.challengeIdentifier,
                 firstFactor: {
@@ -114,34 +140,10 @@ export async function signUserAction(
                 'Content-Type': 'application/json',
             },
             method: 'POST',
-            redirect: 'error',
-        });
-    } catch (error) {
-        throwSignerError(SignerErrorCode.HTTP_ERROR, {
-            cause: error,
-            message: 'Dfns network request failed',
-            url: actionUrl,
-        });
-    }
-
-    if (!signResponse.ok) {
-        const errorText = await signResponse.text().catch(() => 'Failed to read error response');
-        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-            message: `Dfns auth/action failed: ${signResponse.status}`,
-            response: sanitizeRemoteErrorResponse(errorText),
-            status: signResponse.status,
-        });
-    }
-
-    let rawActionResponse: unknown;
-    try {
-        rawActionResponse = await signResponse.json();
-    } catch (error) {
-        throwSignerError(SignerErrorCode.PARSING_ERROR, {
-            cause: error,
-            message: 'Failed to parse Dfns auth action response',
-        });
-    }
+        },
+        providerName: 'Dfns',
+        url: `${apiBaseUrl}/auth/action`,
+    });
 
     const actionResponse = parseUserActionResponse(rawActionResponse);
 
@@ -178,44 +180,11 @@ function isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
 }
 
-export async function signClientData(clientData: Uint8Array, privateKeyPem: string): Promise<Uint8Array> {
-    const normalizedPem = normalizePrivateKeyPem(privateKeyPem);
-
-    let latestError: unknown;
-    const subtle = globalThis.crypto?.subtle;
-    if (subtle) {
-        try {
-            const signature = await signClientDataWithWebCrypto(subtle, clientData, normalizedPem);
-            if (signature) {
-                return signature;
-            }
-        } catch (error) {
-            latestError = error;
-        }
-    }
-
-    try {
-        const signature = await signClientDataWithNodeCrypto(clientData, normalizedPem);
-        if (signature) {
-            return signature;
-        }
-    } catch (error) {
-        latestError = error;
-    }
-
-    throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-        cause: latestError,
-        message: 'Failed to sign Dfns auth challenge',
-    });
-}
-
-async function signClientDataWithWebCrypto(
+async function importWithWebCrypto(
     subtle: SubtleCrypto,
-    clientData: Uint8Array,
     privateKeyPem: string,
-): Promise<Uint8Array | undefined> {
+): Promise<DfnsCredentialKey | undefined> {
     const privateKeyDer = toArrayBuffer(pemToDer(privateKeyPem));
-    const input = toArrayBuffer(clientData);
 
     const attempts: ReadonlyArray<{
         importAlgorithm: AlgorithmIdentifier | EcKeyImportParams | RsaHashedImportParams;
@@ -240,13 +209,30 @@ async function signClientDataWithWebCrypto(
     ];
 
     for (const attempt of attempts) {
+        let privateKey: CryptoKey;
         try {
-            const privateKey = await subtle.importKey('pkcs8', privateKeyDer, attempt.importAlgorithm, false, ['sign']);
-            const signature = new Uint8Array(await subtle.sign(attempt.signAlgorithm, privateKey, input));
-            return attempt.isEcdsa ? p1363ToDer(signature) : signature;
+            privateKey = await subtle.importKey('pkcs8', privateKeyDer, attempt.importAlgorithm, false, ['sign']);
+            await subtle.sign(attempt.signAlgorithm, privateKey, toArrayBuffer(getProbePayload()));
         } catch {
             // Try the next key algorithm.
+            continue;
         }
+        return {
+            async sign(clientData: Uint8Array): Promise<Uint8Array> {
+                let signature: Uint8Array;
+                try {
+                    signature = new Uint8Array(
+                        await subtle.sign(attempt.signAlgorithm, privateKey, toArrayBuffer(clientData)),
+                    );
+                } catch (error) {
+                    throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                        cause: error,
+                        message: 'Failed to sign Dfns auth challenge',
+                    });
+                }
+                return attempt.isEcdsa ? p1363ToDer(signature) : signature;
+            },
+        };
     }
 
     return undefined;
@@ -300,17 +286,31 @@ function encodeDerInteger(value: Uint8Array): Uint8Array {
     return out;
 }
 
-async function signClientDataWithNodeCrypto(
-    clientData: Uint8Array,
-    privateKeyPem: string,
-): Promise<Uint8Array | undefined> {
+async function importWithNodeCrypto(privateKeyPem: string): Promise<DfnsCredentialKey | undefined> {
+    let nodeCrypto: typeof import('node:crypto');
     try {
-        const nodeCrypto = await import('node:crypto');
-        const signature = nodeCrypto.sign(undefined, clientData, privateKeyPem);
-        return new Uint8Array(signature);
+        nodeCrypto = await import('node:crypto');
     } catch {
         return undefined;
     }
+
+    // Throws when the PEM cannot be parsed or the key type cannot sign without
+    // an explicit digest; the caller surfaces this as INVALID_PRIVATE_KEY.
+    const privateKey = nodeCrypto.createPrivateKey(privateKeyPem);
+    nodeCrypto.sign(undefined, getProbePayload(), privateKey);
+
+    return {
+        sign(clientData: Uint8Array): Promise<Uint8Array> {
+            try {
+                return Promise.resolve(new Uint8Array(nodeCrypto.sign(undefined, clientData, privateKey)));
+            } catch (error) {
+                throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                    cause: error,
+                    message: 'Failed to sign Dfns auth challenge',
+                });
+            }
+        },
+    };
 }
 
 function pemToDer(privateKeyPem: string): Uint8Array {

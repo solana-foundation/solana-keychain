@@ -1,14 +1,17 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
+    assertHttpsUrl,
     assertSignatureValid,
     base64UrlDecoder,
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
-    sanitizeRemoteErrorResponse,
+    fetchSignerJson,
+    signBatchStaggered,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import type { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -115,20 +118,11 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
         }
 
         const baseUrl = (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
-        const parsedBaseUrl = parseAndValidateHttpsBaseUrl(baseUrl);
+        const parsedBaseUrl = assertHttpsUrl(baseUrl, 'baseUrl');
         const apiHost = parsedBaseUrl.host;
 
         const requestDelayMs = config.requestDelayMs ?? 0;
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
+        validateRequestDelayMs(requestDelayMs);
 
         const walletKey = await loadWalletKey(config.walletSecret);
         const address = await fetchAddress<TAddress>({
@@ -146,12 +140,6 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
             secretKey: config.secretKey,
             walletKey,
         });
-    }
-
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
     }
 
     /**
@@ -172,40 +160,15 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
             'x-wallet-auth': walletJwt,
         });
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const data = await fetchSignerJson<SignResponse>({
+            init: {
                 body: JSON.stringify(body),
                 headers,
                 method: 'POST',
-                redirect: 'error',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Openfort sign network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Openfort sign API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let data: SignResponse;
-        try {
-            data = (await response.json()) as SignResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Openfort sign response',
-            });
-        }
+            },
+            providerName: 'Openfort',
+            url,
+        });
 
         if (!data.signature) {
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
@@ -236,9 +199,9 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
 
     /** Sign multiple messages by POSTing the raw bytes to Openfort. */
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            messages,
+            async message => {
                 const messageBytes =
                     message.content instanceof Uint8Array
                         ? message.content
@@ -253,7 +216,8 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -261,9 +225,9 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            transactions,
+            async transaction => {
                 const messageBytes = new Uint8Array(transaction.messageBytes);
                 const signatureBytes = await this.signBytes(messageBytes);
                 await assertSignatureValid({
@@ -275,7 +239,8 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -370,26 +335,6 @@ async function loadWalletKey(walletSecret: string): Promise<CryptoKey> {
     }
 }
 
-function parseAndValidateHttpsBaseUrl(baseUrl: string): URL {
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(baseUrl);
-    } catch (error) {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            cause: error,
-            message: 'baseUrl is not a valid URL',
-        });
-    }
-
-    if (parsedUrl.protocol !== 'https:') {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'baseUrl must use HTTPS',
-        });
-    }
-
-    return parsedUrl;
-}
-
 async function fetchAddress<TAddress extends string = string>(config: {
     accountId: string;
     baseUrl: string;
@@ -397,41 +342,16 @@ async function fetchAddress<TAddress extends string = string>(config: {
 }): Promise<Address<TAddress>> {
     const url = `${config.baseUrl}${ACCOUNTS_PATH}/${encodeURIComponent(config.accountId)}`;
 
-    let response: Response;
-    try {
-        response = await fetch(url, {
+    const info = await fetchSignerJson<AccountResponse>({
+        init: {
             headers: {
                 Authorization: `Bearer ${config.secretKey}`,
             },
             method: 'GET',
-            redirect: 'error',
-        });
-    } catch (error) {
-        throwSignerError(SignerErrorCode.HTTP_ERROR, {
-            cause: error,
-            message: 'Openfort getAccount network request failed',
-            url,
-        });
-    }
-
-    if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Failed to read error response');
-        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-            message: `Openfort getAccount API error: ${response.status}`,
-            response: sanitizeRemoteErrorResponse(errorText),
-            status: response.status,
-        });
-    }
-
-    let info: AccountResponse;
-    try {
-        info = (await response.json()) as AccountResponse;
-    } catch (error) {
-        throwSignerError(SignerErrorCode.PARSING_ERROR, {
-            cause: error,
-            message: 'Failed to parse Openfort getAccount response',
-        });
-    }
+        },
+        providerName: 'Openfort',
+        url,
+    });
 
     if (!info.address) {
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {

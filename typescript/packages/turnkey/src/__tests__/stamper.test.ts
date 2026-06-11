@@ -17,6 +17,56 @@ function getTestKeys() {
 }
 
 describe('ApiKeyStamper', () => {
+    describe('constructor key validation', () => {
+        test('throws CONFIG_ERROR when keys are not valid hex', () => {
+            expect(
+                () =>
+                    new ApiKeyStamper({
+                        apiPrivateKey: 'not-hex',
+                        apiPublicKey: 'also-not-hex',
+                    }),
+            ).toThrow('Turnkey API keys must be valid hex strings');
+        });
+
+        test('throws CONFIG_ERROR when public key is not 33 bytes', () => {
+            const { privateKey } = getTestKeys();
+            const uncompressedPublicKey = bytesToHex(p256.getPublicKey(Buffer.from(privateKey, 'hex'), false));
+
+            expect(
+                () =>
+                    new ApiKeyStamper({
+                        apiPrivateKey: privateKey,
+                        apiPublicKey: uncompressedPublicKey,
+                    }),
+            ).toThrow('Public key must be 33 bytes (compressed P-256 format), got 65');
+        });
+
+        test('throws CONFIG_ERROR when private key is not 32 bytes', () => {
+            const { publicKey } = getTestKeys();
+
+            expect(
+                () =>
+                    new ApiKeyStamper({
+                        apiPrivateKey: 'abcdef',
+                        apiPublicKey: publicKey,
+                    }),
+            ).toThrow('Private key must be 32 bytes, got 3');
+        });
+
+        test('throws CONFIG_ERROR when public key is not a valid P-256 point', () => {
+            const { privateKey } = getTestKeys();
+            const invalidPoint = '02' + 'ff'.repeat(32);
+
+            expect(
+                () =>
+                    new ApiKeyStamper({
+                        apiPrivateKey: privateKey,
+                        apiPublicKey: invalidPoint,
+                    }),
+            ).toThrow('Public key is not a valid P-256 point');
+        });
+    });
+
     test('creates valid X-Stamp header with P256 signature', () => {
         const { privateKey, publicKey } = getTestKeys();
 

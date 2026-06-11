@@ -150,7 +150,11 @@ describe('ParaSigner', () => {
 
             await expect(ParaSigner.create(mockConfig)).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
-                message: expect.stringContaining('Failed to fetch wallet'),
+                context: expect.objectContaining({
+                    response: expect.stringContaining('Unauthorized'),
+                    status: 401,
+                }),
+                message: expect.stringContaining('Para API error: 401'),
             });
         });
 
@@ -333,7 +337,11 @@ describe('ParaSigner', () => {
 
             await expect(signer.signMessages([message])).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
-                message: expect.stringContaining('Para signing failed'),
+                context: expect.objectContaining({
+                    response: expect.stringContaining('rate limited'),
+                    status: 429,
+                }),
+                message: expect.stringContaining('Para API error: 429'),
             });
         });
 
@@ -482,7 +490,11 @@ describe('ParaSigner', () => {
 
             await expect(signer.signTransactions([mockTransaction])).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
-                message: expect.stringContaining('Para signing failed'),
+                context: expect.objectContaining({
+                    response: expect.stringContaining('rate limited'),
+                    status: 429,
+                }),
+                message: expect.stringContaining('Para API error: 429'),
             });
         });
 

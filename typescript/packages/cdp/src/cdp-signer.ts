@@ -1,15 +1,18 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase58Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
+    assertHttpsUrl,
     assertSignatureValid,
     base64UrlDecoder,
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
     extractSignatureFromWireTransaction,
-    sanitizeRemoteErrorResponse,
+    fetchSignerJson,
+    signBatchStaggered,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { createKeyPairFromBytes, SignatureBytes } from '@solana/keys';
 import type { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -277,20 +280,11 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         }
 
         const baseUrl = normalizeBaseUrl(config.baseUrl ?? CDP_DEFAULT_BASE_URL);
-        const parsedBaseUrl = parseAndValidateHttpsBaseUrl(baseUrl);
+        const parsedBaseUrl = assertHttpsUrl(baseUrl, 'baseUrl');
         const apiHost = parsedBaseUrl.host;
 
         const requestDelayMs = config.requestDelayMs ?? 0;
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
+        validateRequestDelayMs(requestDelayMs);
 
         const [apiKey, walletKey] = await Promise.all([
             loadApiKey(config.cdpApiKeySecret),
@@ -306,12 +300,6 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
             requestDelayMs,
             walletKey,
         });
-    }
-
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
     }
 
     private decodeMessageBytes(messageBytes: Uint8Array): string {
@@ -355,40 +343,15 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         const body = { message };
         const headers = await this.buildPostHeaders(path, body);
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const data = await fetchSignerJson<SignMessageResponse>({
+            init: {
                 body: JSON.stringify(body),
                 headers,
                 method: 'POST',
-                redirect: 'error',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'CDP signMessage network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `CDP signMessage API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let data: SignMessageResponse;
-        try {
-            data = (await response.json()) as SignMessageResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse CDP signMessage response',
-            });
-        }
+            },
+            providerName: 'CDP',
+            url,
+        });
 
         if (!data.signature) {
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
@@ -421,40 +384,15 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         const body = { transaction: wireTransaction };
         const headers = await this.buildPostHeaders(path, body);
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const data = await fetchSignerJson<SignTransactionResponse>({
+            init: {
                 body: JSON.stringify(body),
                 headers,
                 method: 'POST',
-                redirect: 'error',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'CDP signTransaction network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `CDP signTransaction API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let data: SignTransactionResponse;
-        try {
-            data = (await response.json()) as SignTransactionResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse CDP signTransaction response',
-            });
-        }
+            },
+            providerName: 'CDP',
+            url,
+        });
 
         if (!data.signedTransaction) {
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
@@ -470,9 +408,9 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
      * Message bytes are decoded as UTF-8 before sending to the CDP signMessage endpoint.
      */
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            messages,
+            async message => {
                 const utf8Message = this.decodeMessageBytes(message.content);
                 const signatureBytes = await this.callSignMessage(utf8Message);
                 await assertSignatureValid({
@@ -484,7 +422,8 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -495,9 +434,9 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            transactions,
+            async transaction => {
                 const wireTransaction = getBase64EncodedWireTransaction(transaction);
                 const signedWireTx = await this.callSignTransaction(wireTransaction);
                 const sigDict = extractSignatureFromWireTransaction({
@@ -510,7 +449,8 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
                     signerAddress: this.address,
                 });
                 return sigDict;
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -521,12 +461,15 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         try {
             const path = `${CDP_BASE_PATH}/${this.address}`;
             const headers = await this.buildGetHeaders(path);
-            const response = await fetch(`${this.baseUrl}${path}`, {
-                headers,
-                method: 'GET',
-                redirect: 'error',
+            await fetchSignerJson<unknown>({
+                init: {
+                    headers,
+                    method: 'GET',
+                },
+                providerName: 'CDP',
+                url: `${this.baseUrl}${path}`,
             });
-            return response.ok;
+            return true;
         } catch {
             return false;
         }
@@ -544,26 +487,6 @@ function normalizeBaseUrl(baseUrl: string): string {
         normalized = normalized.slice(0, -1);
     }
     return normalized;
-}
-
-function parseAndValidateHttpsBaseUrl(baseUrl: string): URL {
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(baseUrl);
-    } catch (error) {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            cause: error,
-            message: 'baseUrl is not a valid URL',
-        });
-    }
-
-    if (parsedUrl.protocol !== 'https:') {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'baseUrl must use HTTPS',
-        });
-    }
-
-    return parsedUrl;
 }
 
 function shouldIncludeReqHash(body: unknown): boolean {

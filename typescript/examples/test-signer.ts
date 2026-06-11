@@ -10,11 +10,12 @@
  *
  * Usage:
  *   1. Copy .env.example to .env and fill in credentials for your signer
- *   2. SIGNER_TYPE=fireblocks pnpm test:signer
- *   3. SIGNER_TYPE=para pnpm test:signer
- *   4. SIGNER_TYPE=privy pnpm test:signer
- *   5. SIGNER_TYPE=turnkey pnpm test:signer
- *   6. SIGNER_TYPE=keypair pnpm test:signer
+ *   2. Run the script for your signer (from this directory):
+ *      pnpm test:fireblocks
+ *      pnpm test:para
+ *      pnpm test:privy
+ *      pnpm test:turnkey
+ *      pnpm test:keypair
  *
  * Example AWS KMS args (Rust only):
  *   - AWS_KMS_KEY_ID: "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
@@ -161,9 +162,8 @@ function validateEnv(signerType: SignerType) {
     const missing = [...config.requiredEnvVars, 'SOLANA_RPC_URL', 'SOLANA_WS_URL'].filter(v => !process.env[v]);
 
     if (missing.length > 0) {
-        console.error(
-            `Missing required environment variables for ${signerType}: ${missing.forEach(v => console.error(`\n  ✗ ${v}`))}`,
-        );
+        console.error(`Missing required environment variables for ${signerType}:`);
+        missing.forEach(v => console.error(`  ✗ ${v}`));
         console.error('Please copy .env.example to .env and fill in your credentials');
         process.exit(1);
     }

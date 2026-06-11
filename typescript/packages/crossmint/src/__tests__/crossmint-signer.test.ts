@@ -125,17 +125,20 @@ describe('CrossmintSigner', () => {
                 new Response(JSON.stringify({ message: malicious }), { status: 400 }),
             );
 
-            let thrown: Error | undefined;
+            let thrown: (Error & { context?: Record<string, unknown> }) | undefined;
             try {
                 await createCrossmintSigner(mockConfig);
             } catch (error) {
-                thrown = error as Error;
+                thrown = error as Error & { context?: Record<string, unknown> };
             }
 
             expect(thrown).toBeDefined();
+            expect(thrown?.message).toContain('Crossmint API error: 400');
             // eslint-disable-next-line no-control-regex
             expect(thrown?.message).not.toMatch(/[\u0000-\u001f]/);
-            expect(thrown?.message).toContain('[truncated]');
+            const response = thrown?.context?.response as string;
+            expect(response).toContain('evil');
+            expect(response).toContain('[truncated]');
         });
 
         it('throws config error when apiKey is missing', async () => {
@@ -164,7 +167,7 @@ describe('CrossmintSigner', () => {
         it('throws config error for invalid base URL', async () => {
             await expect(createCrossmintSigner({ ...mockConfig, apiBaseUrl: 'not-a-url' })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
-                message: expect.stringContaining('Invalid apiBaseUrl'),
+                message: expect.stringContaining('apiBaseUrl is not a valid URL'),
             });
         });
 
@@ -575,7 +578,11 @@ describe('CrossmintSigner', () => {
 
             await expect(signer.signTransactions([createMockTransaction()])).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
-                message: expect.stringContaining('Unauthorized'),
+                context: expect.objectContaining({
+                    response: expect.stringContaining('Unauthorized'),
+                    status: 401,
+                }),
+                message: expect.stringContaining('Crossmint API error: 401'),
             });
         });
 

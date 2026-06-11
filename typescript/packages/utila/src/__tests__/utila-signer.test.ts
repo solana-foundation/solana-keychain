@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { decodeJwt, decodeProtectedHeader, importPKCS8 } from 'jose';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { decodeJwt, decodeProtectedHeader, importPKCS8, SignJWT } from 'jose';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
@@ -137,8 +137,25 @@ describe('UtilaSigner', () => {
         it('throws config error for invalid base URL', async () => {
             await expect(createUtilaSigner({ ...mockConfig, apiBaseUrl: 'not-a-url' })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
-                message: expect.stringContaining('Invalid apiBaseUrl'),
+                message: expect.stringContaining('apiBaseUrl is not a valid URL'),
             });
+        });
+
+        it('throws config error when requestDelayMs is negative', async () => {
+            await expect(createUtilaSigner({ ...mockConfig, requestDelayMs: -1 })).rejects.toMatchObject({
+                code: 'SIGNER_CONFIG_ERROR',
+                message: expect.stringContaining('requestDelayMs must not be negative'),
+            });
+            expect(fetch).not.toHaveBeenCalled();
+        });
+
+        it('warns when requestDelayMs is greater than 3000ms', async () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
+
+            await createUtilaSigner({ ...mockConfig, requestDelayMs: 5000 });
+
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
         });
 
         it('throws invalid public key when wallet response omits Solana address', async () => {
@@ -328,6 +345,59 @@ describe('UtilaSigner', () => {
                 code: 'SIGNER_SIGNING_FAILED',
                 message: expect.stringContaining('No signature found'),
             });
+        });
+    });
+
+    describe('access token caching', () => {
+        function signedTransactionResponse(): Response {
+            return jsonResponse({
+                transaction: {
+                    name: 'vaults/vault-test/transactions/tx-1',
+                    solanaTransaction: {
+                        rawTransaction: MOCK_RAW_TRANSACTION,
+                    },
+                    state: 'SIGNED',
+                },
+            });
+        }
+
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('reuses the cached access token across consecutive requests', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
+            const signer = await createUtilaSigner(mockConfig);
+
+            const signSpy = vi.spyOn(SignJWT.prototype, 'sign');
+            signSpy.mockClear();
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(signedTransactionResponse())
+                .mockResolvedValueOnce(signedTransactionResponse());
+
+            await signer.signTransactions([createMockTransaction()]);
+            await signer.signTransactions([createMockTransaction()]);
+
+            expect(signSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it('re-mints the access token when the cached token is near expiry', async () => {
+            vi.useFakeTimers();
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
+            const signer = await createUtilaSigner(mockConfig);
+
+            const signSpy = vi.spyOn(SignJWT.prototype, 'sign');
+            signSpy.mockClear();
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(signedTransactionResponse())
+                .mockResolvedValueOnce(signedTransactionResponse());
+
+            await signer.signTransactions([createMockTransaction()]);
+            expect(signSpy).toHaveBeenCalledTimes(1);
+
+            vi.setSystemTime(Date.now() + 55 * 60 * 1000);
+            await signer.signTransactions([createMockTransaction()]);
+            expect(signSpy).toHaveBeenCalledTimes(2);
         });
     });
 

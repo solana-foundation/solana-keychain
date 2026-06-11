@@ -1,13 +1,16 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
+    assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
     extractSignatureFromTransactionBytes,
-    sanitizeRemoteErrorResponse,
+    fetchSignerJson,
+    signBatchStaggered,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
@@ -100,7 +103,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
         this.organizationId = config.organizationId;
         this.privateKeyId = config.privateKeyId;
         const apiBaseUrl = config.apiBaseUrl || 'https://api.turnkey.com';
-        validateHttpsApiBaseUrl(apiBaseUrl);
+        assertHttpsUrl(apiBaseUrl, 'apiBaseUrl');
 
         this.apiBaseUrl = apiBaseUrl;
         this.stamper = new ApiKeyStamper({
@@ -108,34 +111,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
             apiPublicKey: config.apiPublicKey,
         });
         this.requestDelayMs = config.requestDelayMs || 0;
-        this.validateRequestDelayMs(this.requestDelayMs);
-    }
-
-    /**
-     * Validate request delay ms
-     * @param requestDelayMs
-     */
-    private validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
-    }
-
-    /**
-     * Delay between concurrent signing requests to avoid rate limits
-     * @param index
-     */
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
+        validateRequestDelayMs(this.requestDelayMs);
     }
 
     /**
@@ -171,8 +147,6 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
      * @returns Promise of SignatureBytes
      */
     private async sign(hexPayload: string): Promise<SignatureBytes> {
-        const timestampMs = Date.now().toString();
-
         const request: SignRequest = {
             organizationId: this.organizationId,
             parameters: {
@@ -181,52 +155,25 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                 payload: hexPayload,
                 signWith: this.privateKeyId,
             },
-            timestampMs,
+            timestampMs: Date.now().toString(),
             type: 'ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2',
         };
 
         const body = JSON.stringify(request);
         const stamp = this.stamper.stamp(body);
 
-        const url = `${this.apiBaseUrl}/public/v1/submit/sign_raw_payload`;
-
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const activityResponse = await fetchSignerJson<ActivityResponse>({
+            init: {
                 body,
                 headers: {
                     'Content-Type': 'application/json',
                     [stamp.stampHeaderName]: stamp.stampHeaderValue,
                 },
                 method: 'POST',
-                redirect: 'error',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Turnkey network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Turnkey API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let activityResponse: ActivityResponse;
-        try {
-            activityResponse = (await response.json()) as ActivityResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Turnkey response',
-            });
-        }
+            },
+            providerName: 'Turnkey',
+            url: `${this.apiBaseUrl}/public/v1/submit/sign_raw_payload`,
+        });
 
         const signResult = activityResponse.activity?.result?.signRawPayloadResult;
         if (!signResult || !signResult.r || !signResult.s) {
@@ -251,9 +198,9 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
      * Sign multiple messages using Turnkey API
      */
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            messages,
+            async message => {
                 // Convert message bytes to hex for Turnkey
                 const bytesToHex = getBase16Decoder().decode;
                 const hexMessage = bytesToHex(message.content);
@@ -267,7 +214,8 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -279,8 +227,6 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
      * @returns Promise of string (signed transaction hex)
      */
     private async signTransaction(hexTransaction: string): Promise<string> {
-        const timestampMs = Date.now().toString();
-
         const request: SignTransactionRequest = {
             organizationId: this.organizationId,
             parameters: {
@@ -288,52 +234,25 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                 type: 'TRANSACTION_TYPE_SOLANA',
                 unsignedTransaction: hexTransaction,
             },
-            timestampMs,
+            timestampMs: Date.now().toString(),
             type: 'ACTIVITY_TYPE_SIGN_TRANSACTION_V2',
         };
 
         const body = JSON.stringify(request);
         const stamp = this.stamper.stamp(body);
 
-        const url = `${this.apiBaseUrl}/public/v1/submit/sign_transaction`;
-
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const activityResponse = await fetchSignerJson<ActivityResponse>({
+            init: {
                 body,
                 headers: {
                     'Content-Type': 'application/json',
                     [stamp.stampHeaderName]: stamp.stampHeaderValue,
                 },
                 method: 'POST',
-                redirect: 'error',
-            });
-        } catch (error) {
-            throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Turnkey network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Failed to read error response');
-            throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: `Turnkey API error: ${response.status}`,
-                response: sanitizeRemoteErrorResponse(errorText),
-                status: response.status,
-            });
-        }
-
-        let activityResponse: ActivityResponse;
-        try {
-            activityResponse = (await response.json()) as ActivityResponse;
-        } catch (error) {
-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Turnkey response',
-            });
-        }
+            },
+            providerName: 'Turnkey',
+            url: `${this.apiBaseUrl}/public/v1/submit/sign_transaction`,
+        });
 
         const signedTransaction = activityResponse.activity?.result?.signTransactionResult?.signedTransaction;
         if (!signedTransaction) {
@@ -354,9 +273,9 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            transactions,
+            async transaction => {
                 const wireTransaction = getBase64EncodedWireTransaction(transaction);
 
                 // Convert base64 wire transaction to bytes, then to hex for Turnkey
@@ -381,7 +300,8 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                     signerAddress: this.address,
                 });
                 return sigDict;
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -397,43 +317,23 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
             };
             const body = JSON.stringify(request);
             const stamp = this.stamper.stamp(body);
-            const url = `${this.apiBaseUrl}/public/v1/query/whoami`;
 
-            const response = await fetch(url, {
-                body,
-                headers: {
-                    'Content-Type': 'application/json',
-                    [stamp.stampHeaderName]: stamp.stampHeaderValue,
+            const whoami = await fetchSignerJson<WhoAmIResponse>({
+                init: {
+                    body,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        [stamp.stampHeaderName]: stamp.stampHeaderValue,
+                    },
+                    method: 'POST',
                 },
-                method: 'POST',
-                redirect: 'error',
+                providerName: 'Turnkey',
+                url: `${this.apiBaseUrl}/public/v1/query/whoami`,
             });
-            if (!response.ok) {
-                return false;
-            }
-
-            const whoami = (await response.json()) as WhoAmIResponse;
 
             return whoami?.organizationId === this.organizationId;
         } catch {
             return false;
         }
-    }
-}
-
-function validateHttpsApiBaseUrl(apiBaseUrl: string): void {
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(apiBaseUrl);
-    } catch {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'apiBaseUrl is not a valid URL',
-        });
-    }
-
-    if (parsedUrl.protocol !== 'https:') {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'apiBaseUrl must use HTTPS',
-        });
     }
 }

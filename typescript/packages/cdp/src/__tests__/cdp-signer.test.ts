@@ -241,7 +241,7 @@ describe('CdpSigner', () => {
             const signer = await CdpSigner.create(makeConfig());
             const message = { content: new TextEncoder().encode('hello'), signatures: {} };
 
-            await expect(signer.signMessages([message])).rejects.toThrow('CDP signMessage network request failed');
+            await expect(signer.signMessages([message])).rejects.toThrow('CDP network request failed');
         });
 
         it('throws REMOTE_API_ERROR on non-2xx response', async () => {
@@ -250,7 +250,7 @@ describe('CdpSigner', () => {
             const signer = await CdpSigner.create(makeConfig());
             const message = { content: new TextEncoder().encode('hello'), signatures: {} };
 
-            await expect(signer.signMessages([message])).rejects.toThrow('CDP signMessage API error: 401');
+            await expect(signer.signMessages([message])).rejects.toThrow('CDP API error: 401');
         });
 
         it('throws SIGNING_FAILED for invalid signature length', async () => {
@@ -318,9 +318,7 @@ describe('CdpSigner', () => {
             const signer = await CdpSigner.create(makeConfig());
             const mockTx = createMockTransaction();
 
-            await expect(signer.signTransactions([mockTx])).rejects.toThrow(
-                'CDP signTransaction network request failed',
-            );
+            await expect(signer.signTransactions([mockTx])).rejects.toThrow('CDP network request failed');
         });
 
         it('throws REMOTE_API_ERROR on non-2xx response', async () => {
@@ -329,7 +327,7 @@ describe('CdpSigner', () => {
             const signer = await CdpSigner.create(makeConfig());
             const mockTx = createMockTransaction();
 
-            await expect(signer.signTransactions([mockTx])).rejects.toThrow('CDP signTransaction API error: 403');
+            await expect(signer.signTransactions([mockTx])).rejects.toThrow('CDP API error: 403');
         });
 
         it('throws REMOTE_API_ERROR when the response is missing the signedTransaction field', async () => {

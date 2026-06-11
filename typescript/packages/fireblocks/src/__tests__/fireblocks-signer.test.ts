@@ -243,6 +243,21 @@ describe('FireblocksSigner', () => {
                 message: expect.stringContaining('Fireblocks network request failed'),
             });
         });
+
+        it('should throw INVALID_PRIVATE_KEY for an unparseable PEM before any network call', async () => {
+            await expect(
+                FireblocksSigner.create({
+                    apiKey: TEST_API_KEY,
+                    privateKeyPem: 'not-a-pem',
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                }),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_INVALID_PRIVATE_KEY',
+                message: expect.stringContaining('Failed to parse Fireblocks RSA private key'),
+            });
+
+            expect(mockFetch).not.toHaveBeenCalled();
+        });
     });
 
     describe('init', () => {
@@ -645,6 +660,7 @@ describe('FireblocksSigner', () => {
             mockFetch.mockResolvedValueOnce({
                 ok: false,
                 status: 401,
+                text: async () => 'Unauthorized',
             });
 
             const signer = new FireblocksSigner({
@@ -656,6 +672,19 @@ describe('FireblocksSigner', () => {
             const available = await signer.isAvailable();
 
             expect(available).toBe(false);
+        });
+
+        it('should return false for an unparseable PEM', async () => {
+            const signer = new FireblocksSigner({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: 'not-a-pem',
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+
+            const available = await signer.isAvailable();
+
+            expect(available).toBe(false);
+            expect(mockFetch).not.toHaveBeenCalled();
         });
 
         it('should return false when fetch throws', async () => {

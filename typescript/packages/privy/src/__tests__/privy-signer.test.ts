@@ -548,7 +548,7 @@ describe('PrivySigner', () => {
             const message = createSignableMessage(new Uint8Array([1, 2, 3, 4]));
             await expect(signer.signMessages([message])).rejects.toMatchObject({
                 code: 'SIGNER_PARSING_ERROR',
-                message: expect.stringContaining('Failed to parse Privy signing response'),
+                message: expect.stringContaining('Failed to parse Privy response'),
             });
         });
 
@@ -706,7 +706,7 @@ describe('PrivySigner', () => {
 
             await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
                 code: 'SIGNER_PARSING_ERROR',
-                message: expect.stringContaining('Failed to parse Privy signing response'),
+                message: expect.stringContaining('Failed to parse Privy response'),
             });
         });
 

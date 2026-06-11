@@ -673,40 +673,30 @@ export class YourSigner<TAddress extends string = string> implements SolanaSigne
 
 **Key rules:**
 
-- **HTTPS enforcement**: If your signer accepts an `apiBaseUrl` config field, validate the URL scheme in `create()`:
+- **HTTPS enforcement**: If your signer accepts an `apiBaseUrl` config field, validate it in `create()` with `assertHttpsUrl()` from `@solana/keychain-core`:
   ```typescript
-  const parsedUrl = new URL(config.apiBaseUrl);
-  if (parsedUrl.protocol !== 'https:') {
-      throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-          message: 'apiBaseUrl must use HTTPS',
-      });
-  }
-  ```
-- **Error sanitization**: Never include raw remote API response text in errors. Use `sanitizeRemoteErrorResponse()` from `@solana/keychain-core`:
-  ```typescript
-  import { sanitizeRemoteErrorResponse } from '@solana/keychain-core';
+  import { assertHttpsUrl } from '@solana/keychain-core';
 
-  const errorText = await response.text();
-  throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-      message: `YourService API error: ${sanitizeRemoteErrorResponse(errorText)}`,
-  });
+  assertHttpsUrl(apiBaseUrl, 'apiBaseUrl'); // returns the parsed URL if you need host/origin
   ```
-- **Safe JSON parsing**: Access parsed JSON properties inside the try/catch or use optional chaining (`?.`) to guard against malformed responses that would throw raw `TypeError`:
+- **Remote API calls**: use `fetchSignerJson()` from `@solana/keychain-core` instead of calling `fetch()` directly. It owns the whole error pipeline — network failure → `HTTP_ERROR`, non-2xx → `REMOTE_API_ERROR` with the response body sanitized via `sanitizeRemoteErrorResponse()`, bad JSON → `PARSING_ERROR` — plus redirect rejection and a default 60s timeout:
   ```typescript
-  let data: YourApiResponse;
-  try {
-      data = (await response.json()) as YourApiResponse;
-  } catch (error) {
-      throwSignerError(SignerErrorCode.PARSING_ERROR, { cause: error, ... });
-  }
+  import { fetchSignerJson } from '@solana/keychain-core';
+
+  const data = await fetchSignerJson<YourApiResponse>({
+      init: { body: JSON.stringify(request), headers, method: 'POST' },
+      providerName: 'YourService',
+      url,
+  });
   const signature = data?.result?.signature;
   if (!signature) {
       throwSignerError(SignerErrorCode.SIGNING_FAILED, { ... });
   }
   ```
-- Wrap all `fetch()` calls in try/catch — use `throwSignerError(SignerErrorCode.HTTP_ERROR, { cause: error, ... })` from `@solana/keychain-core`
+  Validate provider-specific response shape (with optional chaining) after the call.
+- **Batch staggering**: support the `requestDelayMs` config field for rate-limited APIs. Validate it with `validateRequestDelayMs()` and implement `signMessages`/`signTransactions` with `signBatchStaggered()` from `@solana/keychain-core` (see any existing signer).
+- **One-time crypto at construction**: import/validate static key material (PEM parsing, `importPKCS8`, point decompression) once in `create()`/`init()` and store the imported key — only genuinely request-bound work (e.g. minting a per-request JWT) belongs in the request path.
 - Add `cause` to catch blocks to preserve stack traces
-- Use `requestDelayMs` pattern if your API has rate limits (see any existing signer for the `delay()` + `validateRequestDelayMs()` pattern)
 - Add `@throws` JSDoc to factory functions listing the error codes they can throw
 
 #### Index Exports

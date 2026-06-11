@@ -1,24 +1,21 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
+    assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
-    sanitizeRemoteErrorResponse,
+    fetchSignerJson,
+    signBatchStaggered,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
 
-import type {
-    VaultErrorResponse,
-    VaultKeyReadResponse,
-    VaultPayloadBase64,
-    VaultSignRequest,
-    VaultSignResponse,
-} from './types.js';
+import type { VaultKeyReadResponse, VaultPayloadBase64, VaultSignRequest, VaultSignResponse } from './types.js';
 
 /**
  * Create a Vault-backed signer.
@@ -90,38 +87,13 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
         }
 
         const vaultAddr = config.vaultAddr.replace(/\/$/, ''); // Remove trailing slash
-        validateHttpsVaultAddr(vaultAddr);
+        assertHttpsUrl(vaultAddr, 'vaultAddr', { allowHttpLoopbackInTests: true });
 
         this.vaultAddr = vaultAddr;
         this.vaultToken = config.vaultToken;
         this.keyName = config.keyName;
         this.requestDelayMs = config.requestDelayMs || 0;
-        this.validateRequestDelayMs(this.requestDelayMs);
-    }
-
-    /**
-     * Validate request delay ms
-     */
-    private validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn(
-                'requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors for signing messages/transactions',
-            );
-        }
-    }
-
-    /**
-     * Add delay between concurrent requests
-     */
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
-        }
+        validateRequestDelayMs(this.requestDelayMs);
     }
 
     /**
@@ -153,51 +125,18 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
             input: base64Data as VaultPayloadBase64,
         };
 
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const signResponse = await fetchSignerJson<VaultSignResponse>({
+            init: {
                 body: JSON.stringify(request),
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Vault-Token': this.vaultToken,
                 },
                 method: 'POST',
-                redirect: 'error',
-            });
-        } catch (error) {
-            return throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Vault network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            let errorMessage = `Vault API error: ${response.status}`;
-            try {
-                const errorData = (await response.json()) as VaultErrorResponse;
-                if (errorData.errors && errorData.errors.length > 0) {
-                    errorMessage = `Vault API error: ${sanitizeRemoteErrorResponse(errorData.errors.join(', '))}`;
-                }
-            } catch {
-                // Ignore JSON parsing errors for error response
-            }
-
-            return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: errorMessage,
-                status: response.status,
-            });
-        }
-
-        let signResponse: VaultSignResponse;
-        try {
-            signResponse = (await response.json()) as VaultSignResponse;
-        } catch (error) {
-            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Vault signing response',
-            });
-        }
+            },
+            providerName: 'Vault',
+            url,
+        });
 
         if (!signResponse.data?.signature) {
             return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
@@ -223,9 +162,9 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
      * Sign multiple messages using Vault
      */
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            messages,
+            async message => {
                 const signatureBytes = await this.signMessageBytes(message.content);
                 await assertSignatureValid({
                     data: message.content,
@@ -236,7 +175,8 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -246,9 +186,9 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            transactions,
+            async transaction => {
                 // Sign the transaction message bytes
                 const signatureBytes = await this.signMessageBytes(transaction.messageBytes);
                 await assertSignatureValid({
@@ -260,7 +200,8 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -271,43 +212,19 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
         const url = `${this.vaultAddr}/v1/transit/keys/${encodeURIComponent(this.keyName)}`;
 
         try {
-            const response = await fetch(url, {
-                headers: {
-                    'X-Vault-Token': this.vaultToken,
+            const keyData = await fetchSignerJson<VaultKeyReadResponse>({
+                init: {
+                    headers: {
+                        'X-Vault-Token': this.vaultToken,
+                    },
+                    method: 'GET',
                 },
-                method: 'GET',
-                redirect: 'error',
+                providerName: 'Vault',
+                url,
             });
-
-            if (!response.ok) {
-                return false;
-            }
-
-            const keyData = (await response.json()) as VaultKeyReadResponse;
             return keyData.data?.supports_signing === true && keyData.data?.type === 'ed25519';
         } catch {
             return false;
         }
-    }
-}
-
-function validateHttpsVaultAddr(vaultAddr: string): void {
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(vaultAddr);
-    } catch {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'vaultAddr is not a valid URL',
-        });
-    }
-
-    const isLocalhost =
-        parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1' || parsedUrl.hostname === '[::1]';
-    const allowHttpInTests = process.env.NODE_ENV === 'test' && isLocalhost;
-
-    if (parsedUrl.protocol !== 'https:' && !allowHttpInTests) {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: 'vaultAddr must use HTTPS',
-        });
     }
 }
