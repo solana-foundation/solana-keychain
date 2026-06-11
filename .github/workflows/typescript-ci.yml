@@ -183,7 +183,7 @@ jobs:
           inject-env-vars: true
       - name: Configure AWS credentials
         if: matrix.package == 'aws-kms'
-        uses: aws-actions/configure-aws-credentials@v6.1.1
+        uses: aws-actions/configure-aws-credentials@v6.2.0
         with:
           role-to-assume: ${{ steps.doppler.outputs.AWS_ROLE_ARN }}
           aws-region: ${{ steps.doppler.outputs.AWS_KMS_REGION }}
