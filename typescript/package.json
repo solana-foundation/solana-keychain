@@ -35,7 +35,7 @@
     "eslint-plugin-jest": "^29.15.2",
     "globals": "^17.6.0",
     "prettier": "^3.8.3",
-    "rollup": "^4.60.4",
+    "rollup": "^4.61.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.2",
     "vitest": "^4.1.6"
