@@ -213,7 +213,7 @@ mod tests {
     use google_cloud_kms_v1::client::KeyManagementService;
     use scoped_env::ScopedEnv;
     use serial_test::serial;
-    use wiremock::matchers::{any, method, path};
+    use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     const TEST_KEY_NAME: &str = "projects/test-project/locations/us-east1/keyRings/test-ring/cryptoKeys/test-key/cryptoKeyVersions/1";
@@ -346,8 +346,11 @@ mod tests {
         )
         .expect("Failed to create signer");
 
-        // Mock GetPublicKey
-        Mock::given(any())
+        // Mock GetPublicKey. Matched by path (not a catch-all) so the auth
+        // client's variable number of metadata probes (e.g. universe-domain)
+        // cannot inflate the match count of the strict expect(1) below.
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/{TEST_KEY_NAME}/publicKey")))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
                 {
                     "name": TEST_KEY_NAME,
@@ -397,7 +400,8 @@ mod tests {
         let signature = keypair.sign_message(message);
 
         // Mock AsymmetricSign
-        Mock::given(any())
+        Mock::given(method("POST"))
+            .and(path(format!("/v1/{TEST_KEY_NAME}:asymmetricSign")))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
                 {
                     "signature": STANDARD.encode(signature.as_ref()),
@@ -449,7 +453,8 @@ mod tests {
         let message = b"test message";
         let signature = signing_keypair.sign_message(message);
 
-        Mock::given(any())
+        Mock::given(method("POST"))
+            .and(path(format!("/v1/{TEST_KEY_NAME}:asymmetricSign")))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
                 {
                     "signature": STANDARD.encode(signature.as_ref()),
@@ -502,7 +507,8 @@ mod tests {
         let signature = keypair.sign_message(&tx.message_data());
 
         // Mock AsymmetricSign
-        Mock::given(any())
+        Mock::given(method("POST"))
+            .and(path(format!("/v1/{TEST_KEY_NAME}:asymmetricSign")))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
                 {
                     "signature": STANDARD.encode(signature.as_ref()),
@@ -559,7 +565,8 @@ mod tests {
         .expect("Failed to create signer");
 
         // Return invalid signature (not 64 bytes)
-        Mock::given(any())
+        Mock::given(method("POST"))
+            .and(path(format!("/v1/{TEST_KEY_NAME}:asymmetricSign")))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
                 {
                     "signature": STANDARD.encode(vec![0u8; 32]),
@@ -607,7 +614,8 @@ mod tests {
         )
         .expect("Failed to create signer");
 
-        Mock::given(any())
+        Mock::given(method("POST"))
+            .and(path(format!("/v1/{TEST_KEY_NAME}:asymmetricSign")))
             .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!(
                 {
                     "error": {
@@ -661,7 +669,8 @@ mod tests {
         .expect("Failed to create signer");
 
         // Mock 403 Forbidden
-        Mock::given(any())
+        Mock::given(method("POST"))
+            .and(path(format!("/v1/{TEST_KEY_NAME}:asymmetricSign")))
             .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!(
                 {
                     "error": {
@@ -716,7 +725,8 @@ mod tests {
         .expect("Failed to create signer");
 
         // Mock GetPublicKey with WRONG algorithm
-        Mock::given(any())
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/{TEST_KEY_NAME}/publicKey")))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
                 {
                     "name": TEST_KEY_NAME,
