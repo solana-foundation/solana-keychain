@@ -57,4 +57,13 @@ pub struct Approvals {
 pub struct PendingApproval {
     #[serde(default)]
     pub message: Option<String>,
+    #[serde(default)]
+    pub signer: Option<ApprovalSigner>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalSigner {
+    #[serde(default)]
+    pub locator: Option<String>,
 }

@@ -29,23 +29,33 @@ async function getLatestBlockhash() {
     return json.result.value;
 }
 
+// Crossmint is broadcast-managed: "success" requires the transaction to land
+// on devnet, so signing can take the signer's full polling budget (60 × 1s in
+// crossmint-signer.ts). The test timeout must exceed that budget so the
+// signer's own timeout error surfaces instead of a vitest kill.
+const SIGN_TEST_TIMEOUT_MS = 90_000;
+
 describe('CrossmintSigner Integration', () => {
-    it.skipIf(!process.env.CROSSMINT_API_KEY)('signs transactions with real API', async () => {
-        const { createSigner } = await getConfig(['signTransaction']);
-        const signer = await createSigner();
+    it.skipIf(!process.env.CROSSMINT_API_KEY)(
+        'signs transactions with real API',
+        { timeout: SIGN_TEST_TIMEOUT_MS },
+        async () => {
+            const { createSigner } = await getConfig(['signTransaction']);
+            const signer = await createSigner();
 
-        const { blockhash, lastValidBlockHeight } = await getLatestBlockhash();
-        const transaction = pipe(
-            createTransactionMessage({ version: 0 }),
-            tx => setTransactionMessageFeePayerSigner(signer, tx),
-            tx => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, tx),
-        );
+            const { blockhash, lastValidBlockHeight } = await getLatestBlockhash();
+            const transaction = pipe(
+                createTransactionMessage({ version: 0 }),
+                tx => setTransactionMessageFeePayerSigner(signer, tx),
+                tx => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, tx),
+            );
 
-        const signedTx = await signTransactionMessageWithSigners(transaction);
+            const signedTx = await signTransactionMessageWithSigners(transaction);
 
-        expect(signedTx.signatures[signer.address]).toBeDefined();
-        expect(signedTx.signatures[signer.address]?.byteLength).toBe(64);
-    });
+            expect(signedTx.signatures[signer.address]).toBeDefined();
+            expect(signedTx.signatures[signer.address]?.byteLength).toBe(64);
+        },
+    );
 
     it.skipIf(!process.env.CROSSMINT_API_KEY)('returns not supported for signMessages', async () => {
         const { createSigner } = await getConfig(['signMessage']);

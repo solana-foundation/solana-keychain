@@ -9,6 +9,9 @@ on:
       - 'rust/**'
       - '.github/workflows/ci.yml'
 
+env:
+  CARGO_NET_RETRY: 10
+
 jobs:
   resolve-signers:
     runs-on: ubuntu-latest

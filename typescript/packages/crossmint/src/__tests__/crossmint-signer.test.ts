@@ -820,26 +820,83 @@ describe('CrossmintSigner', () => {
                 )
                 // approval POST response still awaiting-approval, and our entry
                 // still appears pending (vendor lag). We must NOT resubmit.
-                .mockResolvedValue(
-                    new Response(
-                        JSON.stringify({
-                            id: 'tx-persist',
-                            status: 'awaiting-approval',
-                            approvals: { pending: [{ signer: { locator: OUR_SIGNER }, message: OUR_MESSAGE_B58 }] },
-                        }),
-                        { status: 200 },
+                // Fresh Response per call: a Response body is single-read, and
+                // this state is served across several polls.
+                .mockImplementation(() =>
+                    Promise.resolve(
+                        new Response(
+                            JSON.stringify({
+                                id: 'tx-persist',
+                                status: 'awaiting-approval',
+                                approvals: {
+                                    pending: [{ signer: { locator: OUR_SIGNER }, message: OUR_MESSAGE_B58 }],
+                                },
+                            }),
+                            { status: 200 },
+                        ),
                     ),
                 );
 
             const signer = await createCrossmintSigner(approvalConfig({ maxPollAttempts: 5 }));
 
+            // Once our approval is in, a persistent awaiting-approval status is
+            // an in-flight state, not a terminal failure: the signer keeps
+            // polling and surfaces its own timeout when the budget runs out.
             await expect(signer.signTransactions([createMockTransaction()])).rejects.toMatchObject({
-                code: 'SIGNER_SIGNING_FAILED',
-                message: expect.stringContaining('additional signer approvals are required'),
+                code: 'SIGNER_REMOTE_API_ERROR',
+                message: expect.stringContaining('polling timed out'),
             });
 
             const approvalPosts = vi.mocked(fetch).mock.calls.filter(call => String(call[0]).includes('/approvals'));
             expect(approvalPosts.length).toBe(1);
+        });
+
+        it('keeps polling when approval registers asynchronously and resolves on later success', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse()) // create()
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-async-approval',
+                            status: 'awaiting-approval',
+                            approvals: { pending: [{ signer: { locator: OUR_SIGNER }, message: OUR_MESSAGE_B58 }] },
+                        }),
+                        { status: 201 },
+                    ),
+                )
+                // approval POST acknowledged, but Crossmint has not registered
+                // it yet: status is still awaiting-approval with nothing
+                // pending for us.
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-async-approval',
+                            status: 'awaiting-approval',
+                            approvals: { pending: [] },
+                        }),
+                        { status: 200 },
+                    ),
+                )
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-async-approval',
+                            status: 'success',
+                            onChain: { txId: MOCK_SIGNATURE_B58 },
+                        }),
+                        { status: 200 },
+                    ),
+                );
+
+            const signer = await createCrossmintSigner(approvalConfig());
+            const results = await signer.signTransactions([createMockTransaction()]);
+            expect(results).toHaveLength(1);
+            expect(results[0]![signer.address]?.length).toBe(64);
+
+            const approvalPosts = vi.mocked(fetch).mock.calls.filter(call => String(call[0]).includes('/approvals'));
+            expect(approvalPosts.length).toBe(1);
+            // wallet + create + approvals + final poll = 4 fetches.
+            expect(vi.mocked(fetch)).toHaveBeenCalledTimes(4);
         });
     });
 

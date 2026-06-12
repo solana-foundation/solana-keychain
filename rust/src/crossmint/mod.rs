@@ -12,7 +12,7 @@ use types::{
 };
 
 const DEFAULT_BASE_URL: &str = "https://www.crossmint.com/api";
-const CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const DEFAULT_POLL_INTERVAL_MS: u64 = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 60;
@@ -319,6 +319,7 @@ impl CrossmintSigner {
         &self,
         mut response: TransactionResponse,
     ) -> Result<TransactionResponse, SignerError> {
+        let mut approval_submitted = false;
         for _ in 0..self.max_poll_attempts {
             match response.status.as_str() {
                 "success" => return Ok(response),
@@ -332,8 +333,12 @@ impl CrossmintSigner {
                         "Crossmint transaction failed: {detail}"
                     )));
                 }
-                "awaiting-approval" => {
+                // Submit our approval at most once; Crossmint may register it
+                // asynchronously, so afterwards awaiting-approval is treated
+                // like any other in-flight status and re-polled.
+                "awaiting-approval" if !approval_submitted => {
                     response = self.handle_awaiting_approval(response).await?;
+                    approval_submitted = true;
                 }
                 _ => {
                     tokio::time::sleep(tokio::time::Duration::from_millis(self.poll_interval_ms))
@@ -355,7 +360,7 @@ impl CrossmintSigner {
                     "Crossmint transaction failed: {detail}"
                 )))
             }
-            "awaiting-approval" => Err(SignerError::SigningFailed(
+            "awaiting-approval" if !approval_submitted => Err(SignerError::SigningFailed(
                 "Crossmint transaction is awaiting approval; additional signer approvals are required"
                     .to_string(),
             )),
@@ -376,17 +381,29 @@ impl CrossmintSigner {
             ));
         };
 
-        let message = response
+        // On a multi-approver wallet `pending` may contain challenges for other
+        // approvers; signing one of those with our key yields a vendor 4xx, so
+        // only the entry matching our signer locator is ours to approve.
+        let pending = response
             .approvals
             .as_ref()
-            .and_then(|a| a.pending.first())
-            .and_then(|p| p.message.as_deref())
+            .and_then(|a| {
+                a.pending.iter().find(|p| {
+                    p.signer.as_ref().and_then(|s| s.locator.as_deref())
+                        == Some(signer_locator.as_str())
+                })
+            })
             .ok_or_else(|| {
                 SignerError::SigningFailed(
-                    "Crossmint transaction awaiting approval but no pending message found"
-                        .to_string(),
+                    "Crossmint transaction is awaiting approval; additional signer approvals are required".to_string(),
                 )
             })?;
+
+        let message = pending.message.as_deref().ok_or_else(|| {
+            SignerError::SigningFailed(
+                "Crossmint transaction awaiting approval but no pending message found".to_string(),
+            )
+        })?;
 
         self.submit_approval(&response.id, signer_locator, message, signing_key)
             .await
@@ -1153,6 +1170,159 @@ mod tests {
             }
             other => panic!("Expected SigningFailed error, got: {:?}", other),
         }
+    }
+
+    fn attach_approval_signer(
+        signer: &mut CrossmintSigner,
+        locator: &str,
+    ) -> ed25519_dalek::SigningKey {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        signer.signing_key = Some(key.clone());
+        signer.signer = Some(locator.to_string());
+        key
+    }
+
+    #[tokio::test]
+    async fn test_sign_transaction_submits_approval_once_and_polls_after_async_registration() {
+        let server = MockServer::start().await;
+        let keypair = Keypair::new();
+        let signer_pubkey = keypair_pubkey(&keypair);
+        let locator = "server:test-approver";
+        let approval_message = bs58::encode(b"approval-challenge").into_string();
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .and(header("x-api-key", "test-api-key"))
+            .respond_with(wallet_response(&signer_pubkey.to_string()))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "tx-123",
+                "status": "awaiting-approval",
+                "approvals": {
+                    "pending": [
+                        { "signer": { "locator": locator }, "message": approval_message }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        // Approval is acknowledged but Crossmint has not registered it yet:
+        // the transaction still reports awaiting-approval with nothing pending.
+        Mock::given(method("POST"))
+            .and(path(
+                "/2025-06-09/wallets/test-wallet/transactions/tx-123/approvals",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "tx-123",
+                "status": "awaiting-approval",
+                "approvals": { "pending": [] }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 5);
+        attach_approval_signer(&mut signer, locator);
+        signer.init().await.unwrap();
+
+        let mut tx = create_test_transaction(&signer_pubkey);
+        let expected_signature = keypair_sign_message(&keypair, &tx.message_data());
+        let tx_id = bs58::encode(expected_signature.as_ref()).into_string();
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions/tx-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "tx-123",
+                "status": "success",
+                "onChain": { "txId": tx_id }
+            })))
+            .mount(&server)
+            .await;
+
+        let (_serialized, signature) = signer
+            .sign_transaction(&mut tx)
+            .await
+            .unwrap()
+            .into_signed_transaction();
+        assert_eq!(signature, expected_signature);
+    }
+
+    #[tokio::test]
+    async fn test_sign_transaction_selects_pending_approval_matching_signer_locator() {
+        use ed25519_dalek::Signer as _;
+        use wiremock::matchers::body_string_contains;
+
+        let server = MockServer::start().await;
+        let keypair = Keypair::new();
+        let signer_pubkey = keypair_pubkey(&keypair);
+        let locator = "server:test-approver";
+
+        let our_message_bytes = b"our-approval-challenge";
+        let our_message = bs58::encode(our_message_bytes).into_string();
+        let other_message = bs58::encode(b"someone-elses-challenge").into_string();
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .and(header("x-api-key", "test-api-key"))
+            .respond_with(wallet_response(&signer_pubkey.to_string()))
+            .mount(&server)
+            .await;
+
+        // pending[0] belongs to another approver; ours is second.
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "tx-multi",
+                "status": "awaiting-approval",
+                "approvals": {
+                    "pending": [
+                        { "signer": { "locator": "server:other-approver" }, "message": other_message },
+                        { "signer": { "locator": locator }, "message": our_message }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 5);
+        let signing_key = attach_approval_signer(&mut signer, locator);
+        signer.init().await.unwrap();
+
+        let mut tx = create_test_transaction(&signer_pubkey);
+        let expected_tx_signature = keypair_sign_message(&keypair, &tx.message_data());
+        let tx_id = bs58::encode(expected_tx_signature.as_ref()).into_string();
+
+        // Only an approval whose signature covers OUR challenge bytes (and
+        // carries our locator) is answered; signing pending[0] would miss this
+        // mock and fail the test.
+        let expected_approval_signature =
+            bs58::encode(signing_key.sign(our_message_bytes).to_bytes()).into_string();
+        Mock::given(method("POST"))
+            .and(path(
+                "/2025-06-09/wallets/test-wallet/transactions/tx-multi/approvals",
+            ))
+            .and(body_string_contains(&expected_approval_signature))
+            .and(body_string_contains(locator))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "tx-multi",
+                "status": "success",
+                "onChain": { "txId": tx_id }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let (_serialized, signature) = signer
+            .sign_transaction(&mut tx)
+            .await
+            .unwrap()
+            .into_signed_transaction();
+        assert_eq!(signature, expected_tx_signature);
     }
 
     #[tokio::test]
