@@ -222,9 +222,8 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
             ) {
                 response = await this.submitApproval(response, pending);
                 approvalSubmitted = true;
-                // Re-evaluate the new status immediately; the approvalSubmitted
-                // guard prevents this branch from re-running, so we cannot
-                // busy-loop re-signing/re-submitting the same approval.
+                // Re-evaluate the new status immediately; approvalSubmitted
+                // ensures the approval is signed and submitted at most once.
                 continue;
             }
             const terminalSignature = await this.resolveTerminalStatus(response, transaction, approvalSubmitted);
