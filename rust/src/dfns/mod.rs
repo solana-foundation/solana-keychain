@@ -299,9 +299,17 @@ impl DfnsSigner {
         ))
     }
 
-    /// Check if Dfns API is available by fetching wallet details
+    /// Check if the Dfns wallet is available and healthy: reachable, active,
+    /// and backed by an EdDSA/ed25519 signing key
     async fn check_availability(&self) -> bool {
-        self.get_wallet().await.is_ok()
+        match self.get_wallet().await {
+            Ok(wallet) => {
+                wallet.status == "Active"
+                    && wallet.signing_key.scheme == "EdDSA"
+                    && wallet.signing_key.curve == "ed25519"
+            }
+            Err(_) => false,
+        }
     }
 }
 
@@ -740,7 +748,61 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_is_available_failure() {
+    async fn test_is_available_archived_wallet() {
+        let mock_server = MockServer::start().await;
+        let signer = create_test_signer(&mock_server.uri());
+
+        let mut body = wallet_response_json();
+        body["status"] = serde_json::json!("Archived");
+
+        Mock::given(method("GET"))
+            .and(path("/wallets/test-wallet-id"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        assert!(!signer.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_is_available_wrong_scheme() {
+        let mock_server = MockServer::start().await;
+        let signer = create_test_signer(&mock_server.uri());
+
+        let mut body = wallet_response_json();
+        body["signingKey"]["scheme"] = serde_json::json!("ECDSA");
+
+        Mock::given(method("GET"))
+            .and(path("/wallets/test-wallet-id"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        assert!(!signer.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_is_available_wrong_curve() {
+        let mock_server = MockServer::start().await;
+        let signer = create_test_signer(&mock_server.uri());
+
+        let mut body = wallet_response_json();
+        body["signingKey"]["curve"] = serde_json::json!("secp256k1");
+
+        Mock::given(method("GET"))
+            .and(path("/wallets/test-wallet-id"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        assert!(!signer.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_is_available_api_error() {
         let mock_server = MockServer::start().await;
         let signer = create_test_signer(&mock_server.uri());
 

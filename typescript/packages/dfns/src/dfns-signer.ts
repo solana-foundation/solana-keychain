@@ -266,12 +266,17 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     }
 
     /**
-     * Check if Dfns API is available
+     * Check if the Dfns wallet is available and healthy: reachable, active,
+     * and backed by an EdDSA/ed25519 signing key.
      */
     async isAvailable(): Promise<boolean> {
         try {
-            await fetchWallet(this.apiBaseUrl, this.authToken, this.walletId);
-            return true;
+            const wallet = await fetchWallet(this.apiBaseUrl, this.authToken, this.walletId);
+            return (
+                wallet.status === 'Active' &&
+                wallet.signingKey.scheme === 'EdDSA' &&
+                wallet.signingKey.curve === 'ed25519'
+            );
         } catch {
             return false;
         }

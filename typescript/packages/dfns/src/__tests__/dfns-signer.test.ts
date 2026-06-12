@@ -390,9 +390,8 @@ describe('DfnsSigner', () => {
 
     describe('isAvailable', () => {
         it('returns true when API responds', async () => {
-            mockWalletFetch();
-            // isAvailable doesn't need create(), but we need a signer instance
-            mockWalletFetch(); // for the isAvailable call
+            mockWalletFetch(); // for create()
+            mockWalletFetch(); // for the isAvailable() call
             const signer = await DfnsSigner.create(defaultConfig);
             expect(await signer.isAvailable()).toBe(true);
         });
@@ -406,6 +405,30 @@ describe('DfnsSigner', () => {
                 status: 500,
                 text: async () => 'server error',
             });
+            expect(await signer.isAvailable()).toBe(false);
+        });
+
+        it('returns false for an archived wallet', async () => {
+            mockWalletFetch(); // for create()
+            const signer = await DfnsSigner.create(defaultConfig);
+
+            mockWalletFetch({ status: 'Archived' });
+            expect(await signer.isAvailable()).toBe(false);
+        });
+
+        it('returns false for a non-EdDSA scheme', async () => {
+            mockWalletFetch(); // for create()
+            const signer = await DfnsSigner.create(defaultConfig);
+
+            mockWalletFetch({ scheme: 'ECDSA' });
+            expect(await signer.isAvailable()).toBe(false);
+        });
+
+        it('returns false for a non-ed25519 curve', async () => {
+            mockWalletFetch(); // for create()
+            const signer = await DfnsSigner.create(defaultConfig);
+
+            mockWalletFetch({ curve: 'secp256k1' });
             expect(await signer.isAvailable()).toBe(false);
         });
     });
