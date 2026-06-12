@@ -99,7 +99,7 @@ git commit -m "chore: bump rust version to vX.Y.Z"
 
 ```bash
 cd typescript
-for pkg in core aws-kms cdp dfns fireblocks gcp-kms para privy turnkey vault keychain test-utils crossmint; do
+for pkg in core aws-kms cdp dfns fireblocks gcp-kms memory openfort para privy turnkey utila vault keychain kit-plugin test-utils crossmint; do
   cd packages/${pkg} && npm version "A.B.C" --no-git-tag-version && cd ../..
 done
 npm version "A.B.C" --no-git-tag-version

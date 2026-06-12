@@ -228,6 +228,7 @@ jobs:
           done
           if [ "${{ needs.resolve-signers.outputs.ts_all_signers_enabled }}" = "true" ]; then
             pnpm -F @solana/keychain... run build
+            pnpm -F @solana/keychain-kit-plugin run build
           fi
       - name: Typecheck
         run: |
@@ -239,7 +240,11 @@ jobs:
           done
           if [ "${{ needs.resolve-signers.outputs.ts_all_signers_enabled }}" = "true" ]; then
             pnpm -F @solana/keychain run typecheck
+            pnpm -F @solana/keychain-kit-plugin run typecheck
           fi
+      - name: Run unit tests for @solana/keychain-kit-plugin
+        if: ${{ needs.resolve-signers.outputs.ts_all_signers_enabled == 'true' }}
+        run: pnpm -F @solana/keychain-kit-plugin run test:unit
       - name: Lint
         run: |
           set -euo pipefail
@@ -249,6 +254,7 @@ jobs:
           done
           if [ "${{ needs.resolve-signers.outputs.ts_all_signers_enabled }}" = "true" ]; then
             targets+=("packages/keychain")
+            targets+=("packages/kit-plugin")
           fi
           pnpm exec eslint "${targets[@]}" --ext .ts
       - name: Format check
@@ -260,6 +266,7 @@ jobs:
           done
           if [ "${{ needs.resolve-signers.outputs.ts_all_signers_enabled }}" = "true" ]; then
             pnpm exec prettier --check "packages/keychain/**/*.{ts,json,md}"
+            pnpm exec prettier --check "packages/kit-plugin/**/*.{ts,json,md}"
           fi
       - name: Tree-shakability check
         run: |
@@ -269,6 +276,7 @@ jobs:
           done
           if [ "${{ needs.resolve-signers.outputs.ts_all_signers_enabled }}" = "true" ]; then
             pnpm test:treeshakability:umbrella
+            pnpm -F @solana/keychain-kit-plugin run test:treeshakability
           else
             echo "Skipping umbrella tree-shakability check because one or more signers are disabled."
           fi

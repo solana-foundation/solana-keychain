@@ -25,6 +25,7 @@ on:
           - utila
           - vault
           - keychain
+          - kit-plugin
       publish-to-npm:
         description: 'Publish to npm registry'
         required: true
@@ -64,6 +65,7 @@ env:
     utila
     vault
     keychain
+    kit-plugin
 
 jobs:
   guard-allowed-branch:
@@ -418,6 +420,7 @@ jobs:
               '@solana/keychain-dfns',
               '@solana/keychain-fireblocks',
               '@solana/keychain-gcp-kms',
+              '@solana/keychain-kit-plugin',
               '@solana/keychain-memory',
               '@solana/keychain-openfort',
               '@solana/keychain-para',

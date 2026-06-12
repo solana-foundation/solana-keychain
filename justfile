@@ -344,7 +344,7 @@ release-ts: _check-ts-release
     echo "Updating to $version..."
 
     # Update version in all packages
-    PACKAGES="core aws-kms cdp dfns fireblocks gcp-kms memory openfort para privy turnkey utila vault keychain test-utils crossmint"
+    PACKAGES="core aws-kms cdp dfns fireblocks gcp-kms memory openfort para privy turnkey utila vault keychain kit-plugin test-utils crossmint"
     for pkg in $PACKAGES; do
         echo "  Updating packages/${pkg}..."
         cd packages/${pkg}

@@ -365,6 +365,16 @@ importers:
         specifier: '>=6.0.1'
         version: 6.0.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
 
+  packages/kit-plugin:
+    dependencies:
+      '@solana/keychain':
+        specifier: workspace:*
+        version: link:../keychain
+    devDependencies:
+      '@solana/kit':
+        specifier: ^6.9.0
+        version: 6.9.0(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
+
   packages/memory:
     dependencies:
       '@solana/keychain-core':

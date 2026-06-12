@@ -48,6 +48,21 @@ interface SolanaSigner<TAddress extends string = string> {
 
 See the [`@solana/keychain` README](./packages/keychain/README.md) for more usage patterns.
 
+### Using with Kit clients
+
+`@solana/keychain-kit-plugin` installs a keychain signer on a [Kit client](https://github.com/anza-xyz/kit) as the `payer` and/or `identity`:
+
+```typescript
+import { createClient } from '@solana/kit';
+import { keychainSigner } from '@solana/keychain-kit-plugin';
+
+const client = await createClient().use(
+    keychainSigner({ backend: 'privy', appId, appSecret, walletId }),
+);
+
+client.payer; // SolanaSigner — also a Kit TransactionSigner
+```
+
 ## Packages
 
 | Package | Description |
@@ -66,6 +81,7 @@ See the [`@solana/keychain` README](./packages/keychain/README.md) for more usag
 | [@solana/keychain-openfort](./packages/openfort) | Openfort backend wallet signer implementation |
 | [@solana/keychain-para](./packages/para) | Para MPC signer implementation |
 | [@solana/keychain-utila](./packages/utila) | Utila wallet signer implementation |
+| [@solana/keychain-kit-plugin](./packages/kit-plugin) | Kit client plugins (`keychainSigner`/`keychainPayer`/`keychainIdentity`) |
 
 ## Installation
 
@@ -88,4 +104,7 @@ pnpm add @solana/keychain-privy       # Privy signer
 pnpm add @solana/keychain-turnkey     # Turnkey signer
 pnpm add @solana/keychain-utila       # Utila signer
 pnpm add @solana/keychain-vault       # HashiCorp Vault signer
+
+# Kit client plugins
+pnpm add @solana/keychain-kit-plugin  # keychainSigner/keychainPayer/keychainIdentity
 ```
