@@ -1,1 +1,8 @@
+# Default: everything outside language-specific dirs is owned by both.
 * @dev-jodee @amilz
+
+# Rust
+/rust/ @dev-jodee
+
+# TypeScript
+/typescript/ @amilz
