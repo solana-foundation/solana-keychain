@@ -51,7 +51,7 @@ export function keychainSigner(config: KeychainSignerConfig) {
  * import { keychainPayer } from '@solana/keychain-kit-plugin';
  *
  * const client = await createClient().use(
- *     keychainPayer({ backend: 'vault', vaultUrl, vaultToken, keyName }),
+ *     keychainPayer({ backend: 'vault', vaultAddr, vaultToken, keyName }),
  * );
  * ```
  *
