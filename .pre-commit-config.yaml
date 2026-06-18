@@ -7,5 +7,5 @@ repos:
         description: Format and lint code
         entry: just fmt
         language: system
-        types_or: [rust, ts]
+        types_or: [rust, ts, go]
         pass_filenames: false

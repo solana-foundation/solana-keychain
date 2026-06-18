@@ -4,6 +4,11 @@
 **/*.rs.bk
 *.pdb
 
+# Go
+go/bin/
+*.test
+*.out
+
 # IDE
 .vscode/
 .idea/

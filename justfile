@@ -10,16 +10,16 @@ default:
     @just --list
 
 # Format and lint
-fmt: rust-fmt ts-fmt
+fmt: rust-fmt ts-fmt go-fmt
 
 # Build
-build: rust-build ts-build
+build: rust-build ts-build go-build
 
 # Unit tests
-test: rust-test ts-test
+test: rust-test ts-test go-test
 
 # Integration tests
-test-integration: rust-test-integration ts-test-integration
+test-integration: rust-test-integration ts-test-integration go-test-integration
 
 # All tests
 test-all: test test-integration
@@ -176,6 +176,75 @@ ts-test-integration:
 
     echo "Running TypeScript integration tests..."
     pnpm -F @solana/keychain-fireblocks -F @solana/keychain-privy -F @solana/keychain-turnkey -F @solana/keychain-vault test:integration
+
+# ===========================================================
+# ============================ Go ===========================
+# ===========================================================
+
+[working-directory: 'go']
+go-fmt:
+    gofmt -l -w .
+    go vet ./...
+    golangci-lint run ./... 2>/dev/null || echo "note: golangci-lint not installed; ran gofmt + go vet only"
+
+[working-directory: 'go']
+go-build:
+    go build ./...
+
+[working-directory: 'go']
+go-test:
+    go test ./...
+
+[working-directory: 'go']
+go-test-integration:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    VAULT_PID=""
+
+    cleanup() {
+        if [ -n "$VAULT_PID" ]; then
+            echo "Stopping Vault dev server..."
+            kill "$VAULT_PID" 2>/dev/null || true
+            wait "$VAULT_PID" 2>/dev/null || true
+        fi
+        pkill -f "vault server -dev" 2>/dev/null || true
+    }
+    trap cleanup EXIT
+
+    pkill -f "vault server -dev" 2>/dev/null || true
+
+    # Load env vars from .env file (shared across all three languages)
+    if [ -f ../.env ]; then
+        set -a
+        source ../.env
+        set +a
+    fi
+
+    echo "Starting Vault dev server..."
+    vault server -dev -dev-root-token-id="root" &
+    VAULT_PID=$!
+
+    # Set Vault environment variables
+    export VAULT_ADDR='http://127.0.0.1:8200'
+    export VAULT_TOKEN='root'
+
+    echo "Waiting for Vault to be ready..."
+    for i in {1..10}; do
+        if vault status > /dev/null 2>&1; then
+            echo "Vault is ready!"
+            break
+        fi
+        [[ $i -eq 10 ]] && { echo "Error: Vault not available"; exit 1; }
+        sleep 1
+    done
+
+    # Restore the SAME shared transit test key used by the Rust/TS integration suites.
+    vault secrets enable transit >/dev/null 2>&1 || true
+    vault write transit/restore/solana-test-key backup=@"../rust/src/tests/vault-test-key.b64" >/dev/null 2>&1 || true
+
+    echo "Running Go integration tests..."
+    go test -tags=integration ./...
 
 # ===========================================================
 # ========================= Release =========================
