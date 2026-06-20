@@ -217,13 +217,15 @@ jobs:
             exit 0
           fi
 
-          for sdk in v2 v3; do
+          for sdk in v2 v3 v4; do
             for test_name in ${RUST_LIVE_TESTS}; do
               echo "Running ${test_name} with ${sdk}"
               if [ "${sdk}" = "v2" ]; then
                 cargo test --locked --no-default-features --features ${RUST_CI_FEATURES},sdk-v2,unsafe-debug,integration-tests tests::${test_name}::
-              else
+              elif [ "${sdk}" = "v3" ]; then
                 cargo test --locked --no-default-features --features ${RUST_CI_FEATURES},sdk-v3,unsafe-debug,integration-tests tests::${test_name}::
+              else
+                cargo test --locked --no-default-features --features ${RUST_CI_FEATURES},sdk-v4,unsafe-debug,integration-tests tests::${test_name}::
               fi
             done
           done

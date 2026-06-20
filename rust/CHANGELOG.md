@@ -1,3 +1,9 @@
+## Unreleased
+
+### Features
+
+- add `sdk-v4` feature for the Solana SDK 4.x line (`solana-sdk` 4.0.1), alongside the existing `sdk-v2` and `sdk-v3`
+
 ## 1.3.0 - 2026-06-01
 
 ## 1.2.0 - 2026-04-30

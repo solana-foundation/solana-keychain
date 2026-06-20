@@ -117,7 +117,7 @@ jobs:
         working-directory: rust
     strategy:
       matrix:
-        sdk_version: [v2, v3]
+        sdk_version: [v2, v3, v4]
         backend: ${{ fromJSON(needs.resolve-signers.outputs.rust_unit_backends_json) }}
     steps:
       - uses: actions/checkout@v6
@@ -127,9 +127,12 @@ jobs:
           if [ "${{ matrix.sdk_version }}" = "v2" ]; then
             cargo build --locked --features ${{ matrix.backend }},sdk-v2,unsafe-debug
             cargo test --locked --features ${{ matrix.backend }},sdk-v2,unsafe-debug
-          else
+          elif [ "${{ matrix.sdk_version }}" = "v3" ]; then
             cargo build --locked --no-default-features --features ${{ matrix.backend }},sdk-v3,unsafe-debug
             cargo test --locked --no-default-features --features ${{ matrix.backend }},sdk-v3,unsafe-debug
+          else
+            cargo build --locked --no-default-features --features ${{ matrix.backend }},sdk-v4,unsafe-debug
+            cargo test --locked --no-default-features --features ${{ matrix.backend }},sdk-v4,unsafe-debug
           fi
 
   rust-integration-test:
@@ -144,7 +147,7 @@ jobs:
         working-directory: rust
     strategy:
       matrix:
-        sdk_version: [v2, v3]
+        sdk_version: [v2, v3, v4]
         test: ${{ fromJSON(needs.resolve-signers.outputs.rust_integration_tests_json) }}
     steps:
       - uses: actions/checkout@v6
@@ -175,8 +178,10 @@ jobs:
           ci_features="${{ needs.resolve-signers.outputs.rust_ci_features }}"
           if [ "${{ matrix.sdk_version }}" = "v2" ]; then
             cargo test --locked --no-default-features --features ${ci_features},sdk-v2,unsafe-debug,integration-tests tests::${{ matrix.test }}::
-          else
+          elif [ "${{ matrix.sdk_version }}" = "v3" ]; then
             cargo test --locked --no-default-features --features ${ci_features},sdk-v3,unsafe-debug,integration-tests tests::${{ matrix.test }}::
+          else
+            cargo test --locked --no-default-features --features ${ci_features},sdk-v4,unsafe-debug,integration-tests tests::${{ matrix.test }}::
           fi
 
   rust-format:
@@ -207,3 +212,5 @@ jobs:
         run: cargo clippy --locked --all-targets --features ${{ needs.resolve-signers.outputs.rust_ci_features }},sdk-v2,unsafe-debug,integration-tests -- -D warnings
       - name: Clippy SDK v3
         run: cargo clippy --locked --all-targets --no-default-features --features ${{ needs.resolve-signers.outputs.rust_ci_features }},sdk-v3,unsafe-debug,integration-tests -- -D warnings
+      - name: Clippy SDK v4
+        run: cargo clippy --locked --all-targets --no-default-features --features ${{ needs.resolve-signers.outputs.rust_ci_features }},sdk-v4,unsafe-debug,integration-tests -- -D warnings

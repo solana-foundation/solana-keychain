@@ -2,8 +2,10 @@ set shell := ["bash", "-uc"]
 
 sdkv2 := "all,sdk-v2,unsafe-debug"
 sdkv3 := "all,sdk-v3,unsafe-debug"
+sdkv4 := "all,sdk-v4,unsafe-debug"
 sdkv2_int := "all,sdk-v2,unsafe-debug,integration-tests"
 sdkv3_int := "all,sdk-v3,unsafe-debug,integration-tests"
+sdkv4_int := "all,sdk-v4,unsafe-debug,integration-tests"
 integration_tests := "test_fireblocks_integration test_privy_integration test_turnkey_integration test_vault_integration test_aws_kms_integration"
 
 default:
@@ -33,16 +35,19 @@ rust-fmt:
     cargo fmt
     cargo clippy --all-targets --no-default-features --features {{ sdkv2_int }} -- -D warnings
     cargo clippy --all-targets --no-default-features --features {{ sdkv3_int }} -- -D warnings
+    cargo clippy --all-targets --no-default-features --features {{ sdkv4_int }} -- -D warnings
 
 [working-directory: 'rust']
 rust-build:
     cargo build --no-default-features --features all,sdk-v2
     cargo build --no-default-features --features all,sdk-v3
+    cargo build --no-default-features --features all,sdk-v4
 
 [working-directory: 'rust']
 rust-test:
     cargo test --no-default-features --features {{ sdkv2 }}
     cargo test --no-default-features --features {{ sdkv3 }}
+    cargo test --no-default-features --features {{ sdkv4 }}
 
 [working-directory: 'rust']
 rust-test-integration:
@@ -102,6 +107,9 @@ rust-test-integration:
     done
     for test in {{ integration_tests }}; do
         cargo test --no-default-features --features {{ sdkv3_int }} "tests::${test}::"
+    done
+    for test in {{ integration_tests }}; do
+        cargo test --no-default-features --features {{ sdkv4_int }} "tests::${test}::"
     done
 
 # ===========================================================

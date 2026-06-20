@@ -56,6 +56,21 @@ solana-keychain = { version = "0.5", features = ["utila"] }
 solana-keychain = { version = "0.5", features = ["all"] }
 ```
 
+### Solana SDK version
+
+The Solana SDK line is selected by a mutually-exclusive feature (exactly one is required):
+
+| Feature | Solana SDK | Notes |
+| --- | --- | --- |
+| `sdk-v2` | `solana-sdk` 2.x | Default |
+| `sdk-v3` | `solana-sdk` 3.x | |
+| `sdk-v4` | `solana-sdk` 4.x | |
+
+```toml
+# Use the Solana 4.x SDK line with all backends
+solana-keychain = { version = "0.5", default-features = false, features = ["all", "sdk-v4"] }
+```
+
 ## Quick Start
 
 ### Memory Signer (Local Development)

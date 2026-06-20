@@ -14,11 +14,11 @@ Memory · Vault · Privy · Turnkey · AWS KMS · Fireblocks · GCP KMS · Dfns 
 - `typescript/` — pnpm monorepo, one package per backend plus core/keychain umbrella. See [typescript/README.md](typescript/README.md).
 - `docs/ADDING_SIGNERS.md` — full guide for adding a new backend (Rust + TS + CI).
 - `audits/AUDIT_STATUS.md` — audited-through commit and unaudited delta.
-- `justfile` — top-level dev commands. Prefer these over raw `cargo`/`pnpm` since they encode the right flags (e.g., `just rust-test` runs both `sdk-v2` and `sdk-v3` matrices — `cargo test --all-features` fails because the SDK features are mutually exclusive).
+- `justfile` — top-level dev commands. Prefer these over raw `cargo`/`pnpm` since they encode the right flags (e.g., `just rust-test` runs the `sdk-v2`, `sdk-v3`, and `sdk-v4` matrices — `cargo test --all-features` fails because the SDK features are mutually exclusive).
 
 ### Common commands
 
-Always prefer `just` recipes. They encode the right flags (e.g., `just rust-test` runs both `sdk-v2` and `sdk-v3` matrices — `cargo test --all-features` fails because the SDK features are mutually exclusive). Run `just` with no args to list every recipe.
+Always prefer `just` recipes. They encode the right flags (e.g., `just rust-test` runs the `sdk-v2`, `sdk-v3`, and `sdk-v4` matrices — `cargo test --all-features` fails because the SDK features are mutually exclusive). Run `just` with no args to list every recipe.
 
 ```bash
 just build              # rust-build + ts-build
@@ -60,7 +60,7 @@ Use `just rust-*` for the common workflows. For a single-backend slice (no `just
 cd rust && cargo test --no-default-features --features <backend>,sdk-v2 <backend>::tests
 ```
 
-Remember to also run `sdk-v3` if your change touches SDK-version-sensitive code — `just rust-test` does both for you.
+Remember to also run `sdk-v3` and `sdk-v4` if your change touches SDK-version-sensitive code — `just rust-test` does all three for you.
 
 ### Architecture
 
@@ -72,7 +72,7 @@ Per-backend implementation details live in each module's source. See [rust/READM
 
 ### Feature flags
 
-One feature per backend (`memory` is default), `all` enables everything. At least one is required (enforced by `compile_error!` in `lib.rs`). SDK selection is mutually exclusive: `sdk-v2` (default) or `sdk-v3`.
+One feature per backend (`memory` is default), `all` enables everything. At least one is required (enforced by `compile_error!` in `lib.rs`). SDK selection is mutually exclusive: `sdk-v2` (default), `sdk-v3`, or `sdk-v4` (solana-sdk 4.x).
 
 ### Gotchas
 
