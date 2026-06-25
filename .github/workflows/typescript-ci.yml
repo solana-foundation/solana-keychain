@@ -138,7 +138,7 @@ jobs:
       matrix:
         package: ${{ fromJSON(needs.resolve-signers.outputs.ts_unit_packages_json) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: "20"
@@ -166,7 +166,7 @@ jobs:
       matrix:
         package: ${{ fromJSON(needs.resolve-signers.outputs.ts_integration_packages_json) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: "20"
@@ -209,7 +209,7 @@ jobs:
     env:
       ENABLED_SIGNER_PACKAGES: ${{ needs.resolve-signers.outputs.ts_enabled_packages_space }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: "20"

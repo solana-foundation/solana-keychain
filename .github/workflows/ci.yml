@@ -120,7 +120,7 @@ jobs:
         sdk_version: [v2, v3, v4]
         backend: ${{ fromJSON(needs.resolve-signers.outputs.rust_unit_backends_json) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Build and test with SDK ${{ matrix.sdk_version }}
         run: |
@@ -150,7 +150,7 @@ jobs:
         sdk_version: [v2, v3, v4]
         test: ${{ fromJSON(needs.resolve-signers.outputs.rust_integration_tests_json) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: dopplerhq/secrets-fetch-action@v2.0.0
         id: doppler
@@ -190,7 +190,7 @@ jobs:
       run:
         working-directory: rust
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -204,7 +204,7 @@ jobs:
       run:
         working-directory: rust
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

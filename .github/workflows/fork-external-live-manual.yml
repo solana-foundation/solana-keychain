@@ -169,7 +169,7 @@ jobs:
 
       - name: Checkout PR head SHA
         if: ${{ needs.resolve-signers.outputs.rust_live_test_count != '0' || needs.resolve-signers.outputs.ts_live_package_count != '0' }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.pr.outputs.head_sha }}
 
