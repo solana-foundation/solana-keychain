@@ -1,8 +1,16 @@
-## Unreleased
+## 1.4.0 - 2026-06-29
 
 ### Features
 
-- add `sdk-v4` feature for the Solana SDK 4.x line (`solana-sdk` 4.0.1), alongside the existing `sdk-v2` and `sdk-v3`
+- add `sdk-v4` feature for the Solana SDK 4.x line (`solana-sdk` 4.0.1), alongside the existing `sdk-v2` and `sdk-v3` (#169)
+- add Privy authorization context support (#119)
+
+### Bug Fixes
+
+- reject `useProgramCall` at construction for Fireblocks, before any broadcast (#153)
+- check wallet status, scheme, and curve in Dfns availability checks (#160)
+- harden Crossmint approval-polling for CI stability (#161)
+- bump `quinn-proto` to 0.11.15 for RUSTSEC-2026-0185 (#170)
 
 ## 1.3.0 - 2026-06-01
 
