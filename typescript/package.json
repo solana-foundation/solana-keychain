@@ -27,7 +27,7 @@
     "@rollup/plugin-virtual": "^3.0.2",
     "@solana/eslint-config-solana": "^6.0.0",
     "@solana/prettier-config-solana": "0.0.6",
-    "@types/node": "^25.9.1",
+    "@types/node": "^26.0.1",
     "@typescript-eslint/eslint-plugin": "^8.61.0",
     "@typescript-eslint/parser": "^8.61.0",
     "agadoo": "^3.0.0",
