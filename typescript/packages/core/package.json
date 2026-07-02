@@ -44,12 +44,12 @@
         "@solana/transactions": ">=6.0.1"
     },
     "devDependencies": {
-        "@solana/addresses": "^6.9.0",
-        "@solana/codecs-core": "^6.9.0",
-        "@solana/codecs-strings": "^6.9.0",
-        "@solana/keys": "^6.9.0",
-        "@solana/signers": "^6.9.0",
-        "@solana/transactions": "^6.9.0",
+        "@solana/addresses": "^6.10.0",
+        "@solana/codecs-core": "^6.10.0",
+        "@solana/codecs-strings": "^6.10.0",
+        "@solana/keys": "^6.10.0",
+        "@solana/signers": "^6.10.0",
+        "@solana/transactions": "^6.10.0",
         "vite": "^7.3.5",
         "vitest": "^4.1.6"
     },
