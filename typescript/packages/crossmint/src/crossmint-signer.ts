@@ -501,7 +501,10 @@ async function ed25519PublicKeyFromSeed(seed: Uint8Array): Promise<Uint8Array> {
         key: buildPkcs8Der(seed),
         type: 'pkcs8',
     });
-    const spki = createPublicKey(privateKey).export({ format: 'der', type: 'spki' }) as Buffer;
+    const spki = createPublicKey(privateKey as unknown as Parameters<typeof createPublicKey>[0]).export({
+        format: 'der',
+        type: 'spki',
+    }) as Buffer;
     return new Uint8Array(spki.slice(-32));
 }
 

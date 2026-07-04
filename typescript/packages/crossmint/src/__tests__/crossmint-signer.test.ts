@@ -739,7 +739,7 @@ describe('CrossmintSigner', () => {
             const sigBytes = Buffer.from(base58Encoder.encode(body.approvals[0].signature));
 
             const privateKey = testPrivateKey(deriveTestSeed(SIGNER_SECRET, SIGNER_API_KEY));
-            const pub = createPublicKey(privateKey);
+            const pub = createPublicKey(privateKey as unknown as Parameters<typeof createPublicKey>[0]);
             const expectedOur = Buffer.from(cryptoSign(null, ourMessageBytes, privateKey));
             expect(cryptoVerify(null, ourMessageBytes, pub, sigBytes)).toBe(true);
             expect(cryptoVerify(null, otherMessageBytes, pub, sigBytes)).toBe(false);
