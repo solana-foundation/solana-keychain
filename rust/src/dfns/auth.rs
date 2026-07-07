@@ -6,9 +6,11 @@ use crate::dfns::types::{
 };
 use crate::error::SignerError;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use ed25519_dalek::ed25519::SignatureEncoding as _;
-use ed25519_dalek::pkcs8::DecodePrivateKey;
+use ed25519_dalek::pkcs8::DecodePrivateKey as _;
 use ed25519_dalek::Signer as _;
+use p256::ecdsa::signature::Signer as _;
+use p256::pkcs8::DecodePrivateKey as _;
+use rsa::signature::SignatureEncoding as _;
 
 /// Perform the Dfns User Action Signing flow for a mutating API request.
 ///
