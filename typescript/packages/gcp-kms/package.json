@@ -52,7 +52,7 @@
         "@solana/transactions": ">=6.0.1"
     },
     "devDependencies": {
-        "@solana/addresses": "^6.9.0",
+        "@solana/addresses": "^7.0.0",
         "@solana/keychain-test-utils": "workspace:*",
         "@solana/keys": "^6.9.0",
         "@solana/signers": "^6.9.0",
