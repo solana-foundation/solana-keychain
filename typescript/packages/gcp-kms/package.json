@@ -58,7 +58,7 @@
         "@solana/signers": "^6.9.0",
         "@solana/transactions": "^6.9.0",
         "@solana-program/memo": "^0.11.0",
-        "@solana/kit": "^6.9.0",
+        "@solana/kit": "^7.0.0",
         "dotenv": "^17.4.2"
     },
     "publishConfig": {
