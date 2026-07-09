@@ -57,7 +57,7 @@
         "@solana/codecs-strings": "^6.9.0",
         "@solana/keychain-test-utils": "workspace:*",
         "@solana/keys": "^6.9.0",
-        "@solana/signers": "^6.9.0",
+        "@solana/signers": "^7.0.0",
         "@solana/transactions": "^6.9.0",
         "@solana-program/memo": "^0.11.0",
         "@solana/kit": "^6.9.0",
