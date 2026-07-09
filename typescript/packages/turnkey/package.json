@@ -54,7 +54,7 @@
     },
     "devDependencies": {
         "@solana/addresses": "^6.9.0",
-        "@solana/codecs-core": "^6.9.0",
+        "@solana/codecs-core": "^7.0.0",
         "@solana/codecs-strings": "^6.9.0",
         "@solana/keychain-test-utils": "workspace:*",
         "@solana/keys": "^6.9.0",
