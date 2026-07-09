@@ -32,10 +32,10 @@
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
-        "@solana-program/system": "^0.12.0",
+        "@solana-program/system": "^0.12.2",
         "@solana/keychain-core": "workspace:*",
         "@solana/kit": "^6.9.0",
-        "litesvm": "^1.2.0"
+        "litesvm": "^1.2.1"
     },
     "devDependencies": {
         "@types/node": "^26.0.1"

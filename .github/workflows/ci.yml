@@ -167,7 +167,7 @@ jobs:
           credentials_json: ${{ steps.doppler.outputs.GCP_SERVICE_ACCOUNT_KEY }}
       - name: Configure AWS credentials
         if: matrix.test == 'test_aws_kms_integration'
-        uses: aws-actions/configure-aws-credentials@v6.2.0
+        uses: aws-actions/configure-aws-credentials@v6.2.1
         with:
           role-to-assume: ${{ steps.doppler.outputs.AWS_ROLE_ARN }}
           aws-region: ${{ steps.doppler.outputs.AWS_KMS_REGION }}
