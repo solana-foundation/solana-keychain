@@ -179,7 +179,7 @@ jobs:
       - if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
         uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "22"
 
       - if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
         uses: pnpm/action-setup@v6.0.7
