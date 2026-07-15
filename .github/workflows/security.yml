@@ -41,7 +41,7 @@ jobs:
           node-version: '20'
       - uses: pnpm/action-setup@v6.0.9
         with:
-          version: 10.14.0
+          version: 11.13.0
       - run: pnpm audit --ignore-unfixable
 
   miri:

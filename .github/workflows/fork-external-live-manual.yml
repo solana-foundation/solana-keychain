@@ -184,7 +184,7 @@ jobs:
       - if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
         uses: pnpm/action-setup@v6.0.9
         with:
-          version: 10.14.0
+          version: 11.13.0
 
       - uses: dopplerhq/secrets-fetch-action@v2.0.0
         id: doppler
