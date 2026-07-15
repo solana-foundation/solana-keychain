@@ -182,7 +182,7 @@ jobs:
           node-version: "20"
 
       - if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
-        uses: pnpm/action-setup@v6.0.9
+        uses: pnpm/action-setup@v6.0.7
         with:
           version: 11.13.0
 

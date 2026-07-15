@@ -39,7 +39,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '20'
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.0.7
         with:
           version: 11.13.0
       - run: pnpm audit --ignore-unfixable
