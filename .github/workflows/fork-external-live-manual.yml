@@ -182,7 +182,7 @@ jobs:
           node-version: "22"
 
       - if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
-        uses: pnpm/action-setup@v6.0.7
+        uses: pnpm/action-setup@v6.0.9
         with:
           version: 11.13.0
 
@@ -197,7 +197,7 @@ jobs:
 
       - name: Configure AWS credentials
         if: ${{ needs.resolve-signers.outputs.aws_kms_enabled == 'true' }}
-        uses: aws-actions/configure-aws-credentials@v6.2.1
+        uses: aws-actions/configure-aws-credentials@6.2.2
         with:
           role-to-assume: ${{ steps.doppler.outputs.AWS_ROLE_ARN }}
           aws-region: ${{ steps.doppler.outputs.AWS_KMS_REGION }}
