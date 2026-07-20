@@ -51,7 +51,7 @@
         "@solana/signers": "^7.0.0",
         "@solana/transactions": "^7.0.0",
         "vite": "^7.3.6",
-        "vitest": "^4.1.9"
+        "vitest": "^4.1.10"
     },
     "publishConfig": {
         "access": "public"
