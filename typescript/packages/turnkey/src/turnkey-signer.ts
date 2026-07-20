@@ -282,7 +282,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                 const base64ToBytes = getBase64Encoder().encode;
                 const txBytes = base64ToBytes(wireTransaction);
                 const bytesToHex = getBase16Decoder().decode;
-                const hexTx = bytesToHex(txBytes as Uint8Array);
+                const hexTx = bytesToHex(txBytes);
 
                 // Use Turnkey's sign_transaction endpoint which returns the full signed transaction
                 const signedTransactionHex = await this.signTransaction(hexTx);

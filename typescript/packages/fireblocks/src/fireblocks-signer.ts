@@ -188,7 +188,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
 
         try {
             assertIsAddress(firstAddress);
-            return firstAddress as Address;
+            return firstAddress;
         } catch (error) {
             throwSignerError(SignerErrorCode.INVALID_PUBLIC_KEY, {
                 cause: error,
