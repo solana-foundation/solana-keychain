@@ -188,4 +188,25 @@ describe('createKeychainSigner', () => {
             expect((error as { code: string }).code).toBe(SignerErrorCode.CONFIG_ERROR);
         }
     });
+
+    it('preserves the native Fordefi TransactionSendingSigner type', async () => {
+        const mod = await import('@solana/keychain-fordefi');
+        const factory = mod.createFordefiSigner as ReturnType<typeof vi.fn>;
+        const mockSigner = {
+            ...makeMockSigner(),
+            signAndSendTransactions: vi.fn().mockResolvedValue([]),
+        };
+        factory.mockResolvedValue(mockSigner);
+
+        const signer = await createKeychainSigner({
+            accessToken: 'token',
+            backend: 'fordefi',
+            chain: 'solana_devnet',
+            privateKeyPem: 'pem',
+            publicKey: TEST_ADDRESS,
+            vaultId: 'vault',
+        });
+
+        expect(signer.signAndSendTransactions).toBe(mockSigner.signAndSendTransactions);
+    });
 });

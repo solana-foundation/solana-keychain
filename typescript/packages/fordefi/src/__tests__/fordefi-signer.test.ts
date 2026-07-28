@@ -2,7 +2,8 @@ import { generateKeyPairSync } from 'node:crypto';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { assertIsSolanaSigner, extractSignatureFromWireTransaction } from '@solana/keychain-core';
+import { assertIsSolanaSigner, assertSignatureValid, extractSignatureFromWireTransaction } from '@solana/keychain-core';
+import { isTransactionSendingSigner } from '@solana/signers';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
@@ -48,10 +49,10 @@ const mockConfig: FordefiSignerConfig = {
     vaultId: 'test-vault-id',
 };
 
-const nativeConfig: FordefiSignerConfig = {
+const nativeConfig = {
     ...mockConfig,
     chain: 'solana_mainnet',
-};
+} satisfies FordefiSignerConfig;
 
 function mockCreateTxResponse(id = 'tx-123') {
     return new Response(JSON.stringify({ id }), { status: 200 });
@@ -192,6 +193,26 @@ describe('FordefiSigner', () => {
         it('should throw on invalid publicKey format', async () => {
             await expect(FordefiSigner.create({ ...mockConfig, publicKey: 'not-a-pubkey' })).rejects.toThrow();
         });
+
+        it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+            'should reject invalid maxPollAttempts %s before any network call',
+            async maxPollAttempts => {
+                await expect(FordefiSigner.create({ ...mockConfig, maxPollAttempts })).rejects.toMatchObject({
+                    code: 'SIGNER_CONFIG_ERROR',
+                });
+                expect(fetch).not.toHaveBeenCalled();
+            },
+        );
+
+        it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+            'should reject invalid pollIntervalMs %s before any network call',
+            async pollIntervalMs => {
+                await expect(FordefiSigner.create({ ...mockConfig, pollIntervalMs })).rejects.toMatchObject({
+                    code: 'SIGNER_CONFIG_ERROR',
+                });
+                expect(fetch).not.toHaveBeenCalled();
+            },
+        );
     });
 
     describe('custom requestSigner', () => {
@@ -436,19 +457,35 @@ describe('FordefiSigner', () => {
         });
     });
 
-    describe('signTransactions (native solana mode)', () => {
-        it('should submit solana_transaction and extract raw_transaction', async () => {
-            const wireTx = mockWireTransaction();
+    describe('signAndSendTransactions (native solana mode)', () => {
+        it('should expose a TransactionSendingSigner and return the broadcast transaction signature', async () => {
+            const returnedMessage = new Uint8Array(32).fill(0xcd);
+            const wireTx = mockWireTransaction(returnedMessage);
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockVaultResponse())
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-native'))
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
 
             const signer = await FordefiSigner.create(nativeConfig);
-            const mockTx = { messageBytes: new Uint8Array(32) } as never;
-            const results = await signer.signTransactions([mockTx]);
+            expect(
+                isTransactionSendingSigner(
+                    signer as unknown as { [key: string]: unknown; address: typeof signer.address },
+                ),
+            ).toBe(true);
+
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+            const results = await signer.signAndSendTransactions([mockTx]);
             expect(results).toHaveLength(1);
-            expect(results[0]).toHaveProperty(MOCK_ADDRESS);
+            expect(results[0]).toEqual(MOCK_SIGNATURE_BYTES);
+            expect(assertSignatureValid).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    data: returnedMessage,
+                    signerAddress: MOCK_ADDRESS,
+                }),
+            );
 
             // Verify POST body uses solana_transaction type
             const call = vi.mocked(fetch).mock.calls[1]!;
@@ -462,6 +499,47 @@ describe('FordefiSigner', () => {
             expect(body.details).not.toHaveProperty('signatures');
         });
 
+        it('should reject partial-signer usage before submitting native remote work', async () => {
+            setupCreateVaultMock();
+            const signer = await FordefiSigner.create(nativeConfig);
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+
+            await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
+                code: 'SIGNER_CONFIG_ERROR',
+            });
+            expect(fetch).toHaveBeenCalledTimes(1);
+        });
+
+        it('should reject native multi-signer auto-broadcast before submitting remote work', async () => {
+            setupCreateVaultMock();
+            const signer = await FordefiSigner.create(nativeConfig);
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: {
+                    [MOCK_ADDRESS]: null,
+                    '22222222222222222222222222222222': null,
+                },
+            } as never;
+
+            await expect(signer.signAndSendTransactions([mockTx])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+            expect(fetch).toHaveBeenCalledTimes(1);
+        });
+
+        it('should not expose TransactionSendingSigner in black box mode', async () => {
+            setupCreateVaultMock();
+            const signer = await FordefiSigner.create(mockConfig);
+            expect(
+                isTransactionSendingSigner(
+                    signer as unknown as { [key: string]: unknown; address: typeof signer.address },
+                ),
+            ).toBe(false);
+        });
+
         it('should poll through intermediate pushable states', async () => {
             const wireTx = mockWireTransaction();
             vi.mocked(fetch)
@@ -472,8 +550,11 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
 
             const signer = await FordefiSigner.create({ ...nativeConfig, pollIntervalMs: 1 });
-            const mockTx = { messageBytes: new Uint8Array(32) } as never;
-            const results = await signer.signTransactions([mockTx]);
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+            const results = await signer.signAndSendTransactions([mockTx]);
             expect(results).toHaveLength(1);
             expect(fetch).toHaveBeenCalledTimes(5);
         });
@@ -485,8 +566,11 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64));
 
             const signer = await FordefiSigner.create(nativeConfig);
-            const mockTx = { messageBytes: new Uint8Array(32) } as never;
-            await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+            await expect(signer.signAndSendTransactions([mockTx])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
             });
         });
@@ -498,8 +582,11 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockPollResponse('mined_reverted'));
 
             const signer = await FordefiSigner.create(nativeConfig);
-            const mockTx = { messageBytes: new Uint8Array(32) } as never;
-            await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+            await expect(signer.signAndSendTransactions([mockTx])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
             });
         });

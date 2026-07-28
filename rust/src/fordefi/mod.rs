@@ -45,7 +45,7 @@ pub struct FordefiSignerConfig {
     pub api_base_url: Option<String>,
     /// Polling interval in milliseconds (default: 2000)
     pub poll_interval_ms: Option<u64>,
-    /// Max polling attempts (default: 50)
+    /// Non-zero max polling attempts (default: 50)
     pub max_poll_attempts: Option<u32>,
     /// Optional HTTP client config for timeouts
     pub http_client_config: Option<HttpClientConfig>,
@@ -150,6 +150,15 @@ impl FordefiSigner {
             ));
         }
 
+        let max_poll_attempts = config
+            .max_poll_attempts
+            .unwrap_or(DEFAULT_MAX_POLL_ATTEMPTS);
+        if max_poll_attempts == 0 {
+            return Err(SignerError::ConfigError(
+                "max_poll_attempts must be greater than zero".to_string(),
+            ));
+        }
+
         let public_key = Pubkey::from_str(&config.public_key)
             .map_err(|_| SignerError::InvalidPublicKey("Invalid Solana public key".to_string()))?;
 
@@ -177,9 +186,7 @@ impl FordefiSigner {
             client,
             public_key,
             poll_interval_ms: config.poll_interval_ms.unwrap_or(DEFAULT_POLL_INTERVAL_MS),
-            max_poll_attempts: config
-                .max_poll_attempts
-                .unwrap_or(DEFAULT_MAX_POLL_ATTEMPTS),
+            max_poll_attempts,
             chain: config.chain,
             fee: config.fee,
         })
@@ -453,6 +460,7 @@ impl FordefiSigner {
         &self,
         transaction: &mut Transaction,
     ) -> Result<SignedTransaction, SignerError> {
+        self.validate_native_auto_transaction(transaction)?;
         let message_data = transaction.message_data();
         let tx_id = self.submit_solana_transaction(&message_data).await?;
         let result = self.poll_for_result(&tx_id, true).await?;
@@ -483,9 +491,7 @@ impl FordefiSigner {
             ))
         })?;
 
-        let signature = *returned_tx.signatures.first().ok_or_else(|| {
-            SignerError::SigningFailed("Fordefi wire transaction has no signatures".to_string())
-        })?;
+        let signature = self.extract_vault_signature(&returned_tx)?;
 
         // Verify against the *returned* message (Fordefi modifies the tx, e.g. blockhash)
         let returned_message = returned_tx.message_data();
@@ -502,6 +508,41 @@ impl FordefiSigner {
         // the caller to send. Return an empty serialized transaction rather than
         // re-broadcastable bytes; the signature is still returned.
         Ok((String::new(), signature))
+    }
+
+    /// Native auto-broadcast currently submits message bytes only. Transactions
+    /// with additional required signers would also need their partial signatures
+    /// forwarded through Fordefi's `details.signatures` request field.
+    fn validate_native_auto_transaction(
+        &self,
+        transaction: &Transaction,
+    ) -> Result<(), SignerError> {
+        let required_signatures = transaction.message.header.num_required_signatures as usize;
+        if required_signatures != 1
+            || transaction.message.account_keys.first() != Some(&self.public_key)
+        {
+            return Err(SignerError::SigningFailed(
+                "Fordefi native auto-broadcast currently supports only transactions whose sole required signer is the configured vault"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Locate the configured vault's signature by its required-signer account
+    /// position rather than assuming it occupies slot zero.
+    fn extract_vault_signature(&self, returned_tx: &Transaction) -> Result<Signature, SignerError> {
+        let signer_index =
+            TransactionUtil::get_signing_keypair_position(returned_tx, &self.public_key)?;
+        returned_tx
+            .signatures
+            .get(signer_index)
+            .copied()
+            .ok_or_else(|| {
+                SignerError::SigningFailed(
+                    "Fordefi signature slot missing from returned transaction".to_string(),
+                )
+            })
     }
 
     /// Sign a transaction end-to-end, dispatching to black box or native path.
@@ -796,6 +837,25 @@ mod tests {
             }),
         });
         assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+    }
+
+    #[test]
+    fn test_fordefi_config_zero_max_poll_attempts_rejected() {
+        let pem = test_pem_key();
+        let keypair = create_test_keypair();
+        let result = FordefiSigner::from_config(FordefiSignerConfig {
+            access_token: "token".to_string(),
+            vault_id: "vault-id".to_string(),
+            private_key_pem: pem,
+            public_key: keypair_pubkey(&keypair).to_string(),
+            api_base_url: None,
+            poll_interval_ms: None,
+            max_poll_attempts: Some(0),
+            http_client_config: None,
+            chain: None,
+            fee: None,
+        });
         assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
     }
 
@@ -1267,6 +1327,41 @@ mod tests {
     }
 
     // --- Native Solana signing tests ---
+
+    #[test]
+    fn test_fordefi_native_extracts_vault_signature_from_non_first_slot() {
+        let fee_payer = create_test_keypair();
+        let fordefi_keypair = create_test_keypair();
+        let fordefi_pubkey = keypair_pubkey(&fordefi_keypair);
+        let signer = create_native_test_signer("https://test.com", fordefi_pubkey);
+
+        let mut returned_tx = create_test_transaction(&keypair_pubkey(&fee_payer));
+        returned_tx.message.account_keys.insert(1, fordefi_pubkey);
+        returned_tx.message.header.num_required_signatures = 2;
+        let returned_message = returned_tx.message_data();
+        let fee_payer_signature = fee_payer.sign_message(&returned_message);
+        let fordefi_signature = fordefi_keypair.sign_message(&returned_message);
+        returned_tx.signatures = vec![fee_payer_signature, fordefi_signature];
+
+        let extracted = signer.extract_vault_signature(&returned_tx).unwrap();
+        assert_eq!(extracted, fordefi_signature);
+        assert!(extracted.verify(&fordefi_pubkey.to_bytes(), &returned_message));
+    }
+
+    #[test]
+    fn test_fordefi_native_rejects_multiple_required_signers_before_submit() {
+        let fee_payer = create_test_keypair();
+        let fordefi_keypair = create_test_keypair();
+        let fordefi_pubkey = keypair_pubkey(&fordefi_keypair);
+        let signer = create_native_test_signer("https://test.com", fordefi_pubkey);
+
+        let mut tx = create_test_transaction(&keypair_pubkey(&fee_payer));
+        tx.message.account_keys.insert(1, fordefi_pubkey);
+        tx.message.header.num_required_signatures = 2;
+
+        let result = signer.validate_native_auto_transaction(&tx);
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
 
     #[tokio::test]
     async fn test_fordefi_native_sign_transaction_success() {

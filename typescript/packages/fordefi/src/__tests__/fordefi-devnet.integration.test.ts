@@ -29,6 +29,7 @@ import {
     sendAndConfirmTransactionFactory,
     setTransactionMessageFeePayerSigner,
     setTransactionMessageLifetimeUsingBlockhash,
+    signAndSendTransactionMessageWithSigners,
     signTransactionMessageWithSigners,
 } from '@solana/kit';
 import { getTransferSolInstruction } from '@solana-program/system';
@@ -88,10 +89,7 @@ describe('Fordefi Devnet Integration', () => {
 
             // 2. Set up devnet RPC
             const rpcUrl = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
-            const wsUrl = process.env.SOLANA_WS_URL ?? 'wss://api.devnet.solana.com';
             const rpc = createSolanaRpc(rpcUrl);
-            const rpcSubscriptions = createSolanaRpcSubscriptions(wsUrl);
-            const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
 
             // 3. Pick a recipient
             const recipient = process.env.DEVNET_RECIPIENT
@@ -127,28 +125,13 @@ describe('Fordefi Devnet Integration', () => {
                     ),
             );
 
-            // 6. Sign with Fordefi
-            console.log('Submitting to Fordefi for signing...');
-            const signed = await signTransactionMessageWithSigners(transaction);
+            // 6. Fordefi may update the message and broadcasts it itself.
+            console.log('Submitting to Fordefi for signing and broadcast...');
+            const txSignature = await signAndSendTransactionMessageWithSigners(transaction);
+            expect(txSignature).toHaveLength(64);
+            console.log(`Fordefi transaction submitted: ${Buffer.from(txSignature).toString('hex')}`);
 
-            expect(signed.signatures[signer.address]).toBeDefined();
-            expect(signed.signatures[signer.address]?.length).toBe(64);
-            console.log('Transaction signed successfully');
-
-            // 7. Broadcast to devnet
-            assertIsFullySignedTransaction(signed);
-            assertIsTransactionWithBlockhashLifetime(signed);
-
-            console.log('Broadcasting to devnet...');
-            await sendAndConfirm(signed, {
-                commitment: 'confirmed',
-                skipPreflight: true,
-            });
-
-            const txSignature = getSignatureFromTransaction(signed);
-            console.log(`Transaction confirmed: ${txSignature}`);
-
-            // 8. Verify recipient balance increased
+            // 7. Verify recipient balance increased after Fordefi reports completion
             const { value: recipientBalance } = await rpc.getBalance(recipient).send();
             expect(recipientBalance >= TRANSFER_LAMPORTS).toBe(true);
         },

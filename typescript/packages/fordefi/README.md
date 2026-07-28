@@ -16,10 +16,11 @@ The signer supports two modes determined by whether `chain` is provided:
 
 Set `chain` to use Fordefi's native Solana transaction type. Fordefi may modify the transaction (e.g. updating the blockhash or adding compute budget instructions) and broadcasts it on-chain automatically (`push_mode: 'auto'`). Use this with a **Solana vault**.
 
-> **Note:** In native mode Fordefi has already submitted the transaction by the time signing resolves. `signTransactions` returns the signature over Fordefi's *modified* message (the version that was broadcast), so do **not** re-apply it to your original transaction and re-send — that would use a stale blockhash. Treat the returned signature as the record of the already-broadcast transaction (its base58 form is the on-chain txid). This differs from black box mode below, where nothing is broadcast and you submit the transaction yourself.
+> **Note:** Native mode is a Kit `TransactionSendingSigner`, because Fordefi may sign a different message than the one supplied by the caller and broadcasts it itself. Use `signAndSendTransactionMessageWithSigners()` or `signAndSendTransactions()`. Calling the partial-signer method `signTransactions()` in native mode fails locally before any transaction is submitted.
 
 ```typescript
 import { createFordefiSigner } from '@solana/keychain-fordefi';
+import { signAndSendTransactionMessageWithSigners } from '@solana/signers';
 
 const signer = await createFordefiSigner({
     accessToken: process.env.FORDEFI_ACCESS_TOKEN!,
@@ -29,7 +30,11 @@ const signer = await createFordefiSigner({
     chain: 'solana_devnet',
     fee: { type: 'custom', priority_fee: '1000' },
 });
+
+const transactionSignature = await signAndSendTransactionMessageWithSigners(transactionMessage);
 ```
+
+Native auto-broadcast currently supports transactions whose only required signer is the configured Fordefi vault. Transactions requiring additional signers are rejected before submission until the integration forwards their partial signatures through Fordefi's `details.signatures` field.
 
 ### Black box mode
 
@@ -57,7 +62,7 @@ const signer = await createFordefiSigner({
 | `fee` | No | Priority fee config for native mode (e.g. `{ type: 'custom', priority_fee: '1000' }`) |
 | `apiBaseUrl` | No | API base URL (default: `https://api.fordefi.com`) |
 | `pollIntervalMs` | No | Polling interval in ms (default: 2000) |
-| `maxPollAttempts` | No | Max polling attempts (default: 50) |
+| `maxPollAttempts` | No | Positive integer max polling attempts (default: 50) |
 | `requestDelayMs` | No | Delay between concurrent requests in ms (default: 0) |
 | `requestTimeoutMs` | No | Per-request HTTP timeout in ms (default: 30000) |
 
@@ -94,7 +99,7 @@ const signer = await createFordefiSigner({
 
 Two test suites cover the signing paths:
 
-- **`fordefi-devnet.integration.test.ts`** — Native Solana mode. Builds a real SOL transfer, signs via Fordefi, and broadcasts to devnet. Requires a **Solana vault** (`FORDEFI_VAULT_ID`, `FORDEFI_PUBLIC_KEY`).
+- **`fordefi-devnet.integration.test.ts`** — Native Solana mode. Builds a real SOL transfer and lets Fordefi sign and broadcast it to devnet. Requires a **Solana vault** (`FORDEFI_VAULT_ID`, `FORDEFI_PUBLIC_KEY`).
 - **`fordefi-signer.integration.test.ts`** — Black box mode with LiteSVM. Signs raw bytes, verifies locally. Requires a **black box vault** (`FORDEFI_BB_VAULT_ID`, `FORDEFI_BB_PUBLIC_KEY`).
 
 Required env vars (shared):
