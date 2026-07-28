@@ -16,6 +16,7 @@ on:
           - crossmint
           - dfns
           - fireblocks
+          - fordefi
           - gcp-kms
           - memory
           - openfort
@@ -56,6 +57,7 @@ env:
     crossmint
     dfns
     fireblocks
+    fordefi
     gcp-kms
     memory
     openfort
@@ -419,6 +421,7 @@ jobs:
               '@solana/keychain-crossmint',
               '@solana/keychain-dfns',
               '@solana/keychain-fireblocks',
+              '@solana/keychain-fordefi',
               '@solana/keychain-gcp-kms',
               '@solana/keychain-kit-plugin',
               '@solana/keychain-memory',

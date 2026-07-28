@@ -46,6 +46,7 @@ openfort = [
     "dep:hex",
 ]
 utila = ["dep:reqwest", "dep:jsonwebtoken", "dep:chrono", "dep:tokio"]
+fordefi = ["dep:reqwest", "dep:p256", "dep:tokio"]
 all = [
     "memory",
     "vault",
@@ -60,6 +61,7 @@ all = [
     "dfns",
     "openfort",
     "utila",
+    "fordefi",
 ]
 
 # SDK version selection (mutually exclusive)
@@ -101,7 +103,7 @@ bs58 = "0.5.1"
 
 # Optional dependencies (feature-gated)
 reqwest = { version = "0.12.23", optional = true, features = ["json", "rustls-tls"], default-features = false }
-p256 = { version = "0.13.2", optional = true }
+p256 = { version = "0.13.2", optional = true, features = ["pem"] }
 hex = { version = "0.4.3", optional = true }
 chrono = { version = "0.4.42", optional = true }
 aws-sdk-kms = { version = "1.97.0", optional = true }
@@ -134,6 +136,7 @@ getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] 
 [dev-dependencies]
 tokio = { version = "1.52", features = ["test-util", "macros", "rt", "rt-multi-thread"] }
 wiremock = "0.6"
+rand = "0.8"
 dotenvy = "0.15.7"
 litesvm = "0.7.0"
 litesvm-v3 = { package = "litesvm", version = "=0.8.1" }

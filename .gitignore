@@ -21,6 +21,7 @@ Thumbs.db
 !.claude/skills/
 
 .env
+secret/*
 test-ledger/
 validator.log
 /node_modules/

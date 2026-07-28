@@ -32,6 +32,7 @@ jobs:
           CI_SIGNER_TURNKEY_ENABLED: ${{ vars.CI_SIGNER_TURNKEY_ENABLED || 'true' }}
           CI_SIGNER_AWS_KMS_ENABLED: ${{ vars.CI_SIGNER_AWS_KMS_ENABLED || 'true' }}
           CI_SIGNER_FIREBLOCKS_ENABLED: ${{ vars.CI_SIGNER_FIREBLOCKS_ENABLED || 'true' }}
+          CI_SIGNER_FORDEFI_ENABLED: ${{ vars.CI_SIGNER_FORDEFI_ENABLED || 'true' }}
           CI_SIGNER_GCP_KMS_ENABLED: ${{ vars.CI_SIGNER_GCP_KMS_ENABLED || 'true' }}
           CI_SIGNER_PARA_ENABLED: ${{ vars.CI_SIGNER_PARA_ENABLED || 'true' }}
           CI_SIGNER_CDP_ENABLED: ${{ vars.CI_SIGNER_CDP_ENABLED || 'true' }}
@@ -58,6 +59,7 @@ jobs:
               turnkey: parseVar('CI_SIGNER_TURNKEY_ENABLED'),
               aws_kms: parseVar('CI_SIGNER_AWS_KMS_ENABLED'),
               fireblocks: parseVar('CI_SIGNER_FIREBLOCKS_ENABLED'),
+              fordefi: parseVar('CI_SIGNER_FORDEFI_ENABLED'),
               gcp_kms: parseVar('CI_SIGNER_GCP_KMS_ENABLED'),
               para: parseVar('CI_SIGNER_PARA_ENABLED'),
               cdp: parseVar('CI_SIGNER_CDP_ENABLED'),
@@ -74,6 +76,7 @@ jobs:
               'turnkey',
               'aws_kms',
               'fireblocks',
+              'fordefi',
               'gcp_kms',
               'cdp',
               'para',
@@ -92,6 +95,7 @@ jobs:
               ['privy', 'test_privy_integration'],
               ['turnkey', 'test_turnkey_integration'],
               ['fireblocks', 'test_fireblocks_integration'],
+              ['fordefi', 'test_fordefi_integration'],
               ['aws_kms', 'test_aws_kms_integration'],
               ['gcp_kms', 'test_gcp_kms_integration'],
               ['dfns', 'test_dfns_integration'],

@@ -6,6 +6,7 @@ pub mod test_cdp_integration;
 pub mod test_crossmint_integration;
 pub mod test_dfns_integration;
 pub mod test_fireblocks_integration;
+pub mod test_fordefi_integration;
 pub mod test_gcp_kms_integration;
 pub mod test_openfort_integration;
 pub mod test_para_integration;

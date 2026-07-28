@@ -23,6 +23,7 @@ vi.mock('@solana/keychain-cdp', () => ({ createCdpSigner: vi.fn() }));
 vi.mock('@solana/keychain-crossmint', () => ({ createCrossmintSigner: vi.fn() }));
 vi.mock('@solana/keychain-dfns', () => ({ createDfnsSigner: vi.fn() }));
 vi.mock('@solana/keychain-fireblocks', () => ({ createFireblocksSigner: vi.fn() }));
+vi.mock('@solana/keychain-fordefi', () => ({ createFordefiSigner: vi.fn() }));
 vi.mock('@solana/keychain-gcp-kms', () => ({ createGcpKmsSigner: vi.fn() }));
 vi.mock('@solana/keychain-memory', () => ({ createMemorySigner: vi.fn() }));
 vi.mock('@solana/keychain-openfort', () => ({ createOpenfortSigner: vi.fn() }));
@@ -64,6 +65,17 @@ const BACKEND_CONFIGS = {
         config: { backend: 'fireblocks', apiKey: 'key', privateKeyPem: 'pem', vaultAccountId: 'v' },
         factoryName: 'createFireblocksSigner',
         modulePath: '@solana/keychain-fireblocks',
+    },
+    fordefi: {
+        config: {
+            backend: 'fordefi',
+            accessToken: 'token',
+            privateKeyPem: 'pem',
+            publicKey: TEST_ADDRESS,
+            vaultId: 'vault',
+        },
+        factoryName: 'createFordefiSigner',
+        modulePath: '@solana/keychain-fordefi',
     },
     'gcp-kms': {
         config: { backend: 'gcp-kms', keyName: 'key', publicKey: TEST_ADDRESS },

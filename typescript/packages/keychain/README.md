@@ -15,6 +15,7 @@ This installs all signer implementations. For a smaller bundle, install individu
 - `@solana/keychain-crossmint` - Crossmint signer
 - `@solana/keychain-dfns` - Dfns signer
 - `@solana/keychain-fireblocks` - Fireblocks signer
+- `@solana/keychain-fordefi` - Fordefi MPC signer
 - `@solana/keychain-gcp-kms` - GCP KMS signer
 - `@solana/keychain-memory` - In-memory keypair signer (local Ed25519 signing)
 - `@solana/keychain-openfort` - Openfort backend wallet signer
@@ -61,7 +62,7 @@ const address = await resolveAddress({
     publicKey: '4Nd1m...',
 });
 
-// Async backends (Privy, Para, Fireblocks, Crossmint, Dfns, Utila) fetch from the API
+// Async backends (Privy, Para, Fireblocks, Fordefi, Crossmint, Dfns, Utila) fetch from the API
 const address2 = await resolveAddress({
     backend: 'privy',
     appId: '...',
@@ -77,7 +78,7 @@ The `KeychainSignerConfig` discriminated union and individual config types are e
 ```typescript
 import type { KeychainSignerConfig, BackendName, PrivySignerConfig } from '@solana/keychain';
 
-// BackendName = 'aws-kms' | 'cdp' | 'crossmint' | 'dfns' | 'fireblocks' | 'gcp-kms' | 'memory' | 'openfort' | 'para' | 'privy' | 'turnkey' | 'utila' | 'vault'
+// BackendName = 'aws-kms' | 'cdp' | 'crossmint' | 'dfns' | 'fireblocks' | 'fordefi' | 'gcp-kms' | 'memory' | 'openfort' | 'para' | 'privy' | 'turnkey' | 'utila' | 'vault'
 
 function loadConfig(json: unknown): KeychainSignerConfig {
     // Parse and validate your config...
@@ -156,6 +157,7 @@ try {
 | `crossmint` | [@solana/keychain-crossmint](../crossmint/README.md) | API |
 | `dfns` | [@solana/keychain-dfns](../dfns/README.md) | API |
 | `fireblocks` | [@solana/keychain-fireblocks](../fireblocks/README.md) | API |
+| `fordefi` | [@solana/keychain-fordefi](../fordefi/README.md) | API |
 | `gcp-kms` | [@solana/keychain-gcp-kms](../gcp-kms/README.md) | Config (`publicKey`) |
 | `memory` | [@solana/keychain-memory](../memory/README.md) | Derived from local keypair |
 | `openfort` | [@solana/keychain-openfort](../openfort/README.md) | API |

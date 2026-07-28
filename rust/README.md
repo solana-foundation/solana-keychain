@@ -316,6 +316,116 @@ pub trait SolanaSigner: Send + Sync {
 }
 ```
 
+### Fordefi Signer
+
+Fordefi supports two signing modes, which differ in whether Fordefi broadcasts the transaction and in what `sign_transaction` returns:
+
+- **Black box mode** : Signs raw bytes via EdDSA; the wire transaction is assembled locally. Fordefi does **not** broadcast — `sign_transaction` returns the signed serialized transaction, and **you** submit it to an RPC. Use with a Fordefi black box vault.
+- **Native Solana mode** (recommended): Uses Solana-specific API types. Fordefi modifies the transaction (at minimum updating the blockhash, and optionally adding priority fees) and **auto-broadcasts** it on-chain (`push_mode: "auto"`). Because the transaction is already submitted, `sign_transaction` returns an **empty** serialized transaction (only the signature is meaningful) and updates your `&mut Transaction` to the Fordefi-signed one — do not re-send it. Use with a regular Fordefi Solana vault.
+
+```rust
+use solana_keychain::{FordefiSigner, FordefiSignerConfig, SolanaSigner};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pem = std::fs::read_to_string("path/to/ecdsa-p256-key.pem")?;
+
+    // Black box mode (chain = None)
+    let signer = FordefiSigner::from_config(FordefiSignerConfig {
+        access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
+        vault_id: std::env::var("FORDEFI_BB_VAULT_ID")?,
+        private_key_pem: pem.clone(),
+        public_key: std::env::var("FORDEFI_BB_PUBLIC_KEY")?,
+        api_base_url: None,
+        poll_interval_ms: None,
+        max_poll_attempts: None,
+        http_client_config: None,
+        chain: None,
+        fee: None,
+    })?;
+
+    println!("Public key: {}", signer.pubkey());
+    Ok(())
+}
+```
+
+For native Solana mode, set `chain` and optionally `fee`:
+
+```rust
+use solana_keychain::{
+    FordefiSigner, FordefiSignerConfig, SolanaChainUniqueId,
+    FordefiSolanaFee, FordefiPriorityLevel, SolanaSigner,
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pem = std::fs::read_to_string("path/to/ecdsa-p256-key.pem")?;
+
+    let signer = FordefiSigner::from_config(FordefiSignerConfig {
+        access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
+        vault_id: std::env::var("FORDEFI_VAULT_ID")?,
+        private_key_pem: pem,
+        public_key: std::env::var("FORDEFI_PUBLIC_KEY")?,
+        api_base_url: None,
+        poll_interval_ms: None,
+        max_poll_attempts: None,
+        http_client_config: None,
+        chain: Some(SolanaChainUniqueId::SolanaMainnet),
+        fee: Some(FordefiSolanaFee::Priority {
+            priority_level: FordefiPriorityLevel::Medium,
+        }),
+    })?;
+
+    let message = b"Hello from Fordefi!";
+    let signature = signer.sign_message(message).await?;
+    println!("Signature: {}", signature);
+
+    Ok(())
+}
+```
+
+#### Custom API-request signer (KMS/HSM)
+
+Fordefi authenticates every POST with a request-level signature over
+`{path}|{timestamp}|{body}` (ECDSA P-256, SHA-256, DER, base64). By default this is
+computed locally from `private_key_pem`. To keep that key in a KMS/HSM instead,
+implement [`FordefiRequestSigner`] and pass it to `from_config_with_signer` — the
+`private_key_pem` field is ignored on this path. The implementation must return
+base64 of the DER-encoded ECDSA P-256 signature over `SHA-256(payload)` (AWS KMS
+`Sign` with `ECDSA_SHA_256` already returns a DER signature — just base64-encode it).
+
+```rust
+use std::sync::Arc;
+use solana_keychain::{FordefiRequestSigner, FordefiSigner, FordefiSignerConfig, SignerError};
+
+struct KmsRequestSigner { /* KMS client, key id, ... */ }
+
+#[async_trait::async_trait]
+impl FordefiRequestSigner for KmsRequestSigner {
+    async fn sign_request(&self, payload: &[u8]) -> Result<String, SignerError> {
+        // Call your KMS to sign SHA-256(payload) with ECDSA P-256, then base64-encode
+        // the returned DER signature. `payload` is `{path}|{timestamp}|{body}`.
+        todo!()
+    }
+}
+
+let signer = FordefiSigner::from_config_with_signer(
+    FordefiSignerConfig {
+        access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
+        vault_id: std::env::var("FORDEFI_VAULT_ID")?,
+        private_key_pem: String::new(), // ignored when a custom signer is provided
+        public_key: std::env::var("FORDEFI_PUBLIC_KEY")?,
+        api_base_url: None,
+        poll_interval_ms: None,
+        max_poll_attempts: None,
+        http_client_config: None,
+        chain: None,
+        fee: None,
+    },
+    Arc::new(KmsRequestSigner { /* ... */ }),
+)?;
+```
+
 ## Security Audit
 
 `solana-keychain` has been audited by [Accretion](https://accretion.xyz). View the [audit report](../audits/2026-accretion-solana-foundation-solana-keychain-audit-A26SFR2.pdf).

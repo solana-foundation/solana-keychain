@@ -47,6 +47,10 @@ export async function createKeychainSigner(config: KeychainSignerConfig): Promis
             const { createFireblocksSigner } = await import('@solana/keychain-fireblocks');
             return await createFireblocksSigner(stripBackend(config));
         }
+        case 'fordefi': {
+            const { createFordefiSigner } = await import('@solana/keychain-fordefi');
+            return await createFordefiSigner(stripBackend(config));
+        }
         case 'gcp-kms': {
             const { createGcpKmsSigner } = await import('@solana/keychain-gcp-kms');
             return createGcpKmsSigner(stripBackend(config));

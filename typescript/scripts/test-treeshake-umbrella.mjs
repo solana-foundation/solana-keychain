@@ -25,6 +25,7 @@ const SIGNER_MARKERS = {
     crossmint: ['crossmint.com/api', 'Crossmint transaction polling timed out'],
     dfns: ['api.dfns.io', 'signUserAction'],
     fireblocks: ['api.fireblocks.io', 'PENDING_SIGNATURE'],
+    fordefi: ['api.fordefi.com', 'Fordefi transaction polling timed out'],
     'gcp-kms': ['cloudkms.googleapis.com', 'asymmetricSign'],
     memory: ['Memory signer requires one of', 'U8Array string cannot be empty'],
     openfort: ['api.openfort.io', 'x-wallet-auth'],
@@ -41,6 +42,7 @@ const FACTORIES = [
     { name: 'createCrossmintSigner', pkg: 'crossmint' },
     { name: 'createDfnsSigner', pkg: 'dfns' },
     { name: 'createFireblocksSigner', pkg: 'fireblocks' },
+    { name: 'createFordefiSigner', pkg: 'fordefi' },
     { name: 'createGcpKmsSigner', pkg: 'gcp-kms' },
     { name: 'createMemorySigner', pkg: 'memory' },
     { name: 'createOpenfortSigner', pkg: 'openfort' },
@@ -69,7 +71,7 @@ async function bundleImport(importName) {
             }),
         ],
         // Mark everything that isn't a workspace package as external
-        external: (id) => {
+        external: id => {
             if (id === '__test__') return false;
             if (id.startsWith('/') || id.startsWith('.')) return false;
             if (id.startsWith('@solana/keychain')) return false;

@@ -2,7 +2,7 @@
 //!
 //! This crate provides a unified interface for signing Solana transactions
 //! with multiple backend implementations (memory, Vault, Privy, Turnkey, AWS KMS,
-//! Fireblocks, GCP KMS, Dfns, Crossmint, CDP, Para, Openfort, Utila).
+//! Fireblocks, GCP KMS, Dfns, Crossmint, CDP, Para, Openfort, Utila, Fordefi).
 //!
 //! # Features
 //!
@@ -20,11 +20,13 @@
 //! - `crossmint`: Crossmint wallet integration
 //! - `openfort`: Openfort backend wallet integration
 //! - `utila`: Utila MPC wallet integration
+//! - `fordefi`: Fordefi MPC custody integration
 //! - `all`: Enable all signer backends
 //!
 //! ## SDK Version Selection
 //! - `sdk-v2` (default): Use Solana SDK v2.3.x
 //! - `sdk-v3`: Use Solana SDK v3.x
+//! - `sdk-v4`: Use Solana SDK v4.x
 //!
 //! **Note**: Only one SDK version can be enabled at a time.
 
@@ -66,6 +68,8 @@ pub mod cdp;
 pub mod crossmint;
 #[cfg(feature = "dfns")]
 pub mod dfns;
+#[cfg(feature = "fordefi")]
+pub mod fordefi;
 #[cfg(feature = "openfort")]
 pub mod openfort;
 #[cfg(feature = "para")]
@@ -106,6 +110,11 @@ pub use cdp::{CdpSigner, CdpSignerConfig};
 pub use crossmint::{CrossmintSigner, CrossmintSignerConfig};
 #[cfg(feature = "dfns")]
 pub use dfns::{DfnsSigner, DfnsSignerConfig};
+#[cfg(feature = "fordefi")]
+pub use fordefi::{
+    FordefiPriorityLevel, FordefiRequestSigner, FordefiSigner, FordefiSignerConfig,
+    FordefiSolanaFee, PemRequestSigner, SolanaChainUniqueId,
+};
 #[cfg(feature = "openfort")]
 pub use openfort::{OpenfortSigner, OpenfortSignerConfig};
 #[cfg(feature = "para")]
@@ -127,10 +136,11 @@ pub use utila::{UtilaSigner, UtilaSignerConfig};
     feature = "para",
     feature = "crossmint",
     feature = "openfort",
-    feature = "utila"
+    feature = "utila",
+    feature = "fordefi"
 )))]
 compile_error!(
-    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, cdp, para, dfns, crossmint, openfort, or utila"
+    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, cdp, para, dfns, crossmint, openfort, utila, or fordefi"
 );
 
 /// Unified signer enum supporting multiple backends
@@ -168,6 +178,8 @@ pub enum Signer {
     Crossmint(CrossmintSigner),
     #[cfg(feature = "utila")]
     Utila(UtilaSigner),
+    #[cfg(feature = "fordefi")]
+    Fordefi(FordefiSigner),
 }
 
 impl Signer {
@@ -375,6 +387,31 @@ impl Signer {
         signer.init().await?;
         Ok(Self::Utila(signer))
     }
+
+    /// Create a Fordefi signer.
+    ///
+    /// `from_config` is sync; no `init()` round-trip is required. Set
+    /// `config.chain` to use native Solana mode (Fordefi modifies and
+    /// auto-broadcasts the transaction). Leave it `None` for black-box mode
+    /// (raw EdDSA signing, transaction assembled locally).
+    #[cfg(feature = "fordefi")]
+    pub fn from_fordefi(config: FordefiSignerConfig) -> Result<Self, SignerError> {
+        Ok(Self::Fordefi(FordefiSigner::from_config(config)?))
+    }
+
+    /// Create a Fordefi signer with a custom [`FordefiRequestSigner`] for
+    /// API-request signing (e.g. a KMS/HSM-backed implementation). The key in
+    /// `config.private_key_pem` is ignored on this path.
+    #[cfg(feature = "fordefi")]
+    pub fn from_fordefi_with_signer(
+        config: FordefiSignerConfig,
+        request_signer: std::sync::Arc<dyn FordefiRequestSigner>,
+    ) -> Result<Self, SignerError> {
+        Ok(Self::Fordefi(FordefiSigner::from_config_with_signer(
+            config,
+            request_signer,
+        )?))
+    }
 }
 
 #[async_trait::async_trait]
@@ -414,6 +451,8 @@ impl SolanaSigner for Signer {
             Signer::Crossmint(s) => s.pubkey(),
             #[cfg(feature = "utila")]
             Signer::Utila(s) => s.pubkey(),
+            #[cfg(feature = "fordefi")]
+            Signer::Fordefi(s) => s.pubkey(),
         }
     }
 
@@ -455,6 +494,8 @@ impl SolanaSigner for Signer {
             Signer::Crossmint(s) => s.sign_transaction(tx).await,
             #[cfg(feature = "utila")]
             Signer::Utila(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "fordefi")]
+            Signer::Fordefi(s) => s.sign_transaction(tx).await,
         }
     }
 
@@ -493,6 +534,8 @@ impl SolanaSigner for Signer {
             Signer::Crossmint(s) => s.sign_message(message).await,
             #[cfg(feature = "utila")]
             Signer::Utila(s) => s.sign_message(message).await,
+            #[cfg(feature = "fordefi")]
+            Signer::Fordefi(s) => s.sign_message(message).await,
         }
     }
 
@@ -531,6 +574,8 @@ impl SolanaSigner for Signer {
             Signer::Crossmint(s) => s.is_available().await,
             #[cfg(feature = "utila")]
             Signer::Utila(s) => s.is_available().await,
+            #[cfg(feature = "fordefi")]
+            Signer::Fordefi(s) => s.is_available().await,
         }
     }
 }

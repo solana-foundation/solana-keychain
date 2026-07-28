@@ -1,0 +1,781 @@
+import { createPrivateKey, createSign } from 'node:crypto';
+
+import { Address, assertIsAddress } from '@solana/addresses';
+import { getBase58Decoder } from '@solana/codecs-strings';
+import {
+    assertSignatureValid,
+    createSignatureDictionary,
+    extractSignatureFromWireTransaction,
+    sanitizeRemoteErrorResponse,
+    SignerErrorCode,
+    SolanaSigner,
+    throwSignerError,
+} from '@solana/keychain-core';
+import { SignatureBytes } from '@solana/keys';
+import { SignableMessage, SignatureDictionary } from '@solana/signers';
+import {
+    Base64EncodedWireTransaction,
+    Transaction,
+    TransactionWithinSizeLimit,
+    TransactionWithLifetime,
+} from '@solana/transactions';
+
+import type {
+    FordefiBlackBoxSignatureRequest,
+    FordefiCreateTransactionResponse,
+    FordefiErrorResponse,
+    FordefiSolanaFee,
+    FordefiSolanaMessageRequest,
+    FordefiSolanaTransactionRequest,
+    FordefiTransactionStatusResponse,
+    FordefiVaultResponse,
+    SolanaChainUniqueId,
+} from './types.js';
+
+const DEFAULT_BASE_URL = 'https://api.fordefi.com';
+const DEFAULT_POLL_INTERVAL_MS = 2000;
+const DEFAULT_MAX_POLL_ATTEMPTS = 50;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/** Terminal success states for pushable transactions (solana_transaction with push_mode auto). */
+const PUSHABLE_SUCCESS_STATES = new Set(['completed']);
+/** Terminal success states for non-pushable transactions (black_box_signature, solana_message). */
+const NON_PUSHABLE_SUCCESS_STATES = new Set(['signed', 'completed']);
+/** Terminal failure states (all transaction types). Mirrors the Rust backend. */
+const FAILURE_STATES = new Set([
+    'aborted',
+    'cancelled',
+    'completed_reverted',
+    'dropped',
+    'error_pushing_to_blockchain',
+    'error_signing',
+    'insufficient_funds',
+    'mined_reverted',
+]);
+
+/**
+ * Signs Fordefi API-request payloads for the `x-signature` header.
+ *
+ * Implementations receive the fully-formatted payload (`{path}|{timestamp}|{body}`)
+ * and must return the exact base64 value Fordefi expects: base64 of the DER-encoded
+ * ECDSA P-256 signature over `SHA-256(payload)`.
+ *
+ * The built-in PEM path (`privateKeyPem`) signs locally. To keep the request key in
+ * a KMS/HSM, implement this interface and pass it as `requestSigner` (e.g. AWS KMS
+ * `Sign` with `ECDSA_SHA_256` returns a DER signature — base64-encode it).
+ */
+export interface FordefiRequestSigner {
+    /** Return the base64 `x-signature` value for `payload`. May be async. */
+    signRequest(payload: string): Promise<string> | string;
+}
+
+/**
+ * Built-in {@link FordefiRequestSigner} that signs locally with a PEM-encoded
+ * ECDSA P-256 private key.
+ */
+class PemRequestSigner implements FordefiRequestSigner {
+    private readonly privateKeyPem: string;
+
+    constructor(privateKeyPem: string) {
+        this.privateKeyPem = privateKeyPem;
+    }
+
+    signRequest(payload: string): string {
+        const privateKey = createPrivateKey(this.privateKeyPem);
+        const sign = createSign('SHA256').update(payload, 'utf8').end();
+        return sign.sign(privateKey, 'base64');
+    }
+}
+
+export interface FordefiSignerConfig {
+    /** Fordefi API User bearer token */
+    accessToken: string;
+    /** Optional API base URL (default: https://api.fordefi.com) */
+    apiBaseUrl?: string;
+    /**
+     * Solana chain identifier. When set, uses native Solana API types
+     * (`solana_serialized_transaction_message` with `push_mode: 'auto'` for
+     * transactions, `solana_message` for messages) instead of `black_box_signature`.
+     */
+    chain?: SolanaChainUniqueId;
+    /** Solana fee configuration for native mode transactions. Only used when `chain` is set. */
+    fee?: FordefiSolanaFee;
+    /** Max polling attempts before timeout (default: 50) */
+    maxPollAttempts?: number;
+    /** Polling interval in ms (default: 2000) */
+    pollIntervalMs?: number;
+    /**
+     * PEM-encoded ECDSA P-256 private key for API request signing.
+     * Provide exactly one of `privateKeyPem` or `requestSigner`.
+     */
+    privateKeyPem?: string;
+    /** Solana public key of the vault (base58) */
+    publicKey: string;
+    /** Optional delay in ms between concurrent signing requests (default: 0) */
+    requestDelayMs?: number;
+    /**
+     * Custom API-request signer (e.g. a KMS/HSM-backed implementation).
+     * Provide exactly one of `privateKeyPem` or `requestSigner`. When set,
+     * `privateKeyPem` is ignored.
+     */
+    requestSigner?: FordefiRequestSigner;
+    /**
+     * Per-request HTTP timeout in ms applied to every signing-path network
+     * call (submit POST and each poll GET). Default: 30000.
+     */
+    requestTimeoutMs?: number;
+    /** Fordefi vault UUID */
+    vaultId: string;
+}
+
+/**
+ * Create and initialize a Fordefi-backed signer.
+ *
+ * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
+ */
+export async function createFordefiSigner<TAddress extends string = string>(
+    config: FordefiSignerConfig,
+): Promise<SolanaSigner<TAddress>> {
+    return await FordefiSigner.create(config);
+}
+
+/**
+ * Fordefi MPC signer using Fordefi's API.
+ *
+ * Transaction signing is async: submit via POST, poll GET until MPC signing completes.
+ * API requests require ECDSA P-256 request-level signing.
+ *
+ * Prefer `createFordefiSigner()`. Class export will be removed in a future version.
+ */
+export class FordefiSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+    readonly address: Address<TAddress>;
+    private readonly accessToken: string;
+    private readonly apiBaseUrl: string;
+    private readonly chain?: SolanaChainUniqueId;
+    private readonly fee?: FordefiSolanaFee;
+    private readonly maxPollAttempts: number;
+    private readonly pollIntervalMs: number;
+    private readonly requestSigner: FordefiRequestSigner;
+    private readonly requestDelayMs: number;
+    private readonly requestTimeoutMs: number;
+    private readonly vaultId: string;
+
+    private constructor(config: FordefiSignerConfig, address: Address<TAddress>) {
+        this.accessToken = config.accessToken;
+        this.apiBaseUrl = (config.apiBaseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+        this.chain = config.chain;
+        this.fee = config.fee;
+        this.maxPollAttempts = config.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS;
+        this.pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+        this.requestSigner = config.requestSigner ?? new PemRequestSigner(config.privateKeyPem ?? '');
+        this.requestDelayMs = config.requestDelayMs ?? 0;
+        this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+        this.vaultId = config.vaultId;
+        this.address = address;
+        this.validateRequestDelayMs(this.requestDelayMs);
+        this.validateRequestTimeoutMs(this.requestTimeoutMs);
+    }
+
+    /**
+     * Create a FordefiSigner with the provided configuration.
+     */
+    static async create<TAddress extends string = string>(
+        config: FordefiSignerConfig,
+    ): Promise<FordefiSigner<TAddress>> {
+        if (!config.accessToken) {
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'accessToken must not be empty',
+            });
+        }
+
+        if (!config.vaultId) {
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'vaultId must not be empty',
+            });
+        }
+
+        if (!config.publicKey) {
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'publicKey must not be empty',
+            });
+        }
+
+        if (config.requestSigner && config.privateKeyPem) {
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'provide exactly one of privateKeyPem or requestSigner, not both',
+            });
+        }
+
+        if (!config.requestSigner && !config.privateKeyPem) {
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'one of privateKeyPem or requestSigner must be provided',
+            });
+        }
+
+        const apiBaseUrl = (config.apiBaseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+        let parsedUrl: URL;
+        try {
+            parsedUrl = new URL(apiBaseUrl);
+        } catch {
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'apiBaseUrl is not a valid URL',
+            });
+        }
+        if (parsedUrl.protocol !== 'https:') {
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'apiBaseUrl must use HTTPS',
+            });
+        }
+
+        // Validate the PEM key can be parsed (only on the built-in PEM path).
+        if (config.privateKeyPem) {
+            try {
+                createPrivateKey(config.privateKeyPem);
+            } catch (error) {
+                return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                    cause: error,
+                    message: 'Failed to parse privateKeyPem as a valid private key',
+                });
+            }
+        }
+
+        try {
+            assertIsAddress(config.publicKey);
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                cause: error,
+                message: 'Invalid Solana public key format',
+            });
+        }
+
+        // Authoritative check: fetch the vault from Fordefi and verify that
+        // `config.publicKey` actually belongs to `config.vaultId`. Without this
+        // a valid-but-wrong address would pass configuration and later be
+        // returned by resolveAddress(), creating a funds-routing risk.
+        const verifiedAddress = await FordefiSigner.fetchAndVerifyVaultAddress({
+            accessToken: config.accessToken,
+            apiBaseUrl,
+            expectedPublicKey: config.publicKey,
+            vaultId: config.vaultId,
+        });
+
+        return new FordefiSigner<TAddress>(config, verifiedAddress as Address<TAddress>);
+    }
+
+    /**
+     * Fetch the vault from Fordefi and assert the returned Solana address
+     * matches `expectedPublicKey`.
+     */
+    private static async fetchAndVerifyVaultAddress({
+        accessToken,
+        apiBaseUrl,
+        expectedPublicKey,
+        vaultId,
+    }: {
+        accessToken: string;
+        apiBaseUrl: string;
+        expectedPublicKey: string;
+        vaultId: string;
+    }): Promise<Address> {
+        const url = `${apiBaseUrl}/api/v1/vaults/${vaultId}`;
+
+        let response: Response;
+        try {
+            response = await fetch(url, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                method: 'GET',
+                signal: AbortSignal.timeout(10_000),
+            });
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.HTTP_ERROR, {
+                cause: error,
+                message: 'Fordefi vault verification request failed',
+                url,
+            });
+        }
+
+        if (!response.ok) {
+            const errorMessage = await FordefiSigner.extractErrorMessage(response, 'Fordefi vault verification failed');
+            return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+                message: errorMessage,
+                status: response.status,
+            });
+        }
+
+        let vault: FordefiVaultResponse;
+        try {
+            vault = (await response.json()) as FordefiVaultResponse;
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                cause: error,
+                message: 'Failed to parse Fordefi vault response',
+            });
+        }
+
+        // Regular Fordefi Solana vaults expose `address` directly; black_box vaults
+        // only provide `public_key_compressed` (base64-encoded Ed25519 key).
+        let remoteAddress = vault.address;
+        if (!remoteAddress && vault.public_key_compressed) {
+            try {
+                const keyBytes = new Uint8Array(Buffer.from(vault.public_key_compressed, 'base64'));
+                remoteAddress = getBase58Decoder().decode(keyBytes);
+            } catch (error) {
+                return throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                    cause: error,
+                    message: 'Failed to derive Solana address from vault public_key_compressed',
+                });
+            }
+        }
+        if (!remoteAddress) {
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message:
+                    'Fordefi vault response included neither `address` nor `public_key_compressed`; cannot verify publicKey ownership',
+            });
+        }
+
+        if (remoteAddress !== expectedPublicKey) {
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: `Configured publicKey does not match Fordefi vault ${vaultId}: expected ${remoteAddress}`,
+            });
+        }
+
+        try {
+            assertIsAddress(remoteAddress);
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.INVALID_PUBLIC_KEY, {
+                cause: error,
+                message: 'Fordefi vault returned an invalid Solana address',
+            });
+        }
+
+        return remoteAddress;
+    }
+
+    /**
+     * Lightweight readiness probe.
+     *
+     * Checks that the bearer token and vault are reachable (GET does not
+     * require `x-signature`), then exercises the local P-256 signing path
+     * to catch a malformed `privateKeyPem` early. Note: a passing local
+     * sign does not guarantee the Fordefi server recognises the
+     * corresponding public key — that is only proven on the first real
+     * POST signing call.
+     */
+    async isAvailable(): Promise<boolean> {
+        const url = `${this.apiBaseUrl}/api/v1/vaults/${this.vaultId}`;
+
+        try {
+            const response = await fetch(url, {
+                headers: { Authorization: `Bearer ${this.accessToken}` },
+                method: 'GET',
+                signal: AbortSignal.timeout(5_000),
+            });
+            if (!response.ok) {
+                return false;
+            }
+        } catch {
+            return false;
+        }
+
+        try {
+            await this.signRequest('/api/v1/vaults', Date.now(), '');
+        } catch {
+            return false;
+        }
+
+        return true;
+    }
+
+    async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+        return await Promise.all(
+            messages.map(async (message, index) => {
+                await this.delay(index);
+                const signatureBytes = await this.signMessage(message.content);
+                await assertSignatureValid({
+                    data: message.content,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
+                return createSignatureDictionary({
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
+            }),
+        );
+    }
+
+    async signTransactions(
+        transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+    ): Promise<readonly SignatureDictionary[]> {
+        return await Promise.all(
+            transactions.map(async (transaction, index) => {
+                await this.delay(index);
+                const { sigDict, verificationData } = await this.signTransaction(transaction.messageBytes);
+                const signatureBytes = Object.values(sigDict)[0];
+                if (!signatureBytes) {
+                    return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                        address: this.address,
+                        message: 'No signature bytes found in extracted signature dictionary',
+                    });
+                }
+                await assertSignatureValid({
+                    data: verificationData,
+                    signature: signatureBytes,
+                    signerAddress: this.address,
+                });
+                return sigDict;
+            }),
+        );
+    }
+
+    /**
+     * Sign a Solana transaction message via Fordefi MPC.
+     *
+     * Returns this signer's signature as a single-entry {@link SignatureDictionary}
+     * together with the message bytes the signature must be verified against.
+     * The two signing modes differ in what Fordefi returns:
+     *
+     * - **Native Solana mode**: Fordefi returns a full wire transaction and may
+     *   have modified the message (blockhash, priority fees) before signing. We
+     *   look up *this* signer's signature by account key — Fordefi may not be
+     *   signer #0 in a co-signed transaction — and verify against the returned
+     *   (modified) message bytes.
+     * - **Black box mode**: Fordefi returns a raw 64-byte Ed25519 signature over
+     *   the original message. We return it directly rather than round-tripping
+     *   through a locally-assembled wire transaction. That signature is valid
+     *   regardless of this signer's account index, so this path correctly
+     *   supports multi-signature transactions where Fordefi is not the fee payer.
+     */
+    private async signTransaction(
+        messageBytes: ArrayLike<number>,
+    ): Promise<{ sigDict: SignatureDictionary; verificationData: Uint8Array }> {
+        const bytes = messageBytes instanceof Uint8Array ? messageBytes : new Uint8Array(Array.from(messageBytes));
+        const base64Data = Buffer.from(bytes).toString('base64');
+
+        if (this.chain) {
+            const txId = await this.submitSolanaTransaction(base64Data);
+            const result = await this.pollForResult(txId, { pushable: true });
+            if (!result.raw_transaction) {
+                return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                    message: 'Fordefi solana_transaction response missing raw_transaction',
+                });
+            }
+            const signedWireTx = result.raw_transaction as Base64EncodedWireTransaction;
+            const sigDict = extractSignatureFromWireTransaction({
+                base64WireTransaction: signedWireTx,
+                signerAddress: this.address,
+            });
+            return {
+                sigDict,
+                verificationData: FordefiSigner.extractMessageBytesFromWireTx(signedWireTx),
+            };
+        }
+
+        const txId = await this.submitBlackBoxSignature(base64Data);
+        const result = await this.pollForResult(txId, { pushable: false });
+        const sigBase64 = this.extractSignatureData(result);
+        const sigBytes = new Uint8Array(Buffer.from(sigBase64, 'base64'));
+        if (sigBytes.length !== 64) {
+            return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message: `Expected 64-byte Ed25519 signature, got ${sigBytes.length}`,
+            });
+        }
+        return {
+            sigDict: createSignatureDictionary({ signature: sigBytes as SignatureBytes, signerAddress: this.address }),
+            verificationData: bytes,
+        };
+    }
+
+    /**
+     * POST a transaction request to Fordefi and return the transaction ID.
+     * Shared by all signing modes (black_box, solana_transaction, solana_message).
+     */
+    private async submitTransaction(
+        requestBody: FordefiBlackBoxSignatureRequest | FordefiSolanaMessageRequest | FordefiSolanaTransactionRequest,
+    ): Promise<string> {
+        const apiPath = '/api/v1/transactions';
+        const body = JSON.stringify(requestBody);
+        const timestamp = Date.now();
+        const signature = await this.signRequest(apiPath, timestamp, body);
+
+        const url = `${this.apiBaseUrl}${apiPath}`;
+
+        let response: Response;
+        try {
+            response = await fetch(url, {
+                body,
+                headers: {
+                    Authorization: `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json',
+                    'x-signature': signature,
+                    'x-timestamp': timestamp.toString(),
+                },
+                method: 'POST',
+                signal: AbortSignal.timeout(this.requestTimeoutMs),
+            });
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.HTTP_ERROR, {
+                cause: error,
+                message: FordefiSigner.isTimeoutError(error)
+                    ? `Fordefi submit request timed out after ${this.requestTimeoutMs}ms`
+                    : 'Fordefi network request failed',
+                url,
+            });
+        }
+
+        if (!response.ok) {
+            const errorMessage = await FordefiSigner.extractErrorMessage(response, 'Fordefi submit failed');
+            return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+                message: errorMessage,
+                status: response.status,
+            });
+        }
+
+        let createResponse: FordefiCreateTransactionResponse;
+        try {
+            createResponse = (await response.json()) as FordefiCreateTransactionResponse;
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                cause: error,
+                message: 'Failed to parse Fordefi transaction response',
+            });
+        }
+
+        return createResponse.id;
+    }
+
+    /**
+     * Submit a black_box_signature request for raw EdDSA signing.
+     */
+    private async submitBlackBoxSignature(base64Data: string): Promise<string> {
+        const requestBody: FordefiBlackBoxSignatureRequest = {
+            details: {
+                format: 'hash_binary',
+                hash_binary: base64Data,
+            },
+            sign_mode: 'auto',
+            signer_type: 'api_signer',
+            type: 'black_box_signature',
+            vault_id: this.vaultId,
+        };
+        return await this.submitTransaction(requestBody);
+    }
+
+    /**
+     * Submit a native Solana serialized transaction message for signing + auto-push.
+     */
+    private async submitSolanaTransaction(base64Data: string): Promise<string> {
+        const requestBody: FordefiSolanaTransactionRequest = {
+            details: {
+                chain: this.chain!,
+                data: base64Data,
+                ...(this.fee ? { fee: this.fee } : {}),
+                push_mode: 'auto',
+                type: 'solana_serialized_transaction_message',
+            },
+            sign_mode: 'auto',
+            signer_type: 'api_signer',
+            type: 'solana_transaction',
+            vault_id: this.vaultId,
+        };
+        return await this.submitTransaction(requestBody);
+    }
+
+    /**
+     * Submit a native Solana personal message for signing.
+     */
+    private async submitSolanaMessage(base64Data: string): Promise<string> {
+        const requestBody: FordefiSolanaMessageRequest = {
+            details: {
+                chain: this.chain!,
+                raw_data: base64Data,
+                type: 'personal_message_type',
+            },
+            sign_mode: 'auto',
+            signer_type: 'api_signer',
+            type: 'solana_message',
+            vault_id: this.vaultId,
+        };
+        return await this.submitTransaction(requestBody);
+    }
+
+    /**
+     * Sign a Solana personal message via Fordefi MPC.
+     * Submits the message, polls for completion, and returns the raw 64-byte Ed25519 signature.
+     */
+    private async signMessage(messageBytes: Uint8Array): Promise<SignatureBytes> {
+        const base64Data = Buffer.from(messageBytes).toString('base64');
+
+        const txId = this.chain
+            ? await this.submitSolanaMessage(base64Data)
+            : await this.submitBlackBoxSignature(base64Data);
+        const result = await this.pollForResult(txId, { pushable: false });
+        const sigBase64 = this.extractSignatureData(result);
+
+        let sigBytes: Uint8Array;
+        try {
+            sigBytes = new Uint8Array(Buffer.from(sigBase64, 'base64'));
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                cause: error,
+                message: 'Failed to decode Fordefi signature base64',
+            });
+        }
+
+        if (sigBytes.length !== 64) {
+            return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message: `Expected 64-byte Ed25519 signature, got ${sigBytes.length}`,
+            });
+        }
+
+        return sigBytes as SignatureBytes;
+    }
+
+    /**
+     * Poll until the transaction reaches a terminal state and return the full response.
+     *
+     * @param pushable - When `true`, treats pushable success state
+     *   `completed` as terminal. When `false`, uses non-pushable states
+     *   (`signed`, `completed`).
+     */
+    private async pollForResult(
+        txId: string,
+        { pushable }: { pushable: boolean },
+    ): Promise<FordefiTransactionStatusResponse> {
+        const successStates = pushable ? PUSHABLE_SUCCESS_STATES : NON_PUSHABLE_SUCCESS_STATES;
+
+        for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
+            const url = `${this.apiBaseUrl}/api/v1/transactions/${txId}`;
+
+            let response: Response;
+            try {
+                response = await fetch(url, {
+                    headers: { Authorization: `Bearer ${this.accessToken}` },
+                    method: 'GET',
+                    signal: AbortSignal.timeout(this.requestTimeoutMs),
+                });
+            } catch (error) {
+                return throwSignerError(SignerErrorCode.HTTP_ERROR, {
+                    cause: error,
+                    message: FordefiSigner.isTimeoutError(error)
+                        ? `Fordefi poll request timed out after ${this.requestTimeoutMs}ms`
+                        : 'Fordefi poll request failed',
+                    url,
+                });
+            }
+
+            if (!response.ok) {
+                const errorMessage = await FordefiSigner.extractErrorMessage(response, 'Fordefi poll failed');
+                return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+                    message: errorMessage,
+                    status: response.status,
+                });
+            }
+
+            let txData: FordefiTransactionStatusResponse;
+            try {
+                txData = (await response.json()) as FordefiTransactionStatusResponse;
+            } catch (error) {
+                return throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                    cause: error,
+                    message: 'Failed to parse Fordefi transaction status',
+                });
+            }
+
+            if (successStates.has(txData.state)) {
+                return txData;
+            }
+
+            if (FAILURE_STATES.has(txData.state)) {
+                return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                    message: `Transaction ${txId} reached terminal state: ${txData.state}`,
+                });
+            }
+
+            await new Promise(resolve => setTimeout(resolve, this.pollIntervalMs));
+        }
+
+        return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+            message: `Polling timeout after ${this.maxPollAttempts} attempts`,
+        });
+    }
+
+    /**
+     * Extract the base64-encoded signature from a poll result.
+     */
+    private extractSignatureData(result: FordefiTransactionStatusResponse): string {
+        const sigData = result.signatures?.[0]?.data;
+        if (!sigData) {
+            return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message: 'Transaction signed but no signatures in response',
+            });
+        }
+        return sigData;
+    }
+
+    /**
+     * Sign an API request payload via the configured {@link FordefiRequestSigner}.
+     * Payload format: `{path}|{timestamp}|{body}`
+     */
+    private async signRequest(path: string, timestamp: number, body: string): Promise<string> {
+        const payload = `${path}|${timestamp}|${body}`;
+        return await this.requestSigner.signRequest(payload);
+    }
+
+    private validateRequestDelayMs(requestDelayMs: number): void {
+        if (requestDelayMs < 0) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'requestDelayMs must not be negative',
+            });
+        }
+        if (requestDelayMs > 3000) {
+            console.warn('requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors');
+        }
+    }
+
+    private validateRequestTimeoutMs(requestTimeoutMs: number): void {
+        if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'requestTimeoutMs must be a positive finite number',
+            });
+        }
+    }
+
+    private static isTimeoutError(error: unknown): boolean {
+        return error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+    }
+
+    private async delay(index: number): Promise<void> {
+        if (this.requestDelayMs > 0 && index > 0) {
+            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
+        }
+    }
+
+    /**
+     * Extract the message bytes portion from a base64-encoded wire transaction.
+     * Wire format: [compact-u16 sig_count][sig_count * 64 bytes][message bytes]
+     */
+    private static extractMessageBytesFromWireTx(base64WireTx: Base64EncodedWireTransaction): Uint8Array {
+        const wireBytes = new Uint8Array(Buffer.from(base64WireTx, 'base64'));
+        // Parse compact-u16 signature count (single byte for <= 127 signatures)
+        const sigCount = wireBytes[0]!;
+        const messageStart = 1 + sigCount * 64;
+        return wireBytes.subarray(messageStart);
+    }
+
+    private static async extractErrorMessage(response: Response, fallback: string): Promise<string> {
+        try {
+            const errorData = (await response.json()) as FordefiErrorResponse;
+            // Fordefi returns structured errors as { title, detail, error_type, request_id }
+            // but some endpoints use { message }. Prefer the most specific field available.
+            const parts = [errorData.title, errorData.detail].filter((p): p is string => Boolean(p));
+            const detail = parts.length > 0 ? parts.join(' — ') : errorData.message;
+            if (detail) {
+                return `${fallback}: ${response.status} ${sanitizeRemoteErrorResponse(detail)}`;
+            }
+        } catch {
+            // Ignore JSON parsing errors for error response
+        }
+        return `${fallback}: ${response.status}`;
+    }
+}

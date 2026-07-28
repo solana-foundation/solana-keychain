@@ -18,7 +18,7 @@ pub enum SignerError {
     #[error("Signing failed")]
     SigningFailed(String),
 
-    /// Remote API error (any remote signer backend: Vault, Privy, Turnkey, Fireblocks, AWS/GCP KMS, Dfns, Crossmint, CDP, Para, Openfort, Utila)
+    /// Remote API error (any remote signer backend: Vault, Privy, Turnkey, Fireblocks, AWS/GCP KMS, Dfns, Crossmint, CDP, Para, Openfort, Utila, Fordefi)
     #[error("Remote API error")]
     RemoteApiError(String),
 
@@ -69,7 +69,8 @@ impl From<serde_json::Error> for SignerError {
     feature = "para",
     feature = "crossmint",
     feature = "openfort",
-    feature = "utila"
+    feature = "utila",
+    feature = "fordefi"
 ))]
 impl From<reqwest::Error> for SignerError {
     fn from(err: reqwest::Error) -> Self {

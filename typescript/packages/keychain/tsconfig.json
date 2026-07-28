@@ -14,6 +14,7 @@
         { "path": "../crossmint" },
         { "path": "../dfns" },
         { "path": "../fireblocks" },
+        { "path": "../fordefi" },
         { "path": "../gcp-kms" },
         { "path": "../memory" },
         { "path": "../openfort" },

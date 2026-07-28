@@ -268,6 +268,40 @@ importers:
         specifier: ^17.4.2
         version: 17.4.2
 
+  packages/fordefi:
+    dependencies:
+      '@solana/keychain-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@solana-program/system':
+        specifier: ^0.13.0
+        version: 0.13.0(@solana/kit@7.0.0(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10))
+      '@solana/addresses':
+        specifier: ^7.0.0
+        version: 7.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/codecs-strings':
+        specifier: ^7.0.0
+        version: 7.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/keychain-test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+      '@solana/keys':
+        specifier: ^7.0.0
+        version: 7.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/kit':
+        specifier: ^7.0.0
+        version: 7.0.0(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      '@solana/signers':
+        specifier: ^7.0.0
+        version: 7.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/transactions':
+        specifier: ^7.0.0
+        version: 7.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
+
   packages/gcp-kms:
     dependencies:
       '@solana/keychain-core':
@@ -331,6 +365,9 @@ importers:
       '@solana/keychain-fireblocks':
         specifier: workspace:*
         version: link:../fireblocks
+      '@solana/keychain-fordefi':
+        specifier: workspace:*
+        version: link:../fordefi
       '@solana/keychain-gcp-kms':
         specifier: workspace:*
         version: link:../gcp-kms

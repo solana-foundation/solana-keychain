@@ -3,6 +3,7 @@ import type { CdpSignerConfig } from '@solana/keychain-cdp';
 import type { CrossmintSignerConfig } from '@solana/keychain-crossmint';
 import type { DfnsSignerConfig } from '@solana/keychain-dfns';
 import type { FireblocksSignerConfig } from '@solana/keychain-fireblocks';
+import type { FordefiSignerConfig } from '@solana/keychain-fordefi';
 import type { GcpKmsSignerConfig } from '@solana/keychain-gcp-kms';
 import type { MemorySignerConfig } from '@solana/keychain-memory';
 import type { OpenfortSignerConfig } from '@solana/keychain-openfort';
@@ -22,6 +23,7 @@ export type KeychainSignerConfig =
     | (CrossmintSignerConfig & { backend: 'crossmint' })
     | (DfnsSignerConfig & { backend: 'dfns' })
     | (FireblocksSignerConfig & { backend: 'fireblocks' })
+    | (FordefiSignerConfig & { backend: 'fordefi' })
     | (GcpKmsSignerConfig & { backend: 'gcp-kms' })
     | (MemorySignerConfig & { backend: 'memory' })
     | (OpenfortSignerConfig & { backend: 'openfort' })

@@ -12,15 +12,15 @@ This repository contains two implementations:
 
 Framework-agnostic Rust library with async support and multiple signing backends.
 
-- **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila
-- **Features**: Async/await, feature flags for zero-cost abstractions, SDK v2 & v3 support
+- **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila, Fordefi
+- **Features**: Async/await, feature flags for zero-cost abstractions, SDK v2, v3 & v4 support
 - [View Rust Documentation →](rust/README.md)
 
 ### [TypeScript](typescript/)
 
 Solana Kit compatible signer implementation for Node.js and browser environments.
 
-- **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila
+- **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila, Fordefi
 - **Features**: Solana Kit compatible, tree-shakeable modules, full type safety
 - [View TypeScript Documentation →](typescript/README.md)
 

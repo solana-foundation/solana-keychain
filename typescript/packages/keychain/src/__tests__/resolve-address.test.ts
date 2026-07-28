@@ -14,6 +14,7 @@ const BACKEND_RESOLUTION = {
     crossmint: 'factory',
     dfns: 'factory',
     fireblocks: 'factory',
+    fordefi: 'factory',
     'gcp-kms': 'publicKey',
     memory: 'factory',
     openfort: 'factory',
