@@ -17,6 +17,8 @@ mod tests {
     use super::*;
     use crate::fordefi::{FordefiSigner, FordefiSignerConfig, SolanaChainUniqueId};
     use crate::test_util::create_test_transaction;
+    #[cfg(feature = "integration-tests")]
+    use crate::tests::litesvm_util::{get_latest_blockhash, simulate_transaction, start_litesvm};
     use crate::traits::SolanaSigner;
     use std::env;
     use std::path::{Path, PathBuf};
@@ -36,7 +38,7 @@ mod tests {
     /// Build a `FordefiSigner` for the given vault, sharing the access token and
     /// request-signing key from the environment. `chain` selects black box mode
     /// (`None`) vs native Solana mode (`Some`).
-    fn load_signer(
+    async fn load_signer(
         vault_id: String,
         public_key: String,
         chain: Option<SolanaChainUniqueId>,
@@ -60,23 +62,24 @@ mod tests {
             chain,
             fee: None,
         })
+        .await
         .expect("Failed to create Fordefi signer")
     }
 
     /// Black box signer — uses the dedicated black box vault (`FORDEFI_BB_*`),
     /// which is distinct from the Solana vault used by native mode.
-    fn get_signer() -> FordefiSigner {
+    async fn get_signer() -> FordefiSigner {
         dotenv().ok();
         let vault_id = env::var(FORDEFI_BB_VAULT_ID)
             .expect("FORDEFI_BB_VAULT_ID must be set for integration tests");
         let public_key = env::var(FORDEFI_BB_PUBLIC_KEY)
             .expect("FORDEFI_BB_PUBLIC_KEY must be set for integration tests");
-        load_signer(vault_id, public_key, None)
+        load_signer(vault_id, public_key, None).await
     }
 
     /// Native Solana signer — uses the Solana vault (`FORDEFI_VAULT_ID`) and the
     /// chain from `FORDEFI_CHAIN`.
-    fn get_native_signer() -> FordefiSigner {
+    async fn get_native_signer() -> FordefiSigner {
         dotenv().ok();
         let vault_id =
             env::var(FORDEFI_VAULT_ID).expect("FORDEFI_VAULT_ID must be set for integration tests");
@@ -87,13 +90,13 @@ mod tests {
             "solana_mainnet" => SolanaChainUniqueId::SolanaMainnet,
             other => panic!("Invalid FORDEFI_CHAIN value: {other}"),
         });
-        load_signer(vault_id, public_key, chain)
+        load_signer(vault_id, public_key, chain).await
     }
 
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
     async fn test_fordefi_sign_message() {
-        let signer = get_signer();
+        let signer = get_signer().await;
 
         let message = b"solana-keychain fordefi message signing test";
         let signature = signer
@@ -111,10 +114,7 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
     async fn test_fordefi_sign_transaction() {
-        use crate::tests::litesvm_util::{
-            get_latest_blockhash, simulate_transaction, start_litesvm,
-        };
-        let signer = get_signer();
+        let signer = get_signer().await;
 
         let lite_svm = start_litesvm(&signer.pubkey())
             .await
@@ -160,7 +160,7 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
     async fn test_fordefi_is_available() {
-        let signer = get_signer();
+        let signer = get_signer().await;
         assert!(signer.is_available().await);
     }
 
@@ -174,7 +174,7 @@ mod tests {
         };
         use std::str::FromStr;
 
-        let signer = get_signer();
+        let signer = get_signer().await;
         let from = signer.pubkey();
 
         let rpc_url = env::var("SOLANA_RPC_URL")
@@ -239,7 +239,7 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
     async fn test_fordefi_native_sign_message() {
-        let signer = get_native_signer();
+        let signer = get_native_signer().await;
 
         let message = b"solana-keychain fordefi native message signing test";
         let signature = signer
@@ -261,7 +261,7 @@ mod tests {
         use crate::tests::rpc_util::{confirm_transaction, get_rpc_blockhash};
         use std::str::FromStr;
 
-        let signer = get_native_signer();
+        let signer = get_native_signer().await;
         let from = signer.pubkey();
 
         let rpc_url = env::var("SOLANA_RPC_URL")
@@ -320,7 +320,7 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
     async fn test_fordefi_native_is_available() {
-        let signer = get_native_signer();
+        let signer = get_native_signer().await;
         assert!(signer.is_available().await);
     }
 }

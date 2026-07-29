@@ -29,6 +29,7 @@ const DEFAULT_BASE_URL: &str = "https://api.fordefi.com";
 const DEFAULT_POLL_INTERVAL_MS: u64 = 2000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 50;
 const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const VAULT_VERIFICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Configuration for creating a FordefiSigner.
 #[derive(Clone)]
@@ -92,23 +93,33 @@ impl std::fmt::Debug for FordefiSigner {
 impl FordefiSigner {
     /// Create a new FordefiSigner from a configuration object.
     ///
+    /// Fetches the configured Fordefi vault and verifies that its authoritative
+    /// Solana public key matches `config.public_key` before returning.
+    ///
     /// The request-signing key is parsed from `config.private_key_pem` (PEM-encoded
     /// ECDSA P-256). To keep that key in a KMS/HSM instead, implement
     /// [`FordefiRequestSigner`] and use [`FordefiSigner::from_config_with_signer`].
-    pub fn from_config(config: FordefiSignerConfig) -> Result<Self, SignerError> {
+    pub async fn from_config(config: FordefiSignerConfig) -> Result<Self, SignerError> {
         let request_signer = Arc::new(PemRequestSigner::from_pem(&config.private_key_pem)?);
-        Self::build(config, request_signer)
+        let signer = Self::build(config, request_signer)?;
+        signer.verify_vault_address_with_timeout().await?;
+        Ok(signer)
     }
 
     /// Create a new FordefiSigner with a custom [`FordefiRequestSigner`] for
     /// API-request signing (e.g. a KMS/HSM-backed implementation).
     ///
+    /// Fetches the configured Fordefi vault and verifies that its authoritative
+    /// Solana public key matches `config.public_key` before returning.
+    ///
     /// `config.private_key_pem` is ignored on this path.
-    pub fn from_config_with_signer(
+    pub async fn from_config_with_signer(
         config: FordefiSignerConfig,
         request_signer: Arc<dyn FordefiRequestSigner>,
     ) -> Result<Self, SignerError> {
-        Self::build(config, request_signer)
+        let signer = Self::build(config, request_signer)?;
+        signer.verify_vault_address_with_timeout().await?;
+        Ok(signer)
     }
 
     /// Shared construction: validate config and assemble the signer. Does not
@@ -136,12 +147,29 @@ impl FordefiSigner {
             ));
         }
 
-        if let Some(ref url) = config.api_base_url {
-            if !url.starts_with("https://") {
-                return Err(SignerError::ConfigError(
-                    "api_base_url must use HTTPS".to_string(),
-                ));
-            }
+        let api_base_url = config
+            .api_base_url
+            .as_deref()
+            .unwrap_or(DEFAULT_BASE_URL)
+            .trim_end_matches('/')
+            .to_string();
+        let parsed_api_base_url = reqwest::Url::parse(&api_base_url).map_err(|_| {
+            SignerError::ConfigError("api_base_url must be a valid URL".to_string())
+        })?;
+
+        #[cfg(test)]
+        let test_loopback_http = parsed_api_base_url.scheme() == "http"
+            && matches!(
+                parsed_api_base_url.host_str(),
+                Some("127.0.0.1" | "localhost" | "::1")
+            );
+        #[cfg(not(test))]
+        let test_loopback_http = false;
+
+        if parsed_api_base_url.scheme() != "https" && !test_loopback_http {
+            return Err(SignerError::ConfigError(
+                "api_base_url must use HTTPS".to_string(),
+            ));
         }
 
         if config.fee.is_some() && config.chain.is_none() {
@@ -178,11 +206,7 @@ impl FordefiSigner {
             access_token: config.access_token,
             vault_id: config.vault_id,
             request_signer,
-            api_base_url: config
-                .api_base_url
-                .unwrap_or_else(|| DEFAULT_BASE_URL.to_string())
-                .trim_end_matches('/')
-                .to_string(),
+            api_base_url,
             client,
             public_key,
             poll_interval_ms: config.poll_interval_ms.unwrap_or(DEFAULT_POLL_INTERVAL_MS),
@@ -322,7 +346,7 @@ impl FordefiSigner {
         tx_id: &str,
         pushable: bool,
     ) -> Result<TransactionStatusResponse, SignerError> {
-        for _attempt in 0..self.max_poll_attempts {
+        for attempt in 0..self.max_poll_attempts {
             let url = format!("{}/api/v1/transactions/{}", self.api_base_url, tx_id);
             let response = self
                 .client
@@ -367,7 +391,7 @@ impl FordefiSigner {
             }
 
             // Skip the sleep on the final attempt so we don't delay the timeout error.
-            if _attempt + 1 < self.max_poll_attempts {
+            if attempt + 1 < self.max_poll_attempts {
                 tokio::time::sleep(tokio::time::Duration::from_millis(self.poll_interval_ms)).await;
             }
         }
@@ -557,7 +581,7 @@ impl FordefiSigner {
         }
     }
 
-    /// Check vault availability by fetching vault info.
+    /// Fetch the configured vault from Fordefi.
     async fn fetch_vault(&self) -> Result<VaultResponse, SignerError> {
         let url = format!("{}/api/v1/vaults/{}", self.api_base_url, self.vault_id);
         let response = self
@@ -572,6 +596,70 @@ impl FordefiSigner {
         }
 
         Ok(response.json().await?)
+    }
+
+    /// Resolve the authoritative Solana public key returned for a Fordefi vault.
+    ///
+    /// Chain-specific vaults expose a base58 `address`; black-box vaults expose
+    /// the same 32-byte Ed25519 public key as base64 in `public_key_compressed`.
+    fn vault_public_key(vault: &VaultResponse) -> Result<Pubkey, SignerError> {
+        if let Some(address) = vault
+            .address
+            .as_deref()
+            .filter(|address| !address.is_empty())
+        {
+            return Pubkey::from_str(address).map_err(|_| {
+                SignerError::InvalidPublicKey(
+                    "Fordefi vault returned an invalid Solana address".to_string(),
+                )
+            });
+        }
+
+        let public_key_compressed = vault.public_key_compressed.as_deref().ok_or_else(|| {
+            SignerError::ConfigError(
+                "Fordefi vault response included neither `address` nor \
+                 `public_key_compressed`; cannot verify public_key ownership"
+                    .to_string(),
+            )
+        })?;
+        let public_key_bytes = STANDARD.decode(public_key_compressed).map_err(|_| {
+            SignerError::SerializationError(
+                "Failed to decode Fordefi vault public_key_compressed as base64".to_string(),
+            )
+        })?;
+        let public_key_bytes: [u8; 32] = public_key_bytes.try_into().map_err(|_| {
+            SignerError::InvalidPublicKey(
+                "Fordefi vault public_key_compressed must decode to 32 bytes".to_string(),
+            )
+        })?;
+
+        Ok(Pubkey::new_from_array(public_key_bytes))
+    }
+
+    /// Verify that the configured public key belongs to the configured Fordefi vault.
+    async fn verify_vault_address(&self) -> Result<(), SignerError> {
+        let vault = self.fetch_vault().await?;
+        let remote_public_key = Self::vault_public_key(&vault)?;
+
+        if remote_public_key != self.public_key {
+            return Err(SignerError::ConfigError(format!(
+                "Configured public_key does not match Fordefi vault {}",
+                self.vault_id
+            )));
+        }
+
+        Ok(())
+    }
+
+    async fn verify_vault_address_with_timeout(&self) -> Result<(), SignerError> {
+        tokio::time::timeout(VAULT_VERIFICATION_TIMEOUT, self.verify_vault_address())
+            .await
+            .map_err(|_| {
+                SignerError::HttpError(format!(
+                    "Fordefi vault verification timed out after {} seconds",
+                    VAULT_VERIFICATION_TIMEOUT.as_secs()
+                ))
+            })?
     }
 
     async fn extract_api_error(response: reqwest::Response, context: &str) -> SignerError {
@@ -631,7 +719,16 @@ impl SolanaSigner for FordefiSigner {
     }
 
     async fn is_available(&self) -> bool {
-        let result = tokio::time::timeout(AVAILABILITY_TIMEOUT, self.fetch_vault()).await;
+        let readiness_check = async {
+            self.fetch_vault().await?;
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| SignerError::Other(format!("System time error: {e}")))?
+                .as_millis() as u64;
+            self.sign_request("/api/v1/vaults", timestamp, "").await?;
+            Ok::<(), SignerError>(())
+        };
+        let result = tokio::time::timeout(AVAILABILITY_TIMEOUT, readiness_check).await;
         matches!(result, Ok(Ok(_)))
     }
 }
@@ -653,7 +750,7 @@ mod tests {
 
     /// Generate a test PEM key string (SEC1-encoded ECDSA P-256).
     fn test_pem_key() -> String {
-        let signing_key = SigningKey::random(&mut rand::thread_rng());
+        let signing_key = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
         let secret_key: p256::SecretKey = signing_key.into();
         secret_key
             .to_sec1_pem(p256::pkcs8::LineEnding::LF)
@@ -663,6 +760,30 @@ mod tests {
 
     fn test_request_signer() -> Arc<dyn FordefiRequestSigner> {
         Arc::new(PemRequestSigner::from_pem(&test_pem_key()).unwrap())
+    }
+
+    /// Exercise the synchronous local-validation/build phase without the public
+    /// constructor's authoritative Fordefi vault round-trip.
+    fn build_test_signer_from_config(
+        config: FordefiSignerConfig,
+    ) -> Result<FordefiSigner, SignerError> {
+        let request_signer = Arc::new(PemRequestSigner::from_pem(&config.private_key_pem)?);
+        FordefiSigner::build(config, request_signer)
+    }
+
+    fn verified_test_config(base_url: &str, public_key: Pubkey) -> FordefiSignerConfig {
+        FordefiSignerConfig {
+            access_token: "test-token".to_string(),
+            vault_id: "test-vault-id".to_string(),
+            private_key_pem: test_pem_key(),
+            public_key: public_key.to_string(),
+            api_base_url: Some(base_url.to_string()),
+            poll_interval_ms: Some(10),
+            max_poll_attempts: Some(3),
+            http_client_config: None,
+            chain: None,
+            fee: None,
+        }
     }
 
     /// Build a black-box FordefiSigner for tests, backed by `request_signer`.
@@ -722,7 +843,7 @@ mod tests {
     #[test]
     fn test_fordefi_config_empty_access_token() {
         let pem = test_pem_key();
-        let result = FordefiSigner::from_config(FordefiSignerConfig {
+        let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "".to_string(),
             vault_id: "vault-id".to_string(),
             private_key_pem: pem,
@@ -741,7 +862,7 @@ mod tests {
     #[test]
     fn test_fordefi_config_empty_vault_id() {
         let pem = test_pem_key();
-        let result = FordefiSigner::from_config(FordefiSignerConfig {
+        let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "".to_string(),
             private_key_pem: pem,
@@ -759,7 +880,7 @@ mod tests {
 
     #[test]
     fn test_fordefi_config_invalid_pem() {
-        let result = FordefiSigner::from_config(FordefiSignerConfig {
+        let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
             private_key_pem: "not-a-valid-pem".to_string(),
@@ -781,7 +902,7 @@ mod tests {
     #[test]
     fn test_fordefi_config_invalid_pubkey() {
         let pem = test_pem_key();
-        let result = FordefiSigner::from_config(FordefiSignerConfig {
+        let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
             private_key_pem: pem,
@@ -803,7 +924,7 @@ mod tests {
     #[test]
     fn test_fordefi_config_rejects_http_url() {
         let pem = test_pem_key();
-        let result = FordefiSigner::from_config(FordefiSignerConfig {
+        let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
             private_key_pem: pem,
@@ -820,9 +941,27 @@ mod tests {
     }
 
     #[test]
+    fn test_fordefi_config_rejects_malformed_https_url() {
+        let result = build_test_signer_from_config(FordefiSignerConfig {
+            access_token: "token".to_string(),
+            vault_id: "vault-id".to_string(),
+            private_key_pem: test_pem_key(),
+            public_key: "11111111111111111111111111111111".to_string(),
+            api_base_url: Some("https://".to_string()),
+            poll_interval_ms: None,
+            max_poll_attempts: None,
+            http_client_config: None,
+            chain: None,
+            fee: None,
+        });
+
+        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+    }
+
+    #[test]
     fn test_fordefi_config_fee_without_chain_rejected() {
         let pem = test_pem_key();
-        let result = FordefiSigner::from_config(FordefiSignerConfig {
+        let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
             private_key_pem: pem,
@@ -844,7 +983,7 @@ mod tests {
     fn test_fordefi_config_zero_max_poll_attempts_rejected() {
         let pem = test_pem_key();
         let keypair = create_test_keypair();
-        let result = FordefiSigner::from_config(FordefiSignerConfig {
+        let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
             private_key_pem: pem,
@@ -865,7 +1004,7 @@ mod tests {
         let keypair = create_test_keypair();
         let pubkey_str = keypair_pubkey(&keypair).to_string();
 
-        let result = FordefiSigner::from_config(FordefiSignerConfig {
+        let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
             private_key_pem: pem,
@@ -886,7 +1025,7 @@ mod tests {
         let keypair = create_test_keypair();
         let pubkey_str = keypair_pubkey(&keypair).to_string();
 
-        let result = FordefiSigner::from_config(FordefiSignerConfig {
+        let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
             private_key_pem: pem,
@@ -907,7 +1046,7 @@ mod tests {
     #[test]
     fn test_fordefi_config_strips_trailing_slash() {
         let pem = test_pem_key();
-        let result = FordefiSigner::from_config(FordefiSignerConfig {
+        let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
             private_key_pem: pem,
@@ -921,6 +1060,175 @@ mod tests {
         });
         assert!(result.is_ok());
         assert_eq!(result.unwrap().api_base_url, "https://custom.api.com");
+    }
+
+    // --- Authoritative vault verification tests ---
+
+    #[tokio::test]
+    async fn test_fordefi_constructor_verifies_chain_specific_vault_address() {
+        let mock_server = MockServer::start().await;
+        let public_key = keypair_pubkey(&create_test_keypair());
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/test-vault-id"))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "address": public_key.to_string(),
+                "id": "test-vault-id",
+                "type": "solana"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let signer =
+            FordefiSigner::from_config(verified_test_config(&mock_server.uri(), public_key))
+                .await
+                .unwrap();
+
+        assert_eq!(signer.pubkey(), public_key);
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_constructor_derives_black_box_vault_address() {
+        let mock_server = MockServer::start().await;
+        let public_key = keypair_pubkey(&create_test_keypair());
+        let public_key_compressed = STANDARD.encode(public_key.to_bytes());
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/test-vault-id"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "test-vault-id",
+                "public_key_compressed": public_key_compressed,
+                "type": "black_box"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let signer =
+            FordefiSigner::from_config(verified_test_config(&mock_server.uri(), public_key))
+                .await
+                .unwrap();
+
+        assert_eq!(signer.pubkey(), public_key);
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_constructor_rejects_vault_address_mismatch() {
+        let mock_server = MockServer::start().await;
+        let configured_public_key = keypair_pubkey(&create_test_keypair());
+        let remote_public_key = keypair_pubkey(&create_test_keypair());
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/test-vault-id"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "address": remote_public_key.to_string(),
+                "id": "test-vault-id"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = FordefiSigner::from_config(verified_test_config(
+            &mock_server.uri(),
+            configured_public_key,
+        ))
+        .await;
+
+        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_constructor_rejects_vault_without_public_key() {
+        let mock_server = MockServer::start().await;
+        let public_key = keypair_pubkey(&create_test_keypair());
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/test-vault-id"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "id": "test-vault-id" })),
+            )
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result =
+            FordefiSigner::from_config(verified_test_config(&mock_server.uri(), public_key)).await;
+
+        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_constructor_rejects_invalid_black_box_public_key() {
+        let mock_server = MockServer::start().await;
+        let public_key = keypair_pubkey(&create_test_keypair());
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/test-vault-id"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "test-vault-id",
+                "public_key_compressed": STANDARD.encode([1_u8; 31]),
+                "type": "black_box"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result =
+            FordefiSigner::from_config(verified_test_config(&mock_server.uri(), public_key)).await;
+
+        assert!(matches!(
+            result.unwrap_err(),
+            SignerError::InvalidPublicKey(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_constructor_rejects_invalid_black_box_base64() {
+        let mock_server = MockServer::start().await;
+        let public_key = keypair_pubkey(&create_test_keypair());
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/test-vault-id"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "test-vault-id",
+                "public_key_compressed": "not-base64",
+                "type": "black_box"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result =
+            FordefiSigner::from_config(verified_test_config(&mock_server.uri(), public_key)).await;
+
+        assert!(matches!(
+            result.unwrap_err(),
+            SignerError::SerializationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_constructor_propagates_vault_api_error() {
+        let mock_server = MockServer::start().await;
+        let public_key = keypair_pubkey(&create_test_keypair());
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/test-vault-id"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result =
+            FordefiSigner::from_config(verified_test_config(&mock_server.uri(), public_key)).await;
+
+        assert!(matches!(
+            result.unwrap_err(),
+            SignerError::RemoteApiError(_)
+        ));
     }
 
     // --- sign_message tests ---
@@ -1249,6 +1557,26 @@ mod tests {
             .await;
 
         assert!(signer.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_is_available_checks_request_signer() {
+        let mock_server = MockServer::start().await;
+        let public_key = keypair_pubkey(&create_test_keypair());
+        let signer =
+            create_test_signer_with(&mock_server.uri(), public_key, Arc::new(FailingSigner));
+
+        Mock::given(method("GET"))
+            .and(path_regex("/api/v1/vaults/.*"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "id": "test-vault-id" })),
+            )
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        assert!(!signer.is_available().await);
     }
 
     #[tokio::test]
@@ -1674,33 +2002,33 @@ mod tests {
         assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
     }
 
-    #[test]
-    fn test_fordefi_from_config_with_signer_ignores_pem() {
-        let keypair = create_test_keypair();
-        let pubkey_str = keypair_pubkey(&keypair).to_string();
+    #[tokio::test]
+    async fn test_fordefi_from_config_with_signer_ignores_pem() {
+        let mock_server = MockServer::start().await;
+        let public_key = keypair_pubkey(&create_test_keypair());
 
         // `private_key_pem` is intentionally invalid: it must be ignored when a
         // custom request signer is supplied.
-        let result = FordefiSigner::from_config_with_signer(
-            FordefiSignerConfig {
-                access_token: "token".to_string(),
-                vault_id: "vault-id".to_string(),
-                private_key_pem: "not-a-valid-pem".to_string(),
-                public_key: pubkey_str,
-                api_base_url: None,
-                poll_interval_ms: None,
-                max_poll_attempts: None,
-                http_client_config: None,
-                chain: None,
-                fee: None,
-            },
-            Arc::new(CannedSigner("x")),
-        );
+        let mut config = verified_test_config(&mock_server.uri(), public_key);
+        config.private_key_pem = "not-a-valid-pem".to_string();
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/test-vault-id"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "address": public_key.to_string(),
+                "id": "test-vault-id"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result =
+            FordefiSigner::from_config_with_signer(config, Arc::new(CannedSigner("x"))).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_fordefi_from_config_with_signer_still_validates_config() {
+    #[tokio::test]
+    async fn test_fordefi_from_config_with_signer_still_validates_config() {
         // Shared validation still runs on the custom-signer path.
         let result = FordefiSigner::from_config_with_signer(
             FordefiSignerConfig {
@@ -1716,7 +2044,8 @@ mod tests {
                 fee: None,
             },
             Arc::new(CannedSigner("x")),
-        );
+        )
+        .await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
     }

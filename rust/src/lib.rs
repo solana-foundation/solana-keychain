@@ -390,27 +390,26 @@ impl Signer {
 
     /// Create a Fordefi signer.
     ///
-    /// `from_config` is sync; no `init()` round-trip is required. Set
-    /// `config.chain` to use native Solana mode (Fordefi modifies and
-    /// auto-broadcasts the transaction). Leave it `None` for black-box mode
-    /// (raw EdDSA signing, transaction assembled locally).
+    /// Fetches the vault during initialization and verifies that its authoritative
+    /// Solana address matches `config.public_key`. Set `config.chain` to use native
+    /// Solana mode (Fordefi modifies and auto-broadcasts the transaction). Leave it
+    /// `None` for black-box mode (raw EdDSA signing, transaction assembled locally).
     #[cfg(feature = "fordefi")]
-    pub fn from_fordefi(config: FordefiSignerConfig) -> Result<Self, SignerError> {
-        Ok(Self::Fordefi(FordefiSigner::from_config(config)?))
+    pub async fn from_fordefi(config: FordefiSignerConfig) -> Result<Self, SignerError> {
+        Ok(Self::Fordefi(FordefiSigner::from_config(config).await?))
     }
 
     /// Create a Fordefi signer with a custom [`FordefiRequestSigner`] for
     /// API-request signing (e.g. a KMS/HSM-backed implementation). The key in
     /// `config.private_key_pem` is ignored on this path.
     #[cfg(feature = "fordefi")]
-    pub fn from_fordefi_with_signer(
+    pub async fn from_fordefi_with_signer(
         config: FordefiSignerConfig,
         request_signer: std::sync::Arc<dyn FordefiRequestSigner>,
     ) -> Result<Self, SignerError> {
-        Ok(Self::Fordefi(FordefiSigner::from_config_with_signer(
-            config,
-            request_signer,
-        )?))
+        Ok(Self::Fordefi(
+            FordefiSigner::from_config_with_signer(config, request_signer).await?,
+        ))
     }
 }
 

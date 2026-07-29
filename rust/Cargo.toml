@@ -136,7 +136,6 @@ getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] 
 [dev-dependencies]
 tokio = { version = "1.52", features = ["test-util", "macros", "rt", "rt-multi-thread"] }
 wiremock = "0.6"
-rand = "0.8"
 dotenvy = "0.15.7"
 litesvm = "0.7.0"
 litesvm-v3 = { package = "litesvm", version = "=0.8.1" }

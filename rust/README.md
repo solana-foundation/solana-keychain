@@ -323,6 +323,9 @@ Fordefi supports two signing modes, which differ in whether Fordefi broadcasts t
 - **Black box mode** : Signs raw bytes via EdDSA; the wire transaction is assembled locally. Fordefi does **not** broadcast — `sign_transaction` returns the signed serialized transaction, and **you** submit it to an RPC. Use with a Fordefi black box vault.
 - **Native Solana mode** (recommended): Uses Solana-specific API types. Fordefi modifies the transaction (at minimum updating the blockhash, and optionally adding priority fees) and **auto-broadcasts** it on-chain (`push_mode: "auto"`). Because the transaction is already submitted, `sign_transaction` returns an **empty** serialized transaction (only the signature is meaningful) and updates your `&mut Transaction` to the Fordefi-signed one — do not re-send it. The current auto-broadcast request supports only transactions whose sole required signer is the configured Fordefi vault; additional required signers are rejected before submission. Use with a regular Fordefi Solana vault.
 
+Construction is async because it fetches the Fordefi vault and verifies that its
+authoritative address matches the configured `public_key` before returning.
+
 ```rust
 use solana_keychain::{FordefiSigner, FordefiSignerConfig, SolanaSigner};
 
@@ -342,7 +345,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_client_config: None,
         chain: None,
         fee: None,
-    })?;
+    })
+    .await?;
 
     println!("Public key: {}", signer.pubkey());
     Ok(())
@@ -374,7 +378,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fee: Some(FordefiSolanaFee::Priority {
             priority_level: FordefiPriorityLevel::Medium,
         }),
-    })?;
+    })
+    .await?;
 
     let message = b"Hello from Fordefi!";
     let signature = signer.sign_message(message).await?;
@@ -423,7 +428,8 @@ let signer = FordefiSigner::from_config_with_signer(
         fee: None,
     },
     Arc::new(KmsRequestSigner { /* ... */ }),
-)?;
+)
+.await?;
 ```
 
 ## Security Audit
