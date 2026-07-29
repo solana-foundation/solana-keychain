@@ -6,6 +6,7 @@ license = "MIT"
 description = "Framework-agnostic Solana signing abstractions"
 repository = "https://github.com/solana-foundation/solana-keychain"
 keywords = ["solana", "blockchain", "signer", "wallet", "crypto"]
+include = ["src/**/*", "README.md", "CHANGELOG.md", "build.rs"]
 
 [features]
 default = ["memory", "sdk-v2"]
