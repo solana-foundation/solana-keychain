@@ -42,7 +42,7 @@
         "test:treeshakability": "agadoo dist/index.js"
     },
     "dependencies": {
-        "google-auth-library": "^10.9.0",
+        "google-auth-library": "^10.9.1",
         "@solana/keychain-core": "workspace:*"
     },
     "peerDependencies": {
