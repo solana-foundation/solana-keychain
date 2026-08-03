@@ -21,7 +21,7 @@ the [Rust](../rust/README.md) and [TypeScript](../typescript/README.md) librarie
 | Backend | Use Case | Module | Status |
 | --- | --- | --- | --- |
 | **Memory** | Local keypairs, development, testing | `solana_keychain.memory` | ✅ Available |
-| **Vault** | Enterprise key management with HashiCorp Vault | — | Planned |
+| **Vault** | Enterprise key management with HashiCorp Vault | `solana_keychain.vault` | ✅ Available |
 | **Privy** | Embedded wallets with Privy infrastructure | — | Planned |
 | **Turnkey** | Non-custodial key management via Turnkey | — | Planned |
 | **AWS KMS** | AWS Key Management Service with Ed25519 signing | — | Planned |
@@ -71,6 +71,30 @@ async def main() -> None:
 
 asyncio.run(main())
 ```
+
+### Remote Backends
+
+Every remote backend follows the same pattern: a config dataclass and an async
+`create_<backend>_signer` factory that returns a ready-to-use signer (the Python
+analog of the Rust `Signer::from_*` factories and the TS async factories):
+
+```python
+from solana_keychain import VaultSignerConfig, create_vault_signer
+
+signer = await create_vault_signer(
+    VaultSignerConfig(
+        vault_addr="https://vault.example.com",
+        token=os.environ["VAULT_TOKEN"],
+        key_name="my-solana-key",
+        pubkey="4BuiY9QUUfPoAGNJBja3JapAuVWMc9c7in6UCgyC2zPR",
+    )
+)
+```
+
+Remote HTTP backends accept an optional `http_client` override in their config
+(an `httpx.AsyncClient`, for custom TLS or proxies); when unset, requests go
+through an HTTPS-enforcing one-shot client with a 60s timeout and redirects
+rejected.
 
 ## Core API
 
