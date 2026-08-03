@@ -8,9 +8,6 @@ development, enterprise vault integration, or managed wallet services, this
 library offers a consistent API across all signing methods — with full parity to
 the [Rust](../rust/README.md) and [TypeScript](../typescript/README.md) libraries.
 
-This is the foundation phase: the shared core contract plus the `memory`
-reference backend. Remote backends are tracked as follow-ups.
-
 ## Features
 
 - **Unified interface**: a single `SolanaSigner` contract for every backend
@@ -43,8 +40,7 @@ reference backend. Remote backends are tracked as follow-ups.
 pip install solana-keychain
 ```
 
-Requires **Python 3.10+**. Remote backends will land as optional extras
-(`pip install solana-keychain[vault]`), so a memory-only install pulls no cloud SDKs.
+Requires **Python 3.10+**.
 
 ## Quick Start
 

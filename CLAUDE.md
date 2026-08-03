@@ -12,7 +12,7 @@ Memory · Vault · Privy · Turnkey · AWS KMS · Fireblocks · GCP KMS · Dfns 
 
 - `rust/` — Rust crate, feature-gated per backend. See [rust/README.md](rust/README.md).
 - `typescript/` — pnpm monorepo, one package per backend plus core/keychain umbrella. See [typescript/README.md](typescript/README.md).
-- `python/` — Python package (`solana-keychain`), memory backend only so far. See [python/README.md](python/README.md).
+- `python/` — Python package (`solana-keychain`). See [python/README.md](python/README.md).
 - `docs/ADDING_SIGNERS.md` — full guide for adding a new backend (Rust + TS + CI).
 - `audits/AUDIT_STATUS.md` — audited-through commit and unaudited delta.
 - `justfile` — top-level dev commands. Prefer these over raw `cargo`/`pnpm` since they encode the right flags (e.g., `just rust-test` runs the `sdk-v2`, `sdk-v3`, and `sdk-v4` matrices — `cargo test --all-features` fails because the SDK features are mutually exclusive).
@@ -122,7 +122,6 @@ Single package under [python/](python/) (PyPI `solana-keychain`, import `solana_
 - **Contract** (`solana_keychain.core`): `SolanaSigner` ABC — `pubkey` property, async `sign_transaction()` / `sign_message()` / `is_available()` — mirroring the Rust trait. `sign_transaction` returns `SignedTransaction` with `is_complete` (the Complete/Partial analog).
 - **Errors**: `SignerError` with stable `code` values identical to the TS `SignerErrorCode` strings; `str()`/`repr()` only surface generic messages (detail is redacted, parity with Rust's `Debug` impl).
 - **Serialization**: built on `solders` (Rust bindings), so `bincode` transaction bytes are identical to the Rust crate — pinned cross-language golden vectors in `python/tests/test_parity.py` (same vectors as the Rust and Go parity tests).
-- Memory backend only so far; remote backends, the umbrella factory, and publishing are follow-ups.
 
 ## Branch Workflow
 
