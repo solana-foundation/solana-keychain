@@ -33,7 +33,7 @@ from solana_keychain import MemorySigner
 
 
 async def main() -> None:
-    signer = MemorySigner.from_private_key_file("~/.config/solana/id.json")
+    signer = MemorySigner.from_private_key_file("/path/to/keypair.json")
     print(signer.pubkey)
 
     signature = await signer.sign_message(b"hello solana")
