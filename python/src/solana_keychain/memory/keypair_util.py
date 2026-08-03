@@ -1,3 +1,5 @@
+"""Utility functions for parsing private keys in multiple formats."""
+
 import json
 from pathlib import Path
 
@@ -6,15 +8,31 @@ from solders.keypair import Keypair
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 
 PRIVATE_KEY_LENGTH = 64
+SEED_LENGTH = 32
 
 
 def keypair_from_bytes(private_key: bytes) -> Keypair:
-    """Build a keypair from a 64-byte (seed ‖ pubkey) private key."""
+    """Build a keypair from raw bytes: 64 bytes (seed ‖ pubkey, the Solana CLI layout,
+    with the public half validated against the seed) or 32 bytes (seed only; the
+    public key is derived) — parity with the TS ``privateKey`` and Go ``PrivateKey``
+    raw-bytes sources."""
+    if len(private_key) == SEED_LENGTH:
+        try:
+            return Keypair.from_seed(private_key)
+        except Exception:
+            raise SignerError(
+                SignerErrorCode.INVALID_PRIVATE_KEY, "Invalid private key bytes"
+            ) from None
     if len(private_key) != PRIVATE_KEY_LENGTH:
         raise SignerError(
             SignerErrorCode.INVALID_PRIVATE_KEY,
-            f"Private key must be exactly {PRIVATE_KEY_LENGTH} bytes, got {len(private_key)}",
+            f"Private key must be {SEED_LENGTH} (seed) or {PRIVATE_KEY_LENGTH} "
+            f"(seed ‖ pubkey) bytes, got {len(private_key)}",
         )
+    return _keypair_from_64_bytes(private_key)
+
+
+def _keypair_from_64_bytes(private_key: bytes) -> Keypair:
     try:
         return Keypair.from_bytes(private_key)
     except Exception:
@@ -28,6 +46,8 @@ def keypair_from_private_key_string(private_key: str) -> Keypair:
 
     - U8Array form: ``"[1, 2, ..., 64]"`` (Solana CLI keypair JSON, inline)
     - Otherwise: base58
+
+    String forms are always 64 bytes (parity with Rust and TS).
     """
     trimmed = private_key.strip()
     if trimmed.startswith("[") and trimmed.endswith("]"):
@@ -62,7 +82,12 @@ def keypair_from_u8_array_string(array_str: str) -> Keypair:
         raise SignerError(
             SignerErrorCode.INVALID_PRIVATE_KEY, "Invalid U8Array private key format"
         ) from None
-    return keypair_from_bytes(byte_values)
+    if len(byte_values) != PRIVATE_KEY_LENGTH:
+        raise SignerError(
+            SignerErrorCode.INVALID_PRIVATE_KEY,
+            f"Private key must be exactly {PRIVATE_KEY_LENGTH} bytes, got {len(byte_values)}",
+        )
+    return _keypair_from_64_bytes(byte_values)
 
 
 def keypair_from_json_keypair(json_content: str) -> Keypair:
@@ -80,7 +105,12 @@ def keypair_from_json_keypair(json_content: str) -> Keypair:
         for value in parsed
     ):
         raise invalid
-    return keypair_from_bytes(bytes(parsed))
+    if len(parsed) != PRIVATE_KEY_LENGTH:
+        raise SignerError(
+            SignerErrorCode.INVALID_PRIVATE_KEY,
+            f"JSON keypair must be exactly {PRIVATE_KEY_LENGTH} bytes, got {len(parsed)}",
+        )
+    return _keypair_from_64_bytes(bytes(parsed))
 
 
 def keypair_from_private_key_file(path: str) -> Keypair:

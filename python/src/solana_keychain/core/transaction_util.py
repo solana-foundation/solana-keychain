@@ -1,3 +1,5 @@
+"""Transaction serialization and signature-placement utilities."""
+
 import base64
 
 from solders.pubkey import Pubkey

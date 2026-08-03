@@ -4,6 +4,7 @@ import pytest
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.memory.keypair_util import (
+    keypair_from_bytes,
     keypair_from_json_keypair,
     keypair_from_private_key_file,
     keypair_from_private_key_string,
@@ -11,10 +12,43 @@ from solana_keychain.memory.keypair_util import (
 )
 from tests.util import TEST_KEYPAIR_BASE58, TEST_KEYPAIR_BYTES, TEST_PUBKEY
 
+CANONICAL_KEYPAIR = bytes(int(part) for part in TEST_KEYPAIR_BYTES.strip("[]").split(","))
+
+
+def test_from_bytes_64_byte_keypair() -> None:
+    keypair = keypair_from_bytes(CANONICAL_KEYPAIR)
+    assert str(keypair.pubkey()) == TEST_PUBKEY
+
+
+def test_from_bytes_32_byte_seed_derives_pubkey() -> None:
+    keypair = keypair_from_bytes(CANONICAL_KEYPAIR[:32])
+    assert str(keypair.pubkey()) == TEST_PUBKEY
+
+
+def test_from_bytes_rejects_mismatched_pubkey_half() -> None:
+    corrupted = CANONICAL_KEYPAIR[:32] + bytes(32)
+    with pytest.raises(SignerError) as excinfo:
+        keypair_from_bytes(corrupted)
+    assert excinfo.value.code == SignerErrorCode.INVALID_PRIVATE_KEY
+
+
+@pytest.mark.parametrize("length", [0, 31, 33, 63, 65])
+def test_from_bytes_rejects_wrong_lengths(length: int) -> None:
+    with pytest.raises(SignerError) as excinfo:
+        keypair_from_bytes(bytes(length))
+    assert excinfo.value.code == SignerErrorCode.INVALID_PRIVATE_KEY
+
 
 def test_from_u8_array_string() -> None:
     keypair = keypair_from_u8_array_string(TEST_KEYPAIR_BYTES)
     assert str(keypair.pubkey()) == TEST_PUBKEY
+
+
+def test_from_u8_array_string_rejects_32_byte_seed_form() -> None:
+    seed_str = str(list(CANONICAL_KEYPAIR[:32]))
+    with pytest.raises(SignerError) as excinfo:
+        keypair_from_u8_array_string(seed_str)
+    assert excinfo.value.code == SignerErrorCode.INVALID_PRIVATE_KEY
 
 
 @pytest.mark.parametrize("invalid", ["[1,2,3]", "[not,a,number]", "[]", "[300,1,2]"])
@@ -29,7 +63,10 @@ def test_from_json_keypair() -> None:
     assert str(keypair.pubkey()) == TEST_PUBKEY
 
 
-@pytest.mark.parametrize("invalid", ['{"not": "an array"}', "not json", "[true, false]"])
+@pytest.mark.parametrize(
+    "invalid",
+    ['{"not": "an array"}', "not json", "[true, false]", str(list(range(32)))],
+)
 def test_from_json_keypair_rejects_invalid(invalid: str) -> None:
     with pytest.raises(SignerError) as excinfo:
         keypair_from_json_keypair(invalid)

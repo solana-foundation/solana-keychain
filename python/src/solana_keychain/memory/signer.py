@@ -1,3 +1,5 @@
+"""Memory-based local keypair signer."""
+
 from dataclasses import dataclass
 
 from solders.keypair import Keypair
@@ -40,7 +42,7 @@ class MemorySigner(SolanaSigner):
 
     @classmethod
     def from_bytes(cls, private_key: bytes) -> "MemorySigner":
-        """Build from a raw 64-byte (seed ‖ pubkey) private key."""
+        """Build from raw private key bytes: 64 (seed ‖ pubkey, validated) or 32 (seed)."""
         return cls(keypair_from_bytes(private_key))
 
     @classmethod

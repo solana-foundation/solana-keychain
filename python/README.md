@@ -1,30 +1,54 @@
 # solana-keychain (Python)
 
-Python implementation of `solana-keychain` — a unified `SolanaSigner` interface across
-key-management backends, with parity to the [Rust crate](../rust/README.md) and the
-[TypeScript packages](../typescript/README.md).
+**Flexible, framework-agnostic Solana transaction signing for Python applications**
 
-This is the foundation phase: the shared core contract plus the `memory` reference
-backend. Remote backends are tracked as follow-ups.
+`solana-keychain` provides a unified interface for signing Solana transactions
+with multiple backend implementations. Whether you need local keypairs for
+development, enterprise vault integration, or managed wallet services, this
+library offers a consistent API across all signing methods — with full parity to
+the [Rust](../rust/README.md) and [TypeScript](../typescript/README.md) libraries.
 
-## Supported backends
+This is the foundation phase: the shared core contract plus the `memory`
+reference backend. Remote backends are tracked as follow-ups.
 
-| Backend | Status |
-| --- | --- |
-| Memory | ✅ |
-| Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Crossmint, CDP, Para, Openfort, Utila | Planned |
+## Features
 
-## Install
+- **Unified interface**: a single `SolanaSigner` contract for every backend
+- **Async-first**: `sign_transaction` / `sign_message` / `is_available` are coroutines, matching the Rust and TS contracts
+- **Cross-language parity**: the same signing contract and behavior as the Rust and TypeScript implementations, verified down to byte-identical transaction serialization
+- **Safe errors**: `SignerError` redacts sensitive detail from its message; match on stable codes shared with the TypeScript `SignerErrorCode` values
+- **Minimal core**: built on [`solders`](https://pypi.org/project/solders/) (Rust-native bindings), so `bincode` transaction bytes are identical to the Rust crate by construction
+
+## Supported Backends
+
+| Backend | Use Case | Module | Status |
+| --- | --- | --- | --- |
+| **Memory** | Local keypairs, development, testing | `solana_keychain.memory` | ✅ Available |
+| **Vault** | Enterprise key management with HashiCorp Vault | — | Planned |
+| **Privy** | Embedded wallets with Privy infrastructure | — | Planned |
+| **Turnkey** | Non-custodial key management via Turnkey | — | Planned |
+| **AWS KMS** | AWS Key Management Service with Ed25519 signing | — | Planned |
+| **Fireblocks** | Fireblocks institutional custody platform | — | Planned |
+| **GCP KMS** | Google Cloud Key Management Service with Ed25519 signing | — | Planned |
+| **Dfns** | Dfns wallet infrastructure with Ed25519 signing | — | Planned |
+| **Para** | MPC wallets with Para infrastructure | — | Planned |
+| **CDP** | Coinbase Developer Platform managed wallets | — | Planned |
+| **Crossmint** | Crossmint managed wallets | — | Planned |
+| **Openfort** | Openfort backend wallets with TEE-stored keys | — | Planned |
+| **Utila** | Utila MPC wallet integration | — | Planned |
+
+## Installation
 
 ```bash
 pip install solana-keychain
 ```
 
-Requires Python ≥ 3.10. Built on [`solders`](https://pypi.org/project/solders/), whose
-Rust-native `bincode` serialization keeps transaction bytes identical to the Rust crate
-(verified by pinned golden vectors in `tests/test_parity.py`).
+Requires **Python 3.10+**. Remote backends will land as optional extras
+(`pip install solana-keychain[vault]`), so a memory-only install pulls no cloud SDKs.
 
-## Usage
+## Quick Start
+
+### Memory Signer (Local Development)
 
 ```python
 import asyncio
@@ -33,32 +57,47 @@ from solana_keychain import MemorySigner
 
 
 async def main() -> None:
+    # Build a signer from a base58 key, a "[1,2,...]" byte array, raw bytes,
+    # or a Solana CLI keypair file.
     signer = MemorySigner.from_private_key_file("/path/to/keypair.json")
-    print(signer.pubkey)
+    print("address:", signer.pubkey)
 
-    signature = await signer.sign_message(b"hello solana")
+    # Sign an arbitrary message.
+    signature = await signer.sign_message(b"Hello Solana!")
+    print("signature:", signature)
 
-    # transaction: solders.transaction.Transaction
-    result = await signer.sign_transaction(transaction)
-    print(result.encoded_transaction)  # base64(bincode(tx))
-    print(result.is_complete)  # False when co-signers still need to sign
+    # Sign a transaction (tx is a solders.transaction.Transaction):
+    #   result = await signer.sign_transaction(tx)
+    #   result.encoded_transaction  # base64 wire transaction
+    #   result.signature            # this signer's signature
+    #   result.is_complete          # are all required signatures present?
 
 
 asyncio.run(main())
 ```
 
-`MemorySigner` also accepts a base58 string or a `"[1, 2, ..., 64]"` u8-array string via
-`from_private_key_string`, raw 64-byte keys via `from_bytes`, and a `solders` `Keypair`
-directly.
+## Core API
 
-## Contract
+Every signer implements the `SolanaSigner` ABC from `solana_keychain.core` — the
+Python analog of the Rust `SolanaSigner` trait and the TypeScript `SolanaSigner`
+interface:
 
-Every backend implements `solana_keychain.SolanaSigner`:
+```python
+class SolanaSigner(ABC):
+    @property
+    def pubkey(self) -> Pubkey: ...
 
-- `pubkey` — the signer's public key (`solders.pubkey.Pubkey`)
-- `async sign_transaction(tx)` — returns `SignedTransaction` (encoded tx, signature, completeness)
-- `async sign_message(bytes)` — returns `solders.signature.Signature`
-- `async is_available()` — health check
+    async def sign_transaction(self, transaction: Transaction) -> SignedTransaction: ...
+
+    async def sign_message(self, message: bytes) -> Signature: ...
+
+    async def is_available(self) -> bool: ...
+```
+
+`sign_transaction` signs the transaction in place and returns a
+`SignedTransaction(encoded_transaction, signature, is_complete)`; `is_complete`
+reports whether every required signature is present (the Python analog of the
+Rust `Complete`/`Partial` result).
 
 Errors are always `SignerError` with a stable `code` shared with the TypeScript
 `SignerErrorCode` values (`SIGNER_INVALID_PRIVATE_KEY`, `SIGNER_SIGNING_FAILED`, …).
@@ -81,3 +120,7 @@ cd python
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest
 ```
+
+Cross-language golden vectors are pinned in `tests/test_parity.py` — the same
+canonical keypair, transaction, and `base64(bincode(tx))` bytes as the Rust
+memory-signer tests.

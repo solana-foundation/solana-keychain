@@ -1,3 +1,5 @@
+"""Core contract definitions for Solana signers."""
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 

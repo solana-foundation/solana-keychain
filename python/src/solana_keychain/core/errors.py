@@ -1,3 +1,5 @@
+"""Error types for signer operations."""
+
 from enum import Enum, unique
 
 
