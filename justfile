@@ -12,13 +12,13 @@ default:
     @just --list
 
 # Format and lint
-fmt: rust-fmt ts-fmt
+fmt: rust-fmt ts-fmt py-fmt
 
 # Build
-build: rust-build ts-build
+build: rust-build ts-build py-build
 
 # Unit tests
-test: rust-test ts-test
+test: rust-test ts-test py-test
 
 # Integration tests
 test-integration: rust-test-integration ts-test-integration
@@ -184,6 +184,32 @@ ts-test-integration:
 
     echo "Running TypeScript integration tests..."
     pnpm -F @solana/keychain-fireblocks -F @solana/keychain-privy -F @solana/keychain-turnkey -F @solana/keychain-utila -F @solana/keychain-vault test:integration
+
+# ===========================================================
+# ========================== Python =========================
+# ===========================================================
+
+[private]
+[working-directory: 'python']
+_py-install:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -d .venv ] || python3 -m venv .venv
+    .venv/bin/pip install --quiet -e '.[dev]'
+
+[working-directory: 'python']
+py-fmt: _py-install
+    .venv/bin/ruff format .
+    .venv/bin/ruff check --fix .
+    .venv/bin/mypy
+
+[working-directory: 'python']
+py-build: _py-install
+    .venv/bin/python -m build
+
+[working-directory: 'python']
+py-test: _py-install
+    .venv/bin/pytest
 
 # ===========================================================
 # ========================= Release =========================

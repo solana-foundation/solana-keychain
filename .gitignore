@@ -4,6 +4,16 @@
 **/*.rs.bk
 *.pdb
 
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+python/dist/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
 # IDE
 .vscode/
 .idea/

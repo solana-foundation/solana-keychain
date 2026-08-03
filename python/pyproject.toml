@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "solana-keychain"
+version = "0.1.0"
+description = "Unified SolanaSigner interface across key-management backends"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Solana Foundation" }]
+keywords = ["solana", "signer", "keychain", "ed25519"]
+dependencies = ["solders>=0.26,<1"]
+
+[project.urls]
+Repository = "https://github.com/solana-foundation/solana-keychain"
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2",
+    "mypy>=1.14",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "ruff>=0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/solana_keychain"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "N", "UP", "W"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+mypy_path = "src"
+explicit_package_bases = true
