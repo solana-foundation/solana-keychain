@@ -38,8 +38,12 @@ pub struct FordefiSignerConfig {
     pub access_token: String,
     /// Fordefi vault UUID
     pub vault_id: String,
-    /// PEM-encoded ECDSA P-256 private key for API request signing
-    pub private_key_pem: String,
+    /// PEM-encoded ECDSA P-256 private key for API request signing.
+    /// Provide exactly one of `private_key_pem` or `request_signer`.
+    pub private_key_pem: Option<String>,
+    /// Custom API-request signer (e.g. a KMS/HSM-backed implementation).
+    /// Provide exactly one of `private_key_pem` or `request_signer`.
+    pub request_signer: Option<Arc<dyn FordefiRequestSigner>>,
     /// Solana public key of the vault (base58)
     pub public_key: String,
     /// Optional API base URL (default: "https://api.fordefi.com")
@@ -96,39 +100,18 @@ impl FordefiSigner {
     /// Fetches the configured Fordefi vault and verifies that its authoritative
     /// Solana public key matches `config.public_key` before returning.
     ///
-    /// The request-signing key is parsed from `config.private_key_pem` (PEM-encoded
-    /// ECDSA P-256). To keep that key in a KMS/HSM instead, implement
-    /// [`FordefiRequestSigner`] and use [`FordefiSigner::from_config_with_signer`].
+    /// Provide exactly one request-signing mechanism: a PEM-encoded ECDSA P-256
+    /// key in `config.private_key_pem`, or a custom [`FordefiRequestSigner`] in
+    /// `config.request_signer` for KMS/HSM-backed signing.
     pub async fn from_config(config: FordefiSignerConfig) -> Result<Self, SignerError> {
-        let request_signer = Arc::new(PemRequestSigner::from_pem(&config.private_key_pem)?);
-        let signer = Self::build(config, request_signer)?;
+        let signer = Self::build(config)?;
         signer.verify_vault_address_with_timeout().await?;
         Ok(signer)
     }
 
-    /// Create a new FordefiSigner with a custom [`FordefiRequestSigner`] for
-    /// API-request signing (e.g. a KMS/HSM-backed implementation).
-    ///
-    /// Fetches the configured Fordefi vault and verifies that its authoritative
-    /// Solana public key matches `config.public_key` before returning.
-    ///
-    /// `config.private_key_pem` is ignored on this path.
-    pub async fn from_config_with_signer(
-        config: FordefiSignerConfig,
-        request_signer: Arc<dyn FordefiRequestSigner>,
-    ) -> Result<Self, SignerError> {
-        let signer = Self::build(config, request_signer)?;
-        signer.verify_vault_address_with_timeout().await?;
-        Ok(signer)
-    }
-
-    /// Shared construction: validate config and assemble the signer. Does not
-    /// touch `config.private_key_pem` — request signing is provided by the
-    /// injected `request_signer`.
-    fn build(
-        config: FordefiSignerConfig,
-        request_signer: Arc<dyn FordefiRequestSigner>,
-    ) -> Result<Self, SignerError> {
+    /// Shared construction: validate config, resolve the request-signing
+    /// mechanism, and assemble the signer.
+    fn build(config: FordefiSignerConfig) -> Result<Self, SignerError> {
         if config.access_token.is_empty() {
             return Err(SignerError::ConfigError(
                 "access_token must not be empty".to_string(),
@@ -146,6 +129,25 @@ impl FordefiSigner {
                 "public_key must not be empty".to_string(),
             ));
         }
+
+        let request_signer: Arc<dyn FordefiRequestSigner> =
+            match (&config.private_key_pem, &config.request_signer) {
+                (Some(_), Some(_)) => {
+                    return Err(SignerError::ConfigError(
+                        "provide exactly one of private_key_pem or request_signer, not both"
+                            .to_string(),
+                    ));
+                }
+                (None, None) => {
+                    return Err(SignerError::ConfigError(
+                        "one of private_key_pem or request_signer must be provided".to_string(),
+                    ));
+                }
+                (Some(private_key_pem), None) => {
+                    Arc::new(PemRequestSigner::from_pem(private_key_pem)?)
+                }
+                (None, Some(request_signer)) => Arc::clone(request_signer),
+            };
 
         let api_base_url = config
             .api_base_url
@@ -767,15 +769,15 @@ mod tests {
     fn build_test_signer_from_config(
         config: FordefiSignerConfig,
     ) -> Result<FordefiSigner, SignerError> {
-        let request_signer = Arc::new(PemRequestSigner::from_pem(&config.private_key_pem)?);
-        FordefiSigner::build(config, request_signer)
+        FordefiSigner::build(config)
     }
 
     fn verified_test_config(base_url: &str, public_key: Pubkey) -> FordefiSignerConfig {
         FordefiSignerConfig {
             access_token: "test-token".to_string(),
             vault_id: "test-vault-id".to_string(),
-            private_key_pem: test_pem_key(),
+            private_key_pem: Some(test_pem_key()),
+            request_signer: None,
             public_key: public_key.to_string(),
             api_base_url: Some(base_url.to_string()),
             poll_interval_ms: Some(10),
@@ -846,7 +848,8 @@ mod tests {
         let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "".to_string(),
             vault_id: "vault-id".to_string(),
-            private_key_pem: pem,
+            private_key_pem: Some(pem),
+            request_signer: None,
             public_key: "11111111111111111111111111111111".to_string(),
             api_base_url: None,
             poll_interval_ms: None,
@@ -865,7 +868,8 @@ mod tests {
         let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "".to_string(),
-            private_key_pem: pem,
+            private_key_pem: Some(pem),
+            request_signer: None,
             public_key: "11111111111111111111111111111111".to_string(),
             api_base_url: None,
             poll_interval_ms: None,
@@ -883,7 +887,8 @@ mod tests {
         let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
-            private_key_pem: "not-a-valid-pem".to_string(),
+            private_key_pem: Some("not-a-valid-pem".to_string()),
+            request_signer: None,
             public_key: "11111111111111111111111111111111".to_string(),
             api_base_url: None,
             poll_interval_ms: None,
@@ -905,7 +910,8 @@ mod tests {
         let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
-            private_key_pem: pem,
+            private_key_pem: Some(pem),
+            request_signer: None,
             public_key: "not-a-pubkey".to_string(),
             api_base_url: None,
             poll_interval_ms: None,
@@ -927,7 +933,8 @@ mod tests {
         let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
-            private_key_pem: pem,
+            private_key_pem: Some(pem),
+            request_signer: None,
             public_key: "11111111111111111111111111111111".to_string(),
             api_base_url: Some("http://insecure.example.com".to_string()),
             poll_interval_ms: None,
@@ -945,7 +952,8 @@ mod tests {
         let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
-            private_key_pem: test_pem_key(),
+            private_key_pem: Some(test_pem_key()),
+            request_signer: None,
             public_key: "11111111111111111111111111111111".to_string(),
             api_base_url: Some("https://".to_string()),
             poll_interval_ms: None,
@@ -964,7 +972,8 @@ mod tests {
         let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
-            private_key_pem: pem,
+            private_key_pem: Some(pem),
+            request_signer: None,
             public_key: "11111111111111111111111111111111".to_string(),
             api_base_url: None,
             poll_interval_ms: None,
@@ -986,7 +995,8 @@ mod tests {
         let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
-            private_key_pem: pem,
+            private_key_pem: Some(pem),
+            request_signer: None,
             public_key: keypair_pubkey(&keypair).to_string(),
             api_base_url: None,
             poll_interval_ms: None,
@@ -1007,7 +1017,8 @@ mod tests {
         let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
-            private_key_pem: pem,
+            private_key_pem: Some(pem),
+            request_signer: None,
             public_key: pubkey_str,
             api_base_url: None,
             poll_interval_ms: None,
@@ -1028,7 +1039,8 @@ mod tests {
         let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
-            private_key_pem: pem,
+            private_key_pem: Some(pem),
+            request_signer: None,
             public_key: pubkey_str,
             api_base_url: None,
             poll_interval_ms: None,
@@ -1049,7 +1061,8 @@ mod tests {
         let result = build_test_signer_from_config(FordefiSignerConfig {
             access_token: "token".to_string(),
             vault_id: "vault-id".to_string(),
-            private_key_pem: pem,
+            private_key_pem: Some(pem),
+            request_signer: None,
             public_key: "11111111111111111111111111111111".to_string(),
             api_base_url: Some("https://custom.api.com/".to_string()),
             poll_interval_ms: None,
@@ -2003,14 +2016,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fordefi_from_config_with_signer_ignores_pem() {
+    async fn test_fordefi_config_uses_custom_request_signer() {
         let mock_server = MockServer::start().await;
         let public_key = keypair_pubkey(&create_test_keypair());
 
-        // `private_key_pem` is intentionally invalid: it must be ignored when a
-        // custom request signer is supplied.
         let mut config = verified_test_config(&mock_server.uri(), public_key);
-        config.private_key_pem = "not-a-valid-pem".to_string();
+        config.private_key_pem = None;
+        config.request_signer = Some(Arc::new(CannedSigner("x")));
 
         Mock::given(method("GET"))
             .and(path("/api/v1/vaults/test-vault-id"))
@@ -2022,31 +2034,54 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let result =
-            FordefiSigner::from_config_with_signer(config, Arc::new(CannedSigner("x"))).await;
-        assert!(result.is_ok());
+        let signer = FordefiSigner::from_config(config).await.unwrap();
+        assert_eq!(
+            signer
+                .sign_request("/api/v1/vaults", 123, "")
+                .await
+                .unwrap(),
+            "x"
+        );
     }
 
-    #[tokio::test]
-    async fn test_fordefi_from_config_with_signer_still_validates_config() {
-        // Shared validation still runs on the custom-signer path.
-        let result = FordefiSigner::from_config_with_signer(
-            FordefiSignerConfig {
-                access_token: "".to_string(),
-                vault_id: "vault-id".to_string(),
-                private_key_pem: String::new(),
-                public_key: "11111111111111111111111111111111".to_string(),
-                api_base_url: None,
-                poll_interval_ms: None,
-                max_poll_attempts: None,
-                http_client_config: None,
-                chain: None,
-                fee: None,
-            },
-            Arc::new(CannedSigner("x")),
-        )
-        .await;
-        assert!(result.is_err());
+    #[test]
+    fn test_fordefi_config_rejects_both_request_signing_mechanisms() {
+        let public_key = keypair_pubkey(&create_test_keypair());
+        let mut config = verified_test_config("https://api.test.fordefi.com", public_key);
+        config.request_signer = Some(Arc::new(CannedSigner("x")));
+
+        let result = FordefiSigner::build(config);
+
+        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+    }
+
+    #[test]
+    fn test_fordefi_config_rejects_missing_request_signing_mechanism() {
+        let public_key = keypair_pubkey(&create_test_keypair());
+        let mut config = verified_test_config("https://api.test.fordefi.com", public_key);
+        config.private_key_pem = None;
+
+        let result = FordefiSigner::build(config);
+
+        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+    }
+
+    #[test]
+    fn test_fordefi_custom_request_signer_still_validates_config() {
+        let result = FordefiSigner::build(FordefiSignerConfig {
+            access_token: "".to_string(),
+            vault_id: "vault-id".to_string(),
+            private_key_pem: None,
+            request_signer: Some(Arc::new(CannedSigner("x"))),
+            public_key: "11111111111111111111111111111111".to_string(),
+            api_base_url: None,
+            poll_interval_ms: None,
+            max_poll_attempts: None,
+            http_client_config: None,
+            chain: None,
+            fee: None,
+        });
+
         assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
     }
 }

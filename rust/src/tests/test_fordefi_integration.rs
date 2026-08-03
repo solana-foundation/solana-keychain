@@ -53,7 +53,8 @@ mod tests {
         FordefiSigner::from_config(FordefiSignerConfig {
             access_token,
             vault_id,
-            private_key_pem,
+            private_key_pem: Some(private_key_pem),
+            request_signer: None,
             public_key,
             api_base_url: None,
             poll_interval_ms: None,

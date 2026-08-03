@@ -337,7 +337,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let signer = FordefiSigner::from_config(FordefiSignerConfig {
         access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
         vault_id: std::env::var("FORDEFI_BB_VAULT_ID")?,
-        private_key_pem: pem.clone(),
+        private_key_pem: Some(pem.clone()),
+        request_signer: None,
         public_key: std::env::var("FORDEFI_BB_PUBLIC_KEY")?,
         api_base_url: None,
         poll_interval_ms: None,
@@ -368,7 +369,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let signer = FordefiSigner::from_config(FordefiSignerConfig {
         access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
         vault_id: std::env::var("FORDEFI_VAULT_ID")?,
-        private_key_pem: pem,
+        private_key_pem: Some(pem),
+        request_signer: None,
         public_key: std::env::var("FORDEFI_PUBLIC_KEY")?,
         api_base_url: None,
         poll_interval_ms: None,
@@ -394,10 +396,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Fordefi authenticates every POST with a request-level signature over
 `{path}|{timestamp}|{body}` (ECDSA P-256, SHA-256, DER, base64). By default this is
 computed locally from `private_key_pem`. To keep that key in a KMS/HSM instead,
-implement [`FordefiRequestSigner`] and pass it to `from_config_with_signer` — the
-`private_key_pem` field is ignored on this path. The implementation must return
-base64 of the DER-encoded ECDSA P-256 signature over `SHA-256(payload)` (AWS KMS
-`Sign` with `ECDSA_SHA_256` already returns a DER signature — just base64-encode it).
+implement [`FordefiRequestSigner`] and provide it as `request_signer` instead.
+The implementation must return base64 of the DER-encoded ECDSA P-256 signature
+over `SHA-256(payload)` (AWS KMS `Sign` with `ECDSA_SHA_256` already returns a
+DER signature — just base64-encode it).
 
 ```rust
 use std::sync::Arc;
@@ -414,21 +416,19 @@ impl FordefiRequestSigner for KmsRequestSigner {
     }
 }
 
-let signer = FordefiSigner::from_config_with_signer(
-    FordefiSignerConfig {
-        access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
-        vault_id: std::env::var("FORDEFI_VAULT_ID")?,
-        private_key_pem: String::new(), // ignored when a custom signer is provided
-        public_key: std::env::var("FORDEFI_PUBLIC_KEY")?,
-        api_base_url: None,
-        poll_interval_ms: None,
-        max_poll_attempts: None,
-        http_client_config: None,
-        chain: None,
-        fee: None,
-    },
-    Arc::new(KmsRequestSigner { /* ... */ }),
-)
+let signer = FordefiSigner::from_config(FordefiSignerConfig {
+    access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
+    vault_id: std::env::var("FORDEFI_VAULT_ID")?,
+    private_key_pem: None,
+    request_signer: Some(Arc::new(KmsRequestSigner { /* ... */ })),
+    public_key: std::env::var("FORDEFI_PUBLIC_KEY")?,
+    api_base_url: None,
+    poll_interval_ms: None,
+    max_poll_attempts: None,
+    http_client_config: None,
+    chain: None,
+    fee: None,
+})
 .await?;
 ```
 

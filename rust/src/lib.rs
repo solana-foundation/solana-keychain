@@ -398,19 +398,6 @@ impl Signer {
     pub async fn from_fordefi(config: FordefiSignerConfig) -> Result<Self, SignerError> {
         Ok(Self::Fordefi(FordefiSigner::from_config(config).await?))
     }
-
-    /// Create a Fordefi signer with a custom [`FordefiRequestSigner`] for
-    /// API-request signing (e.g. a KMS/HSM-backed implementation). The key in
-    /// `config.private_key_pem` is ignored on this path.
-    #[cfg(feature = "fordefi")]
-    pub async fn from_fordefi_with_signer(
-        config: FordefiSignerConfig,
-        request_signer: std::sync::Arc<dyn FordefiRequestSigner>,
-    ) -> Result<Self, SignerError> {
-        Ok(Self::Fordefi(
-            FordefiSigner::from_config_with_signer(config, request_signer).await?,
-        ))
-    }
 }
 
 #[async_trait::async_trait]

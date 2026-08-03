@@ -1,12 +1,14 @@
-import { createPrivateKey, createSign } from 'node:crypto';
+import { createPrivateKey, createSign, type KeyObject } from 'node:crypto';
 
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase58Decoder } from '@solana/codecs-strings';
 import {
+    assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
     extractSignatureFromWireTransaction,
-    sanitizeRemoteErrorResponse,
+    fetchSignerJson,
+    normalizeBaseUrl,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -28,7 +30,6 @@ import {
 import type {
     FordefiBlackBoxSignatureRequest,
     FordefiCreateTransactionResponse,
-    FordefiErrorResponse,
     FordefiSolanaFee,
     FordefiSolanaMessageRequest,
     FordefiSolanaTransactionRequest,
@@ -79,16 +80,15 @@ export interface FordefiRequestSigner {
  * ECDSA P-256 private key.
  */
 class PemRequestSigner implements FordefiRequestSigner {
-    private readonly privateKeyPem: string;
+    private readonly privateKey: KeyObject;
 
     constructor(privateKeyPem: string) {
-        this.privateKeyPem = privateKeyPem;
+        this.privateKey = createPrivateKey(privateKeyPem);
     }
 
     signRequest(payload: string): string {
-        const privateKey = createPrivateKey(this.privateKeyPem);
         const sign = createSign('SHA256').update(payload, 'utf8').end();
-        return sign.sign(privateKey, 'base64');
+        return sign.sign(this.privateKey, 'base64');
     }
 }
 
@@ -184,7 +184,7 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
 
     private constructor(config: FordefiSignerConfig, address: Address<TAddress>) {
         this.accessToken = config.accessToken;
-        this.apiBaseUrl = (config.apiBaseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+        this.apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl ?? DEFAULT_BASE_URL);
         this.chain = config.chain;
         this.fee = config.fee;
         this.maxPollAttempts = config.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS;
@@ -251,20 +251,8 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
         FordefiSigner.validateRequestDelayMs(config.requestDelayMs ?? 0);
         FordefiSigner.validateRequestTimeoutMs(config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
 
-        const apiBaseUrl = (config.apiBaseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
-        let parsedUrl: URL;
-        try {
-            parsedUrl = new URL(apiBaseUrl);
-        } catch {
-            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'apiBaseUrl is not a valid URL',
-            });
-        }
-        if (parsedUrl.protocol !== 'https:') {
-            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'apiBaseUrl must use HTTPS',
-            });
-        }
+        const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl ?? DEFAULT_BASE_URL);
+        assertHttpsUrl(apiBaseUrl, 'apiBaseUrl');
 
         // Validate the PEM key can be parsed (only on the built-in PEM path).
         if (config.privateKeyPem) {
@@ -317,39 +305,15 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
         vaultId: string;
     }): Promise<Address> {
         const url = `${apiBaseUrl}/api/v1/vaults/${vaultId}`;
-
-        let response: Response;
-        try {
-            response = await fetch(url, {
+        const vault = await fetchSignerJson<FordefiVaultResponse>({
+            init: {
                 headers: { Authorization: `Bearer ${accessToken}` },
                 method: 'GET',
-                signal: AbortSignal.timeout(10_000),
-            });
-        } catch (error) {
-            return throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: 'Fordefi vault verification request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorMessage = await FordefiSigner.extractErrorMessage(response, 'Fordefi vault verification failed');
-            return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: errorMessage,
-                status: response.status,
-            });
-        }
-
-        let vault: FordefiVaultResponse;
-        try {
-            vault = (await response.json()) as FordefiVaultResponse;
-        } catch (error) {
-            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Fordefi vault response',
-            });
-        }
+            },
+            providerName: 'Fordefi',
+            timeoutMs: 10_000,
+            url,
+        });
 
         // Regular Fordefi Solana vaults expose `address` directly; black_box vaults
         // only provide `public_key_compressed` (base64-encoded Ed25519 key).
@@ -401,17 +365,8 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
      * POST signing call.
      */
     async isAvailable(): Promise<boolean> {
-        const url = `${this.apiBaseUrl}/api/v1/vaults/${this.vaultId}`;
-
         try {
-            const response = await fetch(url, {
-                headers: { Authorization: `Bearer ${this.accessToken}` },
-                method: 'GET',
-                signal: AbortSignal.timeout(5_000),
-            });
-            if (!response.ok) {
-                return false;
-            }
+            await this.request<FordefiVaultResponse>('GET', `/api/v1/vaults/${this.vaultId}`, undefined, 5_000);
         } catch {
             return false;
         }
@@ -587,53 +542,11 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
         requestBody: FordefiBlackBoxSignatureRequest | FordefiSolanaMessageRequest | FordefiSolanaTransactionRequest,
     ): Promise<string> {
         const apiPath = '/api/v1/transactions';
-        const body = JSON.stringify(requestBody);
-        const timestamp = Date.now();
-        const signature = await this.signRequest(apiPath, timestamp, body);
-
-        const url = `${this.apiBaseUrl}${apiPath}`;
-
-        let response: Response;
-        try {
-            response = await fetch(url, {
-                body,
-                headers: {
-                    Authorization: `Bearer ${this.accessToken}`,
-                    'Content-Type': 'application/json',
-                    'x-signature': signature,
-                    'x-timestamp': timestamp.toString(),
-                },
-                method: 'POST',
-                signal: AbortSignal.timeout(this.requestTimeoutMs),
-            });
-        } catch (error) {
-            return throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                cause: error,
-                message: FordefiSigner.isTimeoutError(error)
-                    ? `Fordefi submit request timed out after ${this.requestTimeoutMs}ms`
-                    : 'Fordefi network request failed',
-                url,
-            });
-        }
-
-        if (!response.ok) {
-            const errorMessage = await FordefiSigner.extractErrorMessage(response, 'Fordefi submit failed');
-            return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                message: errorMessage,
-                status: response.status,
-            });
-        }
-
-        let createResponse: FordefiCreateTransactionResponse;
-        try {
-            createResponse = (await response.json()) as FordefiCreateTransactionResponse;
-        } catch (error) {
-            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                cause: error,
-                message: 'Failed to parse Fordefi transaction response',
-            });
-        }
-
+        const createResponse = await this.request<FordefiCreateTransactionResponse>(
+            'POST',
+            apiPath,
+            JSON.stringify(requestBody),
+        );
         return createResponse.id;
     }
 
@@ -738,42 +651,7 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
         const successStates = pushable ? PUSHABLE_SUCCESS_STATES : NON_PUSHABLE_SUCCESS_STATES;
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
-            const url = `${this.apiBaseUrl}/api/v1/transactions/${txId}`;
-
-            let response: Response;
-            try {
-                response = await fetch(url, {
-                    headers: { Authorization: `Bearer ${this.accessToken}` },
-                    method: 'GET',
-                    signal: AbortSignal.timeout(this.requestTimeoutMs),
-                });
-            } catch (error) {
-                return throwSignerError(SignerErrorCode.HTTP_ERROR, {
-                    cause: error,
-                    message: FordefiSigner.isTimeoutError(error)
-                        ? `Fordefi poll request timed out after ${this.requestTimeoutMs}ms`
-                        : 'Fordefi poll request failed',
-                    url,
-                });
-            }
-
-            if (!response.ok) {
-                const errorMessage = await FordefiSigner.extractErrorMessage(response, 'Fordefi poll failed');
-                return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-                    message: errorMessage,
-                    status: response.status,
-                });
-            }
-
-            let txData: FordefiTransactionStatusResponse;
-            try {
-                txData = (await response.json()) as FordefiTransactionStatusResponse;
-            } catch (error) {
-                return throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                    cause: error,
-                    message: 'Failed to parse Fordefi transaction status',
-                });
-            }
+            const txData = await this.request<FordefiTransactionStatusResponse>('GET', `/api/v1/transactions/${txId}`);
 
             if (successStates.has(txData.state)) {
                 return txData;
@@ -817,6 +695,33 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
         return await this.requestSigner.signRequest(payload);
     }
 
+    /**
+     * Make an authenticated request to the Fordefi API.
+     */
+    private async request<T>(
+        method: 'GET' | 'POST',
+        apiPath: string,
+        body?: string,
+        timeoutMs = this.requestTimeoutMs,
+    ): Promise<T> {
+        const headers: Record<string, string> = {
+            Authorization: `Bearer ${this.accessToken}`,
+        };
+        if (body !== undefined) {
+            const timestamp = Date.now();
+            headers['Content-Type'] = 'application/json';
+            headers['x-signature'] = await this.signRequest(apiPath, timestamp, body);
+            headers['x-timestamp'] = timestamp.toString();
+        }
+
+        return await fetchSignerJson<T>({
+            init: { body, headers, method },
+            providerName: 'Fordefi',
+            timeoutMs,
+            url: `${this.apiBaseUrl}${apiPath}`,
+        });
+    }
+
     private static validatePollingConfig(maxPollAttempts: number, pollIntervalMs: number): void {
         if (!Number.isSafeInteger(maxPollAttempts) || maxPollAttempts < 1) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
@@ -847,10 +752,6 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
                 message: 'requestTimeoutMs must be a positive finite number',
             });
         }
-    }
-
-    private static isTimeoutError(error: unknown): boolean {
-        return error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
     }
 
     private async delay(index: number): Promise<void> {
@@ -914,21 +815,5 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
                 wireBytes.subarray(signatureCountSize, signatureCountSize + 64),
             ) as SignatureBytes,
         };
-    }
-
-    private static async extractErrorMessage(response: Response, fallback: string): Promise<string> {
-        try {
-            const errorData = (await response.json()) as FordefiErrorResponse;
-            // Fordefi returns structured errors as { title, detail, error_type, request_id }
-            // but some endpoints use { message }. Prefer the most specific field available.
-            const parts = [errorData.title, errorData.detail].filter((p): p is string => Boolean(p));
-            const detail = parts.length > 0 ? parts.join(' — ') : errorData.message;
-            if (detail) {
-                return `${fallback}: ${response.status} ${sanitizeRemoteErrorResponse(detail)}`;
-            }
-        } catch {
-            // Ignore JSON parsing errors for error response
-        }
-        return `${fallback}: ${response.status}`;
     }
 }
