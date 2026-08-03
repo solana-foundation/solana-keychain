@@ -71,3 +71,17 @@ def test_from_private_key_file_missing_is_io_error() -> None:
     with pytest.raises(SignerError) as excinfo:
         keypair_from_private_key_file("/tmp/definitely-missing-keypair-file.json")
     assert excinfo.value.code == SignerErrorCode.IO_ERROR
+
+
+def test_from_private_key_file_undecodable_content_never_leaks_bytes(tmp_path: Path) -> None:
+    secret = b"\x80\x81SECRET_KEY_MATERIAL\xff\xfe"
+    file_path = tmp_path / "binary-key.bin"
+    file_path.write_bytes(secret)
+
+    with pytest.raises(SignerError) as excinfo:
+        keypair_from_private_key_file(str(file_path))
+
+    error = excinfo.value
+    assert error.code == SignerErrorCode.IO_ERROR
+    for channel in (str(error), repr(error), repr(error.args)):
+        assert "SECRET_KEY_MATERIAL" not in channel

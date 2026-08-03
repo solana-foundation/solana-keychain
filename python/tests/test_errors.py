@@ -1,3 +1,6 @@
+import copy
+import pickle
+
 import pytest
 
 from solana_keychain import SignerError, SignerErrorCode
@@ -32,6 +35,26 @@ def test_detail_is_redacted_from_all_output_channels(code: SignerErrorCode) -> N
 @pytest.mark.parametrize("code", list(SignerErrorCode))
 def test_generic_messages_are_stable(code: SignerErrorCode) -> None:
     assert str(SignerError(code, "x")) == EXPECTED_GENERIC_MESSAGES[code]
+
+
+def test_pickle_round_trip_preserves_code_and_redacts_detail() -> None:
+    error = SignerError(SignerErrorCode.CONFIG_ERROR, SECRET)
+
+    payload = pickle.dumps(error)
+    assert SECRET.encode() not in payload
+
+    restored = pickle.loads(payload)
+    assert isinstance(restored, SignerError)
+    assert restored.code == SignerErrorCode.CONFIG_ERROR
+    assert str(restored) == str(error)
+
+
+def test_copy_and_deepcopy_work() -> None:
+    error = SignerError(SignerErrorCode.SIGNING_FAILED, SECRET)
+    for clone in (copy.copy(error), copy.deepcopy(error)):
+        assert clone.code == SignerErrorCode.SIGNING_FAILED
+        assert SECRET not in str(clone)
+        assert SECRET not in repr(clone)
 
 
 def test_code_values_match_cross_language_contract() -> None:

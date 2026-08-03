@@ -87,6 +87,8 @@ def keypair_from_private_key_file(path: str) -> Keypair:
     """Read a Solana CLI keypair JSON file from disk."""
     try:
         content = Path(path).read_text()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # UnicodeDecodeError.args embeds the raw file bytes — never let it propagate
+        # (parity: Rust read_to_string maps non-UTF-8 to an InvalidData io error).
         raise SignerError(SignerErrorCode.IO_ERROR, "Failed to read private key file") from None
     return keypair_from_json_keypair(content)

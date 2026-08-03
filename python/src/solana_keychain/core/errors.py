@@ -53,3 +53,6 @@ class SignerError(Exception):
 
     def __repr__(self) -> str:
         return f"SignerError({self.code.value})"
+
+    def __reduce__(self) -> tuple[type["SignerError"], tuple[SignerErrorCode]]:
+        return (SignerError, (self.code,))
