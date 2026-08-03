@@ -25,7 +25,7 @@ const SIGNER_MARKERS = {
     crossmint: ['crossmint.com/api', 'Crossmint transaction polling timed out'],
     dfns: ['api.dfns.io', 'signUserAction'],
     fireblocks: ['api.fireblocks.io', 'PENDING_SIGNATURE'],
-    fordefi: ['api.fordefi.com', 'Fordefi transaction polling timed out'],
+    fordefi: ['api.fordefi.com', 'black_box_signature'],
     'gcp-kms': ['cloudkms.googleapis.com', 'asymmetricSign'],
     memory: ['Memory signer requires one of', 'U8Array string cannot be empty'],
     openfort: ['api.openfort.io', 'x-wallet-auth'],

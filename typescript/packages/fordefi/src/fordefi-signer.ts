@@ -9,9 +9,11 @@ import {
     extractSignatureFromWireTransaction,
     fetchSignerJson,
     normalizeBaseUrl,
+    signBatchStaggered,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
+    validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import {
@@ -248,7 +250,7 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
             config.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS,
             config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
         );
-        FordefiSigner.validateRequestDelayMs(config.requestDelayMs ?? 0);
+        validateRequestDelayMs(config.requestDelayMs ?? 0);
         FordefiSigner.validateRequestTimeoutMs(config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
 
         const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl ?? DEFAULT_BASE_URL);
@@ -381,9 +383,9 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
     }
 
     async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
-        return await Promise.all(
-            messages.map(async (message, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            messages,
+            async message => {
                 const signatureBytes = await this.signMessage(message.content);
                 await assertSignatureValid({
                     data: message.content,
@@ -394,7 +396,8 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -409,9 +412,9 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
             });
         }
 
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                await this.delay(index);
+        return await signBatchStaggered(
+            transactions,
+            async transaction => {
                 const { sigDict, verificationData } = await this.signBlackBoxTransaction(transaction.messageBytes);
                 const signatureBytes = Object.values(sigDict)[0];
                 if (!signatureBytes) {
@@ -426,7 +429,8 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
                     signerAddress: this.address,
                 });
                 return sigDict;
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -477,10 +481,10 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
             });
         }
 
-        return await Promise.all(
-            transactions.map(async (transaction, index) => {
-                config?.abortSignal?.throwIfAborted();
-                await this.delay(index);
+        config?.abortSignal?.throwIfAborted();
+        return await signBatchStaggered(
+            transactions,
+            async transaction => {
                 config?.abortSignal?.throwIfAborted();
                 this.assertNativeAutoTransactionSupported(transaction);
 
@@ -514,7 +518,8 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
                 });
                 config?.abortSignal?.throwIfAborted();
                 return transactionSignature;
-            }),
+            },
+            this.requestDelayMs,
         );
     }
 
@@ -735,28 +740,11 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
         }
     }
 
-    private static validateRequestDelayMs(requestDelayMs: number): void {
-        if (requestDelayMs < 0) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: 'requestDelayMs must not be negative',
-            });
-        }
-        if (requestDelayMs > 3000) {
-            console.warn('requestDelayMs is greater than 3000ms, this may result in blockhash expiration errors');
-        }
-    }
-
     private static validateRequestTimeoutMs(requestTimeoutMs: number): void {
         if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
                 message: 'requestTimeoutMs must be a positive finite number',
             });
-        }
-    }
-
-    private async delay(index: number): Promise<void> {
-        if (this.requestDelayMs > 0 && index > 0) {
-            await new Promise(resolve => setTimeout(resolve, index * this.requestDelayMs));
         }
     }
 

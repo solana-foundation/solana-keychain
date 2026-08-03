@@ -97,10 +97,7 @@ const signer = await createFordefiSigner({
 
 ## Integration Tests
 
-Two test suites cover the signing paths:
-
-- **`fordefi-devnet.integration.test.ts`** — Native Solana mode. Builds a real SOL transfer and lets Fordefi sign and broadcast it to devnet. Requires a **Solana vault** (`FORDEFI_VAULT_ID`, `FORDEFI_PUBLIC_KEY`).
-- **`fordefi-signer.integration.test.ts`** — Black box mode with LiteSVM. Signs raw bytes, verifies locally. Requires a **black box vault** (`FORDEFI_BB_VAULT_ID`, `FORDEFI_BB_PUBLIC_KEY`).
+**`fordefi-signer.integration.test.ts`** exercises black box mode against the real Fordefi API and verifies the returned signatures with LiteSVM. It requires a **black box vault** (`FORDEFI_BB_VAULT_ID`, `FORDEFI_BB_PUBLIC_KEY`).
 
 Required env vars (shared):
 
@@ -109,14 +106,7 @@ FORDEFI_ACCESS_TOKEN=<api-token>
 FORDEFI_PRIVATE_KEY_PEM_PATH=<path-to-pem>
 ```
 
-Devnet test (Solana vault):
-
-```
-FORDEFI_VAULT_ID=<solana-vault-uuid>
-FORDEFI_PUBLIC_KEY=<solana-vault-address>
-```
-
-LiteSVM test (black box vault):
+Black box vault:
 
 ```
 FORDEFI_BB_VAULT_ID=<bb-vault-uuid>
