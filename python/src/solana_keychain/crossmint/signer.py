@@ -311,7 +311,7 @@ class CrossmintSigner(SolanaSigner):
             )
 
     def _extract_signature_from_serialized_transaction(
-        self, serialized_transaction: str
+        self, serialized_transaction: str, expected_message: bytes
     ) -> Signature:
         try:
             transaction_bytes = base58.b58decode(serialized_transaction)
@@ -351,7 +351,10 @@ class CrossmintSigner(SolanaSigner):
                 "Crossmint onChain.transaction did not contain a signer signature",
             )
         signature = signatures[position]
-        self._verify_signature_matches_message(signature, bytes(message))
+        # Verify against the caller's message bytes, not the returned ones: if the
+        # service rewrote the transaction (blockhash, wrapping), its signature does
+        # not sign the caller's transaction and must not be attached to it.
+        self._verify_signature_matches_message(signature, expected_message)
         return signature
 
     def _extract_signature_from_response(
@@ -363,7 +366,7 @@ class CrossmintSigner(SolanaSigner):
             if isinstance(serialized_transaction, str):
                 try:
                     return self._extract_signature_from_serialized_transaction(
-                        serialized_transaction
+                        serialized_transaction, expected_message
                     )
                 except SignerError:
                     pass
