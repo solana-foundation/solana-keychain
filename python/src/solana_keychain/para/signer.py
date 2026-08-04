@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
@@ -28,13 +29,16 @@ SIGNATURE_HEX_LENGTH = 128
 _logger = logging.getLogger("solana_keychain")
 
 
+# uuid.UUID is too lenient here: it strips dashes anywhere before parsing, so a
+# 36-char id with misplaced dashes would be accepted. The API requires the
+# canonical dashed form.
+_CANONICAL_UUID = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+
 def _is_valid_uuid(value: str) -> bool:
-    if len(value) != 36:
-        return False
-    if any(value[position] != "-" for position in (8, 13, 18, 23)):
-        return False
-    hex_chars = value.replace("-", "")
-    return len(hex_chars) == 32 and all(c in "0123456789abcdefABCDEF" for c in hex_chars)
+    return _CANONICAL_UUID.fullmatch(value) is not None
 
 
 @dataclass
