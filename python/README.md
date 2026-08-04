@@ -23,7 +23,7 @@ library offers a consistent API across all signing methods.
 | **Vault** | Enterprise key management with HashiCorp Vault | `solana_keychain.vault` | ✅ Available |
 | **Privy** | Embedded wallets with Privy infrastructure | — | Planned |
 | **Turnkey** | Non-custodial key management via Turnkey | — | Planned |
-| **AWS KMS** | AWS Key Management Service with Ed25519 signing | — | Planned |
+| **AWS KMS** | AWS Key Management Service with Ed25519 signing | `solana_keychain.aws_kms` | ✅ Available |
 | **Fireblocks** | Fireblocks institutional custody platform | — | Planned |
 | **GCP KMS** | Google Cloud Key Management Service with Ed25519 signing | — | Planned |
 | **Dfns** | Dfns wallet infrastructure with Ed25519 signing | — | Planned |
@@ -36,10 +36,15 @@ library offers a consistent API across all signing methods.
 ## Installation
 
 ```bash
-pip install solana-keychain
+pip install solana-keychain              # memory + vault
+pip install 'solana-keychain[aws-kms]'   # adds the AWS KMS backend
 ```
 
-Requires **Python 3.10+**.
+Requires **Python 3.10+**. Backends built on heavy provider SDKs ship as optional
+extras; importing such a backend without its extra raises an `ImportError` naming
+the extra to install. Extras-gated backends are imported from their submodule
+(e.g. `from solana_keychain.aws_kms import create_aws_kms_signer`), not from the
+package root.
 
 ## Quick Start
 

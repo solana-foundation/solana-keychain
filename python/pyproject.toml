@@ -17,7 +17,9 @@ dependencies = ["httpx>=0.27", "solders>=0.26,<1"]
 Repository = "https://github.com/solana-foundation/solana-keychain"
 
 [project.optional-dependencies]
+aws-kms = ["boto3>=1.35"]
 dev = [
+    "boto3>=1.35",
     "build>=1.2",
     "mypy>=1.14",
     "pytest>=8.3",
@@ -46,3 +48,7 @@ strict = true
 files = ["src", "tests"]
 mypy_path = "src"
 explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
