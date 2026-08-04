@@ -1,4 +1,3 @@
-from solana_keychain.core.batch import sign_batch_staggered, validate_request_delay_ms
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import (
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
@@ -31,6 +30,4 @@ __all__ = [
     "normalize_base_url",
     "sanitize_remote_error_response",
     "serialize_transaction",
-    "sign_batch_staggered",
-    "validate_request_delay_ms",
 ]
