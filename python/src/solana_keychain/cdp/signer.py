@@ -4,6 +4,13 @@ import base64
 from dataclasses import dataclass, field
 from typing import Any
 
+try:
+    import base58
+except ImportError as error:  # pragma: no cover
+    raise ImportError(
+        "solana_keychain.cdp requires the cdp extra: pip install 'solana-keychain[cdp]'"
+    ) from error
+
 import httpx
 from solders.pubkey import Pubkey
 from solders.signature import Signature
@@ -24,17 +31,6 @@ DEFAULT_API_BASE_URL = "https://api.cdp.coinbase.com"
 BASE_PATH = "/platform/v2/solana/accounts"
 
 ED25519_SIGNATURE_LENGTH = 64
-
-_B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-
-
-def _b58decode(encoded: str) -> bytes:
-    number = 0
-    for char in encoded:
-        number = number * 58 + _B58_ALPHABET.index(char)
-    decoded = number.to_bytes((number.bit_length() + 7) // 8, "big")
-    leading_zeroes = len(encoded) - len(encoded.lstrip("1"))
-    return b"\x00" * leading_zeroes + decoded
 
 
 @dataclass
@@ -127,7 +123,7 @@ class CdpSigner(SolanaSigner):
                 SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse CDP sign_message response"
             )
         try:
-            signature_bytes = _b58decode(signature_b58)
+            signature_bytes = base58.b58decode(signature_b58)
         except ValueError:
             raise SignerError(
                 SignerErrorCode.SERIALIZATION_ERROR,
