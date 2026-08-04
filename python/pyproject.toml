@@ -19,6 +19,7 @@ Repository = "https://github.com/solana-foundation/solana-keychain"
 [project.optional-dependencies]
 aws-kms = ["boto3>=1.35"]
 gcp-kms = ["google-cloud-kms>=2.24"]
+privy = ["cryptography>=43"]
 turnkey = ["cryptography>=43"]
 dev = [
     "boto3>=1.35",

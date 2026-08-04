@@ -21,7 +21,7 @@ library offers a consistent API across all signing methods.
 | --- | --- | --- | --- |
 | **Memory** | Local keypairs, development, testing | `solana_keychain.memory` | ✅ Available |
 | **Vault** | Enterprise key management with HashiCorp Vault | `solana_keychain.vault` | ✅ Available |
-| **Privy** | Embedded wallets with Privy infrastructure | — | Planned |
+| **Privy** | Embedded wallets with Privy infrastructure | `solana_keychain.privy` | ✅ Available |
 | **Turnkey** | Non-custodial key management via Turnkey | `solana_keychain.turnkey` | ✅ Available |
 | **AWS KMS** | AWS Key Management Service with Ed25519 signing | `solana_keychain.aws_kms` | ✅ Available |
 | **Fireblocks** | Fireblocks institutional custody platform | — | Planned |
@@ -39,6 +39,7 @@ library offers a consistent API across all signing methods.
 pip install solana-keychain              # memory + vault
 pip install 'solana-keychain[aws-kms]'   # adds the AWS KMS backend
 pip install 'solana-keychain[gcp-kms]'   # adds the GCP KMS backend
+pip install 'solana-keychain[privy]'     # adds the Privy backend
 pip install 'solana-keychain[turnkey]'   # adds the Turnkey backend
 ```
 
