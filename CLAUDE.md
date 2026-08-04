@@ -119,10 +119,10 @@ Single package under [python/](python/) (PyPI `solana-keychain`, import `solana_
 
 ### Architecture
 
-- **Contract** (`solana_keychain.core`): `SolanaSigner` ABC — `pubkey` property, async `sign_transaction()` / `sign_message()` / `is_available()` — mirroring the Rust trait. `sign_transaction` returns `SignedTransaction` with `is_complete` (the Complete/Partial analog).
-- **Errors**: `SignerError` with stable `code` values identical to the TS `SignerErrorCode` strings; `str()`/`repr()` only surface generic messages (detail is redacted, parity with Rust's `Debug` impl).
-- **Serialization**: built on `solders` (Rust bindings), so `bincode` transaction bytes are identical to the Rust crate — pinned cross-language golden vectors in `python/tests/test_parity.py` (same vectors as the Rust and Go parity tests).
-- **Remote API calls** go through `fetch_signer_json()` from `solana_keychain.core` — it owns the HTTP_ERROR/REMOTE_API_ERROR/PARSING_ERROR pipeline, response sanitization, redirect rejection, and a default 60s timeout (same contract as the TS `fetchSignerJson`). Base URLs must pass `assert_https_url()`. Batch signing uses core `sign_batch_staggered()` + `validate_request_delay_ms()`. Unit tests mock HTTP with `respx` (the analog of Rust's wiremock); no live API calls in unit tests.
+- **Contract** (`solana_keychain.core`): `SolanaSigner` ABC — `pubkey` property, async `sign_transaction()` / `sign_message()` / `is_available()`. `sign_transaction` returns `SignedTransaction` with `is_complete`.
+- **Errors**: `SignerError` with stable `code` values; `str()`/`repr()` only surface generic messages (detail is redacted and must never leak key material or raw remote responses).
+- **Serialization**: built on `solders`; golden wire-format vectors pinned in `python/tests/test_parity.py` — never regenerate them to make the suite pass.
+- **Remote API calls** go through `fetch_signer_json()` from `solana_keychain.core` — it owns the HTTP_ERROR/REMOTE_API_ERROR/PARSING_ERROR pipeline, response sanitization, redirect rejection, and a default 60s timeout. Base URLs must pass `assert_https_url()`. Batch signing uses core `sign_batch_staggered()` + `validate_request_delay_ms()`. Unit tests mock HTTP with `respx`; no live API calls in unit tests.
 - **Backend imports/extras rules**: the root `__init__.py` must never eagerly import a backend whose dependencies live behind an optional extra (use lazy `__getattr__` or leave it to submodule imports), and such backends must raise a clear "install `solana-keychain[<extra>]`" error when imported without their extra. Backends with only base deps (`solders`, `httpx`) may be exported eagerly.
 
 ## Branch Workflow

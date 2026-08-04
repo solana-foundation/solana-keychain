@@ -1,6 +1,8 @@
-"""Cross-language parity: this suite pins the golden vectors produced by the Rust signer
-(rust/src/memory/mod.rs parity vectors, also pinned in go/core/parity_test.go). The Python
-implementation must keep producing byte-identical serialized output."""
+"""Golden wire-format vectors: pins the exact serialized bytes this library must
+produce for one canonical transaction. These constants are frozen — if any assertion
+here fails, the signer's serialized output has drifted from the Solana wire format
+and every transaction it emits is suspect. Never regenerate the vectors to make the
+suite pass."""
 
 import base64
 
@@ -22,13 +24,13 @@ CANONICAL_KEYPAIR_BYTES = bytes([
 ])
 # fmt: on
 
-RUST_PARITY_PUBKEY = "4BuiY9QUUfPoAGNJBja3JapAuVWMc9c7in6UCgyC2zPR"
-RUST_PARITY_MESSAGE_B64 = (
+GOLDEN_PUBKEY = "4BuiY9QUUfPoAGNJBja3JapAuVWMc9c7in6UCgyC2zPR"
+GOLDEN_MESSAGE_B64 = (
     "AQABAy9eeafDiEgWnTBNWD9gOXq18+y88Yau4GT2EapoEZcwAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC"
     "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     "AAAQICAAEMAgAAAEBCDwAAAAAA"
 )
-RUST_PARITY_SIGNED_TX_B64 = (
+GOLDEN_SIGNED_TX_B64 = (
     "AaynSvis6Ib7Ryu0FHtVWQEOaHwqjVtlBUmx5dS8lnDzYlucZlaLBuiwHh2yKYxh9BpT4SnIu2Lkp+dmBFf9Igc"
     "BAAEDL155p8OISBadME1YP2A5erXz7Lzxhq7gZPYRqmgRlzACAgICAgICAgICAgICAgICAgICAgICAgICAgICAg"
     "ICAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -36,10 +38,10 @@ RUST_PARITY_SIGNED_TX_B64 = (
 )
 
 
-def build_parity_transaction() -> tuple[Keypair, Transaction]:
-    """The EXACT transaction the Rust and Go parity tests build: a System transfer of
-    1_000_000 lamports from the canonical signer to the all-0x02 recipient, zero recent
-    blockhash, payer = signer."""
+def build_golden_transaction() -> tuple[Keypair, Transaction]:
+    """The canonical transaction behind the golden vectors: a System transfer of
+    1_000_000 lamports from the canonical signer to the all-0x02 recipient, zero
+    recent blockhash, payer = signer."""
     keypair = Keypair.from_bytes(CANONICAL_KEYPAIR_BYTES)
     recipient = Pubkey.from_bytes(bytes([2] * 32))
     instruction = transfer(
@@ -49,23 +51,23 @@ def build_parity_transaction() -> tuple[Keypair, Transaction]:
     return keypair, Transaction.new_unsigned(message)
 
 
-def test_canonical_keypair_derives_shared_pubkey() -> None:
-    keypair, _ = build_parity_transaction()
-    assert str(keypair.pubkey()) == RUST_PARITY_PUBKEY
+def test_canonical_keypair_derives_golden_pubkey() -> None:
+    keypair, _ = build_golden_transaction()
+    assert str(keypair.pubkey()) == GOLDEN_PUBKEY
 
 
-def test_message_bytes_match_rust() -> None:
-    _, transaction = build_parity_transaction()
+def test_message_bytes_match_golden_vector() -> None:
+    _, transaction = build_golden_transaction()
     encoded = base64.b64encode(transaction.message_data()).decode("ascii")
-    assert encoded == RUST_PARITY_MESSAGE_B64
+    assert encoded == GOLDEN_MESSAGE_B64
 
 
-async def test_signed_transaction_matches_rust() -> None:
-    keypair, transaction = build_parity_transaction()
+async def test_signed_transaction_matches_golden_vector() -> None:
+    keypair, transaction = build_golden_transaction()
     signer = MemorySigner(keypair)
 
     result = await signer.sign_transaction(transaction)
 
     assert result.is_complete
-    assert result.encoded_transaction == RUST_PARITY_SIGNED_TX_B64
+    assert result.encoded_transaction == GOLDEN_SIGNED_TX_B64
     assert result.signature.verify(signer.pubkey, transaction.message_data())

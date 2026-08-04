@@ -14,7 +14,7 @@ class SignedTransaction:
 
     ``encoded_transaction`` is ``base64(bincode(tx))``. ``is_complete`` is True when
     every required signature slot is populated, False when other signers still need
-    to sign (the Python analog of Rust's ``SignTransactionResult::Complete/Partial``).
+    to sign.
     """
 
     encoded_transaction: str
@@ -23,8 +23,7 @@ class SignedTransaction:
 
 
 class SolanaSigner(ABC):
-    """Unified signing contract, mirroring the Rust ``SolanaSigner`` trait and the
-    TypeScript ``SolanaSigner`` interface."""
+    """Unified signing contract implemented by every backend."""
 
     @property
     @abstractmethod

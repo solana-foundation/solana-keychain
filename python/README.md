@@ -5,16 +5,15 @@
 `solana-keychain` provides a unified interface for signing Solana transactions
 with multiple backend implementations. Whether you need local keypairs for
 development, enterprise vault integration, or managed wallet services, this
-library offers a consistent API across all signing methods — with full parity to
-the [Rust](../rust/README.md) and [TypeScript](../typescript/README.md) libraries.
+library offers a consistent API across all signing methods.
 
 ## Features
 
 - **Unified interface**: a single `SolanaSigner` contract for every backend
-- **Async-first**: `sign_transaction` / `sign_message` / `is_available` are coroutines, matching the Rust and TS contracts
-- **Cross-language parity**: the same signing contract and behavior as the Rust and TypeScript implementations, verified down to byte-identical transaction serialization
-- **Safe errors**: `SignerError` redacts sensitive detail from its message; match on stable codes shared with the TypeScript `SignerErrorCode` values
-- **Minimal core**: built on [`solders`](https://pypi.org/project/solders/) (Rust-native bindings), so `bincode` transaction bytes are identical to the Rust crate by construction
+- **Async-first**: `sign_transaction` / `sign_message` / `is_available` are coroutines
+- **Verified wire format**: golden-vector tests pin the exact serialized transaction bytes, so serialization can never silently drift
+- **Safe errors**: `SignerError` redacts sensitive detail from its message; match on its stable `code` values
+- **Minimal core**: built on [`solders`](https://pypi.org/project/solders/) for canonical transaction serialization and Ed25519 primitives
 
 ## Supported Backends
 
@@ -75,8 +74,7 @@ asyncio.run(main())
 ### Remote Backends
 
 Every remote backend follows the same pattern: a config dataclass and an async
-`create_<backend>_signer` factory that returns a ready-to-use signer (the Python
-analog of the Rust `Signer::from_*` factories and the TS async factories):
+`create_<backend>_signer` factory that returns a ready-to-use signer:
 
 ```python
 from solana_keychain import VaultSignerConfig, create_vault_signer
@@ -98,9 +96,7 @@ rejected.
 
 ## Core API
 
-Every signer implements the `SolanaSigner` ABC from `solana_keychain.core` — the
-Python analog of the Rust `SolanaSigner` trait and the TypeScript `SolanaSigner`
-interface:
+Every signer implements the `SolanaSigner` ABC from `solana_keychain.core`:
 
 ```python
 class SolanaSigner(ABC):
@@ -116,11 +112,10 @@ class SolanaSigner(ABC):
 
 `sign_transaction` signs the transaction in place and returns a
 `SignedTransaction(encoded_transaction, signature, is_complete)`; `is_complete`
-reports whether every required signature is present (the Python analog of the
-Rust `Complete`/`Partial` result).
+reports whether every required signature is present.
 
-Errors are always `SignerError` with a stable `code` shared with the TypeScript
-`SignerErrorCode` values (`SIGNER_INVALID_PRIVATE_KEY`, `SIGNER_SIGNING_FAILED`, …).
+Errors are always `SignerError` with a stable `code`
+(`SIGNER_INVALID_PRIVATE_KEY`, `SIGNER_SIGNING_FAILED`, …).
 `str()`/`repr()` of a `SignerError` never include key material or raw remote responses.
 
 ## Development
@@ -141,6 +136,7 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest
 ```
 
-Cross-language golden vectors are pinned in `tests/test_parity.py` — the same
-canonical keypair, transaction, and `base64(bincode(tx))` bytes as the Rust
-memory-signer tests.
+Golden wire-format vectors are pinned in `tests/test_parity.py` — the exact
+serialized bytes for one canonical transaction. Never regenerate them to make
+the suite pass; a mismatch means the library's output has drifted from the
+Solana wire format.

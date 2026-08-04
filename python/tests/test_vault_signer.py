@@ -1,5 +1,3 @@
-"""Vault signer tests, ported from the Rust wiremock suite (rust/src/vault/mod.rs)."""
-
 import base64
 
 import httpx

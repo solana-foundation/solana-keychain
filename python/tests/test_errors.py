@@ -57,7 +57,7 @@ def test_copy_and_deepcopy_work() -> None:
         assert SECRET not in repr(clone)
 
 
-def test_code_values_match_cross_language_contract() -> None:
+def test_code_values_are_frozen() -> None:
     assert {code.value for code in SignerErrorCode} == {
         "SIGNER_CONFIG_ERROR",
         "SIGNER_ERROR",

@@ -77,8 +77,7 @@ async def fetch_signer_json(
     client: httpx.AsyncClient | None = None,
 ) -> Any:
     """Perform a remote signer API request and parse the JSON response, mapping
-    failures to the standard signer error pipeline (parity with the TS
-    ``fetchSignerJson`` and the Go core HTTP client):
+    failures to the standard signer error pipeline:
 
     - network failure or timeout → ``HTTP_ERROR``
     - any redirect → ``HTTP_ERROR`` (auth headers must never replay against a

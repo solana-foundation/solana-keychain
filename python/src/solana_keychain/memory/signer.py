@@ -26,8 +26,7 @@ class MemorySignerConfig:
 
 
 class MemorySigner(SolanaSigner):
-    """In-memory Ed25519 signer, the Python analog of the Rust ``MemorySigner`` and the
-    ``@solana/keychain-memory`` package. The private key is held in process memory; this
+    """In-memory Ed25519 signer. The private key is held in process memory; this
     backend is intended for local development and testing."""
 
     def __init__(self, keypair: Keypair) -> None:

@@ -5,7 +5,7 @@ from enum import Enum, unique
 
 @unique
 class SignerErrorCode(str, Enum):
-    """Stable error codes, identical to the TypeScript SignerErrorCode and Go core.Code values."""
+    """Stable, machine-readable error codes for every signer failure mode."""
 
     CONFIG_ERROR = "SIGNER_CONFIG_ERROR"
     EXPECTED_SOLANA_SIGNER = "SIGNER_EXPECTED_SOLANA_SIGNER"
@@ -44,8 +44,7 @@ class SignerError(Exception):
 
     Security: ``str()``, ``repr()``, and ``args`` only ever expose the fixed generic
     message for the code. The per-error ``detail`` is kept private so key material and
-    raw remote-API responses cannot leak through formatted output or logs (same
-    redaction discipline as the Rust ``Debug`` impl and the TypeScript core).
+    raw remote-API responses cannot leak through formatted output or logs.
     """
 
     def __init__(self, code: SignerErrorCode, detail: str = "") -> None:

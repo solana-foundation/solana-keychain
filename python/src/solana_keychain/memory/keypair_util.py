@@ -14,8 +14,7 @@ SEED_LENGTH = 32
 def keypair_from_bytes(private_key: bytes) -> Keypair:
     """Build a keypair from raw bytes: 64 bytes (seed ‖ pubkey, the Solana CLI layout,
     with the public half validated against the seed) or 32 bytes (seed only; the
-    public key is derived) — parity with the TS ``privateKey`` and Go ``PrivateKey``
-    raw-bytes sources."""
+    public key is derived)."""
     if len(private_key) == SEED_LENGTH:
         try:
             return Keypair.from_seed(private_key)
@@ -47,7 +46,7 @@ def keypair_from_private_key_string(private_key: str) -> Keypair:
     - U8Array form: ``"[1, 2, ..., 64]"`` (Solana CLI keypair JSON, inline)
     - Otherwise: base58
 
-    String forms are always 64 bytes (parity with Rust and TS).
+    String forms must always decode to exactly 64 bytes.
     """
     trimmed = private_key.strip()
     if trimmed.startswith("[") and trimmed.endswith("]"):
@@ -118,7 +117,6 @@ def keypair_from_private_key_file(path: str) -> Keypair:
     try:
         content = Path(path).read_text()
     except (OSError, UnicodeDecodeError):
-        # UnicodeDecodeError.args embeds the raw file bytes — never let it propagate
-        # (parity: Rust read_to_string maps non-UTF-8 to an InvalidData io error).
+        # UnicodeDecodeError.args embeds the raw file bytes — never let it propagate.
         raise SignerError(SignerErrorCode.IO_ERROR, "Failed to read private key file") from None
     return keypair_from_json_keypair(content)
