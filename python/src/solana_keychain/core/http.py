@@ -73,6 +73,7 @@ async def fetch_signer_json(
     method: str = "GET",
     headers: dict[str, str] | None = None,
     json_body: Any | None = None,
+    content: bytes | None = None,
     timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
     client: httpx.AsyncClient | None = None,
 ) -> Any:
@@ -86,9 +87,17 @@ async def fetch_signer_json(
       the (redacted) detail
     - invalid JSON body → ``PARSING_ERROR``
 
+    ``json_body`` and ``content`` are mutually exclusive. Use ``content`` when the
+    request bytes must match a signature computed over them exactly (request-stamping
+    auth schemes) — re-serialization would change the bytes.
+
     When ``client`` is provided the caller owns its lifecycle and transport policy
     (custom TLS, proxies); otherwise a one-shot client is used.
     """
+    if json_body is not None and content is not None:
+        raise SignerError(
+            SignerErrorCode.CONFIG_ERROR, "json_body and content are mutually exclusive"
+        )
     if client is not None:
         return await _request_json(
             client,
@@ -97,6 +106,7 @@ async def fetch_signer_json(
             method=method,
             headers=headers,
             json_body=json_body,
+            content=content,
             timeout_seconds=timeout_seconds,
         )
     async with httpx.AsyncClient() as own_client:
@@ -107,6 +117,7 @@ async def fetch_signer_json(
             method=method,
             headers=headers,
             json_body=json_body,
+            content=content,
             timeout_seconds=timeout_seconds,
         )
 
@@ -119,6 +130,7 @@ async def _request_json(
     method: str,
     headers: dict[str, str] | None,
     json_body: Any | None,
+    content: bytes | None,
     timeout_seconds: float,
 ) -> Any:
     try:
@@ -127,6 +139,7 @@ async def _request_json(
             url,
             headers=headers,
             json=json_body,
+            content=content,
             timeout=timeout_seconds,
             follow_redirects=False,
         )
