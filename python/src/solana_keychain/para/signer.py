@@ -187,7 +187,9 @@ class ParaSigner(SolanaSigner):
         if frequent checks are needed."""
         try:
             wallet = await asyncio.wait_for(self._fetch_wallet(), AVAILABILITY_TIMEOUT_SECONDS)
-        except (SignerError, TimeoutError):
+        except (SignerError, asyncio.TimeoutError):
+            # asyncio.TimeoutError: on 3.10 wait_for raises this distinct class;
+            # from 3.11 it aliases the builtin, so one except covers both.
             return False
         wallet_type = str(wallet.get("type", ""))
         status = str(wallet.get("status", ""))
