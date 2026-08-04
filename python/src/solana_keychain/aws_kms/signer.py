@@ -137,5 +137,9 @@ class AwsKmsSigner(SolanaSigner):
 
 
 async def create_aws_kms_signer(config: AwsKmsSignerConfig) -> AwsKmsSigner:
-    """Create a ready-to-use AWS KMS signer."""
-    return AwsKmsSigner(config)
+    """Create a ready-to-use AWS KMS signer.
+
+    Construction runs in a worker thread: building the client can read AWS config
+    files or query instance metadata, which must not block the event loop.
+    """
+    return await asyncio.to_thread(AwsKmsSigner, config)
