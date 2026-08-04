@@ -27,7 +27,7 @@ library offers a consistent API across all signing methods.
 | **Fireblocks** | Fireblocks institutional custody platform | — | Planned |
 | **GCP KMS** | Google Cloud Key Management Service with Ed25519 signing | `solana_keychain.gcp_kms` | ✅ Available |
 | **Dfns** | Dfns wallet infrastructure with Ed25519 signing | — | Planned |
-| **Para** | MPC wallets with Para infrastructure | — | Planned |
+| **Para** | MPC wallets with Para infrastructure | `solana_keychain.para` | ✅ Available |
 | **CDP** | Coinbase Developer Platform managed wallets | — | Planned |
 | **Crossmint** | Crossmint managed wallets | — | Planned |
 | **Openfort** | Openfort backend wallets with TEE-stored keys | — | Planned |
