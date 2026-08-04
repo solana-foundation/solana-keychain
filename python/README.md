@@ -29,7 +29,7 @@ library offers a consistent API across all signing methods.
 | **Dfns** | Dfns wallet infrastructure with Ed25519 signing | `solana_keychain.dfns` | ✅ Available |
 | **Para** | MPC wallets with Para infrastructure | `solana_keychain.para` | ✅ Available |
 | **CDP** | Coinbase Developer Platform managed wallets | `solana_keychain.cdp` | ✅ Available |
-| **Crossmint** | Crossmint managed wallets | — | Planned |
+| **Crossmint** | Crossmint managed wallets | `solana_keychain.crossmint` | ✅ Available |
 | **Openfort** | Openfort backend wallets with TEE-stored keys | — | Planned |
 | **Utila** | Utila MPC wallet integration | — | Planned |
 
@@ -39,6 +39,7 @@ library offers a consistent API across all signing methods.
 pip install solana-keychain              # memory + vault
 pip install 'solana-keychain[aws-kms]'   # adds the AWS KMS backend
 pip install 'solana-keychain[cdp]'       # adds the CDP backend
+pip install 'solana-keychain[crossmint]' # adds the Crossmint backend
 pip install 'solana-keychain[dfns]'      # adds the Dfns backend
 pip install 'solana-keychain[fireblocks]' # adds the Fireblocks backend
 pip install 'solana-keychain[gcp-kms]'   # adds the GCP KMS backend
