@@ -23,6 +23,7 @@ crossmint = ["base58>=2.1", "cryptography>=43"]
 dfns = ["cryptography>=43"]
 fireblocks = ["cryptography>=43", "pyjwt>=2.8"]
 gcp-kms = ["google-cloud-kms>=2.24"]
+openfort = ["cryptography>=43", "pyjwt>=2.8"]
 privy = ["cryptography>=43"]
 turnkey = ["cryptography>=43"]
 dev = [

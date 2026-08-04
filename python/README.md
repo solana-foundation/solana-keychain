@@ -30,7 +30,7 @@ library offers a consistent API across all signing methods.
 | **Para** | MPC wallets with Para infrastructure | `solana_keychain.para` | ✅ Available |
 | **CDP** | Coinbase Developer Platform managed wallets | `solana_keychain.cdp` | ✅ Available |
 | **Crossmint** | Crossmint managed wallets | `solana_keychain.crossmint` | ✅ Available |
-| **Openfort** | Openfort backend wallets with TEE-stored keys | — | Planned |
+| **Openfort** | Openfort backend wallets with TEE-stored keys | `solana_keychain.openfort` | ✅ Available |
 | **Utila** | Utila MPC wallet integration | — | Planned |
 
 ## Installation
@@ -43,6 +43,7 @@ pip install 'solana-keychain[crossmint]' # adds the Crossmint backend
 pip install 'solana-keychain[dfns]'      # adds the Dfns backend
 pip install 'solana-keychain[fireblocks]' # adds the Fireblocks backend
 pip install 'solana-keychain[gcp-kms]'   # adds the GCP KMS backend
+pip install 'solana-keychain[openfort]'  # adds the Openfort backend
 pip install 'solana-keychain[privy]'     # adds the Privy backend
 pip install 'solana-keychain[turnkey]'   # adds the Turnkey backend
 ```
