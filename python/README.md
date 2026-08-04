@@ -28,7 +28,7 @@ library offers a consistent API across all signing methods.
 | **GCP KMS** | Google Cloud Key Management Service with Ed25519 signing | `solana_keychain.gcp_kms` | ✅ Available |
 | **Dfns** | Dfns wallet infrastructure with Ed25519 signing | — | Planned |
 | **Para** | MPC wallets with Para infrastructure | `solana_keychain.para` | ✅ Available |
-| **CDP** | Coinbase Developer Platform managed wallets | — | Planned |
+| **CDP** | Coinbase Developer Platform managed wallets | `solana_keychain.cdp` | ✅ Available |
 | **Crossmint** | Crossmint managed wallets | — | Planned |
 | **Openfort** | Openfort backend wallets with TEE-stored keys | — | Planned |
 | **Utila** | Utila MPC wallet integration | — | Planned |
@@ -38,6 +38,7 @@ library offers a consistent API across all signing methods.
 ```bash
 pip install solana-keychain              # memory + vault
 pip install 'solana-keychain[aws-kms]'   # adds the AWS KMS backend
+pip install 'solana-keychain[cdp]'       # adds the CDP backend
 pip install 'solana-keychain[fireblocks]' # adds the Fireblocks backend
 pip install 'solana-keychain[gcp-kms]'   # adds the GCP KMS backend
 pip install 'solana-keychain[privy]'     # adds the Privy backend
