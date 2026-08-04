@@ -18,9 +18,11 @@ Repository = "https://github.com/solana-foundation/solana-keychain"
 
 [project.optional-dependencies]
 aws-kms = ["boto3>=1.35"]
+gcp-kms = ["google-cloud-kms>=2.24"]
 dev = [
     "boto3>=1.35",
     "build>=1.2",
+    "google-cloud-kms>=2.24",
     "mypy>=1.14",
     "pytest>=8.3",
     "pytest-asyncio>=0.25",
@@ -50,5 +52,9 @@ mypy_path = "src"
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+module = ["boto3", "boto3.*", "botocore", "botocore.*", "google.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tests.test_gcp_kms_signer"]
+disallow_untyped_calls = false
