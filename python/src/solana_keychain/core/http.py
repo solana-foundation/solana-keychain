@@ -31,15 +31,22 @@ def assert_https_url(url: str, field: str, *, allow_http_loopback_in_tests: bool
     (localhost / 127.0.0.1 / ::1) while running under pytest, for backends whose
     integration tests target a local dev server.
     """
-    parsed = urlsplit(url)
-    if not parsed.hostname:
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        # Accessing ``port`` forces urllib to validate the authority's port syntax
+        # and range rather than deferring the failure to httpx.
+        _ = parsed.port
+    except ValueError:
+        raise SignerError(SignerErrorCode.CONFIG_ERROR, f"{field} is not a valid URL") from None
+    if not hostname:
         raise SignerError(SignerErrorCode.CONFIG_ERROR, f"{field} is not a valid URL")
     if parsed.scheme == "https":
         return
     if (
         allow_http_loopback_in_tests
         and parsed.scheme == "http"
-        and parsed.hostname in _LOOPBACK_HOSTNAMES
+        and hostname in _LOOPBACK_HOSTNAMES
         and "PYTEST_CURRENT_TEST" in os.environ
     ):
         return
