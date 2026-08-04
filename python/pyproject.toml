@@ -26,6 +26,7 @@ gcp-kms = ["google-cloud-kms>=2.24"]
 openfort = ["cryptography>=43", "pyjwt>=2.8"]
 privy = ["cryptography>=43"]
 turnkey = ["cryptography>=43"]
+utila = ["cryptography>=43", "pyjwt>=2.8"]
 dev = [
     "base58>=2.1",
     "boto3>=1.35",

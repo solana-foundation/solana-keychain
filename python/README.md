@@ -31,7 +31,7 @@ library offers a consistent API across all signing methods.
 | **CDP** | Coinbase Developer Platform managed wallets | `solana_keychain.cdp` | ✅ Available |
 | **Crossmint** | Crossmint managed wallets | `solana_keychain.crossmint` | ✅ Available |
 | **Openfort** | Openfort backend wallets with TEE-stored keys | `solana_keychain.openfort` | ✅ Available |
-| **Utila** | Utila MPC wallet integration | — | Planned |
+| **Utila** | Utila MPC wallet integration | `solana_keychain.utila` | ✅ Available |
 
 ## Installation
 
@@ -46,6 +46,7 @@ pip install 'solana-keychain[gcp-kms]'   # adds the GCP KMS backend
 pip install 'solana-keychain[openfort]'  # adds the Openfort backend
 pip install 'solana-keychain[privy]'     # adds the Privy backend
 pip install 'solana-keychain[turnkey]'   # adds the Turnkey backend
+pip install 'solana-keychain[utila]'     # adds the Utila backend
 ```
 
 Requires **Python 3.10+**. Backends built on heavy provider SDKs ship as optional
