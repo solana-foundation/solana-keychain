@@ -25,7 +25,7 @@ def make_api_keys() -> tuple[str, str, ec.EllipticCurvePublicKey]:
     signing_key = ec.generate_private_key(ec.SECP256R1())
     private_hex = signing_key.private_numbers().private_value.to_bytes(32, "big").hex()
     public_key = signing_key.public_key()
-    public_hex = public_key.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint).hex()
+    public_hex = public_key.public_bytes(Encoding.X962, PublicFormat.CompressedPoint).hex()
     return public_hex, private_hex, public_key
 
 
@@ -135,7 +135,7 @@ async def test_sign_message_success_with_stamp_and_body_assertions() -> None:
     stamp_raw = request.headers["X-Stamp"]
     padded = stamp_raw + "=" * (-len(stamp_raw) % 4)
     stamp = json.loads(base64.urlsafe_b64decode(padded))
-    assert stamp["public_key"] == api_public_key
+    assert stamp["publicKey"] == api_public_key
     assert stamp["scheme"] == "SIGNATURE_SCHEME_TK_API_P256"
     verifying_key.verify(bytes.fromhex(stamp["signature"]), body, ec.ECDSA(hashes.SHA256()))
 
@@ -217,22 +217,24 @@ async def test_sign_message_api_error() -> None:
     assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
 
 
-async def test_sign_message_invalid_api_private_key_hex() -> None:
+@pytest.mark.parametrize(
+    ("api_public_key", "api_private_key"),
+    [
+        ("not-hex", "ab" * 32),
+        ("02" + "ab" * 32, "not-hex"),
+        ("02" + "ab" * 31, "ab" * 32),
+        ("04" + "ab" * 64, "ab" * 32),
+        ("02" + "ab" * 32, "ab" * 16),
+        ("02" + "ff" * 32, "ab" * 32),
+    ],
+)
+def test_invalid_api_key_material_rejected_at_construction(
+    api_public_key: str, api_private_key: str
+) -> None:
     keypair = Keypair()
-    api_public_key, _, _ = make_api_keys()
-    signer = make_signer(str(keypair.pubkey()), api_public_key, "not-hex")
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_message(b"hello")
-    assert excinfo.value.code == SignerErrorCode.INVALID_PRIVATE_KEY
-
-
-async def test_sign_message_wrong_length_api_private_key() -> None:
-    keypair = Keypair()
-    api_public_key, _, _ = make_api_keys()
-    signer = make_signer(str(keypair.pubkey()), api_public_key, "ab" * 16)
-    with pytest.raises(SignerError) as excinfo:
-        await signer.sign_message(b"hello")
-    assert excinfo.value.code == SignerErrorCode.INVALID_PRIVATE_KEY
+        make_signer(str(keypair.pubkey()), api_public_key, api_private_key)
+    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
 @respx.mock

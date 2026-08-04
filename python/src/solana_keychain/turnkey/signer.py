@@ -32,6 +32,37 @@ DEFAULT_API_BASE_URL = "https://api.turnkey.com"
 
 SIGNATURE_COMPONENT_LENGTH = 32
 P256_PRIVATE_KEY_LENGTH = 32
+P256_COMPRESSED_PUBLIC_KEY_LENGTH = 33
+
+
+def _validate_api_key_material(private_key_hex: str, public_key_hex: str) -> None:
+    """Both keys must be valid hex; the public key must be a 33-byte compressed
+    P-256 point that decompresses to a valid curve point; the private key must be
+    32 bytes."""
+    try:
+        public_key_bytes = bytes.fromhex(public_key_hex)
+        private_key_bytes = bytes.fromhex(private_key_hex)
+    except ValueError:
+        raise SignerError(
+            SignerErrorCode.CONFIG_ERROR, "Turnkey API keys must be valid hex strings"
+        ) from None
+    if len(public_key_bytes) != P256_COMPRESSED_PUBLIC_KEY_LENGTH:
+        raise SignerError(
+            SignerErrorCode.CONFIG_ERROR,
+            f"Public key must be {P256_COMPRESSED_PUBLIC_KEY_LENGTH} bytes "
+            f"(compressed P-256 format), got {len(public_key_bytes)}",
+        )
+    if len(private_key_bytes) != P256_PRIVATE_KEY_LENGTH:
+        raise SignerError(
+            SignerErrorCode.CONFIG_ERROR,
+            f"Private key must be {P256_PRIVATE_KEY_LENGTH} bytes, got {len(private_key_bytes)}",
+        )
+    try:
+        ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), public_key_bytes)
+    except Exception:
+        raise SignerError(
+            SignerErrorCode.CONFIG_ERROR, "Public key is not a valid P-256 point"
+        ) from None
 
 
 @dataclass
@@ -62,6 +93,7 @@ class TurnkeySigner(SolanaSigner):
             raise SignerError(SignerErrorCode.INVALID_PUBLIC_KEY, "Invalid public key") from None
         api_base_url = normalize_base_url(config.api_base_url)
         assert_https_url(api_base_url, "api_base_url")
+        _validate_api_key_material(config.api_private_key, config.api_public_key)
         self._api_base_url = api_base_url
         self._api_public_key = config.api_public_key
         self._api_private_key = config.api_private_key
@@ -80,25 +112,17 @@ class TurnkeySigner(SolanaSigner):
         """Build the X-Stamp header: a P-256 ECDSA signature over the exact request
         body bytes, DER-encoded, wrapped in a base64url JSON envelope."""
         try:
-            private_key_bytes = bytes.fromhex(self._api_private_key)
-        except ValueError:
-            raise SignerError(
-                SignerErrorCode.INVALID_PRIVATE_KEY, "Failed to decode private key"
-            ) from None
-        if len(private_key_bytes) != P256_PRIVATE_KEY_LENGTH:
-            raise SignerError(SignerErrorCode.INVALID_PRIVATE_KEY, "Invalid private key length")
-        try:
             signing_key = ec.derive_private_key(
-                int.from_bytes(private_key_bytes, "big"), ec.SECP256R1()
+                int.from_bytes(bytes.fromhex(self._api_private_key), "big"), ec.SECP256R1()
             )
         except Exception:
             raise SignerError(SignerErrorCode.INVALID_PRIVATE_KEY, "Invalid signing key") from None
         der_signature = signing_key.sign(body.encode(), ec.ECDSA(hashes.SHA256()))
         stamp = json.dumps(
             {
-                "public_key": self._api_public_key,
-                "signature": der_signature.hex(),
+                "publicKey": self._api_public_key,
                 "scheme": "SIGNATURE_SCHEME_TK_API_P256",
+                "signature": der_signature.hex(),
             },
             separators=(",", ":"),
         )
