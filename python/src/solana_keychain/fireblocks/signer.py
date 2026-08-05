@@ -15,6 +15,7 @@ from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
+    ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
     classify_signed_transaction,
     serialize_transaction,
@@ -26,7 +27,6 @@ DEFAULT_ASSET_ID = "SOL"
 DEFAULT_POLL_INTERVAL_MS = 1000
 DEFAULT_MAX_POLL_ATTEMPTS = 300
 
-ED25519_SIGNATURE_LENGTH = 64
 
 _TERMINAL_FAILURE_STATUSES = frozenset({"FAILED", "CANCELLED", "REJECTED", "BLOCKED"})
 

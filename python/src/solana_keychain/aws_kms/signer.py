@@ -19,6 +19,7 @@ from solders.transaction import Transaction
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
+    ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
     classify_signed_transaction,
     serialize_transaction,
@@ -27,8 +28,6 @@ from solana_keychain.core.transaction_util import (
 AWS_KMS_SIGNING_ALGORITHM = "ED25519_SHA_512"
 AWS_KMS_KEY_SPEC = "ECC_NIST_EDWARDS25519"
 AWS_KMS_KEY_USAGE = "SIGN_VERIFY"
-
-ED25519_SIGNATURE_LENGTH = 64
 
 
 @dataclass

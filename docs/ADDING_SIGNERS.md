@@ -4,7 +4,7 @@
 
 This guide is for wallet service providers and developers who want to integrate new key management solutions into the `solana-keychain` library. By adding your signer implementation, you'll enable developers to use your service for secure Solana transaction signing through a unified interface.
 
-We strongly prefer PRs that include both [Rust](#rust) and [TypeScript](#typescript) implementations — every signer contributed so far has shipped both. If you can only contribute one, that's fine, but expect the other to be required before the signer ships in a release.
+We strongly prefer PRs that include the [Rust](#rust), [TypeScript](#typescript), and [Python](#python) implementations — the library maintains parity across all three. If you can only contribute one, that's fine, but expect the others to be required before the signer ships in a release.
 
 > **Using Claude Code?** This repo includes an `add-signer` skill (`.claude/skills/add-signer/`) that orchestrates the full workflow below — including gotchas and file ordering that this guide doesn't cover.
 
@@ -945,6 +945,97 @@ Your PR must include:
 - **`typescript-ci.yml`**: add package to unit + integration test matrices, add env vars to integration test step
 - **`typescript-publish.yml`**: add package to `PUBLISH_PACKAGES`, GitHub Release `packages` array, and summary table
 
+## Python
+
+### Quick Checklist
+
+- [ ] Create module `python/src/solana_keychain/<name>/`
+- [ ] Subclass `SolanaSigner` from `solana_keychain.core`
+- [ ] Export `async create_x_signer()` factory (awaits `init()` when the backend needs it)
+- [ ] Export a config dataclass (`XSignerConfig`) with secrets marked `field(repr=False)`
+- [ ] Enforce HTTPS on base-URL fields with `assert_https_url()`
+- [ ] Route every request through `fetch_signer_json()` so the error pipeline and sanitization apply
+- [ ] Add the backend to `_BACKENDS` in `python/src/solana_keychain/keychain.py`
+- [ ] Guard provider-SDK imports and declare an optional extra in `pyproject.toml`
+- [ ] Unit tests with pytest — `respx` for HTTP backends, stub clients for SDK backends
+- [ ] Integration test factory in `python/tests/integration/test_live_signers.py`
+- [ ] README backends table + install-extras line
+- [ ] `.env.example` with required env vars
+- [ ] CI updates (`python-ci.yml` signer gating and integration matrix)
+
+### Module Structure
+
+```
+python/src/solana_keychain/<name>/
+├── __init__.py          # Public exports
+├── signer.py            # Signer class + config dataclass + factory
+└── jwt.py / auth.py     # Auth helpers, when the provider needs them
+```
+
+Tests live at `python/tests/test_<name>_signer.py`. See
+[`python/src/solana_keychain/para/`](../python/src/solana_keychain/para/) for a
+pure-HTTP reference and
+[`python/src/solana_keychain/aws_kms/`](../python/src/solana_keychain/aws_kms/)
+for an extras-gated SDK reference.
+
+### Signer Implementation
+
+Subclass `SolanaSigner` and implement the four contract members:
+
+- `pubkey` property returning `solders.pubkey.Pubkey`
+- `async sign_transaction(transaction) -> SignedTransaction`
+- `async sign_message(message: bytes) -> Signature`
+- `async is_available() -> bool`
+
+Backends that must resolve an address remotely add `async init()` and raise
+`SIGNER_NOT_INITIALIZED` from a private `_initialized_pubkey()` helper when used
+before initialization; the factory awaits `init()` so callers never see an
+uninitialized signer.
+
+Always verify the signature the provider returns against the resolved public key
+before handing it back. For providers that rewrite the transaction before signing,
+verify against the bytes they signed — and use
+`solana_keychain.core.signed_message_bytes()`, which adds the `0x80` prefix that
+versioned-message signatures cover.
+
+### Optional Extras
+
+Backends needing a provider SDK must not break the base install. Guard the import
+and name the extra in the error:
+
+```python
+try:
+    import provider_sdk
+except ImportError as error:  # pragma: no cover
+    raise ImportError(
+        "solana_keychain.<name> requires the <name> extra: "
+        "pip install 'solana-keychain[<name>]'"
+    ) from error
+```
+
+Declare it under `[project.optional-dependencies]` in `python/pyproject.toml`,
+add the same packages to the `dev` extra so CI exercises them, and leave the
+backend out of the package root's eager exports.
+
+### Testing
+
+Unit tests must not touch the network: mock HTTP with `respx`, and inject stub
+clients for SDK-based backends (`botocore.stub.Stubber` for AWS, a hand-written
+async stub for GCP). Cover at minimum the success path with request assertions,
+each provider-specific error path, signature-verification failure, and that no
+secret appears in `str()`/`repr()`/`args` of raised errors.
+
+Integration tests are env-gated: add a `make_<name>_signer()` factory to
+`python/tests/integration/test_live_signers.py` using the same environment
+variable names as the Rust and TypeScript suites, and register it in
+`_MESSAGE_CAPABLE` (or `_TRANSACTION_ONLY` for backends without `sign_message`).
+
+### CI Updates
+
+- **`python-ci.yml`**: add the backend to the `CI_SIGNER_*` gating in
+  `resolve-signers` and to the integration matrix
+- **`python-publish.yml`**: no change needed — the package publishes as a whole
+
 ---
 
 ## Submission Checklist
@@ -959,13 +1050,15 @@ Before submitting your PR:
 - [ ] No `.expect()` or `.unwrap()` on untrusted API responses
 - [ ] HTTPS enforced on HTTP clients (Rust: `https_only(true)`, TS: URL protocol check)
 - [ ] HTTP timeouts configured via `HttpClientConfig`
-- [ ] Follows naming conventions (snake_case for Rust, camelCase for TypeScript)
+- [ ] Follows naming conventions (snake_case for Rust and Python, camelCase for TypeScript)
 - [ ] `error.rs` reqwest cfg gate updated (if using reqwest)
 - [ ] Integration test file added with standard test scenarios
 - [ ] `.env.example` updated (root + TS package)
 - [ ] Added to README.md supported backends table
 - [ ] CI changes included
 - [ ] TypeScript package with unit + integration tests
+- [ ] Python module with unit + integration tests, registered in the umbrella `_BACKENDS`
+- [ ] Python optional extra declared (if the backend needs a provider SDK)
 - [ ] Umbrella package updated (7 files — see [Umbrella Package](#umbrella-package))
 - [ ] Coordinated with maintainers on Phase 1 CI preparation
 

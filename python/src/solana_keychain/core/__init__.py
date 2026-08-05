@@ -8,6 +8,7 @@ from solana_keychain.core.http import (
 )
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
+    ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
     classify_signed_transaction,
     get_signing_keypair_position,
@@ -18,6 +19,7 @@ from solana_keychain.core.transaction_util import (
 
 __all__ = [
     "DEFAULT_REQUEST_TIMEOUT_SECONDS",
+    "ED25519_SIGNATURE_LENGTH",
     "SignedTransaction",
     "SignerError",
     "SignerErrorCode",

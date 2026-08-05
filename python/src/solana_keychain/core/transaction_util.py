@@ -11,6 +11,7 @@ from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.signer import SignedTransaction
 
 MESSAGE_VERSION_PREFIX = b"\x80"
+ED25519_SIGNATURE_LENGTH = 64
 
 
 def serialize_transaction(transaction: Transaction) -> str:

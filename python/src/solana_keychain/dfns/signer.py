@@ -13,6 +13,7 @@ from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
+    ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
     classify_signed_transaction,
     serialize_transaction,
@@ -20,8 +21,6 @@ from solana_keychain.core.transaction_util import (
 from solana_keychain.dfns.auth import sign_user_action
 
 DEFAULT_API_BASE_URL = "https://api.dfns.io"
-
-ED25519_SIGNATURE_LENGTH = 64
 
 
 @dataclass

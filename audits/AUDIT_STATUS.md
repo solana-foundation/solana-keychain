@@ -11,6 +11,12 @@ Last updated: 2026-04-03
 
 Audit scope is commit-based. Commits after the audited-through SHA are considered unaudited until a new audit or mitigation review updates this file.
 
+### Language scope
+
+The audit covered the Rust and TypeScript implementations. The Python
+implementation (`python/`) landed after the audited-through commit and is
+**entirely unaudited**, including its port of previously audited signer logic.
+
 ## Branch and Release Model
 
 - `main` is the integration branch and may contain audited and unaudited commits.

@@ -6,7 +6,7 @@
 
 ## Implementations
 
-This repository contains two implementations:
+This repository contains three implementations:
 
 ### [Rust](rust/)
 
@@ -23,6 +23,14 @@ Solana Kit compatible signer implementation for Node.js and browser environments
 - **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila
 - **Features**: Solana Kit compatible, tree-shakeable modules, full type safety
 - [View TypeScript Documentation →](typescript/README.md)
+
+### [Python](python/)
+
+Async signer library built on [`solders`](https://pypi.org/project/solders/) for canonical transaction serialization.
+
+- **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila
+- **Features**: Async/await, optional extras so heavy provider SDKs stay out of the base install, strict typing
+- [View Python Documentation →](python/README.md)
 
 ## Security Audit
 

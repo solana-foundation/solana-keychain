@@ -19,14 +19,13 @@ from solders.transaction import Transaction
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
+    ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
     classify_signed_transaction,
     serialize_transaction,
 )
 
 EC_SIGN_ED25519 = kms_v1.CryptoKeyVersion.CryptoKeyVersionAlgorithm.EC_SIGN_ED25519
-
-ED25519_SIGNATURE_LENGTH = 64
 
 
 @dataclass

@@ -44,6 +44,19 @@ jobs:
           version: 11.13.0
       - run: pnpm audit --ignore-unfixable
 
+  pip-audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - run: pip install -e '.[dev]' pip-audit
+      - run: pip-audit --skip-editable
+
   miri:
     runs-on: ubuntu-latest
     defaults:
