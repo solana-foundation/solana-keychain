@@ -111,7 +111,7 @@ async def make_para_signer() -> SolanaSigner:
 
 async def make_fireblocks_signer() -> SolanaSigner:
     from solana_keychain.fireblocks import FireblocksSignerConfig, create_fireblocks_signer
-    from solana_keychain.fireblocks.signer import DEFAULT_API_BASE_URL, DEFAULT_ASSET_ID
+    from solana_keychain.fireblocks.signer import DEFAULT_API_BASE_URL
 
     env = require_env(
         "FIREBLOCKS_API_KEY", "FIREBLOCKS_PRIVATE_KEY_PEM", "FIREBLOCKS_VAULT_ACCOUNT_ID"
@@ -121,7 +121,8 @@ async def make_fireblocks_signer() -> SolanaSigner:
             api_key=env["FIREBLOCKS_API_KEY"],
             private_key_pem=env["FIREBLOCKS_PRIVATE_KEY_PEM"],
             vault_account_id=env["FIREBLOCKS_VAULT_ACCOUNT_ID"],
-            asset_id=optional_env("FIREBLOCKS_ASSET_ID") or DEFAULT_ASSET_ID,
+            # Test vaults hold devnet assets; the library default is mainnet SOL.
+            asset_id=optional_env("FIREBLOCKS_ASSET_ID") or "SOL_TEST",
             api_base_url=optional_env("FIREBLOCKS_API_BASE_URL") or DEFAULT_API_BASE_URL,
         )
     )

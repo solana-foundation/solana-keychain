@@ -130,6 +130,7 @@ jobs:
       run:
         working-directory: python
     strategy:
+      fail-fast: false
       matrix:
         backend: ${{ fromJSON(needs.resolve-signers.outputs.python_integration_backends_json) }}
     steps:
