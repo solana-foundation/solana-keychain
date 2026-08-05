@@ -48,7 +48,7 @@ pub struct FordefiSignerConfig {
     pub public_key: String,
     /// Optional API base URL (default: "https://api.fordefi.com")
     pub api_base_url: Option<String>,
-    /// Polling interval in milliseconds (default: 2000)
+    /// Non-zero polling interval in milliseconds (default: 2000)
     pub poll_interval_ms: Option<u64>,
     /// Non-zero max polling attempts (default: 50)
     pub max_poll_attempts: Option<u32>,
@@ -180,6 +180,13 @@ impl FordefiSigner {
             ));
         }
 
+        let poll_interval_ms = config.poll_interval_ms.unwrap_or(DEFAULT_POLL_INTERVAL_MS);
+        if poll_interval_ms == 0 {
+            return Err(SignerError::ConfigError(
+                "poll_interval_ms must be greater than zero".to_string(),
+            ));
+        }
+
         let max_poll_attempts = config
             .max_poll_attempts
             .unwrap_or(DEFAULT_MAX_POLL_ATTEMPTS);
@@ -211,7 +218,7 @@ impl FordefiSigner {
             api_base_url,
             client,
             public_key,
-            poll_interval_ms: config.poll_interval_ms.unwrap_or(DEFAULT_POLL_INTERVAL_MS),
+            poll_interval_ms,
             max_poll_attempts,
             chain: config.chain,
             fee: config.fee,
@@ -444,14 +451,19 @@ impl FordefiSigner {
     // Signing paths
     // -----------------------------------------------------------------------
 
+    /// Sign raw bytes via the black box path: submit → poll → extract signature.
+    async fn sign_black_box(&self, data: &[u8]) -> Result<Signature, SignerError> {
+        let tx_id = self.submit_black_box_signature(data).await?;
+        self.poll_for_signature(&tx_id).await
+    }
+
     /// Sign a transaction via the black box path: submit → poll → apply signature.
     async fn sign_and_serialize_black_box(
         &self,
         transaction: &mut Transaction,
     ) -> Result<SignedTransaction, SignerError> {
         let message_data = transaction.message_data();
-        let tx_id = self.submit_black_box_signature(&message_data).await?;
-        let signature = self.poll_for_signature(&tx_id).await?;
+        let signature = self.sign_black_box(&message_data).await?;
 
         if !signature.verify(&self.public_key.to_bytes(), &message_data) {
             return Err(SignerError::SigningFailed(
@@ -704,12 +716,12 @@ impl SolanaSigner for FordefiSigner {
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        let tx_id = if self.chain.is_some() {
-            self.submit_solana_message(message).await?
+        let signature = if self.chain.is_some() {
+            let tx_id = self.submit_solana_message(message).await?;
+            self.poll_for_signature(&tx_id).await?
         } else {
-            self.submit_black_box_signature(message).await?
+            self.sign_black_box(message).await?
         };
-        let signature = self.poll_for_signature(&tx_id).await?;
 
         if !signature.verify(&self.public_key.to_bytes(), message) {
             return Err(SignerError::SigningFailed(
@@ -772,27 +784,38 @@ mod tests {
         FordefiSigner::build(config)
     }
 
-    fn verified_test_config(base_url: &str, public_key: Pubkey) -> FordefiSignerConfig {
+    fn base_test_config() -> FordefiSignerConfig {
         FordefiSignerConfig {
             access_token: "test-token".to_string(),
             vault_id: "test-vault-id".to_string(),
             private_key_pem: Some(test_pem_key()),
             request_signer: None,
-            public_key: public_key.to_string(),
-            api_base_url: Some(base_url.to_string()),
-            poll_interval_ms: Some(10),
-            max_poll_attempts: Some(3),
+            public_key: "11111111111111111111111111111111".to_string(),
+            api_base_url: None,
+            poll_interval_ms: None,
+            max_poll_attempts: None,
             http_client_config: None,
             chain: None,
             fee: None,
         }
     }
 
-    /// Build a black-box FordefiSigner for tests, backed by `request_signer`.
+    fn verified_test_config(base_url: &str, public_key: Pubkey) -> FordefiSignerConfig {
+        FordefiSignerConfig {
+            public_key: public_key.to_string(),
+            api_base_url: Some(base_url.to_string()),
+            poll_interval_ms: Some(10),
+            max_poll_attempts: Some(3),
+            ..base_test_config()
+        }
+    }
+
+    /// Build a FordefiSigner for tests with the given request signer and chain.
     fn create_test_signer_with(
         base_url: &str,
         pubkey: Pubkey,
         request_signer: Arc<dyn FordefiRequestSigner>,
+        chain: Option<SolanaChainUniqueId>,
     ) -> FordefiSigner {
         FordefiSigner {
             access_token: "test-token".to_string(),
@@ -803,30 +826,24 @@ mod tests {
             public_key: pubkey,
             poll_interval_ms: 10,
             max_poll_attempts: 3,
-            chain: None,
+            chain,
             fee: None,
         }
     }
 
     /// Helper to build a black-box FordefiSigner for tests with a mock server URL.
     fn create_test_signer(base_url: &str, pubkey: Pubkey) -> FordefiSigner {
-        create_test_signer_with(base_url, pubkey, test_request_signer())
+        create_test_signer_with(base_url, pubkey, test_request_signer(), None)
     }
 
     /// Helper to build a native-Solana FordefiSigner for tests.
     fn create_native_test_signer(base_url: &str, pubkey: Pubkey) -> FordefiSigner {
-        FordefiSigner {
-            access_token: "test-token".to_string(),
-            vault_id: "test-vault-id".to_string(),
-            request_signer: test_request_signer(),
-            api_base_url: base_url.to_string(),
-            client: reqwest::Client::builder().build().unwrap(),
-            public_key: pubkey,
-            poll_interval_ms: 10,
-            max_poll_attempts: 3,
-            chain: Some(SolanaChainUniqueId::SolanaMainnet),
-            fee: None,
-        }
+        create_test_signer_with(
+            base_url,
+            pubkey,
+            test_request_signer(),
+            Some(SolanaChainUniqueId::SolanaMainnet),
+        )
     }
 
     /// Build a mock wire transaction: [1 byte sig_count][64-byte signature][message bytes]
@@ -844,19 +861,9 @@ mod tests {
 
     #[test]
     fn test_fordefi_config_empty_access_token() {
-        let pem = test_pem_key();
         let result = build_test_signer_from_config(FordefiSignerConfig {
-            access_token: "".to_string(),
-            vault_id: "vault-id".to_string(),
-            private_key_pem: Some(pem),
-            request_signer: None,
-            public_key: "11111111111111111111111111111111".to_string(),
-            api_base_url: None,
-            poll_interval_ms: None,
-            max_poll_attempts: None,
-            http_client_config: None,
-            chain: None,
-            fee: None,
+            access_token: String::new(),
+            ..base_test_config()
         });
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
@@ -864,19 +871,9 @@ mod tests {
 
     #[test]
     fn test_fordefi_config_empty_vault_id() {
-        let pem = test_pem_key();
         let result = build_test_signer_from_config(FordefiSignerConfig {
-            access_token: "token".to_string(),
-            vault_id: "".to_string(),
-            private_key_pem: Some(pem),
-            request_signer: None,
-            public_key: "11111111111111111111111111111111".to_string(),
-            api_base_url: None,
-            poll_interval_ms: None,
-            max_poll_attempts: None,
-            http_client_config: None,
-            chain: None,
-            fee: None,
+            vault_id: String::new(),
+            ..base_test_config()
         });
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
@@ -885,17 +882,8 @@ mod tests {
     #[test]
     fn test_fordefi_config_invalid_pem() {
         let result = build_test_signer_from_config(FordefiSignerConfig {
-            access_token: "token".to_string(),
-            vault_id: "vault-id".to_string(),
             private_key_pem: Some("not-a-valid-pem".to_string()),
-            request_signer: None,
-            public_key: "11111111111111111111111111111111".to_string(),
-            api_base_url: None,
-            poll_interval_ms: None,
-            max_poll_attempts: None,
-            http_client_config: None,
-            chain: None,
-            fee: None,
+            ..base_test_config()
         });
         assert!(result.is_err());
         assert!(matches!(
@@ -906,19 +894,9 @@ mod tests {
 
     #[test]
     fn test_fordefi_config_invalid_pubkey() {
-        let pem = test_pem_key();
         let result = build_test_signer_from_config(FordefiSignerConfig {
-            access_token: "token".to_string(),
-            vault_id: "vault-id".to_string(),
-            private_key_pem: Some(pem),
-            request_signer: None,
             public_key: "not-a-pubkey".to_string(),
-            api_base_url: None,
-            poll_interval_ms: None,
-            max_poll_attempts: None,
-            http_client_config: None,
-            chain: None,
-            fee: None,
+            ..base_test_config()
         });
         assert!(result.is_err());
         assert!(matches!(
@@ -929,19 +907,9 @@ mod tests {
 
     #[test]
     fn test_fordefi_config_rejects_http_url() {
-        let pem = test_pem_key();
         let result = build_test_signer_from_config(FordefiSignerConfig {
-            access_token: "token".to_string(),
-            vault_id: "vault-id".to_string(),
-            private_key_pem: Some(pem),
-            request_signer: None,
-            public_key: "11111111111111111111111111111111".to_string(),
             api_base_url: Some("http://insecure.example.com".to_string()),
-            poll_interval_ms: None,
-            max_poll_attempts: None,
-            http_client_config: None,
-            chain: None,
-            fee: None,
+            ..base_test_config()
         });
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
@@ -950,17 +918,8 @@ mod tests {
     #[test]
     fn test_fordefi_config_rejects_malformed_https_url() {
         let result = build_test_signer_from_config(FordefiSignerConfig {
-            access_token: "token".to_string(),
-            vault_id: "vault-id".to_string(),
-            private_key_pem: Some(test_pem_key()),
-            request_signer: None,
-            public_key: "11111111111111111111111111111111".to_string(),
             api_base_url: Some("https://".to_string()),
-            poll_interval_ms: None,
-            max_poll_attempts: None,
-            http_client_config: None,
-            chain: None,
-            fee: None,
+            ..base_test_config()
         });
 
         assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
@@ -968,86 +927,51 @@ mod tests {
 
     #[test]
     fn test_fordefi_config_fee_without_chain_rejected() {
-        let pem = test_pem_key();
         let result = build_test_signer_from_config(FordefiSignerConfig {
-            access_token: "token".to_string(),
-            vault_id: "vault-id".to_string(),
-            private_key_pem: Some(pem),
-            request_signer: None,
-            public_key: "11111111111111111111111111111111".to_string(),
-            api_base_url: None,
-            poll_interval_ms: None,
-            max_poll_attempts: None,
-            http_client_config: None,
-            chain: None,
             fee: Some(FordefiSolanaFee::Priority {
                 priority_level: FordefiPriorityLevel::High,
             }),
+            ..base_test_config()
         });
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
     }
 
     #[test]
-    fn test_fordefi_config_zero_max_poll_attempts_rejected() {
-        let pem = test_pem_key();
-        let keypair = create_test_keypair();
+    fn test_fordefi_config_zero_poll_interval_rejected() {
         let result = build_test_signer_from_config(FordefiSignerConfig {
-            access_token: "token".to_string(),
-            vault_id: "vault-id".to_string(),
-            private_key_pem: Some(pem),
-            request_signer: None,
-            public_key: keypair_pubkey(&keypair).to_string(),
-            api_base_url: None,
-            poll_interval_ms: None,
+            poll_interval_ms: Some(0),
+            ..base_test_config()
+        });
+        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+    }
+
+    #[test]
+    fn test_fordefi_config_zero_max_poll_attempts_rejected() {
+        let result = build_test_signer_from_config(FordefiSignerConfig {
             max_poll_attempts: Some(0),
-            http_client_config: None,
-            chain: None,
-            fee: None,
+            ..base_test_config()
         });
         assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
     }
 
     #[test]
     fn test_fordefi_config_with_chain_valid() {
-        let pem = test_pem_key();
-        let keypair = create_test_keypair();
-        let pubkey_str = keypair_pubkey(&keypair).to_string();
-
         let result = build_test_signer_from_config(FordefiSignerConfig {
-            access_token: "token".to_string(),
-            vault_id: "vault-id".to_string(),
-            private_key_pem: Some(pem),
-            request_signer: None,
-            public_key: pubkey_str,
-            api_base_url: None,
-            poll_interval_ms: None,
-            max_poll_attempts: None,
-            http_client_config: None,
             chain: Some(SolanaChainUniqueId::SolanaDevnet),
-            fee: None,
+            ..base_test_config()
         });
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_fordefi_config_valid() {
-        let pem = test_pem_key();
         let keypair = create_test_keypair();
         let pubkey_str = keypair_pubkey(&keypair).to_string();
 
         let result = build_test_signer_from_config(FordefiSignerConfig {
-            access_token: "token".to_string(),
-            vault_id: "vault-id".to_string(),
-            private_key_pem: Some(pem),
-            request_signer: None,
             public_key: pubkey_str,
-            api_base_url: None,
-            poll_interval_ms: None,
-            max_poll_attempts: None,
-            http_client_config: None,
-            chain: None,
-            fee: None,
+            ..base_test_config()
         });
         assert!(result.is_ok());
         let signer = result.unwrap();
@@ -1057,19 +981,9 @@ mod tests {
 
     #[test]
     fn test_fordefi_config_strips_trailing_slash() {
-        let pem = test_pem_key();
         let result = build_test_signer_from_config(FordefiSignerConfig {
-            access_token: "token".to_string(),
-            vault_id: "vault-id".to_string(),
-            private_key_pem: Some(pem),
-            request_signer: None,
-            public_key: "11111111111111111111111111111111".to_string(),
             api_base_url: Some("https://custom.api.com/".to_string()),
-            poll_interval_ms: None,
-            max_poll_attempts: None,
-            http_client_config: None,
-            chain: None,
-            fee: None,
+            ..base_test_config()
         });
         assert!(result.is_ok());
         assert_eq!(result.unwrap().api_base_url, "https://custom.api.com");
@@ -1576,8 +1490,12 @@ mod tests {
     async fn test_fordefi_is_available_checks_request_signer() {
         let mock_server = MockServer::start().await;
         let public_key = keypair_pubkey(&create_test_keypair());
-        let signer =
-            create_test_signer_with(&mock_server.uri(), public_key, Arc::new(FailingSigner));
+        let signer = create_test_signer_with(
+            &mock_server.uri(),
+            public_key,
+            Arc::new(FailingSigner),
+            None,
+        );
 
         Mock::given(method("GET"))
             .and(path_regex("/api/v1/vaults/.*"))
@@ -1966,6 +1884,7 @@ mod tests {
             &mock_server.uri(),
             pubkey,
             Arc::new(CannedSigner("canned-sig-value")),
+            None,
         );
 
         let message = b"custom signer message";
@@ -2007,7 +1926,8 @@ mod tests {
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
         let pubkey = keypair_pubkey(&keypair);
-        let signer = create_test_signer_with(&mock_server.uri(), pubkey, Arc::new(FailingSigner));
+        let signer =
+            create_test_signer_with(&mock_server.uri(), pubkey, Arc::new(FailingSigner), None);
 
         // Signing fails before any HTTP request is made, so no mock is needed.
         let result = signer.sign_message(b"test").await;
@@ -2069,17 +1989,10 @@ mod tests {
     #[test]
     fn test_fordefi_custom_request_signer_still_validates_config() {
         let result = FordefiSigner::build(FordefiSignerConfig {
-            access_token: "".to_string(),
-            vault_id: "vault-id".to_string(),
+            access_token: String::new(),
             private_key_pem: None,
             request_signer: Some(Arc::new(CannedSigner("x"))),
-            public_key: "11111111111111111111111111111111".to_string(),
-            api_base_url: None,
-            poll_interval_ms: None,
-            max_poll_attempts: None,
-            http_client_config: None,
-            chain: None,
-            fee: None,
+            ..base_test_config()
         });
 
         assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));

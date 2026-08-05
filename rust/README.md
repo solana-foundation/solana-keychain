@@ -29,6 +29,7 @@
 | **Crossmint** | Crossmint managed wallets (`smart` and `mpc`) | `crossmint` |
 | **Openfort** | Openfort backend wallets with TEE-stored keys | `openfort` |
 | **Utila** | Utila MPC wallets and automated co-signer flow | `utila` |
+| **Fordefi** | Fordefi institutional MPC custody with black-box and native Solana signing | `fordefi` |
 
 ## Installation
 
