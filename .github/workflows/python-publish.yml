@@ -70,11 +70,19 @@ jobs:
       - name: Check version is not already on PyPI
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          if pip index versions solana-keychain 2>/dev/null | grep -q "$VERSION"; then
-            echo "::error::solana-keychain $VERSION is already published to PyPI"
-            exit 1
-          fi
-          echo "✓ $VERSION is not yet on PyPI"
+          STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
+            "https://pypi.org/pypi/solana-keychain/${VERSION}/json")
+          case "$STATUS" in
+            404) echo "✓ $VERSION is not yet on PyPI" ;;
+            200)
+              echo "::error::solana-keychain $VERSION is already published to PyPI"
+              exit 1
+              ;;
+            *)
+              echo "::error::PyPI returned HTTP $STATUS querying solana-keychain $VERSION"
+              exit 1
+              ;;
+          esac
 
       - name: Check if prerelease
         id: prerelease
@@ -104,12 +112,12 @@ jobs:
 
           TAG="python-v${{ steps.version.outputs.version }}"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "· tag $TAG already exists, skipping"
+            echo "· tag $TAG already exists locally"
           else
             git tag "$TAG"
             echo "✓ created tag $TAG"
           fi
-          git push origin "$TAG" 2>/dev/null || echo "· tag already pushed"
+          git push origin "$TAG"
 
       - name: Publish to PyPI
         if: ${{ github.event.inputs.publish-to-pypi == 'true' }}
