@@ -11,14 +11,18 @@ means the environment is misconfigured, not that the signer works.
 
 import os
 
+import httpx
 import pytest
+from solders.hash import Hash
 from solders.keypair import Keypair
+from solders.message import Message
 from solders.pubkey import Pubkey
+from solders.transaction import Transaction
 
 from solana_keychain.core.signer import SolanaSigner
-from tests.util import create_test_transaction
 
 REQUIRE_RUN_ENV = "KEYCHAIN_INTEGRATION_REQUIRE_RUN"
+DEFAULT_RPC_URL = "https://api.devnet.solana.com"
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
@@ -56,8 +60,29 @@ async def assert_message_roundtrip(signer: SolanaSigner) -> None:
     assert signature.verify(signer.pubkey, message)
 
 
+async def fetch_latest_blockhash() -> Hash:
+    """A live blockhash is required: services reject or silently replace a stale one,
+    and a replaced blockhash changes the message bytes the signature must cover."""
+    rpc_url = os.environ.get("SOLANA_RPC_URL", DEFAULT_RPC_URL)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            rpc_url,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getLatestBlockhash",
+                "params": [{"commitment": "finalized"}],
+            },
+        )
+    response.raise_for_status()
+    return Hash.from_string(response.json()["result"]["value"]["blockhash"])
+
+
 async def assert_transaction_roundtrip(signer: SolanaSigner) -> None:
-    transaction = create_test_transaction(signer.pubkey, to_pubkey=_burner_recipient())
+    # An instruction-free transaction keeps this focused on remote signing rather
+    # than balances or program execution.
+    message = Message.new_with_blockhash([], signer.pubkey, await fetch_latest_blockhash())
+    transaction = Transaction.new_unsigned(message)
     result = await signer.sign_transaction(transaction)
     assert result.is_complete
     assert result.signature.verify(signer.pubkey, transaction.message_data())
