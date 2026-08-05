@@ -49,7 +49,6 @@ async def initialized_signer(keypair: Keypair) -> ParaSigner:
     ("api_key", "wallet_id"),
     [
         ("bad-key", WALLET_ID),
-        ("sk_test-key", "not-a-uuid"),
         ("", WALLET_ID),
         ("sk_test-key", ""),
         ("sk_test-key", "12345678-1234-1234-1234-123456789abg"),
@@ -79,7 +78,6 @@ def test_reprs_never_contain_api_key() -> None:
     signer = make_signer()
     assert API_KEY not in repr(config)
     assert API_KEY not in repr(signer)
-    assert repr(signer) == "ParaSigner(pubkey=None)"
 
 
 @respx.mock

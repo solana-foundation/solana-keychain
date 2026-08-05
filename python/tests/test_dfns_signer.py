@@ -268,24 +268,13 @@ async def test_sign_message_accepts_0x_prefixed_components() -> None:
 
 
 @respx.mock
-@pytest.mark.parametrize(
-    ("status", "signature"),
-    [
-        ("Failed", None),
-        ("Pending", None),
-        ("Signed", None),
-    ],
-)
-async def test_sign_message_bad_status_or_missing_components(
-    status: str, signature: dict[str, str] | None
-) -> None:
+@pytest.mark.parametrize("status", ["Failed", "Pending", "Signed"])
+async def test_sign_message_bad_status_or_missing_components(status: str) -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     mock_user_action_flow()
     respx.post(SIGNATURES_URL).mock(
-        return_value=httpx.Response(
-            200, json={"id": "sig-1", "status": status, "signature": signature}
-        )
+        return_value=httpx.Response(200, json={"id": "sig-1", "status": status, "signature": None})
     )
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_message(b"hello")

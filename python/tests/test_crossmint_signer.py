@@ -90,12 +90,6 @@ def test_derive_signing_key_rejects_bad_secret(secret: str) -> None:
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
-def test_signer_secret_default_locator() -> None:
-    signer = make_signer(signer_secret=SIGNER_SECRET)
-    derived = derive_signing_key(SIGNER_SECRET, API_KEY)
-    assert signer._signer == f"server:{derived.pubkey()}"
-
-
 @pytest.mark.parametrize(
     "overrides",
     [

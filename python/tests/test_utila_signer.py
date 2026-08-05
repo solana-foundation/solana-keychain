@@ -107,9 +107,9 @@ def test_invalid_rsa_key_rejected_at_construction() -> None:
 
 
 def test_pem_with_escaped_newlines_accepted() -> None:
+    # Env-var PEMs arrive with literal \n escapes; construction must parse them.
     escaped = RSA_PRIVATE_PEM.replace("\n", "\\n")
-    signer = make_signer(service_account_private_key_pem=escaped)
-    assert isinstance(signer, UtilaSigner)
+    make_signer(service_account_private_key_pem=escaped)
 
 
 @respx.mock

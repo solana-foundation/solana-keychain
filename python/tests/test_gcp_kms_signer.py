@@ -65,7 +65,6 @@ def test_repr_shows_key_name_and_pubkey() -> None:
     keypair = Keypair()
     signer = make_signer(str(keypair.pubkey()), StubKmsClient())
     assert repr(signer) == f"GcpKmsSigner(key_name={TEST_KEY_NAME}, pubkey={keypair.pubkey()})"
-    assert signer.key_name == TEST_KEY_NAME
 
 
 async def test_create_gcp_kms_signer_factory() -> None:

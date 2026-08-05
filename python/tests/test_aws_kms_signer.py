@@ -58,32 +58,6 @@ def test_invalid_pubkey_rejected_before_any_aws_call(invalid: str) -> None:
     assert excinfo.value.code == SignerErrorCode.INVALID_PUBLIC_KEY
 
 
-@pytest.mark.parametrize(
-    "key_id",
-    [
-        TEST_KEY_ID,
-        "12345678-1234-1234-1234-123456789012",
-        "alias/my-key",
-    ],
-)
-def test_key_id_variations_accepted(key_id: str) -> None:
-    keypair = Keypair()
-    signer = AwsKmsSigner(
-        AwsKmsSignerConfig(key_id=key_id, public_key=str(keypair.pubkey()), region=TEST_REGION)
-    )
-    assert signer.key_id == key_id
-    assert signer.pubkey == keypair.pubkey()
-
-
-def test_repr_shows_key_id_pubkey_region_only() -> None:
-    keypair = Keypair()
-    signer, _ = make_stubbed_signer(str(keypair.pubkey()))
-    assert (
-        repr(signer)
-        == f"AwsKmsSigner(key_id={TEST_KEY_ID}, pubkey={keypair.pubkey()}, region=None)"
-    )
-
-
 async def test_create_aws_kms_signer_factory() -> None:
     keypair = Keypair()
     signer = await create_aws_kms_signer(

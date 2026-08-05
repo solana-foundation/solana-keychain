@@ -45,12 +45,10 @@ def test_repr_shows_pubkey_only() -> None:
 
 
 async def test_sign_message() -> None:
-    signature = await create_test_signer().sign_message(b"Hello Solana!")
-    assert len(bytes(signature)) == 64
-
-
-async def test_is_available() -> None:
-    assert await create_test_signer().is_available()
+    signer = create_test_signer()
+    message = b"Hello Solana!"
+    signature = await signer.sign_message(message)
+    assert signature.verify(signer.pubkey, message)
 
 
 async def test_sign_transaction() -> None:

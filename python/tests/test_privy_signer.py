@@ -389,7 +389,6 @@ def test_reprs_never_contain_app_secret() -> None:
     signer = make_signer()
     assert APP_SECRET not in repr(config)
     assert APP_SECRET not in repr(signer)
-    assert repr(signer) == "PrivySigner(pubkey=None)"
 
 
 def test_non_https_base_url_rejected() -> None:

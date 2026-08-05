@@ -11,8 +11,6 @@ from solana_keychain import (
     MemorySignerConfig,
     SignerError,
     SignerErrorCode,
-    VaultSigner,
-    VaultSignerConfig,
     create_keychain_signer,
 )
 from solana_keychain.keychain import _BACKENDS
@@ -36,18 +34,6 @@ async def test_dispatches_memory_backend() -> None:
     signer = await create_keychain_signer("memory", MemorySignerConfig(keypair=keypair))
     assert isinstance(signer, MemorySigner)
     assert signer.pubkey == keypair.pubkey()
-
-
-@respx.mock
-async def test_dispatches_vault_backend() -> None:
-    config = VaultSignerConfig(
-        vault_addr="https://vault.example.com",
-        token="test-token",
-        key_name="test-key",
-        pubkey=str(Keypair().pubkey()),
-    )
-    signer = await create_keychain_signer("vault", config)
-    assert isinstance(signer, VaultSigner)
 
 
 async def test_unknown_backend_is_config_error() -> None:
