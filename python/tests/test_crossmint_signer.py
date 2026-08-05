@@ -347,16 +347,17 @@ async def test_awaiting_approval_with_no_matching_entry_fails() -> None:
 
 
 @respx.mock
-async def test_rewritten_transaction_signature_is_rejected() -> None:
+async def test_rewritten_transaction_signature_is_accepted() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
 
-    # The service returns a validly-signed transaction whose message differs from
-    # the one the caller submitted (same payer, rewritten contents).
+    # Crossmint rewrites the transaction before signing (gas sponsorship, priority
+    # fee, its own blockhash), so the returned signature covers its bytes.
     rewritten = create_test_transaction(keypair.pubkey())
     assert rewritten.message_data() != transaction.message_data()
-    rewritten.signatures = [keypair.sign_message(rewritten.message_data())]
+    expected_signature = keypair.sign_message(rewritten.message_data())
+    rewritten.signatures = [expected_signature]
 
     respx.post(TRANSACTIONS_URL).mock(
         return_value=httpx.Response(
@@ -364,6 +365,29 @@ async def test_rewritten_transaction_signature_is_rejected() -> None:
             json=tx_response(
                 "success",
                 onChain={"transaction": base58.b58encode(bytes(rewritten)).decode()},
+            ),
+        )
+    )
+
+    result = await signer.sign_transaction(transaction)
+    assert result.signature == expected_signature
+
+
+@respx.mock
+async def test_signature_not_covering_returned_transaction_is_rejected() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    transaction = create_test_transaction(keypair.pubkey())
+
+    returned = create_test_transaction(keypair.pubkey())
+    returned.signatures = [keypair.sign_message(b"unrelated bytes")]
+
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=tx_response(
+                "success",
+                onChain={"transaction": base58.b58encode(bytes(returned)).decode()},
             ),
         )
     )
