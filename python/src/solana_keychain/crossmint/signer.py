@@ -20,6 +20,7 @@ from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
     serialize_transaction,
+    signed_message_bytes,
 )
 from solana_keychain.crossmint.derive import derive_signing_key
 
@@ -360,7 +361,7 @@ class CrossmintSigner(SolanaSigner):
         # (gas sponsorship, priority fee, its own blockhash) and broadcasts
         # server-side, so a strict check against caller bytes rejects legitimately
         # landed transactions.
-        self._verify_signature_matches_message(signature, bytes(message))
+        self._verify_signature_matches_message(signature, signed_message_bytes(message))
         return signature
 
     def _extract_signature_from_response(

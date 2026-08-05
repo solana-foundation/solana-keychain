@@ -1,6 +1,7 @@
 import base64
 
 import pytest
+from solders.hash import Hash
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.signature import Signature
@@ -81,3 +82,31 @@ def test_serialize_transaction_round_trips_through_bincode() -> None:
 
     assert decoded == transaction
     assert Signature.default() not in decoded.signatures
+
+
+def test_signed_message_bytes_prefixes_versioned_messages() -> None:
+    from solders.instruction import AccountMeta, Instruction
+    from solders.message import MessageV0
+    from solders.transaction import VersionedTransaction
+
+    from solana_keychain.core import signed_message_bytes
+
+    keypair = Keypair()
+    instruction = Instruction(
+        Pubkey.from_bytes(bytes(32)), b"", [AccountMeta(keypair.pubkey(), True, True)]
+    )
+    message = MessageV0.try_compile(keypair.pubkey(), [instruction], [], Hash.default())
+    signature = list(VersionedTransaction(message, [keypair]).signatures)[0]
+
+    # A v0 signature covers 0x80 ‖ serialization, which bytes(message) omits.
+    assert signed_message_bytes(message) == b"\x80" + bytes(message)
+    assert signature.verify(keypair.pubkey(), signed_message_bytes(message))
+    assert not signature.verify(keypair.pubkey(), bytes(message))
+
+
+def test_signed_message_bytes_leaves_legacy_messages_unchanged() -> None:
+    from solana_keychain.core import signed_message_bytes
+
+    keypair = Keypair()
+    transaction = create_test_transaction(keypair.pubkey())
+    assert signed_message_bytes(transaction.message) == transaction.message_data()

@@ -28,6 +28,7 @@ from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
     serialize_transaction,
+    signed_message_bytes,
 )
 
 DEFAULT_API_BASE_URL = "https://api.utila.io"
@@ -311,7 +312,7 @@ class UtilaSigner(SolanaSigner):
             ) from None
 
         message = transaction.message
-        if bytes(message) != expected_message:
+        if signed_message_bytes(message) != expected_message:
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED,
                 "Utila returned a signed transaction with different message bytes",

@@ -13,6 +13,7 @@ from solana_keychain.core.transaction_util import (
     get_signing_keypair_position,
     has_all_required_signatures,
     serialize_transaction,
+    signed_message_bytes,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "normalize_base_url",
     "sanitize_remote_error_response",
     "serialize_transaction",
+    "signed_message_bytes",
 ]

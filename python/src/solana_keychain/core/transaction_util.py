@@ -2,12 +2,15 @@
 
 import base64
 
+from solders.message import Message, MessageV0
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import Transaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.signer import SignedTransaction
+
+MESSAGE_VERSION_PREFIX = b"\x80"
 
 
 def serialize_transaction(transaction: Transaction) -> str:
@@ -19,6 +22,18 @@ def serialize_transaction(transaction: Transaction) -> str:
             SignerErrorCode.SERIALIZATION_ERROR, f"Failed to serialize transaction: {error}"
         ) from None
     return base64.b64encode(raw).decode("ascii")
+
+
+def signed_message_bytes(message: Message | MessageV0) -> bytes:
+    """The bytes a signature over ``message`` actually covers.
+
+    A v0 message is signed with a ``0x80`` version prefix that its serialization
+    omits; a legacy message is signed as-is.
+    """
+    serialized = bytes(message)
+    if isinstance(message, MessageV0):
+        return MESSAGE_VERSION_PREFIX + serialized
+    return serialized
 
 
 def get_signing_keypair_position(transaction: Transaction, pubkey: Pubkey) -> int:
