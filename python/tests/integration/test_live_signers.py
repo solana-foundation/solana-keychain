@@ -282,11 +282,18 @@ async def test_live_sign_message(backend: str) -> None:
     await assert_message_roundtrip(signer)
 
 
+# Broadcast-managed services rewrite the transaction before signing, so their
+# signature covers their bytes rather than the caller's.
+_REWRITES_TRANSACTION = frozenset({"crossmint"})
+
+
 @pytest.mark.parametrize("backend", sorted(_ALL_BACKENDS))
 async def test_live_sign_transaction(backend: str) -> None:
     _skip_unless_selected(backend)
     signer = await _ALL_BACKENDS[backend]()
-    await assert_transaction_roundtrip(signer)
+    await assert_transaction_roundtrip(
+        signer, signs_caller_bytes=backend not in _REWRITES_TRANSACTION
+    )
 
 
 @pytest.mark.parametrize("backend", sorted(_ALL_BACKENDS))

@@ -9,14 +9,13 @@ do) to fail the session when every selected test skipped — an all-skipped run
 means the environment is misconfigured, not that the signer works.
 """
 
+import base64
 import os
 
 import httpx
 import pytest
 from solders.hash import Hash
-from solders.keypair import Keypair
 from solders.message import Message
-from solders.pubkey import Pubkey
 from solders.transaction import Transaction
 
 from solana_keychain.core.signer import SolanaSigner
@@ -78,15 +77,23 @@ async def fetch_latest_blockhash() -> Hash:
     return Hash.from_string(response.json()["result"]["value"]["blockhash"])
 
 
-async def assert_transaction_roundtrip(signer: SolanaSigner) -> None:
-    # An instruction-free transaction keeps this focused on remote signing rather
-    # than balances or program execution.
+async def assert_transaction_roundtrip(
+    signer: SolanaSigner, *, signs_caller_bytes: bool = True
+) -> None:
+    """An instruction-free transaction keeps this focused on remote signing rather
+    than balances or program execution.
+
+    ``signs_caller_bytes=False`` for broadcast-managed services that rewrite the
+    transaction before signing: their signature covers their own bytes, so only
+    its shape and the encoded result can be checked. Each signer verifies the
+    signature against the bytes it actually covers internally.
+    """
     message = Message.new_with_blockhash([], signer.pubkey, await fetch_latest_blockhash())
     transaction = Transaction.new_unsigned(message)
     result = await signer.sign_transaction(transaction)
+
     assert result.is_complete
-    assert result.signature.verify(signer.pubkey, transaction.message_data())
-
-
-def _burner_recipient() -> Pubkey:
-    return Keypair().pubkey()
+    assert len(bytes(result.signature)) == 64
+    assert Transaction.from_bytes(base64.b64decode(result.encoded_transaction))
+    if signs_caller_bytes:
+        assert result.signature.verify(signer.pubkey, transaction.message_data())
