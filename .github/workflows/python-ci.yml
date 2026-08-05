@@ -164,4 +164,5 @@ jobs:
         env:
           SOLANA_RPC_URL: https://api.devnet.solana.com
           KEYCHAIN_INTEGRATION_REQUIRE_RUN: '1'
-        run: pytest -m integration tests/integration/test_live_signers.py -k "$(echo '${{ matrix.backend }}' | tr '-' '_')"
+          KEYCHAIN_INTEGRATION_BACKEND: ${{ matrix.backend }}
+        run: pytest -m integration tests/integration/test_live_signers.py

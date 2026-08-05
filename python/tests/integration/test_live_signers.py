@@ -1,6 +1,13 @@
 """Live integration tests for the remote backends, driven by the same environment
 variables as the repo's other integration suites. Each backend skips itself when
-its variables are absent."""
+its variables are absent.
+
+``KEYCHAIN_INTEGRATION_BACKEND`` restricts the run to a single backend (used by
+the CI matrix). Selection deliberately avoids ``pytest -k``: a ``-k`` expression
+substring-matches marker keywords, and every test here carries ``parametrize``.
+"""
+
+import os
 
 import pytest
 
@@ -235,28 +242,32 @@ _TRANSACTION_ONLY = {
 }
 
 
-def _test_id(backend: str) -> str:
-    # pytest -k cannot express hyphens; ids use underscores so CI can select
-    # one backend per matrix job.
-    return backend.replace("-", "_")
-
-
 _ALL_BACKENDS = _MESSAGE_CAPABLE | _TRANSACTION_ONLY
 
+_SELECTED_BACKEND = os.environ.get("KEYCHAIN_INTEGRATION_BACKEND", "")
 
-@pytest.mark.parametrize("backend", sorted(_MESSAGE_CAPABLE), ids=_test_id)
+
+def _skip_unless_selected(backend: str) -> None:
+    if _SELECTED_BACKEND and backend != _SELECTED_BACKEND:
+        pytest.skip(f"KEYCHAIN_INTEGRATION_BACKEND={_SELECTED_BACKEND} excludes {backend}")
+
+
+@pytest.mark.parametrize("backend", sorted(_MESSAGE_CAPABLE))
 async def test_live_sign_message(backend: str) -> None:
+    _skip_unless_selected(backend)
     signer = await _MESSAGE_CAPABLE[backend]()
     await assert_message_roundtrip(signer)
 
 
-@pytest.mark.parametrize("backend", sorted(_ALL_BACKENDS), ids=_test_id)
+@pytest.mark.parametrize("backend", sorted(_ALL_BACKENDS))
 async def test_live_sign_transaction(backend: str) -> None:
+    _skip_unless_selected(backend)
     signer = await _ALL_BACKENDS[backend]()
     await assert_transaction_roundtrip(signer)
 
 
-@pytest.mark.parametrize("backend", sorted(_ALL_BACKENDS), ids=_test_id)
+@pytest.mark.parametrize("backend", sorted(_ALL_BACKENDS))
 async def test_live_is_available(backend: str) -> None:
+    _skip_unless_selected(backend)
     signer = await _ALL_BACKENDS[backend]()
     assert await signer.is_available()
