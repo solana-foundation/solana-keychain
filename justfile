@@ -260,7 +260,7 @@ py-test-integration: _py-install
     export VAULT_KEY_NAME="${VAULT_KEY_NAME:-solana-test-key}"
 
     echo "Running Python integration tests..."
-    .venv/bin/pytest -m integration tests/integration
+    KEYCHAIN_INTEGRATION_REQUIRE_RUN=1 .venv/bin/pytest -m integration tests/integration
 
 # ===========================================================
 # ========================= Release =========================

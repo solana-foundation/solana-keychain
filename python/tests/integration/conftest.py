@@ -3,6 +3,10 @@
 Every test here talks to a real service. Tests are gated by the ``integration``
 marker (excluded from default runs) and skip themselves when their environment
 variables are absent, so a partially-configured environment runs whatever it can.
+
+Set ``KEYCHAIN_INTEGRATION_REQUIRE_RUN=1`` (as CI and ``just py-test-integration``
+do) to fail the session when every selected test skipped — an all-skipped run
+means the environment is misconfigured, not that the signer works.
 """
 
 import os
@@ -13,6 +17,25 @@ from solders.pubkey import Pubkey
 
 from solana_keychain.core.signer import SolanaSigner
 from tests.util import create_test_transaction
+
+REQUIRE_RUN_ENV = "KEYCHAIN_INTEGRATION_REQUIRE_RUN"
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    if os.environ.get(REQUIRE_RUN_ENV) != "1":
+        return
+    if exitstatus != 0 or session.testscollected == 0:
+        return
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    passed = len(reporter.stats.get("passed", [])) if reporter else 0
+    if passed == 0:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+        if reporter:
+            reporter.write_line(
+                f"{REQUIRE_RUN_ENV}=1 but every selected integration test was "
+                "skipped — environment is not configured for the requested backend",
+                red=True,
+            )
 
 
 def require_env(*names: str) -> dict[str, str]:
