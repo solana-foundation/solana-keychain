@@ -36,7 +36,7 @@ Per-side recipes (use these to scope work to one language):
 | Build | `just rust-build` | `just ts-build` | `just py-build` |
 | Unit tests | `just rust-test` | `just ts-test` | `just py-test` |
 | Format + lint | `just rust-fmt` | `just ts-fmt` | `just py-fmt` |
-| Integration tests | `just rust-test-integration` | `just ts-test-integration` | — |
+| Integration tests | `just rust-test-integration` | `just ts-test-integration` | `just py-test-integration` |
 | Other | — | `just ts-treeshake` (verifies `@solana/keychain` umbrella + per-pkg tree-shakability) | — |
 
 Integration recipes auto-spawn a local `vault server -dev` and load `.env` from the repo root — do not run vault yourself or pass secrets via shell.
@@ -124,6 +124,8 @@ Single package under [python/](python/) (PyPI `solana-keychain`, import `solana_
 - **Serialization**: built on `solders`; golden wire-format vectors pinned in `python/tests/test_parity.py` — never regenerate them to make the suite pass.
 - **Remote API calls** go through `fetch_signer_json()` from `solana_keychain.core` — it owns the HTTP_ERROR/REMOTE_API_ERROR/PARSING_ERROR pipeline, response sanitization, redirect rejection, and a default 60s timeout. Base URLs must pass `assert_https_url()`. Unit tests mock HTTP with `respx`; no live API calls in unit tests.
 - **Backend imports/extras rules**: the root `__init__.py` must never eagerly import a backend whose dependencies live behind an optional extra (use lazy `__getattr__` or leave it to submodule imports), and such backends must raise a clear "install `solana-keychain[<extra>]`" error when imported without their extra. Backends with only base deps (`solders`, `httpx`) may be exported eagerly.
+- **Umbrella factory**: `create_keychain_signer(backend, config)` in `solana_keychain/keychain.py` dispatches by backend name with lazy imports; new backends must be added to its `_BACKENDS` table.
+- **Integration tests**: `python/tests/integration/`, gated by the `integration` pytest marker (excluded by default via `addopts`), env-var-driven with the same variable names as the other integration suites; each backend skips itself when unconfigured. `just py-test-integration` runs the local Vault flow.
 
 ## Branch Workflow
 

@@ -70,3 +70,8 @@ class MemorySigner(SolanaSigner):
 
     async def is_available(self) -> bool:
         return True
+
+
+async def create_memory_signer(config: MemorySignerConfig) -> MemorySigner:
+    """Create a ready-to-use memory signer."""
+    return MemorySigner.from_config(config)

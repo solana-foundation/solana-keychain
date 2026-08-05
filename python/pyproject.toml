@@ -48,6 +48,10 @@ packages = ["src/solana_keychain"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src", "."]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: live external-service tests, gated by environment variables",
+]
 
 [tool.ruff]
 line-length = 100

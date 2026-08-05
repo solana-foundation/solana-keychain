@@ -10,6 +10,59 @@ on:
       - '.github/workflows/python-ci.yml'
 
 jobs:
+  resolve-signers:
+    runs-on: ubuntu-latest
+    outputs:
+      python_integration_backends_json: ${{ steps.resolve.outputs.python_integration_backends_json }}
+      python_integration_backend_count: ${{ steps.resolve.outputs.python_integration_backend_count }}
+    steps:
+      - name: Resolve enabled signers from repository variables
+        id: resolve
+        uses: actions/github-script@v9
+        env:
+          CI_SIGNER_PRIVY_ENABLED: ${{ vars.CI_SIGNER_PRIVY_ENABLED || 'true' }}
+          CI_SIGNER_TURNKEY_ENABLED: ${{ vars.CI_SIGNER_TURNKEY_ENABLED || 'true' }}
+          CI_SIGNER_FIREBLOCKS_ENABLED: ${{ vars.CI_SIGNER_FIREBLOCKS_ENABLED || 'true' }}
+          CI_SIGNER_AWS_KMS_ENABLED: ${{ vars.CI_SIGNER_AWS_KMS_ENABLED || 'true' }}
+          CI_SIGNER_GCP_KMS_ENABLED: ${{ vars.CI_SIGNER_GCP_KMS_ENABLED || 'true' }}
+          CI_SIGNER_PARA_ENABLED: ${{ vars.CI_SIGNER_PARA_ENABLED || 'true' }}
+          CI_SIGNER_CDP_ENABLED: ${{ vars.CI_SIGNER_CDP_ENABLED || 'true' }}
+          CI_SIGNER_DFNS_ENABLED: ${{ vars.CI_SIGNER_DFNS_ENABLED || 'true' }}
+          CI_SIGNER_CROSSMINT_ENABLED: ${{ vars.CI_SIGNER_CROSSMINT_ENABLED || 'true' }}
+          CI_SIGNER_OPENFORT_ENABLED: ${{ vars.CI_SIGNER_OPENFORT_ENABLED || 'true' }}
+        with:
+          script: |
+            const parseVar = (name) => {
+              const raw = process.env[name];
+              if (raw !== 'true' && raw !== 'false') {
+                const message = `${name} must be set to the string 'true' or 'false' in repository Actions variables. Received: ${raw ?? 'undefined'}`;
+                core.setFailed(message);
+                throw new Error(message);
+              }
+              return raw === 'true';
+            };
+
+            // Same live-credential set as the other language CIs (utila and
+            // vault run locally via `just py-test-integration`).
+            const integrationOrder = [
+              ['privy', 'CI_SIGNER_PRIVY_ENABLED'],
+              ['turnkey', 'CI_SIGNER_TURNKEY_ENABLED'],
+              ['fireblocks', 'CI_SIGNER_FIREBLOCKS_ENABLED'],
+              ['aws-kms', 'CI_SIGNER_AWS_KMS_ENABLED'],
+              ['gcp-kms', 'CI_SIGNER_GCP_KMS_ENABLED'],
+              ['para', 'CI_SIGNER_PARA_ENABLED'],
+              ['cdp', 'CI_SIGNER_CDP_ENABLED'],
+              ['dfns', 'CI_SIGNER_DFNS_ENABLED'],
+              ['crossmint', 'CI_SIGNER_CROSSMINT_ENABLED'],
+              ['openfort', 'CI_SIGNER_OPENFORT_ENABLED'],
+            ];
+            const backends = integrationOrder
+              .filter(([, variable]) => parseVar(variable))
+              .map(([backend]) => backend);
+
+            core.setOutput('python_integration_backends_json', JSON.stringify(backends));
+            core.setOutput('python_integration_backend_count', String(backends.length));
+
   python-test:
     runs-on: ubuntu-latest
     defaults:
@@ -65,3 +118,49 @@ jobs:
         run: |
           pip install build
           python -m build
+
+  python-integration-test:
+    needs: resolve-signers
+    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) && needs.resolve-signers.outputs.python_integration_backend_count != '0' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: python
+    strategy:
+      matrix:
+        backend: ${{ fromJSON(needs.resolve-signers.outputs.python_integration_backends_json) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: python/pyproject.toml
+      - uses: dopplerhq/secrets-fetch-action@v2.0.0
+        id: doppler
+        with:
+          auth-method: oidc
+          doppler-identity-id: ${{ vars.DOPPLER_SERVICE_IDENTITY_ID }}
+          doppler-project: ${{ vars.DOPPLER_PROJECT || 'keychain' }}
+          doppler-config: ${{ vars.DOPPLER_CONFIG_CI || 'stg_github' }}
+          inject-env-vars: true
+      - name: Setup GCP credentials
+        if: matrix.backend == 'gcp-kms'
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ steps.doppler.outputs.GCP_SERVICE_ACCOUNT_KEY }}
+      - name: Configure AWS credentials
+        if: matrix.backend == 'aws-kms'
+        uses: aws-actions/configure-aws-credentials@v6.2.0
+        with:
+          role-to-assume: ${{ steps.doppler.outputs.AWS_ROLE_ARN }}
+          aws-region: ${{ steps.doppler.outputs.AWS_KMS_REGION }}
+      - name: Install
+        run: pip install -e '.[dev]'
+      - name: Run ${{ matrix.backend }} integration tests
+        env:
+          SOLANA_RPC_URL: https://api.devnet.solana.com
+        run: pytest -m integration tests/integration/test_live_signers.py -k "$(echo '${{ matrix.backend }}' | tr '-' '_')"
