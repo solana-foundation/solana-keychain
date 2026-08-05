@@ -5,8 +5,9 @@ marker (excluded from default runs) and skip themselves when their environment
 variables are absent, so a partially-configured environment runs whatever it can.
 
 Set ``KEYCHAIN_INTEGRATION_REQUIRE_RUN=1`` (as CI and ``just py-test-integration``
-do) to fail the session when every selected test skipped — an all-skipped run
-means the environment is misconfigured, not that the signer works.
+do) to fail when the flow the run asked for never executed: the backend named by
+``KEYCHAIN_INTEGRATION_BACKEND``, or the local Vault flow for a full-directory
+run. Skipping is only acceptable for backends the run did not ask for.
 """
 
 import base64
@@ -21,24 +22,46 @@ from solders.transaction import Transaction
 from solana_keychain.core.signer import SolanaSigner
 
 REQUIRE_RUN_ENV = "KEYCHAIN_INTEGRATION_REQUIRE_RUN"
+BACKEND_ENV = "KEYCHAIN_INTEGRATION_BACKEND"
+VAULT_TEST_MODULE = "test_vault_integration.py"
 DEFAULT_RPC_URL = "https://api.devnet.solana.com"
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    if os.environ.get(REQUIRE_RUN_ENV) != "1":
+    """Fail runs that skipped the flow they were asked to exercise.
+
+    A session-wide pass count is not enough: one configured backend passing would
+    mask the requested one being skipped entirely. So the check is scoped — a
+    single-backend run must have passed a test for that backend, and a full run
+    (the ``just`` recipe, which stands up Vault itself) must have passed a Vault
+    test. Other backends stay free to skip when unconfigured.
+    """
+    if os.environ.get(REQUIRE_RUN_ENV) != "1" or exitstatus != 0:
         return
-    if exitstatus != 0 or session.testscollected == 0:
+    if session.testscollected == 0:
         return
+
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")
-    passed = len(reporter.stats.get("passed", [])) if reporter else 0
-    if passed == 0:
-        session.exitstatus = pytest.ExitCode.TESTS_FAILED
-        if reporter:
-            reporter.write_line(
-                f"{REQUIRE_RUN_ENV}=1 but every selected integration test was "
-                "skipped — environment is not configured for the requested backend",
-                red=True,
-            )
+    passed_node_ids = (
+        [report.nodeid for report in reporter.stats.get("passed", [])] if reporter else []
+    )
+
+    backend = os.environ.get(BACKEND_ENV, "")
+    if backend:
+        required, scope = f"[{backend}]", f"backend {backend}"
+    else:
+        required, scope = f"{VAULT_TEST_MODULE}::", "the local Vault flow"
+
+    if any(required in node_id for node_id in passed_node_ids):
+        return
+
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    if reporter:
+        reporter.write_line(
+            f"{REQUIRE_RUN_ENV}=1 but no test exercised {scope} — its environment "
+            "is not configured (other backends skipping is expected)",
+            red=True,
+        )
 
 
 def require_env(*names: str) -> dict[str, str]:
