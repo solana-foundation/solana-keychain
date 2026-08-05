@@ -111,8 +111,13 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           TAG="python-v${{ steps.version.outputs.version }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "· tag $TAG already exists locally"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            TAGGED=$(git rev-parse "$TAG^{commit}")
+            if [ "$TAGGED" != "$GITHUB_SHA" ]; then
+              echo "::error::$TAG already points at $TAGGED but this run builds $GITHUB_SHA — bump the version instead of retagging"
+              exit 1
+            fi
+            echo "· tag $TAG already points at this commit"
           else
             git tag "$TAG"
             echo "✓ created tag $TAG"
