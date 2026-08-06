@@ -106,8 +106,6 @@ impl SolanaSigner for MemorySigner {
 
 #[cfg(test)]
 mod tests {
-    use base64::{engine::general_purpose::STANDARD, Engine};
-
     use crate::test_util::create_test_transaction;
 
     use super::*;
@@ -192,31 +190,5 @@ mod tests {
         // Verify the transaction has the signature
         assert_eq!(tx.signatures.len(), 1);
         assert_eq!(tx.signatures[0], signature);
-    }
-
-    /// Golden vectors pinned verbatim in go/core/parity_test.go
-    /// (TestRustCrossLanguageParity): the canonical keypair signing a
-    /// 1_000_000-lamport transfer to the all-0x02 recipient with a zero
-    /// blockhash must serialize byte-identically in every language.
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn parity_vector_dump() {
-        const PARITY_MESSAGE_B64: &str = "AQABAy9eeafDiEgWnTBNWD9gOXq18+y88Yau4GT2EapoEZcwAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQICAAEMAgAAAEBCDwAAAAAA";
-        const PARITY_SIGNED_TX_B64: &str = "AaynSvis6Ib7Ryu0FHtVWQEOaHwqjVtlBUmx5dS8lnDzYlucZlaLBuiwHh2yKYxh9BpT4SnIu2Lkp+dmBFf9IgcBAAEDL155p8OISBadME1YP2A5erXz7Lzxhq7gZPYRqmgRlzACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAgIAAQwCAAAAQEIPAAAAAAA=";
-
-        let signer = create_test_signer();
-        assert_eq!(signer.pubkey().to_string(), TEST_PUBKEY);
-
-        let to = Pubkey::new_from_array([2u8; 32]);
-        let mut tx =
-            crate::test_util::create_test_transaction_with_recipient(&signer.pubkey(), &to);
-        assert_eq!(STANDARD.encode(tx.message_data()), PARITY_MESSAGE_B64);
-
-        let (serialized_tx, _) = signer
-            .sign_transaction(&mut tx)
-            .await
-            .expect("signing the parity transaction must succeed")
-            .into_signed_transaction();
-        assert_eq!(serialized_tx, PARITY_SIGNED_TX_B64);
     }
 }

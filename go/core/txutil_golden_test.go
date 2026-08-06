@@ -25,20 +25,15 @@ func newGoldenSigner() goldenSigner {
 	return goldenSigner{priv: priv, pub: pub}
 }
 
-// TestGoldenSerialization pins the exact wire bytes of a deterministic signed
-// transaction. It is the regression gate for the #1 risk: that Go's
-// base64(MarshalBinary(tx)) stays byte-identical to the Rust base64(bincode(tx))
-// and TS getBase64EncodedWireTransaction output. The vectors below are produced
-// from a fixed keypair + fixed transaction (testutils.CreateTestTransaction); the
-// SAME logical transaction built in Rust/TS must yield these exact strings.
+// TestGoldenSerialization pins the exact wire bytes of a signed transaction
+// built from the deterministic testutils keypair and test transaction. These
+// vectors are frozen; if an assertion fails, serialization has drifted from
+// the Solana wire format. Never regenerate the vectors to make the suite pass.
 func TestGoldenSerialization(t *testing.T) {
 	const (
-		// base64 of the message bytes that get signed (Rust tx.message_data()).
-		wantMessageB64 = "AQABA3m1Vi6P5lT5QHixEuipi6eQH4U65pW+1+DjkQutBJZkIVL40Zt5HSRFMkLhXy6rbLfP+ntqXtMAl5YOBpiB2xIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJAQICAAEMAgAAAEBCDwAAAAAA"
-		// base64 of the fully-signed transaction (Rust base64(bincode(tx))).
+		wantMessageB64  = "AQABA3m1Vi6P5lT5QHixEuipi6eQH4U65pW+1+DjkQutBJZkIVL40Zt5HSRFMkLhXy6rbLfP+ntqXtMAl5YOBpiB2xIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJAQICAAEMAgAAAEBCDwAAAAAA"
 		wantSignedTxB64 = "AQUSPyADYLJarC6XLNhwmO1ZNP7/MECEKnIrOtFcIShPQX3yXWFNn9ftJEhqvrA0W01eyrBk8Pojgs+jRn23Nw4BAAEDebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQhUvjRm3kdJEUyQuFfLqtst8/6e2pe0wCXlg4GmIHbEgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkBAgIAAQwCAAAAQEIPAAAAAAA="
-		// base58 of the deterministic test pubkey.
-		wantPubkey = "9C6hybhQ6Aycep9jaUnP6uL9ZYvDjUp1aSkFWPUFJtpj"
+		wantPubkey      = "9C6hybhQ6Aycep9jaUnP6uL9ZYvDjUp1aSkFWPUFJtpj"
 	)
 
 	gs := newGoldenSigner()
@@ -61,15 +56,6 @@ func TestGoldenSerialization(t *testing.T) {
 	}
 
 	gotMsg := base64.StdEncoding.EncodeToString(msgBytes)
-
-	// When the constants are placeholders, log the actual values so they can be
-	// pinned (and cross-checked against a Rust/TS-generated vector).
-	if wantSignedTxB64 == "REPLACE_SIGNED_TX" {
-		t.Logf("PUBKEY      = %s", gs.pub.String())
-		t.Logf("MESSAGE_B64 = %s", gotMsg)
-		t.Logf("SIGNEDTX_B64= %s", encoded)
-		t.Fatal("golden vectors not pinned yet")
-	}
 
 	if gs.pub.String() != wantPubkey {
 		t.Errorf("pubkey = %s, want %s", gs.pub.String(), wantPubkey)

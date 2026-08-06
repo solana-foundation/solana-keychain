@@ -5,19 +5,14 @@
 `solana-keychain` provides a unified interface for signing Solana transactions
 with multiple backend implementations. Whether you need local keypairs for
 development, enterprise vault integration, or managed wallet services, this
-library offers a consistent API across all signing methods — with full parity to
-the [Rust](../rust/README.md) and [TypeScript](../typescript/README.md) libraries.
-
-All thirteen backends are implemented with full parity to the Rust and
-TypeScript libraries, each with a unit test suite ported from the Rust
-wiremock tests.
+library offers a consistent API across all signing methods.
 
 ## Features
 
 - **Unified interface**: a single `Signer` interface for every backend
 - **Context-aware**: methods take `context.Context` and block — idiomatic Go, no callbacks
-- **Per-backend modules**: each backend is its own Go module, so both your build and your module graph contain only the backends you import (the Go-native equivalent of Rust feature flags and the TS per-package split)
-- **Cross-language parity**: the same signing contract and behavior as the Rust and TypeScript implementations, verified down to byte-identical transaction serialization
+- **Per-backend modules**: each backend is its own Go module, so both your build and your module graph contain only the backends you import
+- **Verified wire format**: golden-vector tests pin the exact serialized transaction bytes, so serialization can never silently drift
 - **Safe errors**: `SignerError` redacts sensitive detail from its message; match on stable codes with `errors.Is`
 - **Minimal core**: built on [`gagliardetto/solana-go`](https://github.com/gagliardetto/solana-go); heavy vendor SDKs land only in the backends that need them
 
@@ -106,8 +101,7 @@ func main() {
 
 Every remote backend follows the same pattern: a `Config` struct and a `New`
 constructor that returns a ready-to-use signer (backends that need a remote
-lookup take a `context.Context` and perform it inline — the Go analog of the
-Rust `Signer::from_*` factories and the TS async factories):
+lookup take a `context.Context` and perform it inline):
 
 ```go
 import "github.com/solana-foundation/solana-keychain/go/signers/vault"
@@ -130,9 +124,9 @@ signer, err := privy.New(ctx, privy.Config{
 })
 ```
 
-Remote HTTP backends accept an optional `HTTPClient` override in their config
-(the Go analog of the Rust `with_client` constructors); when unset, requests go
-through an HTTPS-enforcing client built from `core.HTTPClientConfig` timeouts.
+Remote HTTP backends accept an optional `HTTPClient` override in their config;
+when unset, requests go through an HTTPS-enforcing client built from
+`core.HTTPClientConfig` timeouts.
 The KMS backends (`awskms`, `gcpkms`) expose the equivalent SDK-level client
 override instead.
 
@@ -151,8 +145,7 @@ sigs, err := core.SignMessages(ctx, signer, [][]byte{msg1, msg2}, core.BatchOpti
 ## Core API
 
 Every signer implements the `Signer` interface from the
-[`core`](core/) package — the Go analog of the Rust `SolanaSigner` trait and the
-TypeScript `SolanaSigner` interface:
+[`core`](core/) package:
 
 ```go
 type Signer interface {
@@ -173,7 +166,7 @@ type Signer interface {
 
 `SignTransaction` returns a `SignedTransaction { EncodedTransaction, Signature,
 Completeness }`; use `IsComplete()` to check whether every required signature is
-present (the Go analog of the Rust `Complete`/`Partial` result).
+present.
 
 ## Packages
 
@@ -194,10 +187,9 @@ present (the Go analog of the Rust `Complete`/`Partial` result).
 | [`signers/openfort`](signers/openfort/) | Openfort (ES256 x-wallet-auth JWTs) |
 | [`testutils`](testutils/) | Deterministic keypair + test-transaction helpers for testing your own signers |
 
-Backend-behavior quirks are identical to the Rust and TypeScript
-implementations: `crossmint` intentionally does not support `SignMessage`
-(returns `SIGNER_SIGNING_FAILED`), and `cdp` only accepts UTF-8 message
-payloads.
+Backend-behavior quirks: `crossmint` intentionally does not support
+`SignMessage` (returns `SIGNER_SIGNING_FAILED`), and `cdp` only accepts UTF-8
+message payloads.
 
 ### Notes for Go consumers
 
@@ -217,11 +209,10 @@ covers the Rust and TypeScript implementations. The Go implementation is new and
 has **not** yet been independently audited. Audit status is tracked in
 [audits/AUDIT_STATUS.md](../audits/AUDIT_STATUS.md).
 
-Unlike the Rust crate, which wraps key material in `Zeroizing` so it is wiped
-on drop, Go offers no reliable way to zero memory: the garbage collector may
-copy and retain key bytes (`memory` keypairs, derived Crossmint/Openfort keys)
-until collection, and finalizer-based scrubbing gives no guarantee. Treat the
-whole process memory as sensitive when using local-key backends.
+Go offers no reliable way to zero memory: the garbage collector may copy and
+retain key bytes (`memory` keypairs, derived Crossmint/Openfort keys) until
+collection, and finalizer-based scrubbing gives no guarantee. Treat the whole
+process memory as sensitive when using local-key backends.
 
 ## Contributing
 
@@ -234,22 +225,21 @@ just go-fmt                # gofmt + go vet + golangci-lint
 just go-test-integration   # integration tests (spins up local Vault, loads .env)
 ```
 
-Cross-language serialization parity is guarded by a pinned golden vector in
-[`core/parity_test.go`](core/parity_test.go): the base64 of a deterministic signed
-transaction must stay byte-identical to the Rust and TypeScript output.
+Serialization is guarded by golden wire-format vectors pinned in
+[`core/parity_test.go`](core/parity_test.go): the base64 of a deterministic
+signed transaction is frozen and must never be regenerated to make the suite
+pass.
 
 ## Roadmap
 
-- Publish workflow (tag `go/vX.Y.Z`) and three-language presentation in the
-  root README / docs.
-- Integration tests beyond Vault (the Rust suite covers Fireblocks, Privy,
-  Turnkey, and AWS KMS via fork live tests).
+- Publish workflow (tag `go/vX.Y.Z`) and Go presentation in the root
+  README / docs.
+- Fork-contributed live-test support for Go backends.
 
 ### Why there is no umbrella package
 
-The TS `createKeychainSigner` umbrella and the Rust `Signer` enum both stay
-lean through dead-code elimination (tree-shaking, cargo features). Go has no
-equivalent for a runtime dispatch switch: an umbrella package would force the
-AWS and GCP SDKs (and every other backend dependency) into all consumers'
-builds. Importing the backend package you need is the Go-native selector and
-keeps dependency isolation exact, so an umbrella is intentionally omitted.
+Go performs no dead-code elimination across a runtime dispatch switch: an
+umbrella package would force the AWS and GCP SDKs (and every other backend
+dependency) into all consumers' builds. Importing the backend package you need
+is the Go-native selector and keeps dependency isolation exact, so an umbrella
+is intentionally omitted.
