@@ -1,0 +1,80 @@
+// Package crossmint provides a SolanaSigner backed by the Crossmint Wallets
+// API: transactions are created remotely, polled to completion, and (when a
+// server signer secret is configured) automatically approved with an HKDF-derived
+// Ed25519 key. It is the Go analog of the Rust crossmint module and the
+// @solana/keychain-crossmint package.
+package crossmint
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/solana-foundation/solana-keychain/go/core"
+)
+
+// Defaults mirroring the Rust crossmint module constants.
+const (
+	// DefaultBaseURL is the production Crossmint API base URL (Rust DEFAULT_BASE_URL).
+	DefaultBaseURL = "https://www.crossmint.com/api"
+	// DefaultPollInterval is the delay between transaction status polls
+	// (Rust DEFAULT_POLL_INTERVAL_MS, TS pollIntervalMs default).
+	DefaultPollInterval = time.Second
+	// DefaultMaxPollAttempts bounds the polling loop (Rust DEFAULT_MAX_POLL_ATTEMPTS).
+	DefaultMaxPollAttempts = 60
+)
+
+// availabilityTimeout bounds the wallet fetch performed by IsAvailable
+// (Rust AVAILABILITY_TIMEOUT).
+const availabilityTimeout = 5 * time.Second
+
+// walletsAPIVersion is the pinned Crossmint Wallets API version path segment.
+const walletsAPIVersion = "2025-06-09"
+
+// maxResponseBytes caps how much of a remote response body is read.
+const maxResponseBytes = 1 << 20
+
+// Config configures a Crossmint signer. It mirrors the Rust
+// CrossmintSignerConfig and the TS CrossmintSignerConfig.
+type Config struct {
+	// APIKey is the Crossmint API key, sent as the X-API-KEY header. Required.
+	// Format: {ck|sk}_{environment}_{base58data}; the embedded projectId and
+	// environment also feed the SignerSecret key derivation.
+	APIKey string
+
+	// WalletLocator identifies the wallet (address or locator string such as
+	// "userId:<id>:solana:smart"). Required.
+	WalletLocator string
+
+	// SignerSecret is an optional server signer secret (`xmsk1_<64hex>`). When
+	// provided, the signer derives an Ed25519 keypair via HKDF-SHA256 and
+	// automatically signs any `awaiting-approval` transactions from the
+	// Crossmint API.
+	SignerSecret string
+
+	// Signer is an optional explicit signer locator forwarded on transaction
+	// creation. When empty and SignerSecret is set, it defaults to
+	// "server:<derived base58 pubkey>".
+	Signer string
+
+	// APIBaseURL overrides the Crossmint API base URL. Empty means
+	// DefaultBaseURL. Must use HTTPS.
+	APIBaseURL string
+
+	// PollInterval is the delay between transaction status polls. Zero means
+	// DefaultPollInterval; negative values are rejected (Go analog of the Rust
+	// poll_interval_ms Option, where an explicit 0 is rejected).
+	PollInterval time.Duration
+
+	// MaxPollAttempts bounds the polling loop. Zero means
+	// DefaultMaxPollAttempts; negative values are rejected.
+	MaxPollAttempts int
+
+	// HTTPClientConfig holds optional timeouts used when building the default
+	// HTTP client. The zero value applies the shared defaults.
+	HTTPClientConfig core.HTTPClientConfig
+
+	// HTTPClient optionally overrides the HTTP client. When nil, the client is
+	// built with core.NewHTTPClient(HTTPClientConfig). The APIBaseURL HTTPS
+	// requirement applies either way.
+	HTTPClient *http.Client
+}

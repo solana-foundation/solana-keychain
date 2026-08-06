@@ -4,9 +4,9 @@ Guidance for Claude Code working in this repo.
 
 ## Project Overview
 
-`solana-keychain` is a Rust + TypeScript library providing a unified `SolanaSigner` interface across twelve backends, with full Rust/TS parity:
+`solana-keychain` is a Rust + TypeScript + Python + Go library providing a unified `SolanaSigner` interface across thirteen backends, with full cross-language parity:
 
-Memory · Vault · Privy · Turnkey · AWS KMS · Fireblocks · GCP KMS · Dfns · Crossmint · CDP · Para · Openfort
+Memory · Vault · Privy · Turnkey · AWS KMS · Fireblocks · GCP KMS · Dfns · Crossmint · CDP · Para · Openfort · Utila
 
 ## Repo Layout
 

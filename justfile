@@ -12,16 +12,16 @@ default:
     @just --list
 
 # Format and lint
-fmt: rust-fmt ts-fmt py-fmt
+fmt: rust-fmt ts-fmt py-fmt go-fmt
 
 # Build
-build: rust-build ts-build py-build
+build: rust-build ts-build py-build go-build
 
 # Unit tests
-test: rust-test ts-test py-test
+test: rust-test ts-test py-test go-test
 
 # Integration tests
-test-integration: rust-test-integration ts-test-integration py-test-integration
+test-integration: rust-test-integration ts-test-integration py-test-integration go-test-integration
 
 # All tests
 test-all: test test-integration
@@ -261,6 +261,92 @@ py-test-integration: _py-install
 
     echo "Running Python integration tests..."
     KEYCHAIN_INTEGRATION_REQUIRE_RUN=1 .venv/bin/pytest -m integration tests/integration
+
+# ===========================================================
+# ============================ Go ===========================
+# ===========================================================
+
+[working-directory: 'go']
+go-fmt:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    gofmt -l -w .
+    lint=false
+    command -v golangci-lint >/dev/null 2>&1 && lint=true
+    $lint || echo "note: golangci-lint not installed; running gofmt + go vet only"
+    for mod in $(find . -name go.mod | sort); do
+        dir=$(dirname "$mod")
+        (cd "$dir" && go vet ./...)
+        if $lint; then (cd "$dir" && golangci-lint run ./...); fi
+    done
+
+[working-directory: 'go']
+go-build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for mod in $(find . -name go.mod | sort); do
+        (cd "$(dirname "$mod")" && go build ./...)
+    done
+
+[working-directory: 'go']
+go-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for mod in $(find . -name go.mod | sort); do
+        (cd "$(dirname "$mod")" && go test -race ./...)
+    done
+
+[working-directory: 'go']
+go-test-integration:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    VAULT_PID=""
+
+    cleanup() {
+        if [ -n "$VAULT_PID" ]; then
+            echo "Stopping Vault dev server..."
+            kill "$VAULT_PID" 2>/dev/null || true
+            wait "$VAULT_PID" 2>/dev/null || true
+        fi
+        pkill -f "vault server -dev" 2>/dev/null || true
+    }
+    trap cleanup EXIT
+
+    pkill -f "vault server -dev" 2>/dev/null || true
+
+    # Load env vars from .env file (shared across all languages)
+    if [ -f ../.env ]; then
+        set -a
+        source ../.env
+        set +a
+    fi
+
+    echo "Starting Vault dev server..."
+    vault server -dev -dev-root-token-id="root" &
+    VAULT_PID=$!
+
+    export VAULT_ADDR='http://127.0.0.1:8200'
+    export VAULT_TOKEN='root'
+
+    echo "Waiting for Vault to be ready..."
+    for i in {1..10}; do
+        if vault status > /dev/null 2>&1; then
+            echo "Vault is ready!"
+            break
+        fi
+        [[ $i -eq 10 ]] && { echo "Error: Vault not available"; exit 1; }
+        sleep 1
+    done
+
+    # Restore the SAME shared transit test key used by the other integration suites.
+    vault secrets enable transit >/dev/null 2>&1 || true
+    vault write transit/restore/solana-test-key backup=@"../rust/src/tests/vault-test-key.b64" >/dev/null 2>&1 || true
+
+    echo "Running Go integration tests..."
+    for mod in $(find . -name go.mod | sort); do
+        (cd "$(dirname "$mod")" && go test -tags=integration ./...)
+    done
 
 # ===========================================================
 # ========================= Release =========================

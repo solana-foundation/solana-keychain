@@ -1,0 +1,24 @@
+# golangci-lint configuration (v2 schema).
+# Local `just go-fmt` runs gofmt + go vet unconditionally and golangci-lint only if
+# it is installed. CI runs golangci-lint with this config.
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+    - unconvert
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/solana-foundation/solana-keychain/go

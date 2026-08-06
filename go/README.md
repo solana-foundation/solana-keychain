@@ -1,0 +1,255 @@
+# solana-keychain (Go)
+
+**Flexible, framework-agnostic Solana transaction signing for Go applications**
+
+`solana-keychain` provides a unified interface for signing Solana transactions
+with multiple backend implementations. Whether you need local keypairs for
+development, enterprise vault integration, or managed wallet services, this
+library offers a consistent API across all signing methods — with full parity to
+the [Rust](../rust/README.md) and [TypeScript](../typescript/README.md) libraries.
+
+All thirteen backends are implemented with full parity to the Rust and
+TypeScript libraries, each with a unit test suite ported from the Rust
+wiremock tests.
+
+## Features
+
+- **Unified interface**: a single `Signer` interface for every backend
+- **Context-aware**: methods take `context.Context` and block — idiomatic Go, no callbacks
+- **Per-backend modules**: each backend is its own Go module, so both your build and your module graph contain only the backends you import (the Go-native equivalent of Rust feature flags and the TS per-package split)
+- **Cross-language parity**: the same signing contract and behavior as the Rust and TypeScript implementations, verified down to byte-identical transaction serialization
+- **Safe errors**: `SignerError` redacts sensitive detail from its message; match on stable codes with `errors.Is`
+- **Minimal core**: built on [`gagliardetto/solana-go`](https://github.com/gagliardetto/solana-go); heavy vendor SDKs land only in the backends that need them
+
+## Supported Backends
+
+| Backend | Use Case | Package | Status |
+| --- | --- | --- | --- |
+| **Memory** | Local keypairs, development, testing | `signers/memory` | ✅ Available |
+| **Vault** | Enterprise key management with HashiCorp Vault | `signers/vault` | ✅ Available |
+| **Turnkey** | Non-custodial key management via Turnkey | `signers/turnkey` | ✅ Available |
+| **AWS KMS** | AWS Key Management Service with Ed25519 signing | `signers/awskms` | ✅ Available |
+| **GCP KMS** | Google Cloud Key Management Service with Ed25519 signing | `signers/gcpkms` | ✅ Available |
+| **Fireblocks** | Fireblocks institutional custody platform | `signers/fireblocks` | ✅ Available |
+| **Privy** | Embedded wallets with Privy infrastructure | `signers/privy` | ✅ Available |
+| **Dfns** | Dfns wallet infrastructure with Ed25519 signing | `signers/dfns` | ✅ Available |
+| **CDP** | Coinbase Developer Platform managed wallets | `signers/cdp` | ✅ Available |
+| **Para** | MPC wallets with Para infrastructure | `signers/para` | ✅ Available |
+| **Crossmint** | Crossmint managed wallets | `signers/crossmint` | ✅ Available |
+| **Openfort** | Openfort backend wallets with TEE-stored keys | `signers/openfort` | ✅ Available |
+| **Utila** | Utila MPC wallet integration | `signers/utila` | ✅ Available |
+
+## Installation
+
+Every backend is its own Go module, so your dependency graph contains only the
+backend you import (a memory-only consumer pulls no AWS/GCP SDKs and no
+`google.golang.org/api` toolchain floor):
+
+```bash
+go get github.com/solana-foundation/solana-keychain/go/signers/memory@latest
+go get github.com/solana-foundation/solana-keychain/go/signers/vault@latest
+```
+
+Requires **Go 1.25+** (the `gcpkms` module requires the toolchain floor set by
+`google.golang.org/api`). Built on
+[`github.com/gagliardetto/solana-go`](https://github.com/gagliardetto/solana-go)
+for the on-chain types and canonical transaction serialization.
+
+Until the first `go/...` version tags are published, `@latest` cannot resolve
+the in-repo `go/core` dependency; releases will tag `go/core` and `go/testutils`
+before the signer modules.
+
+## Quick Start
+
+### Memory Signer (Local Development)
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/solana-foundation/solana-keychain/go/signers/memory"
+)
+
+func main() {
+	ctx := context.Background()
+
+	// Build a signer from a base58 key, a "[1,2,...]" byte array, raw bytes,
+	// or a Solana CLI keypair file.
+	signer, err := memory.New(memory.Config{
+		PrivateKeyString: "[41,99,180,88,51,57,48,80,61,63,219,75,176,49,116,254,...]",
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println("address:", signer.Pubkey())
+
+	// Sign an arbitrary message.
+	sig, err := signer.SignMessage(ctx, []byte("Hello Solana!"))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("signature:", sig)
+
+	// Sign a transaction (tx is a *solana.Transaction):
+	//   res, err := signer.SignTransaction(ctx, tx)
+	//   res.EncodedTransaction  // base64 wire transaction
+	//   res.Signature           // this signer's signature
+	//   res.IsComplete()        // are all required signatures present?
+}
+```
+
+### Remote Backends
+
+Every remote backend follows the same pattern: a `Config` struct and a `New`
+constructor that returns a ready-to-use signer (backends that need a remote
+lookup take a `context.Context` and perform it inline — the Go analog of the
+Rust `Signer::from_*` factories and the TS async factories):
+
+```go
+import "github.com/solana-foundation/solana-keychain/go/signers/vault"
+
+signer, err := vault.New(vault.Config{
+	VaultAddr: "https://vault.example.com",
+	Token:     os.Getenv("VAULT_TOKEN"),
+	KeyName:   "my-solana-key",
+	Pubkey:    "4BuiY9QUUfPoAGNJBja3JapAuVWMc9c7in6UCgyC2zPR",
+})
+```
+
+```go
+import "github.com/solana-foundation/solana-keychain/go/signers/privy"
+
+signer, err := privy.New(ctx, privy.Config{
+	AppID:     os.Getenv("PRIVY_APP_ID"),
+	AppSecret: os.Getenv("PRIVY_APP_SECRET"),
+	WalletID:  os.Getenv("PRIVY_WALLET_ID"),
+})
+```
+
+Remote HTTP backends accept an optional `HTTPClient` override in their config
+(the Go analog of the Rust `with_client` constructors); when unset, requests go
+through an HTTPS-enforcing client built from `core.HTTPClientConfig` timeouts.
+The KMS backends (`awskms`, `gcpkms`) expose the equivalent SDK-level client
+override instead.
+
+### Batch Signing
+
+Single-item methods match the contract 1:1; batch signing is provided as free
+helpers (concurrent, with an optional per-request stagger for rate-limited APIs):
+
+```go
+sigs, err := core.SignMessages(ctx, signer, [][]byte{msg1, msg2}, core.BatchOptions{
+	MaxConcurrency: 4,             // 0 = unbounded
+	RequestDelay:   50 * time.Millisecond,
+})
+```
+
+## Core API
+
+Every signer implements the `Signer` interface from the
+[`core`](core/) package — the Go analog of the Rust `SolanaSigner` trait and the
+TypeScript `SolanaSigner` interface:
+
+```go
+type Signer interface {
+	// Pubkey returns this signer's Solana public key.
+	Pubkey() solana.PublicKey
+
+	// SignTransaction signs tx in place and returns the encoded transaction,
+	// the signature, and whether all required signatures are now present.
+	SignTransaction(ctx context.Context, tx *solana.Transaction) (SignedTransaction, error)
+
+	// SignMessage signs arbitrary bytes and returns the 64-byte signature.
+	SignMessage(ctx context.Context, message []byte) (solana.Signature, error)
+
+	// IsAvailable reports whether the signer is reachable and healthy.
+	IsAvailable(ctx context.Context) bool
+}
+```
+
+`SignTransaction` returns a `SignedTransaction { EncodedTransaction, Signature,
+Completeness }`; use `IsComplete()` to check whether every required signature is
+present (the Go analog of the Rust `Complete`/`Partial` result).
+
+## Packages
+
+| Package | Description |
+| --- | --- |
+| [`core`](core/) | `Signer` interface, `SignedTransaction`, error types, transaction & HTTP utilities, batch helpers |
+| [`signers/memory`](signers/memory/) | In-memory Ed25519 signer — local keypairs for development and testing |
+| [`signers/vault`](signers/vault/) | HashiCorp Vault transit engine |
+| [`signers/turnkey`](signers/turnkey/) | Turnkey (P-256 API-key request stamping) |
+| [`signers/awskms`](signers/awskms/) | AWS KMS (`ECC_NIST_EDWARDS25519` keys) |
+| [`signers/gcpkms`](signers/gcpkms/) | Google Cloud KMS (`EC_SIGN_ED25519`, PureEdDSA) |
+| [`signers/fireblocks`](signers/fireblocks/) | Fireblocks (RAW / PROGRAM_CALL flows with status polling) |
+| [`signers/privy`](signers/privy/) | Privy wallet API |
+| [`signers/dfns`](signers/dfns/) | Dfns (User Action Signing challenge flow) |
+| [`signers/cdp`](signers/cdp/) | Coinbase Developer Platform (EdDSA bearer + ES256 wallet-auth JWTs) |
+| [`signers/para`](signers/para/) | Para wallet API |
+| [`signers/crossmint`](signers/crossmint/) | Crossmint (create/poll/approve flow, HKDF delegated-signer key) |
+| [`signers/openfort`](signers/openfort/) | Openfort (ES256 x-wallet-auth JWTs) |
+| [`testutils`](testutils/) | Deterministic keypair + test-transaction helpers for testing your own signers |
+
+Backend-behavior quirks are identical to the Rust and TypeScript
+implementations: `crossmint` intentionally does not support `SignMessage`
+(returns `SIGNER_SIGNING_FAILED`), and `cdp` only accepts UTF-8 message
+payloads.
+
+### Notes for Go consumers
+
+- **Selective backends are automatic.** Importing `signers/memory` links only
+  `solana-go` + the standard library; the Go compiler excludes backends you don't
+  import. There is no "feature flag" to set — the import graph is the selector.
+- **Errors are redacting.** `core.SignerError` never prints its detail or wrapped
+  cause via `Error()`; only a fixed, generic message per `core.Code` is surfaced.
+  Match codes with `errors.Is(err, ...)` or `core.CodeOf(err)`.
+- **HTTPS is enforced** for remote backends via `core.NewHTTPClient`, which rejects
+  any non-`https` request.
+
+## Security
+
+The published [Accretion audit](../audits/2026-accretion-solana-foundation-solana-keychain-audit-A26SFR2.pdf)
+covers the Rust and TypeScript implementations. The Go implementation is new and
+has **not** yet been independently audited. Audit status is tracked in
+[audits/AUDIT_STATUS.md](../audits/AUDIT_STATUS.md).
+
+Unlike the Rust crate, which wraps key material in `Zeroizing` so it is wiped
+on drop, Go offers no reliable way to zero memory: the garbage collector may
+copy and retain key bytes (`memory` keypairs, derived Crossmint/Openfort keys)
+until collection, and finalizer-based scrubbing gives no guarantee. Treat the
+whole process memory as sensitive when using local-key backends.
+
+## Contributing
+
+Local development uses [Just](https://github.com/casey/just) as the task runner:
+
+```bash
+just go-build              # compile
+just go-test               # unit tests
+just go-fmt                # gofmt + go vet + golangci-lint
+just go-test-integration   # integration tests (spins up local Vault, loads .env)
+```
+
+Cross-language serialization parity is guarded by a pinned golden vector in
+[`core/parity_test.go`](core/parity_test.go): the base64 of a deterministic signed
+transaction must stay byte-identical to the Rust and TypeScript output.
+
+## Roadmap
+
+- Publish workflow (tag `go/vX.Y.Z`) and three-language presentation in the
+  root README / docs.
+- Integration tests beyond Vault (the Rust suite covers Fireblocks, Privy,
+  Turnkey, and AWS KMS via fork live tests).
+
+### Why there is no umbrella package
+
+The TS `createKeychainSigner` umbrella and the Rust `Signer` enum both stay
+lean through dead-code elimination (tree-shaking, cargo features). Go has no
+equivalent for a runtime dispatch switch: an umbrella package would force the
+AWS and GCP SDKs (and every other backend dependency) into all consumers'
+builds. Importing the backend package you need is the Go-native selector and
+keeps dependency isolation exact, so an umbrella is intentionally omitted.

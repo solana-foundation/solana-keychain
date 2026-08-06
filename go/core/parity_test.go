@@ -1,0 +1,88 @@
+package core
+
+import (
+	"crypto/ed25519"
+	"encoding/base64"
+	"testing"
+
+	"github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/programs/system"
+)
+
+// canonicalKeypairBytes is the 64-byte (seed‖pubkey) Ed25519 key shared verbatim
+// with the Rust (memory/mod.rs) and TS test suites. Its base58 pubkey is
+// 4BuiY9QUUfPoAGNJBja3JapAuVWMc9c7in6UCgyC2zPR.
+var canonicalKeypairBytes = []byte{
+	41, 99, 180, 88, 51, 57, 48, 80, 61, 63, 219, 75, 176, 49, 116, 254,
+	227, 176, 196, 204, 122, 47, 166, 133, 155, 252, 217, 0, 253, 17, 49, 143,
+	47, 94, 121, 167, 195, 136, 72, 22, 157, 48, 77, 88, 63, 96, 57, 122,
+	181, 243, 236, 188, 241, 134, 174, 224, 100, 246, 17, 170, 104, 17, 151, 48,
+}
+
+// buildParityTransaction builds the EXACT transaction the Rust parity_vector_dump
+// test builds: a System transfer of 1_000_000 lamports from the canonical signer
+// to the all-0x02 recipient, with a zero recent blockhash (Hash::default()), payer
+// = signer. Both sides must serialize to byte-identical output.
+func buildParityTransaction(t *testing.T) (priv ed25519.PrivateKey, from solana.PublicKey, tx *solana.Transaction) {
+	t.Helper()
+	priv = ed25519.PrivateKey(canonicalKeypairBytes)
+	copy(from[:], priv.Public().(ed25519.PublicKey))
+
+	var to solana.PublicKey
+	for i := range to {
+		to[i] = 2
+	}
+
+	inst := system.NewTransferInstruction(1_000_000, from, to).Build()
+	var err error
+	tx, err = solana.NewTransaction(
+		[]solana.Instruction{inst},
+		solana.Hash{}, // zero blockhash == Rust Hash::default()
+		solana.TransactionPayer(from),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return priv, from, tx
+}
+
+// Cross-language golden vectors (base64(bincode(tx)) and base64(message_data())),
+// pinned verbatim in the Rust memory::tests::parity_vector_dump test — both
+// suites must keep producing these exact bytes.
+const (
+	rustParityPubkey      = "4BuiY9QUUfPoAGNJBja3JapAuVWMc9c7in6UCgyC2zPR"
+	rustParityMessageB64  = "AQABAy9eeafDiEgWnTBNWD9gOXq18+y88Yau4GT2EapoEZcwAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQICAAEMAgAAAEBCDwAAAAAA"
+	rustParitySignedTxB64 = "AaynSvis6Ib7Ryu0FHtVWQEOaHwqjVtlBUmx5dS8lnDzYlucZlaLBuiwHh2yKYxh9BpT4SnIu2Lkp+dmBFf9IgcBAAEDL155p8OISBadME1YP2A5erXz7Lzxhq7gZPYRqmgRlzACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAgIAAQwCAAAAQEIPAAAAAAA="
+)
+
+func TestRustCrossLanguageParity(t *testing.T) {
+	priv, from, tx := buildParityTransaction(t)
+
+	msgBytes, err := tx.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sig solana.Signature
+	copy(sig[:], ed25519.Sign(priv, msgBytes))
+	if err := AddSignature(tx, from, sig); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := Serialize(tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotMsg := base64.StdEncoding.EncodeToString(msgBytes)
+
+	if from.String() != rustParityPubkey {
+		t.Errorf("pubkey = %s, want %s", from.String(), rustParityPubkey)
+	}
+	if gotMsg != rustParityMessageB64 {
+		t.Errorf("message-bytes mismatch vs Rust:\n go  =%s\n rust=%s", gotMsg, rustParityMessageB64)
+	}
+	if encoded != rustParitySignedTxB64 {
+		t.Errorf("signed-tx mismatch vs Rust:\n go  =%s\n rust=%s", encoded, rustParitySignedTxB64)
+	}
+	if !VerifyEd25519(from, msgBytes, sig) {
+		t.Error("signature must verify")
+	}
+}

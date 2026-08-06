@@ -1,0 +1,229 @@
+package fireblocks
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/gagliardetto/solana-go"
+
+	"github.com/solana-foundation/solana-keychain/go/core"
+)
+
+// Fireblocks protocol constants (operation name, source type, and the
+// transaction status values the polling loop reacts to).
+const (
+	operationRaw       = "RAW"
+	sourceVaultAccount = "VAULT_ACCOUNT"
+
+	statusCompleted = "COMPLETED"
+	statusFailed    = "FAILED"
+	statusCancelled = "CANCELLED"
+	statusRejected  = "REJECTED"
+	statusBlocked   = "BLOCKED"
+)
+
+// maxResponseBytes caps how much of a Fireblocks response body is read.
+const maxResponseBytes = 1 << 20
+
+// Wire types for the Fireblocks REST API (Go analogs of the Rust types.rs module).
+
+type createTransactionRequest struct {
+	AssetID         string             `json:"assetId"`
+	Operation       string             `json:"operation"`
+	Source          transactionSource  `json:"source"`
+	ExtraParameters rawExtraParameters `json:"extraParameters"`
+}
+
+type transactionSource struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+type rawExtraParameters struct {
+	RawMessageData rawMessageData `json:"rawMessageData"`
+}
+
+type rawMessageData struct {
+	Messages []rawMessage `json:"messages"`
+}
+
+type rawMessage struct {
+	Content string `json:"content"`
+}
+
+type createTransactionResponse struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+// transactionResponse is the polled transaction state.
+type transactionResponse struct {
+	ID             string          `json:"id"`
+	Status         string          `json:"status"`
+	SubStatus      string          `json:"subStatus"`
+	SignedMessages []signedMessage `json:"signedMessages"`
+}
+
+type signedMessage struct {
+	Signature signatureData `json:"signature"`
+}
+
+type signatureData struct {
+	FullSig string `json:"fullSig"`
+}
+
+type vaultAddressesResponse struct {
+	Addresses []vaultAddress `json:"addresses"`
+}
+
+type vaultAddress struct {
+	Address string `json:"address"`
+}
+
+// doRequest sends an authenticated request to the Fireblocks API and returns the
+// status code and body. The per-request JWT is computed over uri and body (empty
+// body for GET requests), matching the Rust request construction.
+func (s *Signer) doRequest(ctx context.Context, method, uri, body string) (int, []byte, error) {
+	token, err := createJWT(s.apiKey, s.signingKey, uri, body)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, s.apiBaseURL+uri, reader)
+	if err != nil {
+		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "failed to build fireblocks request", err)
+	}
+	if method == http.MethodPost {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("X-API-Key", s.apiKey)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		var se *core.SignerError
+		if errors.As(err, &se) {
+			return 0, nil, se
+		}
+		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "request to fireblocks api failed", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "failed to read fireblocks response body", err)
+	}
+	return resp.StatusCode, data, nil
+}
+
+// fetchPublicKey retrieves the vault account's Solana address. Port of the Rust
+// fetch_public_key (non-2xx surfaces only the status code, never the body).
+func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
+	uri := "/v1/vault/accounts/" + s.vaultAccountID + "/" + s.assetID + "/addresses_paginated"
+	status, body, err := s.doRequest(ctx, http.MethodGet, uri, "")
+	if err != nil {
+		return solana.PublicKey{}, err
+	}
+	if !is2xx(status) {
+		return solana.PublicKey{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status))
+	}
+
+	var addresses vaultAddressesResponse
+	if err := json.Unmarshal(body, &addresses); err != nil {
+		return solana.PublicKey{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse Fireblocks response", err)
+	}
+	if len(addresses.Addresses) == 0 {
+		return solana.PublicKey{}, core.NewSignerError(core.CodeInvalidPublicKey, "invalid public key from Fireblocks")
+	}
+	pubkey, err := solana.PublicKeyFromBase58(addresses.Addresses[0].Address)
+	if err != nil {
+		return solana.PublicKey{}, core.WrapSignerError(core.CodeInvalidPublicKey, "invalid public key from Fireblocks", err)
+	}
+	return pubkey, nil
+}
+
+// createTransaction creates a signing request in Fireblocks. Port of the Rust
+// create_transaction.
+func (s *Signer) createTransaction(ctx context.Context, request createTransactionRequest) (createTransactionResponse, error) {
+	body, err := json.Marshal(request)
+	if err != nil {
+		return createTransactionResponse{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize fireblocks request", err)
+	}
+
+	status, respBody, err := s.doRequest(ctx, http.MethodPost, "/v1/transactions", string(body))
+	if err != nil {
+		return createTransactionResponse{}, err
+	}
+	if !is2xx(status) {
+		return createTransactionResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status))
+	}
+
+	var created createTransactionResponse
+	if err := json.Unmarshal(respBody, &created); err != nil {
+		return createTransactionResponse{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse response", err)
+	}
+	return created, nil
+}
+
+// getTransaction fetches the current status of a Fireblocks transaction. Port of
+// the Rust get_transaction (note the distinct "Fireblocks API error" detail).
+func (s *Signer) getTransaction(ctx context.Context, txID string) (transactionResponse, error) {
+	status, body, err := s.doRequest(ctx, http.MethodGet, "/v1/transactions/"+txID, "")
+	if err != nil {
+		return transactionResponse{}, err
+	}
+	if !is2xx(status) {
+		return transactionResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("Fireblocks API error %d", status))
+	}
+
+	var tx transactionResponse
+	if err := json.Unmarshal(body, &tx); err != nil {
+		return transactionResponse{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse response", err)
+	}
+	return tx, nil
+}
+
+// pollForSignature polls the transaction until it reaches a terminal state or the
+// attempt budget is exhausted. Port of the Rust poll_for_signature: COMPLETED
+// returns the response; FAILED/CANCELLED/REJECTED/BLOCKED fail signing; anything
+// else waits pollInterval and retries. Cancellation of ctx aborts the wait.
+func (s *Signer) pollForSignature(ctx context.Context, txID string) (transactionResponse, error) {
+	for attempt := 0; attempt < s.maxPollAttempts; attempt++ {
+		response, err := s.getTransaction(ctx, txID)
+		if err != nil {
+			return transactionResponse{}, err
+		}
+
+		switch response.Status {
+		case statusCompleted:
+			return response, nil
+		case statusFailed, statusCancelled, statusRejected, statusBlocked:
+			return transactionResponse{}, core.NewSignerError(core.CodeSigningFailed,
+				"transaction "+response.Status+": "+txID)
+		default:
+			timer := time.NewTimer(s.pollInterval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return transactionResponse{}, core.WrapSignerError(core.CodeHTTPError, "polling cancelled", ctx.Err())
+			case <-timer.C:
+			}
+		}
+	}
+
+	return transactionResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf(
+		"transaction polling timeout after %d attempts - signing request may still complete", s.maxPollAttempts))
+}
+
+// is2xx reports whether status is a success status (reqwest is_success parity).
+func is2xx(status int) bool { return status >= 200 && status <= 299 }

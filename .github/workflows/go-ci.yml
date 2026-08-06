@@ -1,0 +1,236 @@
+name: Go CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'go/**'
+      - '.github/workflows/go-ci.yml'
+
+jobs:
+  resolve-signers:
+    runs-on: ubuntu-latest
+    outputs:
+      go_unit_modules_json: ${{ steps.resolve.outputs.go_unit_modules_json }}
+      go_unit_module_count: ${{ steps.resolve.outputs.go_unit_module_count }}
+      go_modules_space: ${{ steps.resolve.outputs.go_modules_space }}
+      go_integration_modules_json: ${{ steps.resolve.outputs.go_integration_modules_json }}
+      go_integration_module_count: ${{ steps.resolve.outputs.go_integration_module_count }}
+    steps:
+      - name: Resolve enabled signers from repository variables
+        id: resolve
+        uses: actions/github-script@v9
+        env:
+          CI_SIGNER_MEMORY_ENABLED: ${{ vars.CI_SIGNER_MEMORY_ENABLED || 'true' }}
+          CI_SIGNER_VAULT_ENABLED: ${{ vars.CI_SIGNER_VAULT_ENABLED || 'true' }}
+          CI_SIGNER_PRIVY_ENABLED: ${{ vars.CI_SIGNER_PRIVY_ENABLED || 'true' }}
+          CI_SIGNER_TURNKEY_ENABLED: ${{ vars.CI_SIGNER_TURNKEY_ENABLED || 'true' }}
+          CI_SIGNER_AWS_KMS_ENABLED: ${{ vars.CI_SIGNER_AWS_KMS_ENABLED || 'true' }}
+          CI_SIGNER_FIREBLOCKS_ENABLED: ${{ vars.CI_SIGNER_FIREBLOCKS_ENABLED || 'true' }}
+          CI_SIGNER_GCP_KMS_ENABLED: ${{ vars.CI_SIGNER_GCP_KMS_ENABLED || 'true' }}
+          CI_SIGNER_PARA_ENABLED: ${{ vars.CI_SIGNER_PARA_ENABLED || 'true' }}
+          CI_SIGNER_CDP_ENABLED: ${{ vars.CI_SIGNER_CDP_ENABLED || 'true' }}
+          CI_SIGNER_DFNS_ENABLED: ${{ vars.CI_SIGNER_DFNS_ENABLED || 'true' }}
+          CI_SIGNER_CROSSMINT_ENABLED: ${{ vars.CI_SIGNER_CROSSMINT_ENABLED || 'true' }}
+          CI_SIGNER_OPENFORT_ENABLED: ${{ vars.CI_SIGNER_OPENFORT_ENABLED || 'true' }}
+          CI_SIGNER_UTILA_ENABLED: ${{ vars.CI_SIGNER_UTILA_ENABLED || 'true' }}
+        with:
+          script: |
+            const parseVar = (name) => {
+              const raw = process.env[name];
+              if (raw !== 'true' && raw !== 'false') {
+                const message = `${name} must be set to the string 'true' or 'false' in repository Actions variables. Received: ${raw ?? 'undefined'}`;
+                core.setFailed(message);
+                throw new Error(message);
+              }
+              return raw === 'true';
+            };
+
+            const enabled = {
+              memory: parseVar('CI_SIGNER_MEMORY_ENABLED'),
+              vault: parseVar('CI_SIGNER_VAULT_ENABLED'),
+              privy: parseVar('CI_SIGNER_PRIVY_ENABLED'),
+              turnkey: parseVar('CI_SIGNER_TURNKEY_ENABLED'),
+              aws_kms: parseVar('CI_SIGNER_AWS_KMS_ENABLED'),
+              fireblocks: parseVar('CI_SIGNER_FIREBLOCKS_ENABLED'),
+              gcp_kms: parseVar('CI_SIGNER_GCP_KMS_ENABLED'),
+              para: parseVar('CI_SIGNER_PARA_ENABLED'),
+              cdp: parseVar('CI_SIGNER_CDP_ENABLED'),
+              dfns: parseVar('CI_SIGNER_DFNS_ENABLED'),
+              crossmint: parseVar('CI_SIGNER_CROSSMINT_ENABLED'),
+              openfort: parseVar('CI_SIGNER_OPENFORT_ENABLED'),
+              utila: parseVar('CI_SIGNER_UTILA_ENABLED'),
+            };
+
+            const goUnitOrder = [
+              'memory',
+              'vault',
+              'privy',
+              'turnkey',
+              'aws_kms',
+              'fireblocks',
+              'gcp_kms',
+              'cdp',
+              'para',
+              'dfns',
+              'crossmint',
+              'openfort',
+              'utila',
+            ];
+            const moduleBySigner = {
+              memory: 'signers/memory',
+              vault: 'signers/vault',
+              privy: 'signers/privy',
+              turnkey: 'signers/turnkey',
+              aws_kms: 'signers/awskms',
+              fireblocks: 'signers/fireblocks',
+              gcp_kms: 'signers/gcpkms',
+              cdp: 'signers/cdp',
+              para: 'signers/para',
+              dfns: 'signers/dfns',
+              crossmint: 'signers/crossmint',
+              openfort: 'signers/openfort',
+              utila: 'signers/utila',
+            };
+
+            // core and testutils are not signer-gated; every signer module is.
+            const goUnitModules = [
+              'core',
+              'testutils',
+              ...goUnitOrder.filter((signer) => enabled[signer]).map((signer) => moduleBySigner[signer]),
+            ];
+
+            core.setOutput('go_unit_modules_json', JSON.stringify(goUnitModules));
+            core.setOutput('go_unit_module_count', String(goUnitModules.length));
+            core.setOutput('go_modules_space', goUnitModules.join(' '));
+
+            // Same live-credential set as the TS CI (utila and vault run
+            // locally via `just go-test-integration`, as in Rust/TS).
+            const goIntegrationOrder = [
+              'privy',
+              'turnkey',
+              'fireblocks',
+              'aws_kms',
+              'gcp_kms',
+              'para',
+              'cdp',
+              'dfns',
+              'crossmint',
+              'openfort',
+            ];
+            const goIntegrationModules = goIntegrationOrder
+              .filter((signer) => enabled[signer])
+              .map((signer) => moduleBySigner[signer]);
+
+            core.setOutput('go_integration_modules_json', JSON.stringify(goIntegrationModules));
+            core.setOutput('go_integration_module_count', String(goIntegrationModules.length));
+
+  go-test:
+    needs: resolve-signers
+    if: ${{ needs.resolve-signers.outputs.go_unit_module_count != '0' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    strategy:
+      matrix:
+        module: ${{ fromJSON(needs.resolve-signers.outputs.go_unit_modules_json) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go/signers/gcpkms/go.mod
+          cache-dependency-path: go/**/go.sum
+      - name: Build and test ${{ matrix.module }}
+        run: |
+          cd '${{ matrix.module }}'
+          go build ./...
+          go test -race -count=1 ./...
+
+  go-integration-test:
+    needs: resolve-signers
+    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) && needs.resolve-signers.outputs.go_integration_module_count != '0' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: go
+    strategy:
+      matrix:
+        module: ${{ fromJSON(needs.resolve-signers.outputs.go_integration_modules_json) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go/signers/gcpkms/go.mod
+          cache-dependency-path: go/**/go.sum
+      - uses: dopplerhq/secrets-fetch-action@v2.0.0
+        id: doppler
+        with:
+          auth-method: oidc
+          doppler-identity-id: ${{ vars.DOPPLER_SERVICE_IDENTITY_ID }}
+          doppler-project: ${{ vars.DOPPLER_PROJECT || 'keychain' }}
+          doppler-config: ${{ vars.DOPPLER_CONFIG_CI || 'stg_github' }}
+          inject-env-vars: true
+      - name: Setup GCP credentials
+        if: matrix.module == 'signers/gcpkms'
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ steps.doppler.outputs.GCP_SERVICE_ACCOUNT_KEY }}
+      - name: Configure AWS credentials
+        if: matrix.module == 'signers/awskms'
+        uses: aws-actions/configure-aws-credentials@v6.2.0
+        with:
+          role-to-assume: ${{ steps.doppler.outputs.AWS_ROLE_ARN }}
+          aws-region: ${{ steps.doppler.outputs.AWS_KMS_REGION }}
+      - name: Run ${{ matrix.module }} integration tests
+        env:
+          SOLANA_RPC_URL: https://api.devnet.solana.com
+        run: |
+          cd '${{ matrix.module }}'
+          go test -tags=integration -race -count=1 ./...
+
+  go-format:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go/signers/gcpkms/go.mod
+          cache-dependency-path: go/**/go.sum
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt required for:" && echo "$unformatted"
+            exit 1
+          fi
+
+  go-lint:
+    needs: resolve-signers
+    if: ${{ needs.resolve-signers.outputs.go_unit_module_count != '0' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go/signers/gcpkms/go.mod
+          cache-dependency-path: go/**/go.sum
+      - name: Install golangci-lint
+        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.12.2
+      - name: Vet and lint every enabled module
+        run: |
+          for module in ${{ needs.resolve-signers.outputs.go_modules_space }}; do
+            echo "==> $module"
+            (cd "$module" && go vet ./... && golangci-lint run ./...)
+          done
