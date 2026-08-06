@@ -1,6 +1,6 @@
 # @solana/keychain-fordefi
 
-Fordefi MPC signer for Solana transactions, part of the [@solana/keychain](https://github.com/solana-foundation/solana-keychain) family.
+[Fordefi](https://docs.fordefi.com/) MPC signer for Solana transactions, part of the [@solana/keychain](https://github.com/solana-foundation/solana-keychain) family.
 
 ## Installation
 
