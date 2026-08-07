@@ -36,6 +36,7 @@ jobs:
           CI_SIGNER_CROSSMINT_ENABLED: ${{ vars.CI_SIGNER_CROSSMINT_ENABLED || 'true' }}
           CI_SIGNER_OPENFORT_ENABLED: ${{ vars.CI_SIGNER_OPENFORT_ENABLED || 'true' }}
           CI_SIGNER_UTILA_ENABLED: ${{ vars.CI_SIGNER_UTILA_ENABLED || 'true' }}
+          CI_SIGNER_FORDEFI_ENABLED: ${{ vars.CI_SIGNER_FORDEFI_ENABLED || 'true' }}
         with:
           script: |
             const parseVar = (name) => {
@@ -62,6 +63,7 @@ jobs:
               crossmint: parseVar('CI_SIGNER_CROSSMINT_ENABLED'),
               openfort: parseVar('CI_SIGNER_OPENFORT_ENABLED'),
               utila: parseVar('CI_SIGNER_UTILA_ENABLED'),
+              fordefi: parseVar('CI_SIGNER_FORDEFI_ENABLED'),
             };
 
             const goUnitOrder = [
@@ -78,6 +80,7 @@ jobs:
               'crossmint',
               'openfort',
               'utila',
+              'fordefi',
             ];
             const moduleBySigner = {
               memory: 'signers/memory',
@@ -93,6 +96,7 @@ jobs:
               crossmint: 'signers/crossmint',
               openfort: 'signers/openfort',
               utila: 'signers/utila',
+              fordefi: 'signers/fordefi',
             };
 
             // core and testutils are not signer-gated; every signer module is.
@@ -119,6 +123,7 @@ jobs:
               'dfns',
               'crossmint',
               'openfort',
+              'fordefi',
             ];
             const goIntegrationModules = goIntegrationOrder
               .filter((signer) => enabled[signer])

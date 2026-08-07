@@ -33,6 +33,7 @@ library offers a consistent API across all signing methods.
 | **Crossmint** | Crossmint managed wallets | `signers/crossmint` | ✅ Available |
 | **Openfort** | Openfort backend wallets with TEE-stored keys | `signers/openfort` | ✅ Available |
 | **Utila** | Utila MPC wallet integration | `signers/utila` | ✅ Available |
+| **Fordefi** | Fordefi institutional MPC custody | `signers/fordefi` | ✅ Available |
 
 ## Installation
 
@@ -194,6 +195,7 @@ present.
 | [`signers/para`](signers/para/) | Para wallet API |
 | [`signers/crossmint`](signers/crossmint/) | Crossmint (create/poll/approve flow, HKDF delegated-signer key) |
 | [`signers/openfort`](signers/openfort/) | Openfort (ES256 x-wallet-auth JWTs) |
+| [`signers/fordefi`](signers/fordefi/) | Fordefi (black-box or native Solana MPC signing with status polling, P-256 request signing) |
 | [`testutils`](testutils/) | Deterministic keypair + test-transaction helpers for testing your own signers |
 
 Backend-behavior quirks: `crossmint` intentionally does not support
