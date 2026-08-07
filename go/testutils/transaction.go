@@ -22,8 +22,8 @@ var testBlockhash = func() solana.Hash {
 const TestTransferLamports = 1_000_000
 
 // CreateTestTransaction builds a minimal single-signer System transfer transaction
-// (payer -> a fixed recipient) with a fixed blockhash — the Go analog of the Rust
-// create_test_transaction helper. It is deterministic for a given payer.
+// (payer -> a fixed recipient) with a fixed blockhash. It is deterministic for a
+// given payer.
 func CreateTestTransaction(payer solana.PublicKey) (*solana.Transaction, error) {
 	inst := system.NewTransferInstruction(TestTransferLamports, payer, testRecipient).Build()
 	return solana.NewTransaction(

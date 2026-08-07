@@ -1,6 +1,5 @@
 // Package gcpkms provides a Google Cloud KMS-backed SolanaSigner using EdDSA
-// (Ed25519) signing — the Go analog of the Rust gcp_kms module and the
-// @solana/keychain-gcp-kms package.
+// (Ed25519) signing.
 //
 // The KMS crypto key must be created with purpose ASYMMETRIC_SIGN and algorithm
 // EC_SIGN_ED25519. Cloud KMS operates in PureEdDSA mode for that algorithm, so
@@ -19,8 +18,7 @@ import (
 
 // KMSClient is the subset of the Cloud KMS API the signer uses. It is satisfied
 // by *kms.KeyManagementClient and exists so tests (and callers with bespoke
-// client setups) can supply a stub via Config.Client — the Go analog of the Rust
-// GcpKmsSigner::with_client constructor.
+// client setups) can supply a stub via Config.Client.
 type KMSClient interface {
 	// AsymmetricSign signs data with the named crypto key version.
 	AsymmetricSign(ctx context.Context, req *kmspb.AsymmetricSignRequest, opts ...gax.CallOption) (*kmspb.AsymmetricSignResponse, error)
@@ -33,8 +31,7 @@ type KMSClient interface {
 // Compile-time proof that the official client satisfies KMSClient.
 var _ KMSClient = (*kms.KeyManagementClient)(nil)
 
-// Config configures a GCP KMS signer (parity with the Rust GcpKmsSignerConfig
-// and the TS GcpKmsSignerConfig).
+// Config configures a GCP KMS signer.
 type Config struct {
 	// KeyName is the full resource name of the crypto key version, e.g.
 	// "projects/P/locations/L/keyRings/R/cryptoKeys/K/cryptoKeyVersions/1".
@@ -45,15 +42,14 @@ type Config struct {
 	// front; every returned signature is verified against it.
 	PublicKey string
 
-	// Client optionally supplies a pre-built KMS client (the Go analog of the
-	// Rust with_client constructor). When set, New performs no dialing and the
-	// caller owns the client's configuration — including its endpoint and
-	// transport security posture. When nil, New dials the official client with
-	// ClientOptions.
+	// Client optionally supplies a pre-built KMS client. When set, New performs
+	// no dialing and the caller owns the client's configuration — including its
+	// endpoint and transport security posture. When nil, New dials the official
+	// client with ClientOptions.
 	Client KMSClient
 
 	// ClientOptions are passed through to kms.NewKeyManagementClient when
 	// Client is nil (credentials, endpoint, etc.). The zero value uses
-	// Application Default Credentials, matching the Rust builder.
+	// Application Default Credentials.
 	ClientOptions []option.ClientOption
 }

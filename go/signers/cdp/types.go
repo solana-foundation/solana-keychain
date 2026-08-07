@@ -2,8 +2,7 @@
 // (CDP) REST API. Keys are held in CDP's managed key infrastructure; each request
 // is authenticated with two per-request JWTs: an `Authorization: Bearer` token
 // signed with the CDP API key (EdDSA) and an `X-Wallet-Auth` token signed with
-// the wallet secret (ES256) for write endpoints. It is the Go analog of the Rust
-// cdp module and the @solana/keychain-cdp package.
+// the wallet secret (ES256) for write endpoints.
 package cdp
 
 import (
@@ -12,8 +11,7 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// Config configures a CDP signer (parity with the Rust CdpSignerConfig and the
-// TS CdpSignerConfig).
+// Config configures a CDP signer.
 type Config struct {
 	// APIKeyID is the CDP API key name / ID. It becomes the `kid` header and
 	// `sub` claim of the Authorization JWT.
@@ -42,7 +40,7 @@ type Config struct {
 	// HTTPClient optionally overrides the HTTP client. When nil, the signer
 	// builds one with core.NewHTTPClient, which enforces HTTPS. Supplying a
 	// client bypasses that HTTPS enforcement and the caller owns that security
-	// posture (Go analog of the Rust `with_client` constructors).
+	// posture.
 	HTTPClient *http.Client
 }
 

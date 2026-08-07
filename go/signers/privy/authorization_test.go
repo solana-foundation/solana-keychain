@@ -14,7 +14,7 @@ import (
 )
 
 // testP256PKCS8PEM and testP256PKCS8Base64 are the same fixed P-256 PKCS#8 key
-// the Rust authorization tests use.
+// in PEM and base64 DER form.
 const testP256PKCS8PEM = "-----BEGIN PRIVATE KEY-----\n" +
 	"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgNVGLQN9VkU26M2JG\n" +
 	"3hbSFACbGLXkQlB69ZxAhXGqf/mhRANCAATjr6H28PJiFSlRz9kfkzu9Fy6vt1uY\n" +
@@ -51,9 +51,8 @@ func testP256PublicKey(t *testing.T) *ecdsa.PublicKey {
 	return &parsed.(*ecdsa.PrivateKey).PublicKey
 }
 
-// TestFormatAuthorizationPayloadEmptyBody ports
-// formats_empty_authorization_request_bodies_like_privy_sdk: an empty JSON
-// object body is canonicalized as the empty string, matching Privy's SDK.
+// TestFormatAuthorizationPayloadEmptyBody checks that an empty JSON object body
+// is canonicalized as the empty string, matching Privy's SDK.
 func TestFormatAuthorizationPayloadEmptyBody(t *testing.T) {
 	payload, err := formatAuthorizationSignaturePayload(authorizationRequest(map[string]any{}))
 	if err != nil {
@@ -67,12 +66,10 @@ func TestFormatAuthorizationPayloadEmptyBody(t *testing.T) {
 	}
 }
 
-// TestGenerateAuthorizationSignaturesFromPrivateKeys ports
-// generates_base64_der_authorization_signatures_from_privy_private_keys: a
-// prefixed PKCS#8 key yields a base64 DER ECDSA signature that verifies against
-// the corresponding public key over the canonical payload. The PEM subtest
-// mirrors the TS "generates authorization signatures from prefixed PEM private
-// keys" case, covering the escaped-newline PEM path.
+// TestGenerateAuthorizationSignaturesFromPrivateKeys checks that a prefixed
+// PKCS#8 key yields a base64 DER ECDSA signature that verifies against the
+// corresponding public key over the canonical payload. The PEM subtest covers
+// the escaped-newline PEM path.
 func TestGenerateAuthorizationSignaturesFromPrivateKeys(t *testing.T) {
 	keys := map[string]string{
 		"wallet-auth base64 DER": "wallet-auth:" + testP256PKCS8Base64,
@@ -116,8 +113,8 @@ func TestGenerateAuthorizationSignaturesFromPrivateKeys(t *testing.T) {
 	}
 }
 
-// TestAuthorizationSignatureOrder ports preserves_privy_signature_order:
-// precomputed signatures come first, then sign-fn signatures.
+// TestAuthorizationSignatureOrder checks that precomputed signatures come
+// first, then sign-fn signatures.
 func TestAuthorizationSignatureOrder(t *testing.T) {
 	request := authorizationRequest(map[string]any{"method": "signMessage"})
 	authorizationContext := &AuthorizationContext{
@@ -136,9 +133,8 @@ func TestAuthorizationSignatureOrder(t *testing.T) {
 	}
 }
 
-// TestInvalidAuthorizationPrivateKeyErrors ports
-// invalid_privy_private_key_errors_do_not_include_parser_details: every parse
-// failure is CodeInvalidPrivateKey with a fixed detail that never echoes the key.
+// TestInvalidAuthorizationPrivateKeyErrors checks that every parse failure is
+// CodeInvalidPrivateKey with a fixed detail that never echoes the key.
 func TestInvalidAuthorizationPrivateKeyErrors(t *testing.T) {
 	cases := []struct {
 		key        string

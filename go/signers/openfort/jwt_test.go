@@ -9,7 +9,7 @@ import (
 )
 
 // p256PKCS8DER is a minimal valid P-256 PKCS#8 DER private key whose scalar is
-// [0x01; 32] (in the valid range [1, n-1]) — the same fixture the Rust tests use.
+// 32 bytes of 0x01 (in the valid range [1, n-1]).
 var p256PKCS8DER = []byte{
 	0x30, 0x41,
 	0x02, 0x01, 0x00,

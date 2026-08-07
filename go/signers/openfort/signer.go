@@ -24,9 +24,8 @@ const (
 )
 
 // Signer signs Solana transactions and messages with an Openfort backend
-// wallet. It is the Go analog of the Rust OpenfortSigner and the TS
-// OpenfortSigner; New resolves the wallet's Solana address up front (parity
-// with Rust init()), so the returned signer is ready to use.
+// wallet. New resolves the wallet's Solana address up front, so the returned
+// signer is ready to use.
 //
 // A Signer is immutable after New and safe for concurrent use.
 type Signer struct {
@@ -43,8 +42,7 @@ type Signer struct {
 var _ core.Signer = (*Signer)(nil)
 
 // New builds an Openfort signer and fetches the wallet's Solana address from
-// GET /v2/accounts/{accountId} (the Go analog of Rust from_config + init and
-// the TS createOpenfortSigner factory).
+// GET /v2/accounts/{accountId}.
 func New(ctx context.Context, cfg Config) (*Signer, error) {
 	if cfg.SecretKey == "" {
 		return nil, core.NewSignerError(core.CodeConfigError, "secret_key must not be empty")
@@ -97,8 +95,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 // Pubkey returns the wallet's Solana address resolved during New.
 func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
-// String renders the signer without any secret material — the Go analog of the
-// Rust redacting Debug impl.
+// String renders the signer without any secret material.
 func (s Signer) String() string {
 	return "openfort.Signer{accountID: " + s.accountID + ", pubkey: " + s.pubkey.String() + ", baseURL: " + s.baseURL + "}"
 }
@@ -136,14 +133,14 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 
 // IsAvailable re-fetches the account and reports whether its address still
 // matches the one resolved during New. All errors are swallowed and reported
-// as false (parity with the Rust is_available).
+// as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
 	pubkey, err := s.fetchPublicKey(ctx)
 	return err == nil && pubkey == s.pubkey
 }
 
-// fetchPublicKey calls GET /v2/accounts/{accountId} — bearer auth only, no
-// wallet JWT — and parses the Solana address. Port of the Rust fetch_public_key.
+// fetchPublicKey calls GET /v2/accounts/{accountId} (bearer auth only, no
+// wallet JWT) and parses the Solana address.
 func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+accountsPath+"/"+s.accountID, nil)
 	if err != nil {
@@ -170,7 +167,7 @@ func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 
 // callSign sends POST /v2/accounts/backend/{accountId}/sign with hex-encoded
 // message bytes. The body bytes sent over the wire are exactly the bytes the
-// JWT's reqHash is computed over. Port of the Rust call_sign.
+// JWT's reqHash is computed over.
 func (s *Signer) callSign(ctx context.Context, message []byte) (signResponse, error) {
 	path := backendPath + "/" + s.accountID + "/sign"
 	body, err := marshalCanonical(map[string]any{"data": "0x" + hex.EncodeToString(message)})
@@ -203,8 +200,7 @@ func (s *Signer) callSign(ctx context.Context, message []byte) (signResponse, er
 }
 
 // signBytes signs message via the Openfort API, decodes the 0x-prefixed hex
-// signature, and verifies it against the signer's address. Port of the Rust
-// sign_bytes.
+// signature, and verifies it against the signer's address.
 func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signature, error) {
 	resp, err := s.callSign(ctx, message)
 	if err != nil {
@@ -231,8 +227,8 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 
 // do executes an Openfort API request and returns the response body of a 2xx
 // response. Transport failures map to CodeHTTPError and non-2xx statuses to
-// CodeRemoteAPIError with only the status code (the Rust error never includes
-// the remote body).
+// CodeRemoteAPIError with only the status code (the remote body is never
+// included).
 func (s *Signer) do(req *http.Request) ([]byte, error) {
 	resp, err := s.client.Do(req)
 	if err != nil {

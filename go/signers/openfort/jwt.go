@@ -17,19 +17,16 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// jwtLifetimeSecs is how long a wallet-auth JWT stays valid (parity with the
-// Rust JWT_LIFETIME_SECS).
+// jwtLifetimeSecs is how long a wallet-auth JWT stays valid.
 const jwtLifetimeSecs int64 = 120
 
-// jwtURI formats the JWT `uris` claim entry as "<METHOD> <HOST><PATH>". Port
-// of the Rust jwt_uri.
+// jwtURI formats the JWT `uris` claim entry as "<METHOD> <HOST><PATH>".
 func jwtURI(host, method, path string) string {
 	return method + " " + host + path
 }
 
 // marshalCanonical serializes v to compact JSON with object keys sorted
-// (encoding/json sorts map keys) and without HTML escaping, matching the byte
-// output of Rust's serde_json over a sorted map.
+// (encoding/json sorts map keys) and without HTML escaping.
 func marshalCanonical(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -42,7 +39,7 @@ func marshalCanonical(v any) ([]byte, error) {
 
 // computeReqHash returns hex(sha256(canonical-JSON(body))), where the
 // canonical form recursively sorts object keys so the hash is key-order
-// invariant. Port of the Rust sort_json + compute_req_hash.
+// invariant.
 func computeReqHash(body []byte) (string, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
@@ -61,7 +58,7 @@ func computeReqHash(body []byte) (string, error) {
 // walletSecretToPEM normalizes the wallet secret to a PEM string. A full PEM
 // input is passed through verbatim; a bare base64 PKCS#8 DER body (the
 // convenient single-line form) has whitespace stripped and is wrapped in PEM
-// headers. Port of the Rust wallet_secret_to_pem.
+// headers.
 func walletSecretToPEM(walletSecret string) string {
 	if strings.HasPrefix(strings.TrimLeftFunc(walletSecret, unicode.IsSpace), "-----BEGIN") {
 		return walletSecret
@@ -77,8 +74,7 @@ func walletSecretToPEM(walletSecret string) string {
 }
 
 // parseWalletSecret parses the wallet secret into an ECDSA private key,
-// accepting bare base64 PKCS#8 DER or full PEM (parity with the Rust
-// EncodingKey::from_ec_pem call).
+// accepting bare base64 PKCS#8 DER or full PEM.
 func parseWalletSecret(walletSecret string) (*ecdsa.PrivateKey, error) {
 	key, err := jwt.ParseECPrivateKeyFromPEM([]byte(walletSecretToPEM(walletSecret)))
 	if err != nil {
@@ -88,8 +84,7 @@ func parseWalletSecret(walletSecret string) (*ecdsa.PrivateKey, error) {
 	return key, nil
 }
 
-// newUUIDv4 returns an RFC 4122 version-4 UUID string for the JWT `jti` claim
-// (the Go analog of the Rust Uuid::new_v4).
+// newUUIDv4 returns an RFC 4122 version-4 UUID string for the JWT `jti` claim.
 func newUUIDv4() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -101,8 +96,8 @@ func newUUIDv4() (string, error) {
 }
 
 // createWalletJWT builds the x-wallet-auth ES256 JWT for an Openfort backend
-// wallet request. Claims mirror the Rust WalletClaims: uris, iat, nbf, exp,
-// jti, and reqHash over the request body. Port of the Rust create_wallet_jwt.
+// wallet request. Claims: uris, iat, nbf, exp, jti, and reqHash over the
+// request body.
 func createWalletJWT(walletSecret, host, method, path string, requestBody []byte) (string, error) {
 	key, err := parseWalletSecret(walletSecret)
 	if err != nil {

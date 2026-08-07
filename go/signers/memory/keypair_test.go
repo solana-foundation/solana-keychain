@@ -39,10 +39,9 @@ func TestPrivateKeyFromStringInvalid(t *testing.T) {
 	}
 }
 
-// Canonical cross-language test vector shared with the Rust (memory/mod.rs) and
-// TypeScript suites. Parsing either encoding MUST yield this exact pubkey — this
-// is the authoritative proof that Go's key handling (seed‖pubkey interpretation
-// and base58 encoding) matches the other two implementations byte-for-byte.
+// Canonical test vector: parsing either encoding MUST yield this exact pubkey,
+// verifying the key handling (seed‖pubkey interpretation and base58 encoding)
+// byte-for-byte.
 const (
 	canonicalKeypairU8Array = "[41,99,180,88,51,57,48,80,61,63,219,75,176,49,116,254,227,176,196,204,122,47,166,133,155,252,217,0,253,17,49,143,47,94,121,167,195,136,72,22,157,48,77,88,63,96,57,122,181,243,236,188,241,134,174,224,100,246,17,170,104,17,151,48]"
 	canonicalKeypairBase58  = "pzjkwgQ5shhq3Awijz6CjDjZrXPX7YKKgkTipBK7JAq8XW5GbDynBFChESMBrz4SvFiZ8qJAtUB6sL3PpVCnbR1"

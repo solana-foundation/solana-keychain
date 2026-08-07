@@ -16,9 +16,8 @@ import (
 )
 
 // integrationSigner builds a signer against the live Fireblocks API configured
-// by the environment — the Go analog of the Rust
-// tests/test_fireblocks_integration.rs (SOL_TEST asset by default), run by
-// `just go-test-integration` (loads .env) or CI with Doppler secrets.
+// by the environment (SOL_TEST asset by default; `just go-test-integration`
+// loads .env, CI supplies Doppler secrets).
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	assetID := os.Getenv("FIREBLOCKS_ASSET_ID")
@@ -66,8 +65,7 @@ func TestIntegrationSignMessage(t *testing.T) {
 	}
 }
 
-// The Rust test additionally simulates the signed transaction in LiteSVM;
-// there are no LiteSVM bindings for Go, so verification is cryptographic only.
+// There are no LiteSVM bindings for Go, so verification is cryptographic only.
 func TestIntegrationSignTransaction(t *testing.T) {
 	s := integrationSigner(t)
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())

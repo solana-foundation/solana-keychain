@@ -21,8 +21,7 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/testutils"
 )
 
-// testWalletID is a syntactically valid Para wallet UUID used across tests
-// (the Rust tests' "12345678-1234-1234-1234-123456789abc").
+// testWalletID is a syntactically valid Para wallet UUID used across tests.
 const testWalletID = "12345678-1234-1234-1234-123456789abc"
 
 const walletPath = "/v1/wallets/" + testWalletID
@@ -36,8 +35,8 @@ func newMockServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	return srv
 }
 
-// newBareSigner builds a Signer struct directly, bypassing New — the Go analog
-// of the Rust tests' create_test_signer helper (which bypasses init()).
+// newBareSigner builds a Signer struct directly, bypassing New (and thus the
+// wallet fetch in init).
 func newBareSigner(srv *httptest.Server, apiKey string) *Signer {
 	return &Signer{apiKey: apiKey, walletID: testWalletID, baseURL: srv.URL, client: srv.Client()}
 }
@@ -70,8 +69,8 @@ func assertCode(t *testing.T, err error, want core.Code) {
 }
 
 // signFixture returns the deterministic test keypair, a test transaction's
-// message bytes, and a real ed25519 signature over them — the Go analog of the
-// Rust tests signing with a local Keypair so verification passes.
+// message bytes, and a real ed25519 signature over them so verification
+// passes.
 func signFixture(t *testing.T) (pub solana.PublicKey, msg []byte, sig []byte) {
 	t.Helper()
 	priv := testutils.TestPrivateKey()
@@ -87,7 +86,7 @@ func signFixture(t *testing.T) (pub solana.PublicKey, msg []byte, sig []byte) {
 	return pub, msg, ed25519.Sign(priv, msg)
 }
 
-// --- Validation tests (Rust test_para_new_*) ---
+// --- Validation tests ---
 
 func TestNewValidatesAPIKeyPrefix(t *testing.T) {
 	_, err := New(context.Background(), Config{APIKey: "bad-key", WalletID: testWalletID})
@@ -118,7 +117,7 @@ func TestNewValidatesEmptyFields(t *testing.T) {
 }
 
 func TestNewValid(t *testing.T) {
-	// Validation/normalization only (Rust ParaSigner::new does not init).
+	// Validation/normalization only; newUninitialized does not fetch the wallet.
 	s, err := newUninitialized(Config{APIKey: "sk_test-key", WalletID: testWalletID})
 	if err != nil {
 		t.Fatalf("expected valid config, got %v", err)
@@ -156,9 +155,8 @@ func TestNewRejectsHTTPURL(t *testing.T) {
 }
 
 func TestNewRejectsHTTPURLWithCustomClient(t *testing.T) {
-	// A caller-supplied HTTPClient must not bypass the HTTPS requirement
-	// (parity with Rust from_config and the TS assertHttpsUrl, which always
-	// validate the base URL).
+	// A caller-supplied HTTPClient must not bypass the HTTPS requirement; the
+	// base URL is always validated.
 	_, err := New(context.Background(), Config{
 		APIKey:     "sk_test-key",
 		WalletID:   testWalletID,
@@ -187,7 +185,7 @@ func TestIsValidUUID(t *testing.T) {
 	}
 }
 
-// --- Sign before init (Rust test_para_sign_before_init) ---
+// --- Sign before init ---
 
 func TestSignMessageBeforeInit(t *testing.T) {
 	srv := newMockServer(t, func(_ http.ResponseWriter, _ *http.Request) {
@@ -199,7 +197,7 @@ func TestSignMessageBeforeInit(t *testing.T) {
 	assertCode(t, err, core.CodeConfigError)
 }
 
-// --- Init tests (Rust test_para_init_*) ---
+// --- Init tests ---
 
 func TestNewInitSuccess(t *testing.T) {
 	pub := testutils.TestPublicKey()
@@ -312,9 +310,8 @@ func TestNewInitMalformedJSON(t *testing.T) {
 }
 
 func TestNewInitMissingTypeField(t *testing.T) {
-	// Rust fails at deserialization (required "type" field); Go's JSON decoder
-	// tolerates missing fields, so this surfaces as the SOLANA type check
-	// failing instead. Both reject the wallet.
+	// The JSON decoder tolerates a missing "type" field, so this surfaces as
+	// the SOLANA type check failing.
 	srv := newMockServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, http.StatusOK, map[string]any{
 			"id":      testWalletID,
@@ -328,7 +325,7 @@ func TestNewInitMissingTypeField(t *testing.T) {
 }
 
 func TestNewInitCreatingStatusWithAddress(t *testing.T) {
-	// init does not check status (matches Rust/TS behavior) — only IsAvailable does.
+	// init does not check status; only IsAvailable does.
 	pub := testutils.TestPublicKey()
 	srv := newMockServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, http.StatusOK, map[string]any{
@@ -348,7 +345,7 @@ func TestNewInitCreatingStatusWithAddress(t *testing.T) {
 	}
 }
 
-// --- Sign tests (Rust test_para_sign_*) ---
+// --- Sign tests ---
 
 func TestSignMessageSuccess(t *testing.T) {
 	pub, msg, sig := signFixture(t)
@@ -512,8 +509,7 @@ func TestSignMessageVerificationFailure(t *testing.T) {
 }
 
 func TestSignMessageErrorStatusCodeOnly(t *testing.T) {
-	// Error output must stay generic and never include API response text
-	// (Rust test_para_error_status_code_only).
+	// Error output must stay generic and never include API response text.
 	pub, _, _ := signFixture(t)
 	srv := newMockServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, http.StatusForbidden, map[string]any{"message": "Wallet is locked"})
@@ -538,7 +534,7 @@ func TestSignMessageErrorStatusCodeOnly(t *testing.T) {
 	}
 }
 
-// --- IsAvailable tests (Rust test_para_is_available_*) ---
+// --- IsAvailable tests ---
 
 func TestIsAvailable(t *testing.T) {
 	cases := []struct {
@@ -587,8 +583,7 @@ func TestIsAvailableAPIError(t *testing.T) {
 
 func TestIsAvailableTimeout(t *testing.T) {
 	// The handler blocks until the client gives up, exercising the bounded
-	// health check (Rust test_para_is_available_timeout, without a 5s wait:
-	// the caller context expires first).
+	// health check without a 5s wait: the caller context expires first.
 	srv := newMockServer(t, func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	})
@@ -601,7 +596,7 @@ func TestIsAvailableTimeout(t *testing.T) {
 	}
 }
 
-// --- Redaction (Rust test_para_debug_hides_secrets) ---
+// --- Redaction ---
 
 func TestStringHidesSecrets(t *testing.T) {
 	s := &Signer{apiKey: "secret-api-key", walletID: "secret-wallet-id", baseURL: DefaultBaseURL}

@@ -15,15 +15,13 @@ import (
 )
 
 // walletResponse is the subset of the Crossmint wallet object the signer needs.
-// Port of the Rust WalletResponse.
 type walletResponse struct {
 	ChainType string `json:"chainType"`
 	Type      string `json:"type"`
 	Address   string `json:"address"`
 }
 
-// createTransactionRequest is the create-transaction request body. Port of the
-// Rust CreateTransactionRequest.
+// createTransactionRequest is the create-transaction request body.
 type createTransactionRequest struct {
 	Params createTransactionParams `json:"params"`
 }
@@ -33,9 +31,8 @@ type createTransactionParams struct {
 	Signer      string `json:"signer,omitempty"`
 }
 
-// transactionResponse is the Crossmint transaction object. Port of the Rust
-// TransactionResponse; optional fields are pointers/raw JSON so absent and
-// null are treated alike.
+// transactionResponse is the Crossmint transaction object; optional fields are
+// pointers/raw JSON so absent and null are treated alike.
 type transactionResponse struct {
 	ID        string          `json:"id"`
 	Status    string          `json:"status"`
@@ -58,14 +55,12 @@ type pendingApproval struct {
 	Signer  *approvalSigner `json:"signer"`
 }
 
-// approvalSigner identifies which approver a pending challenge is addressed
-// to. Port of the Rust ApprovalSigner.
+// approvalSigner identifies which approver a pending challenge is addressed to.
 type approvalSigner struct {
 	Locator *string `json:"locator"`
 }
 
-// approvalRequest is the submit-approval request body (the Rust module builds
-// this inline as serde_json::json!).
+// approvalRequest is the submit-approval request body.
 type approvalRequest struct {
 	Approvals []approvalEntry `json:"approvals"`
 }
@@ -76,7 +71,7 @@ type approvalEntry struct {
 }
 
 // fetchWallet retrieves the wallet object; the response must carry an
-// "address". Port of the Rust fetch_wallet.
+// "address".
 func (s *Signer) fetchWallet(ctx context.Context) (walletResponse, error) {
 	u, err := s.buildWalletsAPIURL()
 	if err != nil {
@@ -89,8 +84,7 @@ func (s *Signer) fetchWallet(ctx context.Context) (walletResponse, error) {
 	return parseResponseWithRequiredField[walletResponse](status, body, "address", "fetch_wallet")
 }
 
-// createTransaction submits a base58-encoded transaction for signing. Port of
-// the Rust create_transaction.
+// createTransaction submits a base58-encoded transaction for signing.
 func (s *Signer) createTransaction(ctx context.Context, transaction string) (transactionResponse, error) {
 	u, err := s.buildWalletsAPIURL("transactions")
 	if err != nil {
@@ -107,8 +101,7 @@ func (s *Signer) createTransaction(ctx context.Context, transaction string) (tra
 	return parseResponseWithRequiredField[transactionResponse](status, body, "id", "create_transaction")
 }
 
-// getTransaction fetches the current state of a transaction. Port of the Rust
-// get_transaction.
+// getTransaction fetches the current state of a transaction.
 func (s *Signer) getTransaction(ctx context.Context, transactionID string) (transactionResponse, error) {
 	u, err := s.buildWalletsAPIURL("transactions", transactionID)
 	if err != nil {
@@ -122,7 +115,6 @@ func (s *Signer) getTransaction(ctx context.Context, transactionID string) (tran
 }
 
 // submitApprovalRequest posts a signed approval for a pending transaction.
-// Port of the HTTP half of the Rust submit_approval.
 func (s *Signer) submitApprovalRequest(ctx context.Context, transactionID string, req approvalRequest) (transactionResponse, error) {
 	u, err := s.buildWalletsAPIURL("transactions", transactionID, "approvals")
 	if err != nil {
@@ -136,9 +128,9 @@ func (s *Signer) submitApprovalRequest(ctx context.Context, transactionID string
 }
 
 // buildWalletsAPIURL joins the base URL, API version, percent-encoded wallet
-// locator, and extra path segments. Port of the Rust build_wallets_api_url:
-// every segment is encoded with encodeURIComponent semantics so locators
-// containing '/', "..", '?', or '#' stay inside a single path segment.
+// locator, and extra path segments. Every segment is encoded with
+// encodeURIComponent semantics so locators containing '/', "..", '?', or '#'
+// stay inside a single path segment.
 func (s *Signer) buildWalletsAPIURL(segments ...string) (string, error) {
 	base, err := url.Parse(s.apiBaseURL)
 	if err != nil {
@@ -160,8 +152,7 @@ func (s *Signer) buildWalletsAPIURL(segments ...string) (string, error) {
 }
 
 // encodeURIComponent percent-encodes every byte except the JavaScript
-// encodeURIComponent unreserved set (A-Z a-z 0-9 - _ . ! ~ * ' ( )). Byte-for-byte
-// port of the Rust encode_uri_component, itself matching the TS implementation.
+// encodeURIComponent unreserved set (A-Z a-z 0-9 - _ . ! ~ * ' ( )).
 func encodeURIComponent(input string) string {
 	var b strings.Builder
 	b.Grow(len(input))
@@ -220,15 +211,14 @@ func (s *Signer) doRequest(ctx context.Context, method, u string, body any) (int
 	return resp.StatusCode, data, nil
 }
 
-// parseResponseWithRequiredField mirrors the Rust parse_response_with_required_field:
-// non-2xx statuses become RemoteApiError with any extractable API message, a 2xx
-// body missing the required field becomes RemoteApiError (if the body carries an
-// error message) or SerializationError, and only then is the body decoded into T.
+// parseResponseWithRequiredField turns non-2xx statuses into RemoteApiError
+// with any extractable API message; a 2xx body missing the required field
+// becomes RemoteApiError (if the body carries an error message) or
+// SerializationError, and only then is the body decoded into T.
 func parseResponseWithRequiredField[T any](status int, body []byte, requiredField, opContext string) (T, error) {
 	var zero T
 	var value map[string]json.RawMessage
-	// Undecodable bodies degrade to an empty object, like the Rust
-	// unwrap_or(Value::Null) fallback.
+	// Undecodable bodies degrade to an empty object.
 	_ = json.Unmarshal(body, &value)
 
 	if status >= 400 {
@@ -256,7 +246,7 @@ func parseResponseWithRequiredField[T any](status int, body []byte, requiredFiel
 
 // extractErrorMessage pulls a human-readable message out of a Crossmint error
 // body: a top-level "message" string, an "error" string, or an "error" object
-// with a "message" string. Port of the Rust extract_error_message.
+// with a "message" string.
 func extractErrorMessage(value map[string]json.RawMessage) (string, bool) {
 	if raw, ok := value["message"]; ok {
 		var s string

@@ -18,10 +18,9 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// parseSigningKey normalizes and parses the service-account RSA private key.
-// Port of the Rust PEM handling in UtilaSigner::new: escaped `\n` sequences are
-// expanded, carriage returns are stripped, and the result is trimmed before
-// parsing (PKCS#1 and PKCS#8 PEM are both accepted).
+// parseSigningKey normalizes and parses the service-account RSA private key:
+// escaped `\n` sequences are expanded, carriage returns are stripped, and the
+// result is trimmed before parsing (PKCS#1 and PKCS#8 PEM are both accepted).
 func parseSigningKey(pem string) (*rsa.PrivateKey, error) {
 	normalized := strings.ReplaceAll(pem, `\n`, "\n")
 	normalized = strings.ReplaceAll(normalized, "\r", "")
@@ -34,8 +33,8 @@ func parseSigningKey(pem string) (*rsa.PrivateKey, error) {
 }
 
 // createAccessToken mints the RS256 service-account JWT that authenticates every
-// Utila API request. Port of the Rust create_access_token: the claims are
-// sub = service account email, aud = utilaAPIAudience, exp = now + tokenTTL.
+// Utila API request. The claims are sub = service account email,
+// aud = utilaAPIAudience, exp = now + tokenTTL.
 func createAccessToken(serviceAccountEmail string, signingKey *rsa.PrivateKey) (string, error) {
 	claims := jwt.MapClaims{
 		"sub": serviceAccountEmail,
@@ -50,9 +49,8 @@ func createAccessToken(serviceAccountEmail string, signingKey *rsa.PrivateKey) (
 }
 
 // normalizeAPIBaseURL applies the default, trims trailing slashes, and validates
-// the URL. Port of the Rust normalize_api_base_url plus the cannot_be_a_base
-// check from build_url; runs regardless of whether a custom HTTP client is
-// supplied, so HTTPS is always enforced.
+// the URL, which must be usable as a base URL. It runs regardless of whether a
+// custom HTTP client is supplied, so HTTPS is always enforced.
 func normalizeAPIBaseURL(raw string) (string, error) {
 	if raw == "" {
 		raw = DefaultAPIBaseURL
@@ -72,9 +70,9 @@ func normalizeAPIBaseURL(raw string) (string, error) {
 	return normalized, nil
 }
 
-// fetchWallet retrieves the wallet object holding the Solana address. Port of
-// the Rust fetch_wallet; the "wallet" envelope (and, when solanaDetails is
-// present, its address) is required, matching the Rust serde struct shape.
+// fetchWallet retrieves the wallet object holding the Solana address. The
+// "wallet" envelope (and, when solanaDetails is present, its address) is
+// required.
 func (s *Signer) fetchWallet(ctx context.Context) (walletResponse, error) {
 	path := "/v2/vaults/" + encodeURIComponent(s.vaultID) + "/wallets/" + encodeURIComponent(s.walletID)
 	status, body, err := s.doRequest(ctx, http.MethodGet, path, nil)
@@ -93,7 +91,7 @@ func (s *Signer) fetchWallet(ctx context.Context) (walletResponse, error) {
 }
 
 // initiateTransaction submits the base64 wire transaction for signing (publish
-// and blockhash replacement disabled). Port of the Rust initiate_transaction.
+// and blockhash replacement disabled).
 func (s *Signer) initiateTransaction(ctx context.Context, rawTransaction string) (utilaTransaction, error) {
 	path := "/v2/vaults/" + encodeURIComponent(s.vaultID) + "/transactions:initiate"
 	request := initiateTransactionRequest{
@@ -113,7 +111,7 @@ func (s *Signer) initiateTransaction(ctx context.Context, rawTransaction string)
 }
 
 // getTransaction fetches the current state of a Utila transaction (FULL view, so
-// the signed rawTransaction is included). Port of the Rust get_transaction.
+// the signed rawTransaction is included).
 func (s *Signer) getTransaction(ctx context.Context, transactionID string) (utilaTransaction, error) {
 	path := "/v2/vaults/" + encodeURIComponent(s.vaultID) +
 		"/transactions/" + encodeURIComponent(transactionID) + "?view=FULL"
@@ -124,8 +122,8 @@ func (s *Signer) getTransaction(ctx context.Context, transactionID string) (util
 	return parseTransactionEnvelope(status, body, "get_transaction")
 }
 
-// doRequest issues an authenticated request (a fresh access token per call, like
-// the Rust get_json/post_json) and returns the status code and size-capped body.
+// doRequest issues an authenticated request (a fresh access token per call)
+// and returns the status code and size-capped body.
 // Transport failures map to CodeHTTPError, except that a *core.SignerError raised
 // inside the client (e.g. the HTTPS-only transport's CodeConfigError) is
 // surfaced as-is.
@@ -170,9 +168,9 @@ func (s *Signer) doRequest(ctx context.Context, method, path string, body any) (
 	return resp.StatusCode, data, nil
 }
 
-// parseResponse mirrors the Rust parse_response: any 4xx/5xx status becomes
-// RemoteApiError carrying only the context and status code (never the body), and
-// an undecodable 2xx body becomes SerializationError.
+// parseResponse maps any 4xx/5xx status to RemoteApiError carrying only the
+// context and status code (never the body), and an undecodable 2xx body to
+// SerializationError.
 func parseResponse[T any](status int, body []byte, opContext string) (T, error) {
 	var zero T
 	if status >= 400 {
@@ -188,8 +186,7 @@ func parseResponse[T any](status int, body []byte, opContext string) (T, error) 
 }
 
 // parseTransactionEnvelope decodes a transaction envelope and requires the
-// transaction, its name, and its state — the fields the Rust serde structs
-// treat as mandatory.
+// transaction, its name, and its state.
 func parseTransactionEnvelope(status int, body []byte, opContext string) (utilaTransaction, error) {
 	envelope, err := parseResponse[transactionEnvelope](status, body, opContext)
 	if err != nil {
@@ -204,7 +201,6 @@ func parseTransactionEnvelope(status int, body []byte, opContext string) (utilaT
 
 // encodeURIComponent percent-encodes every byte except the JavaScript
 // encodeURIComponent unreserved set (A-Z a-z 0-9 - _ . ! ~ * ' ( )).
-// Byte-for-byte port of the Rust encode_uri_component.
 func encodeURIComponent(input string) string {
 	var b strings.Builder
 	b.Grow(len(input))

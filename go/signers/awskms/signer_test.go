@@ -34,8 +34,7 @@ func otherPrivateKey() ed25519.PrivateKey {
 	return ed25519.NewKeyFromSeed(seed)
 }
 
-// fakeKMS stubs the API interface so unit tests never touch the network — the
-// Go analog of the Rust wiremock setup behind with_client.
+// fakeKMS stubs the API interface so unit tests never touch the network.
 type fakeKMS struct {
 	signOut *kms.SignOutput
 	signErr error
@@ -87,10 +86,8 @@ func newStubSigner(t *testing.T, fake *fakeKMS) *Signer {
 	return s
 }
 
-// newHTTPTestClient builds a real *kms.Client pointed at an httptest server —
-// the Go analog of the Rust create_test_client(endpoint_url) used with wiremock.
-// Using the server's own client intentionally bypasses HTTPS enforcement, like
-// Rust with_client.
+// newHTTPTestClient builds a real *kms.Client pointed at an httptest server.
+// Using the server's own client intentionally bypasses HTTPS enforcement.
 func newHTTPTestClient(srv *httptest.Server) *kms.Client {
 	return kms.New(kms.Options{
 		Region:           testRegion,
@@ -101,14 +98,13 @@ func newHTTPTestClient(srv *httptest.Server) *kms.Client {
 	})
 }
 
-// Port of test_kms_new_invalid_pubkey, test_kms_new_empty_pubkey, and
-// test_kms_with_client_invalid_pubkey: an invalid public key fails before any
-// AWS config is loaded, with or without a pre-built client.
+// An invalid public key fails before any AWS config is loaded, with or without
+// a pre-built client.
 func TestNewInvalidPublicKey(t *testing.T) {
 	cases := map[string]Config{
-		"invalid base58":                         {KeyID: testKeyID, PublicKey: "not-a-valid-pubkey", Region: testRegion},
-		"empty":                                  {KeyID: testKeyID, PublicKey: "", Region: testRegion},
-		"invalid with client (Rust with_client)": {KeyID: testKeyID, PublicKey: "not-a-valid-pubkey", Client: &fakeKMS{}},
+		"invalid base58":                {KeyID: testKeyID, PublicKey: "not-a-valid-pubkey", Region: testRegion},
+		"empty":                         {KeyID: testKeyID, PublicKey: "", Region: testRegion},
+		"invalid with pre-built client": {KeyID: testKeyID, PublicKey: "not-a-valid-pubkey", Client: &fakeKMS{}},
 	}
 	for name, cfg := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -123,8 +119,6 @@ func TestNewInvalidPublicKey(t *testing.T) {
 	}
 }
 
-// Port of test_kms_new_valid_pubkey, test_kms_new_without_region,
-// test_kms_pubkey, and test_kms_key_id_accessor.
 func TestNewValidPublicKey(t *testing.T) {
 	want := testutils.TestPublicKey()
 	for _, region := range []string{testRegion, ""} {
@@ -149,8 +143,7 @@ func TestNewValidPublicKey(t *testing.T) {
 	}
 }
 
-// Port of test_kms_key_id_variations: ARN, bare key ID, and alias forms are all
-// accepted verbatim.
+// ARN, bare key ID, and alias forms are all accepted verbatim.
 func TestNewKeyIDVariations(t *testing.T) {
 	keyIDs := []string{
 		"arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012",
@@ -172,9 +165,9 @@ func TestNewKeyIDVariations(t *testing.T) {
 	}
 }
 
-// Port of test_kms_new_valid_pubkey / test_kms_different_regions through the
-// default (nil Client) path: New loads the AWS config chain without error for
-// any region. Static env credentials keep the chain deterministic and offline.
+// Through the default (nil Client) path, New loads the AWS config chain without
+// error for any region. Static env credentials keep the chain deterministic and
+// offline.
 func TestNewDefaultClientDifferentRegions(t *testing.T) {
 	setDefaultChainEnv(t)
 
@@ -193,9 +186,8 @@ func TestNewDefaultClientDifferentRegions(t *testing.T) {
 	}
 }
 
-// Port of test_signing_algorithm_spec_from_str and test_message_type_raw, plus
-// the key-spec/key-usage constants: pins the exact wire values the Rust module
-// hardcodes as strings.
+// Pins the exact wire values of the signing algorithm, message type, key spec,
+// and key usage constants.
 func TestKMSConstants(t *testing.T) {
 	if got := string(signingAlgorithm); got != "ED25519_SHA_512" {
 		t.Errorf("signing algorithm = %q, want ED25519_SHA_512", got)
@@ -211,9 +203,8 @@ func TestKMSConstants(t *testing.T) {
 	}
 }
 
-// Port of test_kms_sign_message_success. Also asserts the exact Sign request
-// parameters (key ID, raw message, RAW message type, ED25519_SHA_512), which the
-// Rust test delegates to the SDK/wiremock.
+// A successful sign returns a verifiable signature; also asserts the exact Sign
+// request parameters (key ID, raw message, RAW message type, ED25519_SHA_512).
 func TestSignMessageSuccess(t *testing.T) {
 	message := []byte("test message")
 	sig := ed25519.Sign(testutils.TestPrivateKey(), message)
@@ -254,8 +245,8 @@ func TestSignMessageSuccess(t *testing.T) {
 	}
 }
 
-// Port of test_kms_sign_message_signature_verification_failure: a valid 64-byte
-// signature from the wrong key must be rejected with SIGNING_FAILED.
+// A valid 64-byte signature from the wrong key must be rejected with
+// SIGNING_FAILED.
 func TestSignMessageVerificationFailure(t *testing.T) {
 	message := []byte("test message")
 	wrongSig := ed25519.Sign(otherPrivateKey(), message)
@@ -271,9 +262,7 @@ func TestSignMessageVerificationFailure(t *testing.T) {
 	}
 }
 
-// Port of test_kms_sign_message_invalid_signature_length and the
-// test_signature_length_validation_logic table: any non-64-byte signature
-// (including a missing one) is SIGNING_FAILED.
+// Any non-64-byte signature (including a missing one) is SIGNING_FAILED.
 func TestSignMessageInvalidSignatureLength(t *testing.T) {
 	cases := map[string]int{
 		"too short":   63,
@@ -295,10 +284,9 @@ func TestSignMessageInvalidSignatureLength(t *testing.T) {
 	}
 }
 
-// Port of test_kms_sign_api_error and test_kms_sign_unauthorized, exercised
-// through the real AWS SDK client against an httptest endpoint (the Go analog of
-// wiremock): KMS API errors map to REMOTE_API_ERROR, and the hostile remote
-// message never reaches the error detail (the Rust module uses a fixed message).
+// Exercised through the real AWS SDK client against an httptest endpoint: KMS
+// API errors map to REMOTE_API_ERROR, and the hostile remote message never
+// reaches the error detail (the detail is a fixed message).
 func TestSignAPIError(t *testing.T) {
 	cases := map[string]struct {
 		status int
@@ -353,8 +341,8 @@ func TestSignAPIError(t *testing.T) {
 	}
 }
 
-// Port of test_kms_sign_message_success through the real SDK client + httptest
-// endpoint, mirroring the wiremock JSON body (base64 Signature) exactly.
+// A successful sign through the real SDK client + httptest endpoint, with the
+// KMS JSON response body (base64 Signature).
 func TestSignMessageSuccessHTTPEndpoint(t *testing.T) {
 	message := []byte("test message")
 	sig := ed25519.Sign(testutils.TestPrivateKey(), message)
@@ -384,9 +372,8 @@ func TestSignMessageSuccessHTTPEndpoint(t *testing.T) {
 	}
 }
 
-// Port of test_kms_is_available_success, _wrong_key_spec, _wrong_key_usage,
-// _disabled_key, plus the missing-metadata and transport-error branches of the
-// Rust check_availability.
+// Covers the success, wrong-key-spec, wrong-key-usage, disabled-key,
+// missing-metadata, and transport-error availability branches.
 func TestIsAvailable(t *testing.T) {
 	metadata := func(spec kmstypes.KeySpec, usage kmstypes.KeyUsageType, enabled bool) *kms.DescribeKeyOutput {
 		return &kms.DescribeKeyOutput{KeyMetadata: &kmstypes.KeyMetadata{
@@ -421,9 +408,8 @@ func TestIsAvailable(t *testing.T) {
 	}
 }
 
-// Port of test_kms_sign_transaction_success: KMS signs the transaction's message
-// bytes; the result is complete, encodable, and carries the signature at the
-// payer's position.
+// KMS signs the transaction's message bytes; the result is complete, encodable,
+// and carries the signature at the payer's position.
 func TestSignTransactionSuccess(t *testing.T) {
 	tx, err := testutils.CreateTestTransaction(testutils.TestPublicKey())
 	if err != nil {

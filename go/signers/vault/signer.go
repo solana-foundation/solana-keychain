@@ -39,9 +39,8 @@ type keyReadResponse struct {
 	} `json:"data"`
 }
 
-// Signer signs with an Ed25519 key held in HashiCorp Vault's transit engine —
-// the Go analog of the Rust VaultSigner. All fields are immutable after New, so
-// a Signer is safe for concurrent use.
+// Signer signs with an Ed25519 key held in HashiCorp Vault's transit engine.
+// All fields are immutable after New, so a Signer is safe for concurrent use.
 type Signer struct {
 	client    *http.Client
 	vaultAddr string
@@ -53,8 +52,8 @@ type Signer struct {
 // Ensure Signer satisfies the core contract at compile time.
 var _ core.Signer = (*Signer)(nil)
 
-// New builds a Vault signer from cfg. Construction performs no I/O (parity with
-// the Rust VaultSigner::new); only the base58 public key is validated.
+// New builds a Vault signer from cfg. Construction performs no I/O; only the
+// base58 public key is validated.
 func New(cfg Config) (*Signer, error) {
 	pubkey, err := solana.PublicKeyFromBase58(cfg.Pubkey)
 	if err != nil {
@@ -76,8 +75,7 @@ func New(cfg Config) (*Signer, error) {
 // Pubkey returns the signer's public key.
 func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
-// String renders the signer without any secret material — the Go analog of the
-// Rust redacting Debug impl.
+// String renders the signer without any secret material.
 func (s Signer) String() string {
 	return "vault.Signer{pubkey: " + s.pubkey.String() + "}"
 }
@@ -114,7 +112,7 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 
 // IsAvailable reads the transit key's metadata as a health check and reports
 // whether it is a signing-capable ed25519 key. All errors are swallowed and
-// reported as false (parity with the Rust is_available).
+// reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
 	url := s.vaultAddr + "/v1/transit/keys/" + s.keyName
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -141,7 +139,7 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 
 // signBytes posts the payload to the transit sign endpoint, decodes the returned
 // signature (stripping the "vault:vN:" prefix), and verifies it against the
-// configured public key before returning it. Port of the Rust sign_bytes.
+// configured public key before returning it.
 func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signature, error) {
 	url := s.vaultAddr + "/v1/transit/sign/" + s.keyName
 	payload, err := json.Marshal(signRequest{Input: base64.StdEncoding.EncodeToString(message)})
@@ -159,7 +157,7 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 	if err != nil {
 		// Preserve SignerError codes raised inside the transport (e.g. the
 		// HTTPS-only guard's CodeConfigError); everything else is a remote API
-		// failure, matching the Rust RemoteApiError on send.
+		// failure.
 		var se *core.SignerError
 		if errors.As(err, &se) {
 			return solana.Signature{}, se
@@ -204,8 +202,7 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 
 // stripVaultSignaturePrefix removes a versioned Vault transit prefix (e.g.
 // "vault:v1:", "vault:v27:") from a signature string. Anything that does not
-// match "vault:v<digits>:" exactly is returned unchanged. Port of the Rust
-// strip_vault_signature_prefix.
+// match "vault:v<digits>:" exactly is returned unchanged.
 func stripVaultSignaturePrefix(signature string) string {
 	rest, ok := strings.CutPrefix(signature, "vault:v")
 	if !ok {

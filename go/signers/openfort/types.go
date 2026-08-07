@@ -1,6 +1,5 @@
 // Package openfort provides a SolanaSigner backed by an Openfort backend
-// wallet — the Go analog of the Rust openfort module and the
-// @solana/keychain-openfort package.
+// wallet.
 //
 // Signing calls Openfort's POST /v2/accounts/backend/{accountId}/sign
 // endpoint; the private key lives in Openfort's TEE and is never exposed.
@@ -18,8 +17,7 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// Config configures an Openfort signer (parity with the Rust
-// OpenfortSignerConfig and the TS OpenfortSignerConfig).
+// Config configures an Openfort signer.
 type Config struct {
 	// SecretKey is the Openfort project secret key (`sk_live_*` or `sk_test_*`).
 	SecretKey string
@@ -43,19 +41,18 @@ type Config struct {
 
 	// HTTPClient optionally overrides the HTTP client. When nil, the signer
 	// builds one with core.NewHTTPClient (HTTPS-only). Supplying a client
-	// bypasses HTTPS enforcement and the caller owns that security posture —
-	// the Go analog of the Rust `with_client` constructors.
+	// bypasses HTTPS enforcement and the caller owns that security posture.
 	HTTPClient *http.Client
 }
 
 // accountInfo is the subset of GET /v2/accounts/{id} we care about — just the
-// on-chain address. Port of the Rust AccountInfo.
+// on-chain address.
 type accountInfo struct {
 	Address string `json:"address"`
 }
 
-// signResponse is the body of POST /v2/accounts/backend/{id}/sign. Port of the
-// Rust SignResponse; Signature is hex-encoded with a leading "0x".
+// signResponse is the body of POST /v2/accounts/backend/{id}/sign. Signature
+// is hex-encoded with a leading "0x".
 type signResponse struct {
 	Object    string `json:"object"`
 	Account   string `json:"account"`

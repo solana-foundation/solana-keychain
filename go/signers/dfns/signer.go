@@ -28,7 +28,7 @@ type signingKey struct {
 
 // generateSignatureRequest is the Keys API signature request. Kind selects the
 // variant: "Message" uses Message; "Transaction" uses Transaction and
-// BlockchainKind (Go analog of the Rust kind-tagged enum).
+// BlockchainKind.
 type generateSignatureRequest struct {
 	Kind           string `json:"kind"`
 	Message        string `json:"message,omitempty"`
@@ -48,9 +48,8 @@ type signatureComponents struct {
 	S string `json:"s"`
 }
 
-// Signer signs with a Dfns wallet's Ed25519 key via the Dfns Keys API. It is
-// the Go analog of the Rust DfnsSigner and the TS DfnsSigner. All fields are
-// immutable after New, so a Signer is safe for concurrent use.
+// Signer signs with a Dfns wallet's Ed25519 key via the Dfns Keys API. All
+// fields are immutable after New, so a Signer is safe for concurrent use.
 type Signer struct {
 	authToken     string
 	credID        string
@@ -65,10 +64,9 @@ type Signer struct {
 // Ensure Signer satisfies the core contract at compile time.
 var _ core.Signer = (*Signer)(nil)
 
-// New builds a Dfns signer and initializes it by fetching the wallet from Dfns
-// (parity with the Rust Signer::from_dfns, which calls init(), and the TS
-// createDfnsSigner factory). It validates that the wallet is Active with an
-// EdDSA/ed25519 signing key and resolves the wallet's public key and key ID.
+// New builds a Dfns signer and initializes it by fetching the wallet from Dfns.
+// It validates that the wallet is Active with an EdDSA/ed25519 signing key and
+// resolves the wallet's public key and key ID.
 func New(ctx context.Context, cfg Config) (*Signer, error) {
 	if cfg.AuthToken == "" {
 		return nil, core.NewSignerError(core.CodeConfigError, "missing required auth token field")
@@ -104,7 +102,6 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		client:        client,
 	}
 
-	// Port of the Rust init(): fetch the wallet and extract the key details.
 	wallet, err := s.getWallet(ctx)
 	if err != nil {
 		return nil, err
@@ -183,8 +180,7 @@ func (s *Signer) sendSignatureRequest(ctx context.Context, request generateSigna
 }
 
 // combineSignature concatenates the hex-decoded r and s components into a
-// 64-byte Ed25519 signature. Port of the Rust combine_signature (concatenation,
-// no padding), tightened to require each component to be exactly 32 bytes: a
+// 64-byte Ed25519 signature. Each component must be exactly 32 bytes: a
 // misaligned split could never verify anyway, and rejecting it here yields an
 // accurate error instead of a downstream verification failure.
 func combineSignature(r, s string) (solana.Signature, error) {
@@ -210,8 +206,7 @@ func combineSignature(r, s string) (solana.Signature, error) {
 // Pubkey returns the Dfns wallet's public key resolved during New.
 func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
-// String renders the signer without any secret material — the Go analog of the
-// Rust redacting Debug impl.
+// String renders the signer without any secret material.
 func (s Signer) String() string {
 	return "dfns.Signer{pubkey: " + s.pubkey.String() + ", walletID: " + s.walletID + ", keyID: " + s.keyID + "}"
 }
@@ -221,7 +216,7 @@ func (s Signer) GoString() string { return s.String() }
 
 // SignMessage signs arbitrary bytes via the Dfns Keys API "Message" kind
 // (hex-encoded with a 0x prefix) and verifies the returned signature against
-// the wallet public key before returning it (parity with Rust).
+// the wallet public key before returning it.
 func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
 	request := generateSignatureRequest{
 		Kind:    "Message",
@@ -277,8 +272,8 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 }
 
 // IsAvailable reports whether the Dfns wallet is available and healthy:
-// reachable, active, and backed by an EdDSA/ed25519 signing key. Port of the
-// Rust check_availability; all errors are swallowed.
+// reachable, active, and backed by an EdDSA/ed25519 signing key. All errors
+// are swallowed.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
 	wallet, err := s.getWallet(ctx)
 	if err != nil {

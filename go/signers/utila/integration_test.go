@@ -16,8 +16,8 @@ import (
 )
 
 // integrationSigner builds a signer against the live Utila API configured by
-// the environment — the Go analog of the Rust tests/test_utila_integration.rs,
-// run by `just go-test-integration` (loads .env) or CI with Doppler secrets.
+// the environment; run by `just go-test-integration` (loads .env) or CI with
+// Doppler secrets.
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	cfg := Config{

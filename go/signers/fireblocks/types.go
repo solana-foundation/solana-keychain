@@ -1,5 +1,4 @@
-// Package fireblocks provides a SolanaSigner backed by the Fireblocks API — the Go
-// analog of the Rust fireblocks module and the @solana/keychain-fireblocks package.
+// Package fireblocks provides a SolanaSigner backed by the Fireblocks API.
 // Signing requests are created as Fireblocks RAW transactions and polled to
 // completion, returning a signer-bound Ed25519 signature over the message bytes.
 // Every request is authenticated with a per-request RS256 JWT signed by the RSA
@@ -13,7 +12,7 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// Defaults mirroring the Rust FireblocksSignerConfig fallbacks.
+// Defaults applied when the corresponding Config fields are zero.
 const (
 	// DefaultAPIBaseURL is the production Fireblocks API endpoint.
 	DefaultAPIBaseURL = "https://api.fireblocks.io"
@@ -25,8 +24,7 @@ const (
 	DefaultMaxPollAttempts = 300
 )
 
-// Config configures a Fireblocks signer (parity with the Rust
-// FireblocksSignerConfig and the TS FireblocksSignerConfig).
+// Config configures a Fireblocks signer.
 type Config struct {
 	// APIKey is the Fireblocks API key, sent in the X-API-Key header and used as
 	// the JWT subject.
@@ -47,16 +45,15 @@ type Config struct {
 	APIBaseURL string
 
 	// PollInterval is the delay between transaction status polls. Zero means
-	// DefaultPollInterval (parity with the Rust poll_interval_ms default of 1000).
+	// DefaultPollInterval.
 	PollInterval time.Duration
 
 	// MaxPollAttempts bounds how many status polls run before the signing request
-	// times out. Zero means DefaultMaxPollAttempts (Rust default: 300).
+	// times out. Zero means DefaultMaxPollAttempts.
 	MaxPollAttempts int
 
 	// UseProgramCall is deprecated and unsupported: setting it to true causes New
-	// to fail with CodeConfigError before any network call (parity with the Rust
-	// init() rejection).
+	// to fail with CodeConfigError before any network call.
 	//
 	// Fireblocks PROGRAM_CALL signing broadcasts the transaction on-chain and only
 	// returns a broadcast transaction id, not a reusable signer-bound signature
@@ -73,6 +70,6 @@ type Config struct {
 	// HTTPClient optionally overrides the HTTP client. When nil, the signer builds
 	// one with core.NewHTTPClient(HTTPClientConfig), which enforces HTTPS.
 	// Supplying a client bypasses that HTTPS enforcement and the caller owns the
-	// resulting security posture (Go analog of the Rust with_client constructors).
+	// resulting security posture.
 	HTTPClient *http.Client
 }

@@ -17,16 +17,15 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// Turnkey API paths (port of the Rust URL construction).
+// Turnkey API paths.
 const (
 	signRawPayloadPath = "/public/v1/submit/sign_raw_payload"
 	whoAmIPath         = "/public/v1/query/whoami"
 )
 
 // Signer signs with an Ed25519 private key held by Turnkey, authenticating each
-// request with a P-256 API-key stamp. It is the Go analog of the Rust
-// TurnkeySigner and the TS Turnkey signer. All fields are immutable after New,
-// so a Signer is safe for concurrent use.
+// request with a P-256 API-key stamp. All fields are immutable after New, so a
+// Signer is safe for concurrent use.
 type Signer struct {
 	organizationID string
 	privateKeyID   string
@@ -40,8 +39,7 @@ type Signer struct {
 // Ensure Signer satisfies the core contract at compile time.
 var _ core.Signer = (*Signer)(nil)
 
-// New builds a Turnkey signer from cfg. Construction is pure — no network I/O —
-// matching the Rust TurnkeySigner::from_config (Turnkey has no init step).
+// New builds a Turnkey signer from cfg. Construction is pure: no network I/O.
 func New(cfg Config) (*Signer, error) {
 	pubkey, err := solana.PublicKeyFromBase58(cfg.PublicKey)
 	if err != nil {
@@ -72,8 +70,7 @@ func New(cfg Config) (*Signer, error) {
 // Pubkey returns the signer's Solana public key.
 func (s *Signer) Pubkey() solana.PublicKey { return s.publicKey }
 
-// String renders the signer without any secret material — the Go analog of the
-// Rust redacting Debug impl.
+// String renders the signer without any secret material.
 func (s Signer) String() string {
 	return "turnkey.Signer{pubkey: " + s.publicKey.String() + "}"
 }
@@ -89,8 +86,7 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 
 // SignTransaction signs the transaction's message bytes remotely, inserts the
 // signature at this signer's required-signer position, and returns the encoded
-// transaction with its completeness. Port of the Rust sign_and_serialize +
-// classify_signed_transaction flow.
+// transaction with its completeness.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	msg, err := tx.Message.MarshalBinary()
 	if err != nil {
@@ -112,7 +108,7 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 
 // IsAvailable reports whether the Turnkey API is reachable and the API
 // credentials are valid, via a stamped whoami query. All errors are swallowed
-// and reported as false (port of the Rust check_availability).
+// and reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
 	body, err := json.Marshal(whoAmIRequest{OrganizationID: s.organizationID})
 	if err != nil {
@@ -122,9 +118,9 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 	return err == nil
 }
 
-// signBytes signs message via the Turnkey API and returns just the signature.
-// Port of the Rust TurnkeySigner::sign_bytes, including the r/s left-padding
-// quirk and the local verification of the returned signature.
+// signBytes signs message via the Turnkey API, assembles the left-padded r/s
+// components into a 64-byte signature, and verifies it locally before
+// returning.
 func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signature, error) {
 	req := signRequest{
 		Type:           "ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2",
@@ -147,8 +143,6 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 		return solana.Signature{}, err
 	}
 
-	// Rust parses the response with serde_json, whose errors map to
-	// SerializationError; mirror that code here.
 	var resp activityResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
 		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse sign response", err)
@@ -171,8 +165,8 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 // assembleSignature decodes the hex r and s components returned by Turnkey and
 // concatenates them into a 64-byte Ed25519 signature. Turnkey may return fewer
 // than 32 bytes per component, so each is LEFT-padded (right-aligned) to
-// exactly 32 bytes before concatenation — port of the padding quirk in the
-// Rust turnkey module. Components longer than 32 bytes are rejected.
+// exactly 32 bytes before concatenation. Components longer than 32 bytes are
+// rejected.
 func assembleSignature(rHex, sHex string) (solana.Signature, error) {
 	rBytes, err := hex.DecodeString(rHex)
 	if err != nil {
@@ -193,8 +187,8 @@ func assembleSignature(rHex, sHex string) (solana.Signature, error) {
 
 // post sends a stamped JSON POST to the Turnkey API and returns the response
 // body on 2xx. Non-2xx responses map to RemoteApiError carrying only the
-// status code — the Rust implementation deliberately never surfaces the
-// response body (it may echo request material), so neither does this port.
+// status code; the response body is deliberately never surfaced (it may echo
+// request material).
 func (s *Signer) post(ctx context.Context, path string, body []byte) ([]byte, error) {
 	stamp, err := s.createStamp(string(body))
 	if err != nil {

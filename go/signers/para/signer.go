@@ -17,16 +17,14 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// availabilityTimeout bounds the IsAvailable health check, parity with the
-// Rust AVAILABILITY_TIMEOUT.
+// availabilityTimeout bounds the IsAvailable health check.
 const availabilityTimeout = 5 * time.Second
 
 // maxResponseBytes caps how much of a Para response body is read.
 const maxResponseBytes = 1 << 20
 
-// Signer signs Solana transactions and messages via Para's wallet API — the Go
-// analog of the Rust ParaSigner and the TS para signer. All fields are
-// immutable after New, so a Signer is safe for concurrent use.
+// Signer signs Solana transactions and messages via Para's wallet API. All
+// fields are immutable after New, so a Signer is safe for concurrent use.
 type Signer struct {
 	apiKey   string
 	walletID string
@@ -39,12 +37,11 @@ type Signer struct {
 var _ core.Signer = (*Signer)(nil)
 
 // New builds a Para signer and initializes it by fetching the wallet from
-// Para's API and extracting its Solana address — parity with the Rust
-// Signer::from_para (which calls init()) and the TS createParaSigner factory.
+// Para's API and extracting its Solana address.
 //
 // APIKey must start with "sk_" and WalletID must be a valid UUID. The wallet
 // must be of type SOLANA and already have an address; its status is not
-// checked here (only IsAvailable checks status), matching the Rust/TS init.
+// checked here (only IsAvailable checks status).
 func New(ctx context.Context, cfg Config) (*Signer, error) {
 	s, err := newUninitialized(cfg)
 	if err != nil {
@@ -56,8 +53,8 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 	return s, nil
 }
 
-// newUninitialized validates cfg and builds a Signer with a zero public key —
-// the Go analog of the Rust ParaSigner::from_config (validation without init).
+// newUninitialized validates cfg and builds a Signer with a zero public key,
+// leaving the wallet fetch to init.
 func newUninitialized(cfg Config) (*Signer, error) {
 	if cfg.APIKey == "" || cfg.WalletID == "" {
 		return nil, core.NewSignerError(core.CodeConfigError, "apiKey and walletId must not be empty")
@@ -87,9 +84,8 @@ func newUninitialized(cfg Config) (*Signer, error) {
 	}, nil
 }
 
-// init fetches the wallet and extracts the public key. Port of the Rust
-// ParaSigner::init. A non-ACTIVE/READY status is tolerated here (the Rust
-// implementation only logs a warning); status gates IsAvailable instead.
+// init fetches the wallet and extracts the public key. A non-ACTIVE/READY
+// status is tolerated here; status gates IsAvailable instead.
 func (s *Signer) init(ctx context.Context) error {
 	wallet, err := s.fetchWallet(ctx)
 	if err != nil {
@@ -141,8 +137,8 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 
 // IsAvailable reports whether the wallet is a SOLANA wallet in ACTIVE or READY
 // status. It makes a network call to the Para API bounded by a 5-second
-// timeout and swallows all errors (parity with the Rust is_available); callers
-// should cache the result if frequent checks are needed.
+// timeout and swallows all errors; callers should cache the result if
+// frequent checks are needed.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, availabilityTimeout)
 	defer cancel()
@@ -154,8 +150,7 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 		(strings.EqualFold(wallet.Status, "ACTIVE") || strings.EqualFold(wallet.Status, "READY"))
 }
 
-// String renders the signer without exposing the API key or wallet ID — the Go
-// analog of the Rust redacting Debug impl.
+// String renders the signer without exposing the API key or wallet ID.
 func (s Signer) String() string {
 	return "para.Signer{pubkey: " + s.pubkey.String() + "}"
 }
@@ -163,8 +158,7 @@ func (s Signer) String() string {
 // GoString redacts the %#v representation the same way as String.
 func (s Signer) GoString() string { return s.String() }
 
-// fetchWallet retrieves wallet info from GET /v1/wallets/{walletId}. Port of
-// the Rust fetch_wallet.
+// fetchWallet retrieves wallet info from GET /v1/wallets/{walletId}.
 func (s *Signer) fetchWallet(ctx context.Context) (*walletResponse, error) {
 	body, err := s.doRequest(ctx, http.MethodGet, s.baseURL+"/v1/wallets/"+s.walletID, nil)
 	if err != nil {
@@ -178,8 +172,7 @@ func (s *Signer) fetchWallet(ctx context.Context) (*walletResponse, error) {
 }
 
 // signBytes signs data via POST /v1/wallets/{walletId}/sign-raw with a
-// hex-encoded payload, then decodes and verifies the returned signature. Port
-// of the Rust sign_bytes.
+// hex-encoded payload, then decodes and verifies the returned signature.
 func (s *Signer) signBytes(ctx context.Context, data []byte) (solana.Signature, error) {
 	if s.pubkey.IsZero() {
 		return solana.Signature{}, core.NewSignerError(core.CodeConfigError, "signer not initialized: call init() first")
@@ -209,8 +202,7 @@ func (s *Signer) signBytes(ctx context.Context, data []byte) (solana.Signature, 
 
 // doRequest performs an authenticated Para API request and returns the raw
 // response body. Non-2xx responses map to CodeRemoteAPIError carrying only the
-// status code — the Rust extract_api_error deliberately never surfaces the
-// response body.
+// status code; the remote response body is deliberately never surfaced.
 func (s *Signer) doRequest(ctx context.Context, method, url string, requestBody any) ([]byte, error) {
 	var reader io.Reader
 	if requestBody != nil {
@@ -250,7 +242,7 @@ func (s *Signer) doRequest(ctx context.Context, method, url string, requestBody 
 }
 
 // decodeHexSignature decodes a hex-encoded signature string (optionally
-// 0x-prefixed) into a 64-byte signature. Port of the Rust decode_hex_signature.
+// 0x-prefixed) into a 64-byte signature.
 func decodeHexSignature(hexStr string) (solana.Signature, error) {
 	hexStr = strings.TrimPrefix(hexStr, "0x")
 	if len(hexStr) != 2*core.SignatureLength {
@@ -267,7 +259,6 @@ func decodeHexSignature(hexStr string) (solana.Signature, error) {
 }
 
 // isValidUUID reports whether s is a UUID in 8-4-4-4-12 form with hex digits.
-// Port of the Rust is_valid_uuid (which matches the TS UUID_REGEX).
 func isValidUUID(s string) bool {
 	if len(s) != 36 {
 		return false

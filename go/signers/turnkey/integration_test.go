@@ -16,8 +16,8 @@ import (
 )
 
 // integrationSigner builds a signer against the live Turnkey API configured by
-// the environment — the Go analog of the Rust tests/test_turnkey_integration.rs,
-// run by `just go-test-integration` (loads .env) or CI with Doppler secrets.
+// the environment, run by `just go-test-integration` (loads .env) or CI with
+// Doppler secrets.
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	s, err := New(Config{
@@ -61,8 +61,7 @@ func TestIntegrationSignMessage(t *testing.T) {
 	}
 }
 
-// The Rust test additionally simulates the signed transaction in LiteSVM;
-// there are no LiteSVM bindings for Go, so verification is cryptographic only.
+// There are no LiteSVM bindings for Go, so verification is cryptographic only.
 func TestIntegrationSignTransaction(t *testing.T) {
 	s := integrationSigner(t)
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())

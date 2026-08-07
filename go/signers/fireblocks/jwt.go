@@ -12,14 +12,14 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// JWT lifetime constants, matching the Rust jwt.rs module.
+// JWT lifetime constants.
 const (
 	jwtTTLSecs        = 120
 	jwtSkewLeewaySecs = 60
 )
 
-// parseSigningKey parses the Fireblocks RSA API secret once for token reuse.
-// Port of the Rust jwt::parse_encoding_key (accepts PKCS#1 and PKCS#8 PEM).
+// parseSigningKey parses the Fireblocks RSA API secret (PKCS#1 or PKCS#8 PEM)
+// once for token reuse.
 func parseSigningKey(privateKeyPEM string) (*rsa.PrivateKey, error) {
 	key, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(privateKeyPEM))
 	if err != nil {
@@ -29,9 +29,9 @@ func parseSigningKey(privateKeyPEM string) (*rsa.PrivateKey, error) {
 }
 
 // createJWT builds the per-request RS256 JWT for Fireblocks API authentication.
-// Port of the Rust jwt::create_jwt: claims are uri, a random UUIDv4 nonce,
-// iat = nbf = now - skew leeway, exp = now + TTL, sub = apiKey, and bodyHash =
-// hex(sha256(body)) (empty string body for GET requests).
+// Claims are uri, a random UUIDv4 nonce, iat = nbf = now - skew leeway,
+// exp = now + TTL, sub = apiKey, and bodyHash = hex(sha256(body)) (empty string
+// body for GET requests).
 func createJWT(apiKey string, signingKey *rsa.PrivateKey, uri, body string) (string, error) {
 	nonce, err := newNonce()
 	if err != nil {
@@ -60,9 +60,9 @@ func createJWT(apiKey string, signingKey *rsa.PrivateKey, uri, body string) (str
 	return token, nil
 }
 
-// newNonce generates a random UUIDv4 string (Go analog of the Rust Uuid::new_v4
-// nonce; the standard library has no UUID type, so the 16 random bytes are
-// version/variant-tagged and formatted manually).
+// newNonce generates a random UUIDv4 string: the standard library has no UUID
+// type, so the 16 random bytes are version/variant-tagged and formatted
+// manually.
 func newNonce() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {

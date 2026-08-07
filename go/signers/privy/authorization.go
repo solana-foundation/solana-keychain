@@ -19,18 +19,15 @@ import (
 )
 
 // DefaultAuthorizationRequestExpiryMs is the privy-request-expiry window applied
-// when an authorization context is configured and no override is set. Port of
-// the Rust default_privy_authorization_request_expiry_ms.
+// when an authorization context is configured and no override is set.
 const DefaultAuthorizationRequestExpiryMs uint64 = 15 * 60 * 1000
 
 // AuthorizationSignFn is an external signer that receives the exact canonical
-// authorization payload bytes and returns a base64-encoded signature. Go analog
-// of the Rust PrivyAuthorizationSignFn.
+// authorization payload bytes and returns a base64-encoded signature.
 type AuthorizationSignFn func(payload []byte) (string, error)
 
 // AuthorizationContext supplies the material used to build the
-// privy-authorization-signature header for quorum-controlled wallets. Port of
-// the Rust PrivyAuthorizationContext.
+// privy-authorization-signature header for quorum-controlled wallets.
 type AuthorizationContext struct {
 	// AuthorizationPrivateKeys are PKCS#8 P-256 private keys exported by Privy,
 	// either base64 DER or PEM (literal "\n" sequences are converted to real
@@ -46,7 +43,6 @@ type AuthorizationContext struct {
 }
 
 // authorizationRequestInput is the value that gets canonicalized and signed.
-// Port of the Rust PrivyAuthorizationRequestInput.
 type authorizationRequestInput struct {
 	Version int
 	Method  string
@@ -56,15 +52,15 @@ type authorizationRequestInput struct {
 }
 
 // authorizationHeaders carries the computed authorization header values; empty
-// strings mean the header is omitted. Port of the Rust PrivyAuthorizationHeaders.
+// strings mean the header is omitted.
 type authorizationHeaders struct {
 	signature     string
 	requestExpiry string
 }
 
-// resolveAuthorizationRequestExpiryMs maps the Config expiry fields onto the Rust
-// PrivyAuthorizationRequestExpiry semantics: Omit -> nil, zero -> the 15-minute
-// default, anything else -> the configured window.
+// resolveAuthorizationRequestExpiryMs maps the Config expiry fields to the
+// effective window: Omit -> nil, zero -> the 15-minute default, anything
+// else -> the configured window.
 func resolveAuthorizationRequestExpiryMs(cfg Config) *uint64 {
 	if cfg.OmitAuthorizationRequestExpiry {
 		return nil
@@ -78,8 +74,7 @@ func resolveAuthorizationRequestExpiryMs(cfg Config) *uint64 {
 
 // prepareAuthorizationHeaders builds the privy-authorization-signature and
 // privy-request-expiry headers for one signing request, or nothing when no
-// authorization context is configured. Port of the Rust
-// prepare_privy_authorization_headers.
+// authorization context is configured.
 func (s *Signer) prepareAuthorizationHeaders(method, url string, body any) (authorizationHeaders, error) {
 	if s.authorizationContext == nil {
 		return authorizationHeaders{}, nil
@@ -119,8 +114,7 @@ func (s *Signer) prepareAuthorizationHeaders(method, url string, body any) (auth
 }
 
 // generateAuthorizationSignatures collects the precomputed signatures, then one
-// signature per private key, then one per sign fn — order preserved. Port of the
-// Rust generate_privy_authorization_signatures.
+// signature per private key, then one per sign fn — order preserved.
 func generateAuthorizationSignatures(input authorizationRequestInput, authorizationContext *AuthorizationContext) ([]string, error) {
 	payload, err := formatAuthorizationSignaturePayload(input)
 	if err != nil {
@@ -147,7 +141,7 @@ func generateAuthorizationSignatures(input authorizationRequestInput, authorizat
 
 // formatAuthorizationSignaturePayload renders the request as canonical JSON
 // (sorted keys, no whitespace), replacing an empty-object body with "" like
-// Privy's SDK. Port of the Rust format_privy_authorization_signature_payload.
+// Privy's SDK.
 func formatAuthorizationSignaturePayload(input authorizationRequestInput) ([]byte, error) {
 	bodyValue, err := toJSONValue(input.Body)
 	if err != nil {
@@ -178,8 +172,7 @@ func formatAuthorizationSignaturePayload(input authorizationRequestInput) ([]byt
 }
 
 // generateAuthorizationSignature signs the payload with ECDSA P-256 over SHA-256
-// and returns the DER signature base64-encoded. Port of the Rust
-// generate_privy_authorization_signature.
+// and returns the DER signature base64-encoded.
 func generateAuthorizationSignature(authorizationPrivateKey string, payload []byte) (string, error) {
 	signingKey, err := parseAuthorizationPrivateKey(authorizationPrivateKey)
 	if err != nil {
@@ -196,7 +189,7 @@ func generateAuthorizationSignature(authorizationPrivateKey string, payload []by
 
 // parseAuthorizationPrivateKey accepts wallet-auth:/wallet-api:-prefixed base64
 // PKCS#8 DER or PEM keys. Error details are fixed strings that never echo the key
-// material. Port of the Rust parse_p256_private_key.
+// material.
 func parseAuthorizationPrivateKey(authorizationPrivateKey string) (*ecdsa.PrivateKey, error) {
 	normalized := strings.TrimSpace(stripAuthorizationKeyPrefix(authorizationPrivateKey))
 
@@ -259,8 +252,8 @@ func toJSONValue(body any) (any, error) {
 }
 
 // canonicalizeJSON serializes a JSON value deterministically: object keys sorted
-// bytewise, no whitespace, no HTML escaping — byte-compatible with the Rust and
-// TS canonicalize_json implementations. Port of the Rust canonicalize_json.
+// bytewise, no whitespace, no HTML escaping. The output bytes are what get
+// signed, so the form must never change.
 func canonicalizeJSON(value any) (string, bool) {
 	switch v := value.(type) {
 	case nil:
@@ -305,8 +298,8 @@ func canonicalizeJSON(value any) (string, bool) {
 	}
 }
 
-// encodeJSONString marshals a string without Go's default HTML escaping so the
-// payload bytes match serde_json/JSON.stringify output.
+// encodeJSONString marshals a string without Go's default HTML escaping so
+// characters like <, >, and & stay literal in the canonical payload.
 func encodeJSONString(value string) (string, bool) {
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)

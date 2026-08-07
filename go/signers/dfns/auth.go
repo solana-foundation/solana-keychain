@@ -18,7 +18,7 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// Dfns User Action Signing flow — port of the Rust dfns::auth module. See
+// Dfns User Action Signing flow. See
 // https://docs.dfns.co/api-reference/auth/signing-flows#asymetric-keys-signing-flow
 
 // userActionInitRequest is the challenge request posted to /auth/action/init.
@@ -67,8 +67,8 @@ type userActionResponse struct {
 }
 
 // clientData is the challenge payload signed by the credential key. The field
-// order (challenge, then type) reproduces the exact byte layout the Rust
-// implementation signs (serde_json's map serialization is key-sorted).
+// order (challenge, then type) fixes the exact byte layout that is signed and
+// verified by Dfns.
 type clientData struct {
 	Challenge string `json:"challenge"`
 	Type      string `json:"type"`
@@ -76,7 +76,6 @@ type clientData struct {
 
 // signUserAction performs the Dfns User Action Signing flow for a mutating API
 // request and returns the token to include as the x-dfns-useraction header.
-// Port of the Rust dfns::auth::sign_user_action.
 func (s *Signer) signUserAction(ctx context.Context, httpMethod, httpPath, body string) (string, error) {
 	// Request a challenge.
 	initBody, err := marshalJSON(userActionInitRequest{
@@ -146,10 +145,9 @@ func (s *Signer) signUserAction(ctx context.Context, httpMethod, httpPath, body 
 }
 
 // signChallenge signs the challenge client data with an Ed25519, ECDSA P-256,
-// or RSA private key in PEM format. Port of the Rust dfns::auth::sign_challenge:
-// Ed25519 yields a raw 64-byte signature, P-256 an ASN.1 DER-encoded ECDSA
-// signature over the SHA-256 digest, and RSA a PKCS#1 v1.5 signature over the
-// SHA-256 digest.
+// or RSA private key in PEM format. Ed25519 yields a raw 64-byte signature,
+// P-256 an ASN.1 DER-encoded ECDSA signature over the SHA-256 digest, and RSA
+// a PKCS#1 v1.5 signature over the SHA-256 digest.
 func signChallenge(privateKeyPEM string, data []byte) ([]byte, error) {
 	block, _ := pem.Decode([]byte(privateKeyPEM))
 	if block == nil {
@@ -185,7 +183,7 @@ func signChallenge(privateKeyPEM string, data []byte) ([]byte, error) {
 }
 
 // signECDSAP256 produces a DER-encoded ECDSA signature over the SHA-256 digest
-// of data, matching the Rust p256 signing output format.
+// of data.
 func signECDSAP256(key *ecdsa.PrivateKey, data []byte) ([]byte, error) {
 	digest := sha256.Sum256(data)
 	sig, err := ecdsa.SignASN1(rand.Reader, key, digest[:])
@@ -195,7 +193,7 @@ func signECDSAP256(key *ecdsa.PrivateKey, data []byte) ([]byte, error) {
 	return sig, nil
 }
 
-// errUnsupportedKey mirrors the Rust InvalidPrivateKey fallthrough.
+// errUnsupportedKey is the shared error for unparseable or unsupported PEM keys.
 func errUnsupportedKey() error {
 	return core.NewSignerError(core.CodeInvalidPrivateKey, "unsupported PEM key type (expected Ed25519, P256, or RSA)")
 }

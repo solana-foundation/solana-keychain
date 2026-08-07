@@ -75,8 +75,6 @@ func signMessage(priv ed25519.PrivateKey, message []byte) solana.Signature {
 	return sig
 }
 
-// createTestTransactionWithRecipient is the Go analog of the Rust
-// create_test_transaction_with_recipient helper.
 func createTestTransactionWithRecipient(t *testing.T, payer, recipient solana.PublicKey) *solana.Transaction {
 	t.Helper()
 	inst := system.NewTransferInstruction(testutils.TestTransferLamports, payer, recipient).Build()
@@ -88,8 +86,8 @@ func createTestTransactionWithRecipient(t *testing.T, payer, recipient solana.Pu
 }
 
 // signAndEncodeB58 signs tx's message with priv, adds the signature, and
-// returns the base58-encoded wire transaction plus the signature — the fixture
-// the Rust tests build for onChain.transaction.
+// returns the base58-encoded wire transaction plus the signature, for use as
+// an onChain.transaction fixture.
 func signAndEncodeB58(t *testing.T, tx *solana.Transaction, priv ed25519.PrivateKey) (string, solana.Signature) {
 	t.Helper()
 	msg, err := tx.Message.MarshalBinary()
@@ -117,8 +115,8 @@ func walletJSON(address string) string {
 	return fmt.Sprintf(`{"chainType":"solana","type":"smart","address":%q}`, address)
 }
 
-// walletHandler serves the wallet fetch that New (init) performs, checking the
-// X-API-KEY header like the Rust wiremock matchers.
+// walletHandler serves the wallet fetch that New performs, checking the
+// X-API-KEY header.
 func walletHandler(t *testing.T, apiKey, address string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("X-API-KEY"); got != apiKey {
@@ -155,9 +153,9 @@ func newTestSigner(t *testing.T, cfg Config) *Signer {
 	return s
 }
 
-// TestBuildWalletsAPIURL ports the Rust URL-builder tests: raw slashes, dot
-// segments, pre-encoded traversal sequences, and query/fragment metacharacters
-// in a wallet locator must all stay inside a single encoded path segment.
+// TestBuildWalletsAPIURL: raw slashes, dot segments, pre-encoded traversal
+// sequences, and query/fragment metacharacters in a wallet locator must all
+// stay inside a single encoded path segment.
 func TestBuildWalletsAPIURL(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -192,7 +190,7 @@ func TestBuildWalletsAPIURL(t *testing.T) {
 			wantPath: "/api/2025-06-09/wallets/userId%3Atest%3Fwallet%23fragment%3Asolana%3Asmart",
 		},
 		{
-			name:     "matches TypeScript encodeURIComponent behavior",
+			name:     "matches encodeURIComponent unreserved set",
 			locator:  "userId:alice/../wallet?draft#frag:solana:smart",
 			segments: []string{"transactions", "tx-123", "approvals"},
 			wantPath: "/api/2025-06-09/wallets/userId%3Aalice%2F..%2Fwallet%3Fdraft%23frag%3Asolana%3Asmart/transactions/tx-123/approvals",
@@ -224,9 +222,8 @@ func TestBuildWalletsAPIURL(t *testing.T) {
 	}
 }
 
-// TestNewRejectsInsecureAPIBaseURL ports test_new_rejects_insecure_api_base_url:
-// an http:// base URL is a config error, even with a custom HTTP client
-// (TS parity: assertHttpsUrl always runs).
+// TestNewRejectsInsecureAPIBaseURL: an http:// base URL is a config error,
+// even with a custom HTTP client.
 func TestNewRejectsInsecureAPIBaseURL(t *testing.T) {
 	for name, client := range map[string]*http.Client{
 		"default client": nil,
@@ -263,7 +260,6 @@ func TestNewValidatesConfig(t *testing.T) {
 	}
 }
 
-// TestNewSuccess ports test_init_success.
 func TestNewSuccess(t *testing.T) {
 	want := testutils.TestPublicKey()
 	mux := http.NewServeMux()
@@ -276,8 +272,8 @@ func TestNewSuccess(t *testing.T) {
 	}
 }
 
-// TestNewURLEncodesWalletLocator ports test_init_url_encodes_wallet_locator:
-// the locator must reach the wire percent-encoded.
+// TestNewURLEncodesWalletLocator: the locator must reach the wire
+// percent-encoded.
 func TestNewURLEncodesWalletLocator(t *testing.T) {
 	want := testutils.TestPublicKey()
 	const wantPath = "/" + walletsAPIVersion + "/wallets/userId%3Atest-user%3Asolana%3Asmart"
@@ -297,8 +293,8 @@ func TestNewURLEncodesWalletLocator(t *testing.T) {
 	}
 }
 
-// TestNewWalletValidation covers the init()-time wallet checks and the
-// fetch_wallet error paths.
+// TestNewWalletValidation covers the wallet checks New performs and the
+// fetchWallet error paths.
 func TestNewWalletValidation(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -358,8 +354,8 @@ func TestNewWalletValidation(t *testing.T) {
 	}
 }
 
-// TestSignMessageNotSupported ports test_sign_message_not_supported: Crossmint
-// intentionally does not support raw message signing for Solana wallets.
+// TestSignMessageNotSupported: Crossmint intentionally does not support raw
+// message signing for Solana wallets.
 func TestSignMessageNotSupported(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.TestPublicKey().String()))
@@ -373,7 +369,6 @@ func TestSignMessageNotSupported(t *testing.T) {
 	}
 }
 
-// TestSignTransactionSuccess ports test_sign_transaction_success.
 func TestSignTransactionSuccess(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := pubkeyOf(priv)
@@ -431,8 +426,7 @@ func TestSignTransactionSuccess(t *testing.T) {
 	}
 }
 
-// TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes ports
-// test_sign_transaction_rejects_approval_signatures_for_local_transaction_bytes:
+// TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes:
 // approval signatures (over Crossmint's internal payload) must never be used
 // as the transaction signature.
 func TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes(t *testing.T) {
@@ -466,8 +460,7 @@ func TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes(t *tes
 	}
 }
 
-// TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes ports
-// test_sign_transaction_accepts_signature_from_on_chain_transaction_bytes: the
+// TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes: the
 // signature is verified against the onChain transaction's own message bytes,
 // even when Crossmint modified the transaction (e.g. a smart-wallet rewrite).
 func TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes(t *testing.T) {
@@ -504,8 +497,6 @@ func TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes(t *testing.T
 	}
 }
 
-// TestSignTransactionPrefersOnChainTransactionSignatureOverTxIDFallback ports
-// test_sign_transaction_prefers_on_chain_transaction_signature_over_txid_fallback.
 func TestSignTransactionPrefersOnChainTransactionSignatureOverTxIDFallback(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := pubkeyOf(priv)
@@ -542,8 +533,8 @@ func TestSignTransactionPrefersOnChainTransactionSignatureOverTxIDFallback(t *te
 	}
 }
 
-// TestSignTransactionAwaitingApproval ports test_sign_transaction_awaiting_approval:
-// without a configured signer secret, awaiting-approval is a terminal failure.
+// TestSignTransactionAwaitingApproval: without a configured signer secret,
+// awaiting-approval is a terminal failure.
 func TestSignTransactionAwaitingApproval(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.TestPublicKey().String()))
@@ -565,9 +556,8 @@ func TestSignTransactionAwaitingApproval(t *testing.T) {
 	}
 }
 
-// TestSignTransactionSuccessOnLastPolledResponse ports
-// test_sign_transaction_success_on_last_polled_response: a success arriving on
-// the final poll attempt is still honored.
+// TestSignTransactionSuccessOnLastPolledResponse: a success arriving on the
+// final poll attempt is still honored.
 func TestSignTransactionSuccessOnLastPolledResponse(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := pubkeyOf(priv)
@@ -658,8 +648,8 @@ func TestSignTransactionPollingTimesOut(t *testing.T) {
 	}
 }
 
-// TestCreateTransactionRemoteAPIError covers the Rust
-// parse_response_with_required_field error extraction: message string, error
+// TestCreateTransactionRemoteAPIError covers the
+// parseResponseWithRequiredField error extraction: message string, error
 // string, error object, and the status-code fallback.
 func TestCreateTransactionRemoteAPIError(t *testing.T) {
 	cases := []struct {
@@ -818,7 +808,7 @@ func TestSignTransactionSubmitsApprovalWithDerivedKey(t *testing.T) {
 
 // TestSignTransactionAwaitingApprovalNoPendingMessage: with a derived signer
 // key and a pending challenge addressed to it but carrying no message, signing
-// fails (Rust handle_awaiting_approval).
+// fails.
 func TestSignTransactionAwaitingApprovalNoPendingMessage(t *testing.T) {
 	apiKey := "sk_staging_" + base58.Encode([]byte("project-123:signature-data"))
 	secret := signerSecretPrefix + strings.Repeat("4d", 32)
@@ -854,14 +844,13 @@ func TestSignTransactionAwaitingApprovalNoPendingMessage(t *testing.T) {
 }
 
 // attachApprovalSigner injects an approval key and locator directly into the
-// signer, the Go analog of the Rust attach_approval_signer test helper.
+// signer.
 func attachApprovalSigner(s *Signer, locator string, key ed25519.PrivateKey) {
 	s.signingKey = key
 	s.signerLocator = locator
 }
 
-// TestSignTransactionSubmitsApprovalOnceAndPollsAfterAsyncRegistration ports
-// test_sign_transaction_submits_approval_once_and_polls_after_async_registration:
+// TestSignTransactionSubmitsApprovalOnceAndPollsAfterAsyncRegistration:
 // when Crossmint acknowledges the approval but still reports awaiting-approval
 // (async registration), the signer must not re-submit; it keeps polling until
 // the transaction succeeds.
@@ -921,8 +910,7 @@ func TestSignTransactionSubmitsApprovalOnceAndPollsAfterAsyncRegistration(t *tes
 	}
 }
 
-// TestSignTransactionSelectsPendingApprovalMatchingSignerLocator ports
-// test_sign_transaction_selects_pending_approval_matching_signer_locator: on a
+// TestSignTransactionSelectsPendingApprovalMatchingSignerLocator: on a
 // multi-approver wallet only the pending challenge addressed to this signer's
 // locator is signed, never pending[0].
 func TestSignTransactionSelectsPendingApprovalMatchingSignerLocator(t *testing.T) {
@@ -1113,10 +1101,9 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 	}
 }
 
-// Rust (Transaction::new_unsigned) and TS (kit wire encoding) serialize an
-// unsigned transaction as a zero placeholder signature per required signer
-// followed by the message bytes; the transaction posted to Crossmint must be
-// byte-identical across languages.
+// An unsigned transaction is serialized as a zero placeholder signature per
+// required signer followed by the message bytes; the transaction posted to
+// Crossmint must use exactly that wire encoding.
 func TestSignTransactionSendsPlaceholderSignatures(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := pubkeyOf(priv)

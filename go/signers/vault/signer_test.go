@@ -105,7 +105,6 @@ func signSuccessBody(prefix string, sig solana.Signature) string {
 	return `{"data":{"signature":"` + prefix + base64.StdEncoding.EncodeToString(sig[:]) + `"}}`
 }
 
-// Port of test_create_vault_signer.
 func TestNew(t *testing.T) {
 	s, err := New(Config{
 		VaultAddr: testVaultAddr,
@@ -121,7 +120,6 @@ func TestNew(t *testing.T) {
 	}
 }
 
-// Port of test_invalid_pubkey.
 func TestNewInvalidPubkey(t *testing.T) {
 	_, err := New(Config{
 		VaultAddr: testVaultAddr,
@@ -137,7 +135,6 @@ func TestNewInvalidPubkey(t *testing.T) {
 	}
 }
 
-// Port of test_pubkey.
 func TestPubkey(t *testing.T) {
 	s := newTestSigner(t, testVaultAddr, testPubkey, nil)
 	if got := s.Pubkey().String(); got != testPubkey {
@@ -145,7 +142,6 @@ func TestPubkey(t *testing.T) {
 	}
 }
 
-// Port of the four test_strip_vault_signature_prefix_* cases.
 func TestStripVaultSignaturePrefix(t *testing.T) {
 	cases := map[string]struct {
 		in, want string
@@ -167,8 +163,8 @@ func TestStripVaultSignaturePrefix(t *testing.T) {
 	}
 }
 
-// Port of test_with_client_uses_supplied_client: prove a caller-supplied client
-// is the one used for outbound requests. The mock server is plain HTTP, so the
+// A caller-supplied client is the one used for outbound requests. The mock
+// server is plain HTTP, so the
 // default (HTTPS-only) client could never reach it — precisely the point of the
 // HTTPClient override: the caller owns the TLS (or lack thereof) policy.
 func TestSuppliedHTTPClientIsUsed(t *testing.T) {
@@ -194,7 +190,6 @@ func TestSuppliedHTTPClientIsUsed(t *testing.T) {
 	}
 }
 
-// Port of test_sign_message_success.
 func TestSignMessageSuccess(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	message := []byte("vault-message")
@@ -221,8 +216,7 @@ func TestSignMessageSuccess(t *testing.T) {
 	}
 }
 
-// Port of test_sign_message_signature_verification_failure: Vault returns a
-// valid signature made by a different key, so verification against the
+// Vault returns a valid signature made by a different key, so verification against the
 // configured pubkey must fail with CodeSigningFailed.
 func TestSignMessageSignatureVerificationFailure(t *testing.T) {
 	signingPriv := testutils.TestPrivateKey()
@@ -245,7 +239,6 @@ func TestSignMessageSignatureVerificationFailure(t *testing.T) {
 	}
 }
 
-// Port of test_sign_message_api_error.
 func TestSignMessageAPIError(t *testing.T) {
 	var calls int32
 	srv := httptest.NewServer(signHandler(t, "", http.StatusUnauthorized, `{"errors":["unauthorized"]}`, &calls))
@@ -292,7 +285,6 @@ func TestSignMessageErrorBodySanitized(t *testing.T) {
 	}
 }
 
-// Port of test_sign_transaction_success.
 func TestSignTransactionSuccess(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	pub := pubkeyOf(priv)
@@ -344,8 +336,6 @@ func TestSignTransactionSuccess(t *testing.T) {
 	}
 }
 
-// Port of test_is_available_success, test_is_available_false_for_unsupported_key_type,
-// test_is_available_false_when_key_does_not_support_signing, and test_is_available_failure.
 func TestIsAvailable(t *testing.T) {
 	cases := map[string]struct {
 		status int

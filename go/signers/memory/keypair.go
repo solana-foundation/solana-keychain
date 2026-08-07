@@ -12,8 +12,7 @@ import (
 )
 
 // resolvePrivateKey turns a Config into an ed25519.PrivateKey (the 64-byte
-// seed‖pubkey form), validating that exactly one source is provided. Port of the
-// Rust keypair_util.rs parsing and the TS resolveKeyPairSigner source handling.
+// seed‖pubkey form), validating that exactly one source is provided.
 func resolvePrivateKey(cfg Config) (ed25519.PrivateKey, error) {
 	sources := 0
 	if len(cfg.PrivateKey) > 0 {
@@ -42,8 +41,8 @@ func resolvePrivateKey(cfg Config) (ed25519.PrivateKey, error) {
 }
 
 // privateKeyFromBytes accepts a 64-byte (seed‖pubkey) or 32-byte (seed) Ed25519 key.
-// For the 64-byte form the public half must match the key derived from the seed
-// (parity with Rust's Keypair::try_from, which rejects inconsistent keypair bytes).
+// For the 64-byte form the public half must match the key derived from the seed;
+// inconsistent keypair bytes are rejected.
 func privateKeyFromBytes(b []byte) (ed25519.PrivateKey, error) {
 	switch len(b) {
 	case ed25519.PrivateKeySize: // 64: seed‖pubkey
@@ -62,7 +61,7 @@ func privateKeyFromBytes(b []byte) (ed25519.PrivateKey, error) {
 }
 
 // privateKeyFromString parses a base58 key or a "[1,2,...]" u8-array string. The
-// leading "[" disambiguates the two forms, matching the Rust/TS auto-detection.
+// leading "[" disambiguates the two forms.
 func privateKeyFromString(s string) (ed25519.PrivateKey, error) {
 	trimmed := strings.TrimSpace(s)
 	var (
@@ -82,7 +81,7 @@ func privateKeyFromString(s string) (ed25519.PrivateKey, error) {
 }
 
 // privateKeyFromFile loads a Solana CLI keypair JSON file. Read failures are
-// IO errors; malformed contents are invalid-key errors (Rust/TS taxonomy).
+// IO errors; malformed contents are invalid-key errors.
 func privateKeyFromFile(path string) (ed25519.PrivateKey, error) {
 	contents, err := os.ReadFile(path)
 	if err != nil {

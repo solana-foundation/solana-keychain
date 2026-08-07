@@ -16,9 +16,9 @@ import (
 )
 
 // integrationSigner builds a signer against live AWS KMS configured by the
-// environment — the Go analog of the Rust tests/test_aws_kms_integration.rs
-// (requires an ECC_NIST_EDWARDS25519 key and standard AWS credentials), run by
-// `just go-test-integration` (loads .env) or CI with Doppler + assumed role.
+// environment (requires an ECC_NIST_EDWARDS25519 key and standard AWS
+// credentials), run by `just go-test-integration` (loads .env) or CI with
+// Doppler + assumed role.
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	s, err := New(context.Background(), Config{
@@ -60,8 +60,7 @@ func TestIntegrationSignMessage(t *testing.T) {
 	}
 }
 
-// The Rust test additionally simulates the signed transaction in LiteSVM;
-// there are no LiteSVM bindings for Go, so verification is cryptographic only.
+// There are no LiteSVM bindings for Go, so verification is cryptographic only.
 func TestIntegrationSignTransaction(t *testing.T) {
 	s := integrationSigner(t)
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())

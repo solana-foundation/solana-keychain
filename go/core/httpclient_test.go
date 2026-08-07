@@ -8,7 +8,7 @@ import (
 
 // NewHTTPClient must refuse to follow any redirect: replaying auth headers
 // (X-Vault-Token, privy-app-id, ...) against a host chosen by the response
-// would leak credentials, and the TS fetchSignerJson uses redirect: 'error'.
+// would leak credentials.
 func TestCheckRedirectRejectsAllRedirects(t *testing.T) {
 	client := NewHTTPClient(HTTPClientConfig{})
 
@@ -27,8 +27,7 @@ func TestCheckRedirectRejectsAllRedirects(t *testing.T) {
 	}
 }
 
-// The transport must block plaintext requests before they leave the process,
-// mirroring reqwest's https_only(true) and the TS assertHttpsUrl.
+// The transport must block plaintext requests before they leave the process.
 func TestHTTPSOnlyTransportBlocksPlaintext(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, "http://example.com", nil)
 	if err != nil {

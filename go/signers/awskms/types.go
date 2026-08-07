@@ -1,9 +1,7 @@
 // Package awskms provides an AWS KMS-backed SolanaSigner using EdDSA (Ed25519)
-// signing — the Go analog of the Rust aws_kms module and the
-// @solana/keychain-aws-kms package. The KMS key must be created with key spec
-// ECC_NIST_EDWARDS25519 and key usage SIGN_VERIFY; the corresponding Solana
-// public key is supplied in the configuration (base58), exactly as in the Rust
-// and TypeScript implementations.
+// signing. The KMS key must be created with key spec ECC_NIST_EDWARDS25519 and
+// key usage SIGN_VERIFY; the corresponding Solana public key is supplied in
+// the configuration (base58).
 package awskms
 
 import (
@@ -15,10 +13,9 @@ import (
 )
 
 // API is the subset of the AWS KMS client this signer uses. *kms.Client
-// satisfies it. Supplying a pre-built client through Config.Client is the Go
-// analog of the Rust AwsKmsSigner::with_client constructor — it lets tests and
-// advanced callers control the endpoint, credentials, and HTTP transport, and
-// it bypasses the HTTPS-enforcing default client, so the caller owns that
+// satisfies it. Supplying a pre-built client through Config.Client lets tests
+// and advanced callers control the endpoint, credentials, and HTTP transport,
+// and it bypasses the HTTPS-enforcing default client, so the caller owns that
 // security posture.
 type API interface {
 	// Sign performs the KMS Sign operation.
@@ -27,8 +24,7 @@ type API interface {
 	DescribeKey(ctx context.Context, params *kms.DescribeKeyInput, optFns ...func(*kms.Options)) (*kms.DescribeKeyOutput, error)
 }
 
-// Config configures an AWS KMS signer. It mirrors the Rust AwsKmsSignerConfig
-// and the TS AwsKmsSignerConfig (keyId / publicKey / region).
+// Config configures an AWS KMS signer.
 type Config struct {
 	// KeyID is the AWS KMS key ID, key ARN, or alias. The key must be an
 	// ECC_NIST_EDWARDS25519 key with SIGN_VERIFY usage.
@@ -39,8 +35,7 @@ type Config struct {
 	PublicKey string
 
 	// Region optionally overrides the AWS region. When empty, the region is
-	// resolved from the default AWS configuration chain (parity with the Rust
-	// Option<String> region).
+	// resolved from the default AWS configuration chain.
 	Region string
 
 	// HTTPClientConfig holds request/connect timeouts for the default HTTP

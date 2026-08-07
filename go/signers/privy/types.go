@@ -1,5 +1,4 @@
-// Package privy provides a SolanaSigner backed by Privy's wallet API — the Go
-// analog of the Rust privy module and the @solana/keychain-privy package. Requests
+// Package privy provides a SolanaSigner backed by Privy's wallet API. Requests
 // authenticate with HTTP Basic auth (app ID + app secret) plus the privy-app-id
 // header; message bytes are sent base64-encoded to the wallet RPC endpoint and the
 // returned base64 signature is verified locally before use.
@@ -11,12 +10,11 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// DefaultAPIBaseURL is the Privy API base URL used when Config.APIBaseURL is empty
-// (parity with the Rust and TS defaults).
+// DefaultAPIBaseURL is the Privy API base URL used when Config.APIBaseURL is
+// empty.
 const DefaultAPIBaseURL = "https://api.privy.io/v1"
 
-// Config configures a Privy signer. Fields mirror the Rust PrivySignerConfig and
-// the TS PrivySignerConfig.
+// Config configures a Privy signer.
 type Config struct {
 	// AppID is the Privy application ID. Required.
 	AppID string
@@ -34,16 +32,15 @@ type Config struct {
 	// defaults.
 	HTTPClientConfig core.HTTPClientConfig
 
-	// HTTPClient optionally overrides the HTTP client (the Go analog of the Rust
-	// with_client constructor, used chiefly for testing). When nil, a client is
-	// built with core.NewHTTPClient, which enforces HTTPS. Supplying a client
-	// bypasses that HTTPS enforcement — the caller owns that security posture.
+	// HTTPClient optionally overrides the HTTP client (used chiefly for
+	// testing). When nil, a client is built with core.NewHTTPClient, which
+	// enforces HTTPS. Supplying a client bypasses that HTTPS enforcement; the
+	// caller owns that security posture.
 	HTTPClient *http.Client
 
 	// AuthorizationContext optionally enables Privy wallet authorization (quorum)
 	// signing: every signing request carries a privy-authorization-signature
-	// header computed over the canonical request payload. Nil disables it. Port
-	// of the Rust PrivySignerConfig.authorization_context.
+	// header computed over the canonical request payload. Nil disables it.
 	AuthorizationContext *AuthorizationContext
 
 	// AuthorizationRequestExpiryMs is the request-expiry window in milliseconds
@@ -52,43 +49,38 @@ type Config struct {
 	AuthorizationRequestExpiryMs uint64
 
 	// OmitAuthorizationRequestExpiry omits privy-request-expiry from the signed
-	// payload and the request headers (the Rust
-	// PrivyAuthorizationRequestExpiry::Omit).
+	// payload and the request headers.
 	OmitAuthorizationRequestExpiry bool
 }
 
-// signMessageRequest is the wallet RPC signing request body. Port of the Rust
-// SignMessageRequest.
+// signMessageRequest is the wallet RPC signing request body.
 type signMessageRequest struct {
 	Method    string            `json:"method"`
 	ChainType string            `json:"chain_type"`
 	Params    signMessageParams `json:"params"`
 }
 
-// signMessageParams carries the base64-encoded message bytes. Port of the Rust
-// SignMessageParams.
+// signMessageParams carries the base64-encoded message bytes.
 type signMessageParams struct {
 	Message  string `json:"message"`
 	Encoding string `json:"encoding"`
 }
 
-// signMessageResponse is the wallet RPC signing response body. Port of the Rust
-// SignMessageResponse.
+// signMessageResponse is the wallet RPC signing response body.
 type signMessageResponse struct {
 	Method string          `json:"method"`
 	Data   signMessageData `json:"data"`
 }
 
-// signMessageData carries the base64-encoded signature. Port of the Rust
-// SignMessageData.
+// signMessageData carries the base64-encoded signature.
 type signMessageData struct {
 	Signature string `json:"signature"`
 	Encoding  string `json:"encoding"`
 }
 
 // walletResponse is the wallet info response; for Solana wallets the address is
-// the public key. Port of the Rust WalletResponse (only the fields the signer
-// reads; unknown fields are ignored).
+// the public key. Only the fields the signer reads are declared; unknown fields
+// are ignored.
 type walletResponse struct {
 	ID        string `json:"id"`
 	Address   string `json:"address"`

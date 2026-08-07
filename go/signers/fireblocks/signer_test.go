@@ -30,8 +30,7 @@ const (
 )
 
 // keyFromSeed derives a deterministic throwaway Ed25519 keypair from a single
-// seed byte (mirrors the local Keypair::new fixtures in the Rust tests, but
-// deterministic).
+// seed byte.
 func keyFromSeed(seedByte byte) (ed25519.PrivateKey, solana.PublicKey) {
 	var seed [ed25519.SeedSize]byte
 	for i := range seed {
@@ -50,8 +49,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 // newTestSigner starts an httptest server serving addressesPath (returning
 // address) plus any handlers registered by configure, and constructs an
-// initialized signer against it. Go analog of the Rust create_test_signer +
-// wiremock MockServer pairing.
+// initialized signer against it.
 func newTestSigner(t *testing.T, address string, configure func(mux *http.ServeMux)) *Signer {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -79,8 +77,7 @@ func newTestSigner(t *testing.T, address string, configure func(mux *http.ServeM
 	return s
 }
 
-// Ports test_new_valid + test_init_success: defaults resolve and the pubkey is
-// fetched during construction.
+// Defaults resolve and the pubkey is fetched during construction.
 func TestNewDefaultsAndFetchesPubkey(t *testing.T) {
 	want := testutils.TestPublicKey()
 	s := newTestSigner(t, want.String(), nil)
@@ -96,9 +93,8 @@ func TestNewDefaultsAndFetchesPubkey(t *testing.T) {
 	}
 }
 
-// Ports test_init_rejects_program_call_before_any_network_call: the unsupported
-// PROGRAM_CALL mode fails New with a config error and, failing closed, no request
-// may reach Fireblocks before the rejection.
+// The unsupported PROGRAM_CALL mode fails New with a config error and, failing
+// closed, no request may reach Fireblocks before the rejection.
 func TestNewRejectsProgramCallBeforeAnyNetworkCall(t *testing.T) {
 	var requests atomic.Int64
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -130,7 +126,7 @@ func TestNewRejectsProgramCallBeforeAnyNetworkCall(t *testing.T) {
 	}
 }
 
-// Ports test_init_api_error: a non-2xx during the pubkey fetch fails New.
+// A non-2xx during the pubkey fetch fails New.
 func TestNewAPIError(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc(addressesPath, func(w http.ResponseWriter, _ *http.Request) {
@@ -154,8 +150,7 @@ func TestNewAPIError(t *testing.T) {
 	}
 }
 
-// Ports the Rust InvalidPrivateKey path (create_auth_token with an unparseable
-// RSA key), which surfaces from New because init runs inline.
+// An unparseable RSA key fails New with INVALID_PRIVATE_KEY.
 func TestNewInvalidRSAKey(t *testing.T) {
 	_, err := New(context.Background(), Config{
 		APIKey:         testAPIKey,
@@ -170,8 +165,7 @@ func TestNewInvalidRSAKey(t *testing.T) {
 	}
 }
 
-// The default client (nil HTTPClient) must reject non-HTTPS base URLs — the Go
-// analog of reqwest's https_only(true).
+// The default client (nil HTTPClient) must reject non-HTTPS base URLs.
 func TestNewHTTPSEnforcement(t *testing.T) {
 	_, err := New(context.Background(), Config{
 		APIKey:         testAPIKey,
@@ -214,7 +208,7 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 	}
 }
 
-// Ports test_sign_message_success, plus assertions on the RAW request wire shape
+// Happy-path message signing, with assertions on the RAW request wire shape
 // and the JWT carried in the Authorization header (claims tested directly in
 // jwt_test.go; here the token must also verify against the RSA key).
 func TestSignMessageSuccess(t *testing.T) {
@@ -288,8 +282,7 @@ func TestSignMessageSuccess(t *testing.T) {
 	}
 }
 
-// Ports test_sign_message_signature_verification_failure: a signature that does
-// not verify against the signer's pubkey is rejected.
+// A signature that does not verify against the signer's pubkey is rejected.
 func TestSignMessageVerificationFailure(t *testing.T) {
 	signingPriv, _ := keyFromSeed(0x24)
 	_, differentPub := keyFromSeed(0x25)
@@ -320,7 +313,7 @@ func TestSignMessageVerificationFailure(t *testing.T) {
 	}
 }
 
-// Ports test_sign_message_api_error.
+// A non-2xx from the transactions endpoint surfaces a REMOTE_API_ERROR.
 func TestSignMessageAPIError(t *testing.T) {
 	s := newTestSigner(t, testutils.TestPublicKey().String(), func(mux *http.ServeMux) {
 		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
@@ -337,8 +330,7 @@ func TestSignMessageAPIError(t *testing.T) {
 	}
 }
 
-// Ports test_sign_message_transaction_failed: a terminal FAILED status aborts
-// polling with a signing failure.
+// A terminal FAILED status aborts polling with a signing failure.
 func TestSignMessageTransactionFailed(t *testing.T) {
 	s := newTestSigner(t, testutils.TestPublicKey().String(), func(mux *http.ServeMux) {
 		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
@@ -359,7 +351,7 @@ func TestSignMessageTransactionFailed(t *testing.T) {
 }
 
 // Exercises the polling-timeout branch: a transaction that never reaches a
-// terminal state exhausts maxPollAttempts (Rust poll_for_signature fallthrough).
+// terminal state exhausts maxPollAttempts.
 func TestSignMessagePollingTimeout(t *testing.T) {
 	s := newTestSigner(t, testutils.TestPublicKey().String(), func(mux *http.ServeMux) {
 		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
@@ -383,8 +375,8 @@ func TestSignMessagePollingTimeout(t *testing.T) {
 	}
 }
 
-// A hostile remote error body must never reach the error detail: like Rust, only
-// the status code is surfaced for non-2xx responses.
+// A hostile remote error body must never reach the error detail: only the
+// status code is surfaced for non-2xx responses.
 func TestRemoteErrorBodyNotLeaked(t *testing.T) {
 	hostile := "evil\x01<script>alert(1)</script>"
 	s := newTestSigner(t, testutils.TestPublicKey().String(), func(mux *http.ServeMux) {
@@ -410,7 +402,7 @@ func TestRemoteErrorBodyNotLeaked(t *testing.T) {
 	}
 }
 
-// Ports test_is_available_success and test_is_available_failure.
+// IsAvailable is true on a 2xx vault-account response and false otherwise.
 func TestIsAvailable(t *testing.T) {
 	cases := map[string]struct {
 		status int
@@ -447,8 +439,7 @@ func TestIsAvailableUnreachable(t *testing.T) {
 }
 
 // RAW-mode transaction signing succeeds end-to-end and reports Complete for a
-// single-signer transaction (the RAW analog of the Rust flow; the message bytes
-// are what gets remotely signed).
+// single-signer transaction; the message bytes are what gets remotely signed.
 func TestSignTransactionRawComplete(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	pub := testutils.TestPublicKey()
@@ -501,8 +492,7 @@ func TestSignTransactionRawComplete(t *testing.T) {
 	}
 }
 
-// Ports the extract_signature "no signed_messages" branch: a COMPLETED RAW
-// response without signed messages fails signing.
+// A COMPLETED RAW response without signed messages fails signing.
 func TestSignMessageNoSignedMessages(t *testing.T) {
 	s := newTestSigner(t, testutils.TestPublicKey().String(), func(mux *http.ServeMux) {
 		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {

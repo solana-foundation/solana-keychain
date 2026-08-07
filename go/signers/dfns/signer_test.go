@@ -21,7 +21,6 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/testutils"
 )
 
-// Fixtures ported from the Rust dfns tests.
 const (
 	testKeyID     = "test-key-id"
 	testPubkeyHex = "5da30b28c87836b0ee76ae7b07e3a2e3be1a4c12e48fce3aee18de0a13040b9a"
@@ -38,7 +37,7 @@ func walletJSON(pubkeyHex string) string {
 }
 
 // walletJSONWith renders the wallet response with the given status, scheme,
-// and curve — the fields the Rust availability tests mutate.
+// and curve, the fields the availability tests mutate.
 func walletJSONWith(status, scheme, curve string) string {
 	return `{"id":"test-wallet-id","status":"` + status + `","network":"Solana","signingKey":` +
 		`{"id":"` + testKeyID + `","scheme":"` + scheme + `","curve":"` + curve + `","publicKey":"` + testPubkeyHex + `"}}`
@@ -87,7 +86,7 @@ func mountUserActionFlow(t *testing.T, mux *http.ServeMux) {
 		if err != nil {
 			t.Errorf("clientData is not base64url (no padding): %v", err)
 		}
-		// Exact bytes the Rust implementation signs (serde_json key order).
+		// The exact client data bytes the signer must produce and sign.
 		if want := `{"challenge":"test-challenge","type":"key.get"}`; string(clientDataBytes) != want {
 			t.Errorf("clientData = %q, want %q", clientDataBytes, want)
 		}
@@ -137,8 +136,8 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// TestNewDefaultBaseURL ports test_new_valid: an empty APIBaseURL must resolve
-// to the production Dfns endpoint.
+// TestNewDefaultBaseURL checks that an empty APIBaseURL resolves to the
+// production Dfns endpoint.
 func TestNewDefaultBaseURL(t *testing.T) {
 	var gotURL string
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -168,7 +167,7 @@ func TestNewDefaultBaseURL(t *testing.T) {
 }
 
 // TestNewMissingConfig checks that each required field is validated with a
-// CONFIG_ERROR (parity with the TS createDfnsSigner validation).
+// CONFIG_ERROR.
 func TestNewMissingConfig(t *testing.T) {
 	base := Config{
 		AuthToken:     "token",
@@ -195,7 +194,8 @@ func TestNewMissingConfig(t *testing.T) {
 	}
 }
 
-// TestNewSuccess ports test_init_success.
+// TestNewSuccess checks that New resolves the pubkey and key ID from a single
+// wallet fetch.
 func TestNewSuccess(t *testing.T) {
 	var hits atomic.Int32
 	mux := http.NewServeMux()
@@ -218,7 +218,8 @@ func TestNewSuccess(t *testing.T) {
 	}
 }
 
-// TestNewAPIError ports test_init_api_error.
+// TestNewAPIError checks that a non-2xx wallet response fails New with a
+// REMOTE_API_ERROR.
 func TestNewAPIError(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /wallets/test-wallet-id", func(w http.ResponseWriter, _ *http.Request) {
@@ -236,7 +237,8 @@ func TestNewAPIError(t *testing.T) {
 	}
 }
 
-// TestNewInvalidScheme ports test_init_invalid_scheme.
+// TestNewInvalidScheme checks that a non-EdDSA signing key fails New with a
+// CONFIG_ERROR.
 func TestNewInvalidScheme(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /wallets/test-wallet-id", func(w http.ResponseWriter, _ *http.Request) {
@@ -315,7 +317,9 @@ func TestRemoteErrorSanitized(t *testing.T) {
 	}
 }
 
-// TestSignMessageSuccess ports test_sign_message_success.
+// TestSignMessageSuccess checks the happy-path signing flow: the user-action
+// token is attached, the request carries the hex-encoded message, and the
+// returned signature is surfaced.
 func TestSignMessageSuccess(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	pub := testutils.TestPublicKey()
@@ -359,9 +363,8 @@ func TestSignMessageSuccess(t *testing.T) {
 	}
 }
 
-// TestSignMessageVerificationFailure ports
-// test_sign_message_signature_verification_failure: the remote returns a
-// signature from a different key than the wallet's public key.
+// TestSignMessageVerificationFailure checks the case where the remote returns
+// a signature from a different key than the wallet's public key.
 func TestSignMessageVerificationFailure(t *testing.T) {
 	signingPriv := testutils.TestPrivateKey()
 	differentPriv := ed25519.NewKeyFromSeed(func() []byte {
@@ -395,8 +398,8 @@ func TestSignMessageVerificationFailure(t *testing.T) {
 	}
 }
 
-// TestSignMessageAPIError ports test_sign_message_api_error: the signatures
-// endpoint fails after a successful user-action flow.
+// TestSignMessageAPIError checks the case where the signatures endpoint fails
+// after a successful user-action flow.
 func TestSignMessageAPIError(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /wallets/test-wallet-id", walletHandler(testPubkeyHex))
@@ -417,7 +420,7 @@ func TestSignMessageAPIError(t *testing.T) {
 	}
 }
 
-// TestSignTransactionSuccess ports test_sign_transaction_success.
+// TestSignTransactionSuccess checks the happy-path transaction signing flow.
 func TestSignTransactionSuccess(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	pub := testutils.TestPublicKey()
@@ -474,8 +477,8 @@ func TestSignTransactionSuccess(t *testing.T) {
 	}
 }
 
-// TestSignTransactionVerificationFailure ports
-// test_sign_transaction_signature_verification_failure.
+// TestSignTransactionVerificationFailure checks that a signature from a key
+// other than the wallet's is rejected.
 func TestSignTransactionVerificationFailure(t *testing.T) {
 	signingPriv := testutils.TestPrivateKey()
 	differentPriv := ed25519.NewKeyFromSeed(func() []byte {
@@ -519,11 +522,10 @@ func TestSignTransactionVerificationFailure(t *testing.T) {
 	}
 }
 
-// TestIsAvailable ports test_is_available_success,
-// test_is_available_archived_wallet, test_is_available_wrong_scheme,
-// test_is_available_wrong_curve, and test_is_available_api_error. New needs a
-// healthy wallet, so the unavailable cases serve one on the first call and the
-// degraded response afterwards.
+// TestIsAvailable covers the healthy wallet plus the archived, wrong-scheme,
+// wrong-curve, and API-error cases. New needs a healthy wallet, so the
+// unavailable cases serve one on the first call and the degraded response
+// afterwards.
 func TestIsAvailable(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		srv := httptest.NewTLSServer(walletHandler(testPubkeyHex))

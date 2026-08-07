@@ -20,8 +20,7 @@ import (
 )
 
 const (
-	// testPubkey is a fixed foreign address (we do not hold its key) — the same
-	// fixture the Rust tests use.
+	// testPubkey is a fixed foreign address (we do not hold its key).
 	testPubkey    = "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV"
 	testAccountID = "acc_e0b84653-1741-4a3d-9e91-2b0fd2942f60"
 	testSecretKey = "sk_test_secret"
@@ -81,7 +80,7 @@ func signStatusHandler(status int) http.HandlerFunc {
 }
 
 // signResponder responds to the sign endpoint with the given signature value
-// after checking the auth headers, mirroring the Rust wiremock matchers.
+// after checking the auth headers.
 func signResponder(t *testing.T, sigHex string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+testSecretKey {
@@ -394,8 +393,8 @@ func TestSignUnauthorized(t *testing.T) {
 }
 
 func TestSignMessageInvalidWalletSecret(t *testing.T) {
-	// The wallet secret is only parsed at signing time (parity with Rust,
-	// where init() never touches it), so New succeeds and SignMessage fails.
+	// The wallet secret is only parsed at signing time, so New succeeds and
+	// SignMessage fails.
 	api := newMockAPI(t, testPubkey, nil)
 	cfg := api.config()
 	cfg.WalletSecret = "not-a-pem-key"

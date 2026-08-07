@@ -19,9 +19,8 @@ import (
 // maxResponseBytes caps how much of a Privy response body is read.
 const maxResponseBytes = 1 << 20 // 1 MiB
 
-// Signer signs with a Privy wallet via Privy's REST API. It is the Go analog of
-// the Rust PrivySigner and the TS privy signer. All fields are immutable after
-// New, so a Signer is safe for concurrent use.
+// Signer signs with a Privy wallet via Privy's REST API. All fields are
+// immutable after New, so a Signer is safe for concurrent use.
 type Signer struct {
 	appID                        string
 	appSecret                    string
@@ -37,8 +36,7 @@ type Signer struct {
 var _ core.Signer = (*Signer)(nil)
 
 // New builds a Privy signer and fetches the wallet's public key from the Privy
-// API (the Rust init(), performed inline — parity with Signer::from_privy and the
-// TS createPrivySigner factory), so the returned signer is ready to use.
+// API, so the returned signer is ready to use.
 func New(ctx context.Context, cfg Config) (*Signer, error) {
 	if cfg.AppID == "" || cfg.AppSecret == "" || cfg.WalletID == "" {
 		return nil, core.NewSignerError(core.CodeConfigError,
@@ -75,8 +73,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 // Pubkey returns the wallet's public key fetched during New.
 func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
-// String renders the signer without any secret material — the Go analog of the
-// Rust redacting Debug impl.
+// String renders the signer without any secret material.
 func (s Signer) String() string {
 	return "privy.Signer{pubkey: " + s.pubkey.String() + ", apiBaseURL: " + s.apiBaseURL + "}"
 }
@@ -92,8 +89,7 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 
 // SignTransaction signs the transaction's message bytes with the Privy wallet,
 // inserts the signature at this signer's required-signer position, and returns
-// the encoded transaction with its completeness. Port of the Rust
-// sign_and_serialize + classify_signed_transaction flow.
+// the encoded transaction with its completeness.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	msg, err := tx.Message.MarshalBinary()
 	if err != nil {
@@ -115,20 +111,18 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 
 // IsAvailable re-fetches the wallet from the Privy API and reports whether it
 // still resolves to this signer's public key. All errors are swallowed and
-// reported as false (parity with the Rust is_available).
+// reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
 	pubkey, err := s.fetchPublicKey(ctx)
 	return err == nil && pubkey == s.pubkey
 }
 
 // authHeader returns the HTTP Basic auth header value for the app credentials.
-// Port of the Rust get_privy_auth_header.
 func (s *Signer) authHeader() string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(s.appID+":"+s.appSecret))
 }
 
 // fetchPublicKey resolves the wallet's Solana address via GET /wallets/{id}.
-// Port of the Rust fetch_public_key.
 func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 	url := s.apiBaseURL + "/wallets/" + s.walletID
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -148,8 +142,6 @@ func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 		return solana.PublicKey{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse privy wallet response", err)
 	}
 
-	// Guard the wallet shape before parsing (parity with the TS privy signer;
-	// the Rust implementation falls through to the pubkey parse instead).
 	if wallet.Address == "" {
 		return solana.PublicKey{}, core.NewSignerError(core.CodeRemoteAPIError, "missing address in privy wallet response")
 	}
@@ -167,7 +159,7 @@ func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 
 // signBytes signs message via POST /wallets/{id}/rpc with method "signMessage",
 // sending the bytes base64-encoded and decoding the base64 signature from the
-// response, then verifies it locally. Port of the Rust sign_bytes.
+// response, then verifies it locally.
 func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signature, error) {
 	url := s.apiBaseURL + "/wallets/" + s.walletID + "/rpc"
 	request := signMessageRequest{
@@ -228,8 +220,8 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 }
 
 // do executes the request and returns the response body, mapping transport
-// failures to CodeHTTPError and non-2xx statuses to CodeRemoteAPIError with the
-// sanitized response body in the detail ("API error {status}", parity with Rust).
+// failures to CodeHTTPError and non-2xx statuses to CodeRemoteAPIError whose
+// detail carries only the status code ("API error {status}").
 func (s *Signer) do(req *http.Request, what string) ([]byte, error) {
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -248,9 +240,8 @@ func (s *Signer) do(req *http.Request, what string) ([]byte, error) {
 		return nil, core.WrapSignerError(core.CodeHTTPError, "failed to read "+what+" response", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// Only the status code goes into the detail: the Rust implementation
-		// deliberately discards the response body here, and the other Go
-		// backends do the same.
+		// Only the status code goes into the detail; the response body is
+		// deliberately discarded since it may echo request material.
 		return nil, core.NewSignerError(core.CodeRemoteAPIError,
 			what+" failed: API error "+strconv.Itoa(resp.StatusCode))
 	}

@@ -9,8 +9,7 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// Signer is an in-memory Ed25519 signer. It is the Go analog of the Rust
-// MemorySigner and the TS memory signer.
+// Signer is an in-memory Ed25519 signer.
 type Signer struct {
 	priv ed25519.PrivateKey
 	pub  solana.PublicKey

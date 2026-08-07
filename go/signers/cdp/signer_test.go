@@ -26,7 +26,7 @@ const testPubkeyStr = "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV"
 
 // testEd25519Key returns a deterministic Ed25519 key in the CDP base64 format
 // (seed || pubkey). It must be a real keypair to pass JWT key validation
-// (mirrors the Rust test_ed25519_key fixture: seed = 32 x 0x42).
+// (seed = 32 x 0x42).
 func testEd25519Key() string {
 	seed := make([]byte, ed25519.SeedSize)
 	for i := range seed {
@@ -36,8 +36,8 @@ func testEd25519Key() string {
 	return base64.StdEncoding.EncodeToString(priv) // priv is already seed || pubkey
 }
 
-// testWalletSecret returns a valid wallet secret: base64 of a minimal P-256
-// PKCS#8 DER (same 67-byte fixture as the Rust test_wallet_secret).
+// testWalletSecret returns a valid wallet secret: base64 of a minimal 67-byte
+// P-256 PKCS#8 DER fixture.
 func testWalletSecret() string {
 	der := []byte{
 		// outer SEQUENCE (65 bytes)
@@ -66,8 +66,7 @@ func testWalletSecret() string {
 	return base64.StdEncoding.EncodeToString(der)
 }
 
-// testConfig builds a valid Config pointing at baseURL (mirrors the Rust
-// create_test_signer fixture).
+// testConfig builds a valid Config pointing at baseURL.
 func testConfig(baseURL string, client *http.Client) Config {
 	return Config{
 		APIKeyID:     "test-api-key",
@@ -114,8 +113,7 @@ func assertCode(t *testing.T, err error, want core.Code) {
 	}
 }
 
-// transferTx builds a single-signer System transfer to an explicit recipient
-// (analog of the Rust create_test_transaction_with_recipient).
+// transferTx builds a single-signer System transfer to an explicit recipient.
 func transferTx(t *testing.T, payer, recipient solana.PublicKey) *solana.Transaction {
 	t.Helper()
 	inst := system.NewTransferInstruction(testutils.TestTransferLamports, payer, recipient).Build()

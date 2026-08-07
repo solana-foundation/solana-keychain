@@ -1,7 +1,7 @@
 // Package testutils provides shared helpers for testing solana-keychain Go signers:
-// deterministic key material and a canonical test-transaction builder. It is the Go
-// analog of the @solana/keychain-test-utils package. It is a regular (non-test)
-// package so it can be imported by _test.go files in any backend package.
+// deterministic key material and a canonical test-transaction builder. It is a
+// regular (non-test) package so it can be imported by _test.go files in any
+// backend package.
 package testutils
 
 import (
@@ -11,7 +11,7 @@ import (
 )
 
 // testSeed is a fixed 32-byte Ed25519 seed so the derived keypair is deterministic
-// across runs (and reproducible from the same seed in the Rust/TS test fixtures).
+// across runs.
 var testSeed = [ed25519.SeedSize]byte{
 	1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
 	17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,

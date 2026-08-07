@@ -15,9 +15,8 @@ import (
 )
 
 // integrationSigner builds a signer against the live Vault configured by the
-// environment — the Go analog of the Rust tests/test_vault_integration.rs, run
-// by `just go-test-integration` against a local `vault server -dev` with the
-// shared transit test key restored.
+// environment, run by `just go-test-integration` against a local
+// `vault server -dev` with the shared transit test key restored.
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	addr := requireEnv(t, "VAULT_ADDR")
@@ -28,8 +27,7 @@ func integrationSigner(t *testing.T) *Signer {
 		Pubkey:    requireEnv(t, "VAULT_SIGNER_PUBKEY"),
 	}
 	// The local dev Vault listens on plain HTTP, so the HTTPS-enforcing default
-	// client cannot reach it; supply a plain client (the documented escape hatch,
-	// mirroring the Rust integration setup's non-https_only client).
+	// client cannot reach it; supply a plain client (the documented escape hatch).
 	cfg.HTTPClient = &http.Client{}
 	s, err := New(cfg)
 	if err != nil {

@@ -16,10 +16,10 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/testutils"
 )
 
-// resolveTestSignerPubkeyOverride mirrors the Rust integration test: when the
-// wallet's admin signer differs from the derived server signer, the expected
-// signing key can be pinned via TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY (or
-// inferred from a "server:" CROSSMINT_SIGNER locator).
+// resolveTestSignerPubkeyOverride handles wallets whose admin signer differs
+// from the derived server signer: the expected signing key can be pinned via
+// TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY (or inferred from a "server:"
+// CROSSMINT_SIGNER locator).
 func resolveTestSignerPubkeyOverride() (solana.PublicKey, bool) {
 	resolved := strings.TrimSpace(os.Getenv("TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY"))
 	if resolved == "" {
@@ -40,9 +40,8 @@ func resolveTestSignerPubkeyOverride() (solana.PublicKey, bool) {
 }
 
 // integrationSigner builds a signer against the live Crossmint API configured
-// by the environment — the Go analog of the Rust
-// tests/test_crossmint_integration.rs, run by `just go-test-integration`
-// (loads .env) or CI with Doppler secrets.
+// by the environment, via `just go-test-integration` (loads .env) or CI with
+// Doppler secrets.
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	s, err := New(context.Background(), Config{

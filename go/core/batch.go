@@ -11,17 +11,16 @@ import (
 // BatchOptions tunes the batch signing helpers.
 type BatchOptions struct {
 	// MaxConcurrency bounds how many sign calls run at once. Zero means unbounded
-	// (all at once), matching the TS Promise.all default.
+	// (all at once).
 	MaxConcurrency int
-	// RequestDelay staggers task i by i*RequestDelay before it starts — the analog
-	// of the TS requestDelayMs option used to respect remote rate limits.
+	// RequestDelay staggers task i by i*RequestDelay before it starts, to respect
+	// remote rate limits.
 	RequestDelay time.Duration
 }
 
 // SignMessages signs each message with s concurrently, preserving order. The first
-// error cancels the remaining work and is returned (parity with the TS Promise.all
-// reject semantics). The core Signer methods stay single-item; this is the Go analog
-// of the array-shaped TS signMessages.
+// error cancels the remaining work and is returned. The core Signer methods stay
+// single-item; this helper provides the batch shape.
 func SignMessages(ctx context.Context, s Signer, messages [][]byte, opts BatchOptions) ([]solana.Signature, error) {
 	out := make([]solana.Signature, len(messages))
 	g, ctx := errgroup.WithContext(ctx)
@@ -76,8 +75,8 @@ func SignTransactions(ctx context.Context, s Signer, txs []*solana.Transaction, 
 	return out, nil
 }
 
-// stagger delays task index until start+index*delay (respecting ctx), mirroring
-// the TS per-index delay used for rate limiting. The target is anchored to the
+// stagger delays task index until start+index*delay (respecting ctx), pacing
+// requests for rate limiting. The target is anchored to the
 // batch start rather than to when the task acquires a concurrency slot: with
 // MaxConcurrency set, slot waits already provide the pacing, and adding a full
 // index*delay on top would compound into minutes on large batches — long past

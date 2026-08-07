@@ -11,10 +11,10 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// Signer signs with an Ed25519 key held in Google Cloud KMS. Port of the Rust
-// GcpKmsSigner: AsymmetricSign is invoked in PureEdDSA mode with the raw message
-// bytes, and every returned signature is verified against the configured public
-// key before being surfaced.
+// Signer signs with an Ed25519 key held in Google Cloud KMS. AsymmetricSign is
+// invoked in PureEdDSA mode with the raw message bytes, and every returned
+// signature is verified against the configured public key before being
+// surfaced.
 //
 // A Signer is immutable after New and safe for concurrent use.
 type Signer struct {
@@ -36,8 +36,7 @@ func (s Signer) String() string {
 func (s Signer) GoString() string { return s.String() }
 
 // New builds a GCP KMS signer from cfg. When cfg.Client is nil it dials the
-// official KMS client (I/O), so the returned signer is ready to use — parity
-// with the Rust Signer::from_gcp_kms and the TS async factory.
+// official KMS client (I/O), so the returned signer is ready to use.
 func New(ctx context.Context, cfg Config) (*Signer, error) {
 	pubkey, err := solana.PublicKeyFromBase58(cfg.PublicKey)
 	if err != nil {
@@ -59,19 +58,17 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 // Pubkey returns the signer's Solana public key.
 func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
-// KeyName returns the full resource name of the crypto key version (parity with
-// the Rust key_name accessor).
+// KeyName returns the full resource name of the crypto key version.
 func (s *Signer) KeyName() string { return s.keyName }
 
 // Close releases the underlying KMS client's connections, including a client
 // supplied via Config.Client — callers sharing one client across signers should
-// close it themselves instead of calling Close here. (Go-specific: the Rust
-// client needs no explicit shutdown.)
+// close it themselves instead of calling Close here.
 func (s *Signer) Close() error { return s.client.Close() }
 
-// signBytes signs message with GCP KMS EdDSA signing. Port of the Rust
-// sign_bytes: EC_SIGN_ED25519 operates in PureEdDSA mode, so the raw message
-// bytes go in the request's data field (not a digest).
+// signBytes signs message with GCP KMS EdDSA signing. EC_SIGN_ED25519 operates
+// in PureEdDSA mode, so the raw message bytes go in the request's data field
+// (not a digest).
 func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signature, error) {
 	resp, err := s.client.AsymmetricSign(ctx, &kmspb.AsymmetricSignRequest{
 		Name: s.keyName,
@@ -107,8 +104,7 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 
 // SignTransaction signs the transaction's message bytes and inserts the
 // signature at this signer's required-signer position, returning the encoded
-// transaction and its completeness (port of the Rust sign_and_serialize +
-// classify_signed_transaction flow).
+// transaction and its completeness.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	msg, err := tx.Message.MarshalBinary()
 	if err != nil {
@@ -129,8 +125,7 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 }
 
 // IsAvailable reports whether the crypto key version is reachable and uses the
-// EC_SIGN_ED25519 algorithm. All errors are swallowed and reported as false
-// (parity with the Rust check_availability GetPublicKey health check).
+// EC_SIGN_ED25519 algorithm. All errors are swallowed and reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
 	resp, err := s.client.GetPublicKey(ctx, &kmspb.GetPublicKeyRequest{Name: s.keyName})
 	if err != nil {

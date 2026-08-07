@@ -17,10 +17,9 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/testutils"
 )
 
-// testKeyName mirrors TEST_KEY_NAME in the Rust tests.
 const testKeyName = "projects/test-project/locations/us-east1/keyRings/test-ring/cryptoKeys/test-key/cryptoKeyVersions/1"
 
-// stubKMS is a KMSClient stub, standing in for the Rust tests' wiremock server.
+// stubKMS is a KMSClient stub so unit tests never touch the network.
 type stubKMS struct {
 	sign   func(ctx context.Context, req *kmspb.AsymmetricSignRequest) (*kmspb.AsymmetricSignResponse, error)
 	getPub func(ctx context.Context, req *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error)
@@ -47,8 +46,7 @@ func (s *stubKMS) Close() error {
 }
 
 // signingStub returns a stub whose AsymmetricSign produces a real Ed25519
-// signature over the request data with priv — the analog of the Rust tests
-// mocking the response with keypair.sign_message bytes.
+// signature over the request data with priv.
 func signingStub(t *testing.T, priv ed25519.PrivateKey) *stubKMS {
 	t.Helper()
 	return &stubKMS{
@@ -78,7 +76,6 @@ func newTestSigner(t *testing.T, client KMSClient) *Signer {
 	return s
 }
 
-// Port of test_gcp_kms_new_invalid_pubkey and test_gcp_kms_new_empty_pubkey.
 func TestNewRejectsBadPublicKey(t *testing.T) {
 	cases := map[string]string{
 		"invalid": "invalid-pubkey",
@@ -101,8 +98,6 @@ func TestNewRejectsBadPublicKey(t *testing.T) {
 	}
 }
 
-// Port of test_gcp_kms_new_valid_pubkey, test_gcp_kms_pubkey, and
-// test_gcp_kms_key_id_accessor.
 func TestNewValidPublicKeyAndAccessors(t *testing.T) {
 	want := testutils.TestPublicKey()
 	s := newTestSigner(t, &stubKMS{})
@@ -117,7 +112,6 @@ func TestNewValidPublicKeyAndAccessors(t *testing.T) {
 	}
 }
 
-// Port of test_gcp_kms_sign_message_success.
 func TestSignMessageSuccess(t *testing.T) {
 	s := newTestSigner(t, signingStub(t, testutils.TestPrivateKey()))
 
@@ -134,8 +128,8 @@ func TestSignMessageSuccess(t *testing.T) {
 	}
 }
 
-// Port of test_gcp_kms_sign_message_signature_verification_failure: the remote
-// signs with one key while the signer is configured with a different pubkey.
+// The remote signs with one key while the signer is configured with a
+// different pubkey.
 func TestSignMessageVerificationFailure(t *testing.T) {
 	otherSeed := bytes.Repeat([]byte{0x77}, ed25519.SeedSize)
 	signingKey := ed25519.NewKeyFromSeed(otherSeed)
@@ -151,7 +145,6 @@ func TestSignMessageVerificationFailure(t *testing.T) {
 	}
 }
 
-// Port of test_gcp_kms_sign_transaction_success.
 func TestSignTransactionSuccess(t *testing.T) {
 	s := newTestSigner(t, signingStub(t, testutils.TestPrivateKey()))
 
@@ -185,7 +178,7 @@ func TestSignTransactionSuccess(t *testing.T) {
 	}
 }
 
-// Empty-signature branch of the Rust sign_bytes (signature_bytes.is_empty()).
+// An empty signature in the response is SIGNING_FAILED.
 func TestSignMessageEmptySignature(t *testing.T) {
 	s := newTestSigner(t, &stubKMS{
 		sign: func(context.Context, *kmspb.AsymmetricSignRequest) (*kmspb.AsymmetricSignResponse, error) {
@@ -202,7 +195,7 @@ func TestSignMessageEmptySignature(t *testing.T) {
 	}
 }
 
-// Port of test_gcp_kms_sign_message_invalid_signature_length (32-byte response).
+// A 32-byte signature response is SIGNING_FAILED.
 func TestSignMessageInvalidSignatureLength(t *testing.T) {
 	s := newTestSigner(t, &stubKMS{
 		sign: func(context.Context, *kmspb.AsymmetricSignRequest) (*kmspb.AsymmetricSignResponse, error) {
@@ -219,9 +212,8 @@ func TestSignMessageInvalidSignatureLength(t *testing.T) {
 	}
 }
 
-// Port of test_gcp_kms_sign_api_error and test_gcp_kms_sign_unauthorized: any
-// AsymmetricSign failure maps to REMOTE_API_ERROR with a fixed detail (the Rust
-// code never copies remote error text into the error).
+// Any AsymmetricSign failure maps to REMOTE_API_ERROR with a fixed detail;
+// remote error text is never copied into the error.
 func TestSignRemoteAPIErrors(t *testing.T) {
 	cases := map[string]error{
 		"invalid argument":  status.Error(codes.InvalidArgument, "Key is not valid for signing"),
@@ -256,7 +248,6 @@ func TestSignRemoteAPIErrors(t *testing.T) {
 	}
 }
 
-// Port of test_gcp_kms_is_available_success.
 func TestIsAvailableSuccess(t *testing.T) {
 	s := newTestSigner(t, &stubKMS{
 		getPub: func(_ context.Context, req *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
@@ -275,7 +266,6 @@ func TestIsAvailableSuccess(t *testing.T) {
 	}
 }
 
-// Port of test_gcp_kms_is_available_wrong_algorithm.
 func TestIsAvailableWrongAlgorithm(t *testing.T) {
 	s := newTestSigner(t, &stubKMS{
 		getPub: func(context.Context, *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
@@ -291,7 +281,7 @@ func TestIsAvailableWrongAlgorithm(t *testing.T) {
 	}
 }
 
-// The Err branch of the Rust check_availability: errors are swallowed → false.
+// GetPublicKey errors are swallowed and reported as false.
 func TestIsAvailableError(t *testing.T) {
 	s := newTestSigner(t, &stubKMS{
 		getPub: func(context.Context, *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
@@ -304,7 +294,7 @@ func TestIsAvailableError(t *testing.T) {
 	}
 }
 
-// Close delegates to the underlying client (Go-specific resource management).
+// Close delegates to the underlying client.
 func TestCloseDelegatesToClient(t *testing.T) {
 	stub := &stubKMS{}
 	s := newTestSigner(t, stub)

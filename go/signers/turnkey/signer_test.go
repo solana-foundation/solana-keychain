@@ -23,8 +23,8 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/testutils"
 )
 
-// newTestAPIKeys generates a P-256 API key pair the way the Rust tests do:
-// hex private scalar and hex uncompressed public point.
+// newTestAPIKeys generates a P-256 API key pair: hex private scalar and hex
+// uncompressed public point.
 func newTestAPIKeys(t *testing.T) (pubHex, privHex string, key *ecdsa.PrivateKey) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -59,15 +59,14 @@ func testConfig(t *testing.T, pubkey string, srv *httptest.Server) Config {
 }
 
 // signResultBody renders the activity JSON Turnkey returns for a signature,
-// split into hex r and s components like the Rust wiremock fixtures.
+// split into hex r and s components.
 func signResultBody(sig []byte) string {
 	return `{"activity":{"result":{"signRawPayloadResult":{"r":"` +
 		hex.EncodeToString(sig[:32]) + `","s":"` + hex.EncodeToString(sig[32:]) + `"}}}}`
 }
 
 // signServer serves the sign_raw_payload endpoint with a fixed status and
-// body, counting calls and checking method/path/headers (the Go analog of the
-// Rust wiremock matchers + expect(1)).
+// body, counting calls and checking method/path/headers.
 func signServer(t *testing.T, status int, body string, calls *int32) *httptest.Server {
 	t.Helper()
 	return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -466,7 +465,7 @@ func TestCreateStamp(t *testing.T) {
 		t.Fatalf("stamp is not valid base64url: %v", err)
 	}
 
-	// Valid JSON with the Rust stamp shape.
+	// Valid JSON with the expected stamp shape.
 	var payload map[string]string
 	if err := json.Unmarshal(decoded, &payload); err != nil {
 		t.Fatalf("stamp is not valid JSON: %v", err)
@@ -519,7 +518,7 @@ func TestCreateStampInvalidPrivateKey(t *testing.T) {
 
 func TestAssembleSignatureLeftPads(t *testing.T) {
 	// Short components must be right-aligned (left-padded with zeros) to 32
-	// bytes each — the Turnkey padding quirk documented in the Rust module.
+	// bytes each.
 	rBytes := bytes.Repeat([]byte{0xAB}, 31) // 31 bytes: one leading zero
 	sBytes := bytes.Repeat([]byte{0xCD}, 30) // 30 bytes: two leading zeros
 

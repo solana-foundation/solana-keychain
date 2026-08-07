@@ -17,9 +17,8 @@ import (
 // stampScheme is the signature scheme Turnkey expects for API-key stamps.
 const stampScheme = "SIGNATURE_SCHEME_TK_API_P256"
 
-// stampPayload is the JSON body of the X-Stamp header. Field order matches the
-// alphabetical key order the Rust implementation emits via serde_json, and the
-// snake_case key names match the Rust stamp exactly.
+// stampPayload is the JSON body of the X-Stamp header. Keys are snake_case and
+// marshal in alphabetical order.
 type stampPayload struct {
 	PublicKey string `json:"public_key"`
 	Scheme    string `json:"scheme"`
@@ -29,7 +28,7 @@ type stampPayload struct {
 // createStamp builds the base64url (unpadded) X-Stamp header value for a
 // request body: the body is signed with the P-256 ECDSA API private key
 // (SHA-256 digest, DER-encoded signature, hex) and wrapped in the Turnkey
-// stamp JSON. Port of the Rust TurnkeySigner::create_stamp.
+// stamp JSON.
 func (s *Signer) createStamp(message string) (string, error) {
 	priv, err := parseP256PrivateKey(s.apiPrivateKey)
 	if err != nil {
@@ -53,8 +52,7 @@ func (s *Signer) createStamp(message string) (string, error) {
 }
 
 // parseP256PrivateKey decodes a hex-encoded 32-byte P-256 scalar into an ECDSA
-// private key. Error mapping mirrors the Rust create_stamp: hex/length/scalar
-// failures are all InvalidPrivateKey.
+// private key. Hex, length, and scalar failures all map to InvalidPrivateKey.
 func parseP256PrivateKey(hexKey string) (*ecdsa.PrivateKey, error) {
 	keyBytes, err := hex.DecodeString(hexKey)
 	if err != nil {

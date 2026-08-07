@@ -21,17 +21,16 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// jwtTTL is the JWT validity window in seconds (parity with the Rust exp = now + 120).
+// jwtTTL is the JWT validity window in seconds.
 const jwtTTL = 120
 
-// jwtURI builds the URI claim value for a CDP JWT. Port of the Rust jwt_uri:
-// "<METHOD> <host><path>".
+// jwtURI builds the URI claim value for a CDP JWT: "<METHOD> <host><path>".
 func jwtURI(host, method, path string) string {
 	return method + " " + host + path
 }
 
 // extractHost returns the request host (including port if present) from a base
-// URL. Port of the Rust extract_host.
+// URL.
 func extractHost(baseURL string) (string, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
@@ -44,9 +43,8 @@ func extractHost(baseURL string) (string, error) {
 }
 
 // marshalCanonicalJSON serializes v to compact JSON with recursively sorted
-// object keys and no HTML escaping — byte-parity with the Rust
-// serde_json::to_string(&sort_json(body)) used for the reqHash (encoding/json
-// sorts map keys at every nesting level).
+// object keys (encoding/json sorts map keys at every nesting level) and no
+// HTML escaping, producing the canonical bytes hashed into reqHash.
 func marshalCanonicalJSON(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -59,8 +57,7 @@ func marshalCanonicalJSON(v any) ([]byte, error) {
 
 // computeReqHash computes the hex-encoded SHA-256 of the canonical JSON request
 // body for wallet authentication. It reports ok=false when the body is absent or
-// an empty object, in which case no reqHash claim is included. Port of the Rust
-// compute_req_hash.
+// an empty object, in which case no reqHash claim is included.
 func computeReqHash(body map[string]any) (string, bool, error) {
 	if len(body) == 0 {
 		return "", false, nil
@@ -75,7 +72,7 @@ func computeReqHash(body map[string]any) (string, bool, error) {
 
 // validateEd25519KeypairBytes checks a decoded CDP API key (seed || pubkey):
 // the length must be 64 and the public half must match the key derived from the
-// seed. Port of the Rust validate_ed25519_keypair_bytes.
+// seed.
 func validateEd25519KeypairBytes(keyBytes []byte) error {
 	if len(keyBytes) != ed25519.PrivateKeySize {
 		return core.NewSignerError(core.CodeInvalidPrivateKey,
@@ -88,8 +85,7 @@ func validateEd25519KeypairBytes(keyBytes []byte) error {
 	return nil
 }
 
-// randomNonce returns a 32-hex-char random nonce for the auth JWT header
-// (parity with the Rust Uuid::new_v4().simple() nonce).
+// randomNonce returns a 32-hex-char random nonce for the auth JWT header.
 func randomNonce() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -98,8 +94,7 @@ func randomNonce() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-// randomUUID returns a random version-4 UUID string for the wallet JWT jti claim
-// (parity with the Rust Uuid::new_v4().to_string()).
+// randomUUID returns a random version-4 UUID string for the wallet JWT jti claim.
 func randomUUID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -114,7 +109,7 @@ func randomUUID() (string, error) {
 // createAuthJWT creates the main CDP API authentication JWT (Authorization
 // bearer token). The API key secret must be a base64-encoded 64-byte Ed25519
 // key (seed || pubkey); the token is signed with EdDSA and carries a `nonce`
-// header field for replay prevention. Port of the Rust create_auth_jwt.
+// header field for replay prevention.
 func createAuthJWT(apiKeyID, apiKeySecret, host, method, path string) (string, error) {
 	if strings.HasPrefix(apiKeySecret, "-----BEGIN") {
 		return "", core.NewSignerError(core.CodeInvalidPrivateKey,
@@ -159,7 +154,7 @@ func createAuthJWT(apiKeyID, apiKeySecret, host, method, path string) (string, e
 // header), required for the signing endpoints. The wallet secret must be a
 // base64-encoded PKCS#8 DER EC (P-256) private key; the token is signed with
 // ES256 and carries a reqHash claim over the canonical request body when one is
-// present. Port of the Rust create_wallet_jwt.
+// present.
 func createWalletJWT(walletSecret, host, method, path string, requestBody map[string]any) (string, error) {
 	derBytes, err := base64.StdEncoding.DecodeString(walletSecret)
 	if err != nil {

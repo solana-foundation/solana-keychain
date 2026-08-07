@@ -27,7 +27,7 @@ const (
 	testAppID     = "test-app-id"
 	testAppSecret = "test-app-secret"
 	testWalletID  = "test-wallet-id"
-	// base64("test-app-id:test-app-secret"), as asserted by the Rust wiremock tests.
+	// base64("test-app-id:test-app-secret").
 	testAuthHeader = "Basic dGVzdC1hcHAtaWQ6dGVzdC1hcHAtc2VjcmV0"
 
 	walletPath = "/wallets/" + testWalletID
@@ -82,7 +82,7 @@ func testConfig(srv *httptest.Server) Config {
 }
 
 // addWalletRoute serves GET /wallets/{id} with the given address, asserting the
-// Basic auth and privy-app-id headers exactly like the Rust wiremock matchers.
+// Basic auth and privy-app-id headers.
 func addWalletRoute(t *testing.T, mux *http.ServeMux, address string) {
 	t.Helper()
 	mux.HandleFunc("GET "+walletPath, func(w http.ResponseWriter, r *http.Request) {
@@ -102,8 +102,8 @@ func addWalletRoute(t *testing.T, mux *http.ServeMux, address string) {
 
 // addRPCRoute serves POST /wallets/{id}/rpc, asserting headers and the exact
 // wire-format JSON body (method "signMessage", chain_type "solana", base64
-// params — the shape the Rust wiremock body_json matcher pins), then delegates
-// the response to respond with the decoded message bytes.
+// params), then delegates the response to respond with the decoded message
+// bytes.
 func addRPCRoute(t *testing.T, mux *http.ServeMux, respond func(w http.ResponseWriter, message []byte)) {
 	t.Helper()
 	mux.HandleFunc("POST "+rpcPath, func(w http.ResponseWriter, r *http.Request) {
@@ -196,8 +196,8 @@ func TestNewMissingConfig(t *testing.T) {
 	}
 }
 
-// TestNewFetchesPublicKey ports test_privy_fetch_public_key (and test_privy_pubkey):
-// New performs the wallet lookup with the exact auth headers and resolves the pubkey.
+// TestNewFetchesPublicKey checks that New performs the wallet lookup with the
+// exact auth headers and resolves the pubkey.
 func TestNewFetchesPublicKey(t *testing.T) {
 	want := testutils.TestPublicKey()
 	mux := http.NewServeMux()
@@ -209,7 +209,8 @@ func TestNewFetchesPublicKey(t *testing.T) {
 	}
 }
 
-// TestNewUnauthorized ports test_privy_fetch_public_key_unauthorized.
+// TestNewUnauthorized checks that an unauthorized wallet fetch maps to
+// CodeRemoteAPIError.
 func TestNewUnauthorized(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+walletPath, func(w http.ResponseWriter, _ *http.Request) {
@@ -222,7 +223,8 @@ func TestNewUnauthorized(t *testing.T) {
 	assertCode(t, err, core.CodeRemoteAPIError)
 }
 
-// TestNewInvalidPublicKey ports test_privy_fetch_public_key_invalid.
+// TestNewInvalidPublicKey checks that an unparsable wallet address maps to
+// CodeInvalidPublicKey.
 func TestNewInvalidPublicKey(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+walletPath, func(w http.ResponseWriter, _ *http.Request) {
@@ -239,9 +241,9 @@ func TestNewInvalidPublicKey(t *testing.T) {
 	assertCode(t, err, core.CodeInvalidPublicKey)
 }
 
-// TestNewRejectsNonSolanaWallet guards the wallet-shape checks (TS parity): a
-// wallet with the wrong chain_type or no address must fail with
-// CodeRemoteAPIError before any public key parsing.
+// TestNewRejectsNonSolanaWallet guards the wallet-shape checks: a wallet with
+// the wrong chain_type or no address must fail with CodeRemoteAPIError before
+// any public key parsing.
 func TestNewRejectsNonSolanaWallet(t *testing.T) {
 	cases := map[string]map[string]any{
 		"wrong chain type": {
@@ -323,8 +325,8 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 	}
 }
 
-// TestSignMessage ports test_privy_sign_message: the remote returns a real
-// signature over the transaction message bytes and the signer surfaces it.
+// TestSignMessage checks that the remote returns a real signature over the
+// transaction message bytes and the signer surfaces it.
 func TestSignMessage(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	pub := testutils.TestPublicKey()
@@ -360,8 +362,7 @@ func TestSignMessage(t *testing.T) {
 	}
 }
 
-// TestSignMessageAuthorizationContextHeaders ports
-// test_privy_sign_message_authorization_context_headers: with a precomputed
+// TestSignMessageAuthorizationContextHeaders checks that with a precomputed
 // authorization signature and expiry omitted, the RPC request carries the
 // privy-authorization-signature header, no privy-request-expiry header, and the
 // exact wire-format body.
@@ -488,10 +489,10 @@ func TestSignMessageAuthorizationRequestExpiry(t *testing.T) {
 	}
 }
 
-// TestSignMessageEmptyAuthorizationContext covers the Rust empty-context guard:
-// a context with no keys, signatures, or sign fns fails with CodeConfigError
-// before any RPC request is sent (no RPC route is registered, so a sent request
-// would surface as CodeRemoteAPIError instead).
+// TestSignMessageEmptyAuthorizationContext checks that a context with no keys,
+// signatures, or sign fns fails with CodeConfigError before any RPC request is
+// sent (no RPC route is registered, so a sent request would surface as
+// CodeRemoteAPIError instead).
 func TestSignMessageEmptyAuthorizationContext(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, testutils.TestPublicKey().String())
@@ -509,9 +510,8 @@ func TestSignMessageEmptyAuthorizationContext(t *testing.T) {
 	assertCode(t, err, core.CodeConfigError)
 }
 
-// TestSignMessageVerificationFailure ports
-// test_privy_sign_message_signature_verification_failure: the remote signs with a
-// different key than the wallet's advertised pubkey.
+// TestSignMessageVerificationFailure checks the case where the remote signs
+// with a different key than the wallet's advertised pubkey.
 func TestSignMessageVerificationFailure(t *testing.T) {
 	signingPriv := testutils.TestPrivateKey()
 	differentPub := pubkeyOf(otherPrivateKey())
@@ -528,8 +528,8 @@ func TestSignMessageVerificationFailure(t *testing.T) {
 	assertCode(t, err, core.CodeSigningFailed)
 }
 
-// TestSignMessageInvalidBase64Signature ports
-// test_privy_sign_message_invalid_base64_signature.
+// TestSignMessageInvalidBase64Signature checks that a non-base64 signature in
+// the response maps to CodeSerializationError.
 func TestSignMessageInvalidBase64Signature(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, testutils.TestPublicKey().String())
@@ -548,8 +548,8 @@ func TestSignMessageInvalidBase64Signature(t *testing.T) {
 	assertCode(t, err, core.CodeSerializationError)
 }
 
-// TestSignMessageWrongLengthSignature covers the Rust Signature::try_from failure
-// site: a valid-base64 payload that is not 64 bytes maps to SigningFailed.
+// TestSignMessageWrongLengthSignature checks that a valid-base64 payload that
+// is not 64 bytes maps to CodeSigningFailed.
 func TestSignMessageWrongLengthSignature(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, testutils.TestPublicKey().String())
@@ -568,7 +568,8 @@ func TestSignMessageWrongLengthSignature(t *testing.T) {
 	assertCode(t, err, core.CodeSigningFailed)
 }
 
-// TestSignMessageUnauthorized ports test_privy_sign_unauthorized.
+// TestSignMessageUnauthorized checks that an unauthorized signing request maps
+// to CodeRemoteAPIError.
 func TestSignMessageUnauthorized(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, testutils.TestPublicKey().String())
@@ -582,7 +583,7 @@ func TestSignMessageUnauthorized(t *testing.T) {
 }
 
 // TestSignMessageRemoteErrorBodyDiscarded checks that non-2xx response bodies
-// never reach the error detail — only the status code does (Rust parity).
+// never reach the error detail: only the status code does.
 func TestSignMessageRemoteErrorBodyDiscarded(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, testutils.TestPublicKey().String())
@@ -599,8 +600,8 @@ func TestSignMessageRemoteErrorBodyDiscarded(t *testing.T) {
 	if !strings.Contains(detail, "API error 500") {
 		t.Errorf("detail %q should mention the status", detail)
 	}
-	// Rust parity: the response body is deliberately discarded on non-2xx —
-	// only the status code may appear in the detail.
+	// The response body is deliberately discarded on non-2xx; only the status
+	// code may appear in the detail.
 	if strings.Contains(detail, "bad thing") {
 		t.Errorf("detail %q should not embed the remote response body", detail)
 	}
@@ -611,7 +612,8 @@ func TestSignMessageRemoteErrorBodyDiscarded(t *testing.T) {
 	}
 }
 
-// TestSignTransaction ports test_privy_sign_transaction.
+// TestSignTransaction checks that signing a transaction inserts the signature
+// at position 0 and yields a complete encoded transaction.
 func TestSignTransaction(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	pub := testutils.TestPublicKey()
@@ -657,9 +659,9 @@ func TestSignTransaction(t *testing.T) {
 	}
 }
 
-// TestIsAvailable ports test_privy_is_available and
-// test_privy_is_available_remote_failure: true while the wallet still resolves to
-// the same pubkey, false on a changed address or a remote failure.
+// TestIsAvailable checks that availability is true while the wallet still
+// resolves to the same pubkey, and false on a changed address or a remote
+// failure.
 func TestIsAvailable(t *testing.T) {
 	pub := testutils.TestPublicKey()
 

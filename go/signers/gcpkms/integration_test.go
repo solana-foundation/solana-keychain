@@ -16,8 +16,7 @@ import (
 )
 
 // integrationSigner builds a signer against live GCP KMS configured by the
-// environment — the Go analog of the Rust tests/test_gcp_kms_integration.rs
-// (requires an EC_SIGN_ED25519 key version and Application Default
+// environment (requires an EC_SIGN_ED25519 key version and Application Default
 // Credentials), run by `just go-test-integration` (loads .env) or CI with
 // Doppler + google-github-actions/auth.
 func integrationSigner(t *testing.T) *Signer {
@@ -60,8 +59,7 @@ func TestIntegrationSignMessage(t *testing.T) {
 	}
 }
 
-// The Rust test additionally simulates the signed transaction in LiteSVM;
-// there are no LiteSVM bindings for Go, so verification is cryptographic only.
+// There are no LiteSVM bindings for Go, so verification is cryptographic only.
 func TestIntegrationSignTransaction(t *testing.T) {
 	s := integrationSigner(t)
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())

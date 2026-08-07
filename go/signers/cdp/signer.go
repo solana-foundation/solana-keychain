@@ -19,19 +19,18 @@ import (
 )
 
 const (
-	// defaultBaseURL is the production CDP API endpoint (Rust CDP_API_HOST).
+	// defaultBaseURL is the production CDP API endpoint.
 	defaultBaseURL = "https://api.cdp.coinbase.com"
-	// basePath is the CDP Solana accounts base path (Rust CDP_BASE_PATH).
+	// basePath is the CDP Solana accounts base path.
 	basePath = "/platform/v2/solana/accounts"
 	// maxResponseBytes caps how much of a CDP response body is read.
 	maxResponseBytes = 1 << 20
 )
 
 // Signer signs Solana transactions and messages with CDP's managed key
-// infrastructure via the CDP REST API. It is the Go analog of the Rust CdpSigner
-// and the TS CdpSigner. The account address is provided at construction time; no
-// remote calls happen until a signing method is invoked. All fields are immutable
-// after New, so a Signer is safe for concurrent use.
+// infrastructure via the CDP REST API. The account address is provided at
+// construction time; no remote calls happen until a signing method is invoked.
+// All fields are immutable after New, so a Signer is safe for concurrent use.
 type Signer struct {
 	apiKeyID     string
 	apiKeySecret string
@@ -45,9 +44,8 @@ type Signer struct {
 // Ensure Signer satisfies the core contract at compile time.
 var _ core.Signer = (*Signer)(nil)
 
-// New builds a CDP signer from cfg. Construction is pure (parity with the Rust
-// CdpSigner::new / from_config, which perform no I/O): key material is only
-// validated when the first JWT is built.
+// New builds a CDP signer from cfg. Construction performs no I/O: key material
+// is only validated when the first JWT is built.
 func New(cfg Config) (*Signer, error) {
 	if cfg.APIKeyID == "" {
 		return nil, core.NewSignerError(core.CodeConfigError, "api_key_id must not be empty")
@@ -98,8 +96,7 @@ func New(cfg Config) (*Signer, error) {
 // Pubkey returns the CDP-managed account's public key.
 func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
-// String renders the signer without any secret material — the Go analog of the
-// Rust redacting Debug impl.
+// String renders the signer without any secret material.
 func (s Signer) String() string {
 	return "cdp.Signer{pubkey: " + s.pubkey.String() + ", apiBaseURL: " + s.apiBaseURL + "}"
 }
@@ -110,8 +107,8 @@ func (s Signer) GoString() string { return s.String() }
 // SignMessage signs arbitrary bytes via the CDP signMessage endpoint and
 // verifies the returned signature against this signer's public key.
 //
-// Quirk (parity with Rust and TS): the CDP signMessage API takes a UTF-8
-// string, so non-UTF-8 payloads are rejected with CodeSerializationError.
+// Quirk: the CDP signMessage API takes a UTF-8 string, so non-UTF-8 payloads
+// are rejected with CodeSerializationError.
 func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
 	var sig solana.Signature
 	if !utf8.Valid(message) {
@@ -145,11 +142,10 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 }
 
 // SignTransaction sends the full serialized transaction (base64 wire format,
-// with required-signature slots zero-filled — the same bytes the Rust
-// implementation produces from an unsigned Transaction) to the CDP
-// signTransaction endpoint, then extracts only this signer's signature from the
-// returned signed transaction, verifies it against the original message bytes,
-// and applies it to tx.
+// with required-signature slots zero-filled) to the CDP signTransaction
+// endpoint, then extracts only this signer's signature from the returned
+// signed transaction, verifies it against the original message bytes, and
+// applies it to tx.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	msgBytes, err := tx.Message.MarshalBinary()
 	if err != nil {
@@ -161,8 +157,9 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, err
 	}
 
-	// Serialize the full transaction (Solana wire format). Rust transactions
-	// carry zero-filled required-signature slots, so pad a copy the same way.
+	// Serialize the full transaction (Solana wire format): the wire encoding
+	// carries one slot per required signature, so pad a copy with zero-filled
+	// slots.
 	reqTx := *tx
 	if n := int(tx.Message.Header.NumRequiredSignatures); len(reqTx.Signatures) < n {
 		sigs := make([]solana.Signature, n)
@@ -195,7 +192,7 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 	}
 
 	// Extract only our signature from the response and apply it to the original
-	// transaction (parity with the Rust sign_and_serialize).
+	// transaction.
 	if pos >= len(signedTx.Signatures) {
 		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
 			"signature not found at expected position in CDP response")
@@ -240,9 +237,8 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 }
 
 // doPost sends an authenticated POST to a CDP signing endpoint (bearer auth JWT
-// plus X-Wallet-Auth wallet JWT, parity with the Rust build_auth_headers) and
-// decodes the 2xx JSON response into out. what names the endpoint in error
-// details ("sign_message" / "sign_transaction", matching the Rust wording).
+// plus X-Wallet-Auth wallet JWT) and decodes the 2xx JSON response into out.
+// what names the endpoint in error details ("sign_message" / "sign_transaction").
 func (s *Signer) doPost(ctx context.Context, path string, body map[string]any, out any, what string) error {
 	bodyBytes, err := marshalCanonicalJSON(body)
 	if err != nil {
@@ -276,8 +272,8 @@ func (s *Signer) doPost(ctx context.Context, path string, body map[string]any, o
 		return core.WrapSignerError(core.CodeHTTPError, "failed to read CDP response", err)
 	}
 
-	// Parity with Rust: only the status code goes into the error; the response
-	// body is never attached (the Rust impl logs it solely under unsafe-debug).
+	// Only the status code goes into the error; the response body is never
+	// attached.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return core.NewSignerError(core.CodeRemoteAPIError, "CDP API error "+strconv.Itoa(resp.StatusCode))
 	}

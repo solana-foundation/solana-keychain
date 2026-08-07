@@ -32,7 +32,7 @@ const (
 	testWalletPath = "/v2/vaults/vault-test/wallets/wallet-test"
 )
 
-// testRSAKey is the PKCS#8 RSA test fixture shared with the Rust test suite.
+// testRSAKey is the PKCS#8 RSA private key test fixture.
 const testRSAKey = `-----BEGIN PRIVATE KEY-----
 MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDKKw7fHhfK3/Ts
 rAqsNCrDsjmyBTHx/AUCOTM+tZph2ZOyDSH9nZO4JkzLrW6Vfk7EZvlP3QjLiXEG
@@ -123,8 +123,8 @@ func walletJSON(address string) string {
 	return fmt.Sprintf(`{"wallet":{"solanaDetails":{"address":%q}}}`, address)
 }
 
-// walletHandler serves the wallet fetch that New (init) performs, checking the
-// bearer authorization the Rust signer attaches to every request.
+// walletHandler serves the wallet fetch that New performs, checking the
+// bearer authorization the signer attaches to every request.
 func walletHandler(t *testing.T, address string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") {
@@ -164,8 +164,8 @@ func newTestSigner(t *testing.T, cfg Config) *Signer {
 	return s
 }
 
-// newDirectSigner constructs a Signer without running init — the Go analog of
-// the Rust create_test_signer helper.
+// newDirectSigner constructs a Signer directly, skipping the wallet fetch New
+// performs.
 func newDirectSigner(t *testing.T, srv *httptest.Server, pubkey solana.PublicKey) *Signer {
 	t.Helper()
 	return &Signer{
@@ -183,9 +183,8 @@ func newDirectSigner(t *testing.T, srv *httptest.Server, pubkey solana.PublicKey
 	}
 }
 
-// signedTransactionPayload is the Go analog of the Rust signed_transaction_payload
-// helper: a deterministic unsigned transaction for priv's pubkey, its base64
-// wire form (with the placeholder signature Rust's new_unsigned includes), the
+// signedTransactionPayload builds a deterministic unsigned transaction for
+// priv's pubkey, its base64 wire form (with a zero placeholder signature), the
 // signed wire form, and the signature.
 func signedTransactionPayload(t *testing.T, priv ed25519.PrivateKey) (unsigned *solana.Transaction, unsignedRaw, signedRaw string, sig solana.Signature) {
 	t.Helper()
@@ -221,8 +220,8 @@ func signedTransactionPayload(t *testing.T, priv ed25519.PrivateKey) (unsigned *
 	return unsigned, unsignedRaw, signedRaw, sig
 }
 
-// initiateHandler asserts the exact transactions:initiate request body (the Go
-// analog of the Rust body_json matcher) and replies with body.
+// initiateHandler asserts the exact transactions:initiate request body and
+// replies with responseBody.
 func initiateHandler(t *testing.T, unsignedRaw string, status int, responseBody string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") {
@@ -264,8 +263,8 @@ func signedTransactionJSON(name, signedRaw string) string {
 		name, signedRaw)
 }
 
-// TestNewValidatesConfig ports test_new_rejects_missing_config and extends it to
-// every required field plus the negative poll settings and an unparseable key.
+// TestNewValidatesConfig covers every required config field plus the negative
+// poll settings and an unparseable key.
 func TestNewValidatesConfig(t *testing.T) {
 	cases := map[string]struct {
 		mutate   func(*Config)
@@ -302,8 +301,8 @@ func TestNewValidatesConfig(t *testing.T) {
 	}
 }
 
-// TestNewRejectsInsecureAPIBaseURL ports test_new_rejects_insecure_api_base_url:
-// an http:// base URL is a config error, even with a custom HTTP client.
+// TestNewRejectsInsecureAPIBaseURL verifies an http:// base URL is a config
+// error, even with a custom HTTP client.
 func TestNewRejectsInsecureAPIBaseURL(t *testing.T) {
 	for name, client := range map[string]*http.Client{
 		"default client": nil,
@@ -325,9 +324,8 @@ func TestNewRejectsInsecureAPIBaseURL(t *testing.T) {
 	}
 }
 
-// TestCreateAccessTokenClaims ports test_create_access_token_claims: the JWT
-// payload must carry sub = service account email, aud = the fixed Utila
-// audience, and a numeric exp.
+// TestCreateAccessTokenClaims verifies the JWT payload carries sub = service
+// account email, aud = the fixed Utila audience, and a numeric exp.
 func TestCreateAccessTokenClaims(t *testing.T) {
 	token, err := createAccessToken(testEmail, parsedTestKey(t))
 	if err != nil {
@@ -380,8 +378,8 @@ func TestCreateAccessTokenClaims(t *testing.T) {
 	}
 }
 
-// TestNewAcceptsEscapedNewlinePEM ports test_new_accepts_escaped_newline_pem:
-// a key delivered with literal "\n" sequences (or CRLF line endings) must parse.
+// TestNewAcceptsEscapedNewlinePEM verifies a key delivered with literal "\n"
+// sequences (or CRLF line endings) parses.
 func TestNewAcceptsEscapedNewlinePEM(t *testing.T) {
 	for name, pem := range map[string]string{
 		"escaped newlines": strings.ReplaceAll(testRSAKey, "\n", `\n`),
@@ -399,7 +397,8 @@ func TestNewAcceptsEscapedNewlinePEM(t *testing.T) {
 	}
 }
 
-// TestNewFetchesSolanaAddress ports test_init_fetches_solana_address.
+// TestNewFetchesSolanaAddress verifies New adopts the wallet's Solana address
+// as the signer pubkey.
 func TestNewFetchesSolanaAddress(t *testing.T) {
 	want := testutils.TestPublicKey()
 	mux := http.NewServeMux()
@@ -412,9 +411,8 @@ func TestNewFetchesSolanaAddress(t *testing.T) {
 	}
 }
 
-// TestNewEncodesResourceIDs ports test_fetch_wallet_encodes_resource_ids: vault
-// and wallet ids containing '/' or spaces must stay inside a single encoded
-// path segment.
+// TestNewEncodesResourceIDs verifies vault and wallet ids containing '/' or
+// spaces stay inside a single encoded path segment.
 func TestNewEncodesResourceIDs(t *testing.T) {
 	want := testutils.TestPublicKey()
 	const wantPath = "/v2/vaults/vault%2Fwith%20space/wallets/wallet%2Fwith%20space"
@@ -436,8 +434,7 @@ func TestNewEncodesResourceIDs(t *testing.T) {
 }
 
 // TestNewTrimsResourceIdentifiers verifies the vault_id "vaults/" prefix and a
-// full wallet resource name are reduced to bare ids before hitting the wire
-// (Rust trim_resource_prefix / trim_wallet_id).
+// full wallet resource name are reduced to bare ids before hitting the wire.
 func TestNewTrimsResourceIdentifiers(t *testing.T) {
 	want := testutils.TestPublicKey()
 	srv := startServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -453,8 +450,8 @@ func TestNewTrimsResourceIdentifiers(t *testing.T) {
 	newTestSigner(t, cfg)
 }
 
-// TestInitiateTransactionEncodesVaultID ports
-// test_initiate_transaction_encodes_vault_id.
+// TestInitiateTransactionEncodesVaultID verifies the vault id is
+// percent-encoded in the transactions:initiate path.
 func TestInitiateTransactionEncodesVaultID(t *testing.T) {
 	const wantPath = "/v2/vaults/vault%2Fwith%20space/transactions:initiate"
 
@@ -481,8 +478,8 @@ func TestInitiateTransactionEncodesVaultID(t *testing.T) {
 	}
 }
 
-// TestSignMessageNotSupported ports test_sign_message_not_supported: Utila
-// intentionally does not support raw message signing for Solana wallets.
+// TestSignMessageNotSupported verifies Utila intentionally does not support
+// raw message signing for Solana wallets.
 func TestSignMessageNotSupported(t *testing.T) {
 	s := &Signer{pubkey: testutils.TestPublicKey()}
 	_, err := s.SignMessage(context.Background(), []byte("hello"))
@@ -490,9 +487,8 @@ func TestSignMessageNotSupported(t *testing.T) {
 	assertDetailContains(t, err, "not supported")
 }
 
-// TestSignTransactionPostsPayloadAndPollsSignedResponse ports
-// test_sign_transaction_posts_payload_and_polls_signed_response: the exact
-// initiate payload is asserted, the AWAITING_SIGNATURE transaction is polled
+// TestSignTransactionPostsPayloadAndPollsSignedResponse verifies the exact
+// initiate payload is posted, the AWAITING_SIGNATURE transaction is polled
 // (FULL view), and the signature from the returned wire transaction is
 // installed on the local transaction.
 func TestSignTransactionPostsPayloadAndPollsSignedResponse(t *testing.T) {
@@ -534,7 +530,8 @@ func TestSignTransactionPostsPayloadAndPollsSignedResponse(t *testing.T) {
 	}
 }
 
-// TestSignTransactionTerminalFailure ports test_sign_transaction_terminal_failure.
+// TestSignTransactionTerminalFailure verifies a terminal-failure state fails
+// signing.
 func TestSignTransactionTerminalFailure(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	transaction, unsignedRaw, _, _ := signedTransactionPayload(t, priv)
@@ -551,8 +548,8 @@ func TestSignTransactionTerminalFailure(t *testing.T) {
 	assertDetailContains(t, err, "terminal state FAILED")
 }
 
-// TestSignTransactionTimeout ports test_sign_transaction_timeout: a transaction
-// that never leaves AWAITING_SIGNATURE exhausts the poll budget.
+// TestSignTransactionTimeout verifies a transaction that never leaves
+// AWAITING_SIGNATURE exhausts the poll budget.
 func TestSignTransactionTimeout(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	transaction, unsignedRaw, _, _ := signedTransactionPayload(t, priv)
@@ -572,8 +569,7 @@ func TestSignTransactionTimeout(t *testing.T) {
 	assertDetailContains(t, err, "polling timed out after 2 attempts")
 }
 
-// TestSignTransactionRejectsMismatchedReturnedTransaction ports
-// test_sign_transaction_rejects_mismatched_returned_transaction: a signed
+// TestSignTransactionRejectsMismatchedReturnedTransaction verifies a signed
 // transaction whose message bytes differ from the requested ones is rejected.
 func TestSignTransactionRejectsMismatchedReturnedTransaction(t *testing.T) {
 	priv := testutils.TestPrivateKey()
@@ -600,8 +596,8 @@ func TestSignTransactionRejectsMismatchedReturnedTransaction(t *testing.T) {
 	assertDetailContains(t, err, "different message bytes")
 }
 
-// TestSignTransactionMissingRawTransaction covers the Rust sign_and_serialize
-// rejection when the SIGNED response carries no solanaTransaction.rawTransaction.
+// TestSignTransactionMissingRawTransaction verifies a SIGNED response carrying
+// no solanaTransaction.rawTransaction fails signing.
 func TestSignTransactionMissingRawTransaction(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	transaction, unsignedRaw, _, _ := signedTransactionPayload(t, priv)
@@ -618,9 +614,9 @@ func TestSignTransactionMissingRawTransaction(t *testing.T) {
 	assertDetailContains(t, err, "missing solanaTransaction.rawTransaction")
 }
 
-// TestNewWalletErrorPaths covers the fetch_wallet error mapping the Rust module
-// implements: non-2xx statuses, undecodable bodies, and wallet payloads without
-// a usable Solana address.
+// TestNewWalletErrorPaths covers the wallet fetch error mapping: non-2xx
+// statuses, undecodable bodies, and wallet payloads without a usable Solana
+// address.
 func TestNewWalletErrorPaths(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -678,8 +674,8 @@ func TestNewWalletErrorPaths(t *testing.T) {
 	}
 }
 
-// TestIsAvailable ports test_is_available: true while the wallet endpoint is
-// healthy, false on remote errors or an unreachable endpoint.
+// TestIsAvailable verifies availability is true while the wallet endpoint is
+// healthy and false on remote errors or an unreachable endpoint.
 func TestIsAvailable(t *testing.T) {
 	var healthy atomic.Bool
 	healthy.Store(true)
@@ -709,8 +705,7 @@ func TestIsAvailable(t *testing.T) {
 }
 
 // TestStringDoesNotLeakSecrets verifies the fmt renderings never expose the
-// service-account private key (or the email the Rust Debug impl also omits)
-// while still identifying the signer.
+// service-account private key or email while still identifying the signer.
 func TestStringDoesNotLeakSecrets(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testutils.TestPublicKey().String()))

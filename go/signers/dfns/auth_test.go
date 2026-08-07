@@ -9,8 +9,6 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// PEM fixtures ported from the Rust dfns::auth tests.
-
 // testEd25519PEM is an Ed25519 test key in PKCS#8 PEM format.
 const testEd25519PEM = "-----BEGIN PRIVATE KEY-----\n" +
 	"MC4CAQAwBQYDK2VwBCIEIJ+DYvh6SEqVTm50DFtMDoQikUmifl1yiWd+IiYyoHBD\n" +

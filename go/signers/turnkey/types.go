@@ -1,8 +1,7 @@
-// Package turnkey provides a SolanaSigner backed by the Turnkey API — the Go
-// analog of the Rust `turnkey` module and the `@solana/keychain-turnkey`
-// TypeScript package. Every request body is authenticated by stamping it with
-// the P-256 ECDSA API private key (X-Stamp header); Ed25519 signatures are
-// produced remotely by Turnkey via the sign_raw_payload activity.
+// Package turnkey provides a SolanaSigner backed by the Turnkey API. Every
+// request body is authenticated by stamping it with the P-256 ECDSA API
+// private key (X-Stamp header); Ed25519 signatures are produced remotely by
+// Turnkey via the sign_raw_payload activity.
 package turnkey
 
 import (
@@ -12,11 +11,10 @@ import (
 )
 
 // DefaultAPIBaseURL is the Turnkey API endpoint used when Config.APIBaseURL is
-// empty (parity with the Rust default).
+// empty.
 const DefaultAPIBaseURL = "https://api.turnkey.com"
 
-// Config configures a Turnkey signer. It mirrors the Rust TurnkeySignerConfig
-// and the TS TurnkeySignerConfig.
+// Config configures a Turnkey signer.
 type Config struct {
 	// APIPublicKey is the Turnkey API public key (hex-encoded compressed P-256
 	// point). It is embedded verbatim in every X-Stamp header.
@@ -46,12 +44,11 @@ type Config struct {
 	// HTTPClient optionally overrides the HTTP client. When nil, the signer
 	// builds one with core.NewHTTPClient(HTTPClientConfig), which enforces
 	// HTTPS. Supplying a client bypasses that HTTPS enforcement and the caller
-	// owns the resulting security posture (Go analog of the Rust `with_client`
-	// constructors).
+	// owns the resulting security posture.
 	HTTPClient *http.Client
 }
 
-// Wire types below are a port of rust/src/turnkey/types.rs (camelCase JSON).
+// Wire types for the Turnkey API (camelCase JSON).
 
 // signRequest is the ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2 request body.
 type signRequest struct {

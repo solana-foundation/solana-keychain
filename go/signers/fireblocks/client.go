@@ -31,7 +31,7 @@ const (
 // maxResponseBytes caps how much of a Fireblocks response body is read.
 const maxResponseBytes = 1 << 20
 
-// Wire types for the Fireblocks REST API (Go analogs of the Rust types.rs module).
+// Wire types for the Fireblocks REST API.
 
 type createTransactionRequest struct {
 	AssetID         string             `json:"assetId"`
@@ -88,7 +88,7 @@ type vaultAddress struct {
 
 // doRequest sends an authenticated request to the Fireblocks API and returns the
 // status code and body. The per-request JWT is computed over uri and body (empty
-// body for GET requests), matching the Rust request construction.
+// body for GET requests).
 func (s *Signer) doRequest(ctx context.Context, method, uri, body string) (int, []byte, error) {
 	token, err := createJWT(s.apiKey, s.signingKey, uri, body)
 	if err != nil {
@@ -126,8 +126,8 @@ func (s *Signer) doRequest(ctx context.Context, method, uri, body string) (int, 
 	return resp.StatusCode, data, nil
 }
 
-// fetchPublicKey retrieves the vault account's Solana address. Port of the Rust
-// fetch_public_key (non-2xx surfaces only the status code, never the body).
+// fetchPublicKey retrieves the vault account's Solana address. A non-2xx
+// response surfaces only the status code, never the body.
 func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 	uri := "/v1/vault/accounts/" + s.vaultAccountID + "/" + s.assetID + "/addresses_paginated"
 	status, body, err := s.doRequest(ctx, http.MethodGet, uri, "")
@@ -152,8 +152,7 @@ func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 	return pubkey, nil
 }
 
-// createTransaction creates a signing request in Fireblocks. Port of the Rust
-// create_transaction.
+// createTransaction creates a signing request in Fireblocks.
 func (s *Signer) createTransaction(ctx context.Context, request createTransactionRequest) (createTransactionResponse, error) {
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -175,8 +174,7 @@ func (s *Signer) createTransaction(ctx context.Context, request createTransactio
 	return created, nil
 }
 
-// getTransaction fetches the current status of a Fireblocks transaction. Port of
-// the Rust get_transaction (note the distinct "Fireblocks API error" detail).
+// getTransaction fetches the current status of a Fireblocks transaction.
 func (s *Signer) getTransaction(ctx context.Context, txID string) (transactionResponse, error) {
 	status, body, err := s.doRequest(ctx, http.MethodGet, "/v1/transactions/"+txID, "")
 	if err != nil {
@@ -194,9 +192,9 @@ func (s *Signer) getTransaction(ctx context.Context, txID string) (transactionRe
 }
 
 // pollForSignature polls the transaction until it reaches a terminal state or the
-// attempt budget is exhausted. Port of the Rust poll_for_signature: COMPLETED
-// returns the response; FAILED/CANCELLED/REJECTED/BLOCKED fail signing; anything
-// else waits pollInterval and retries. Cancellation of ctx aborts the wait.
+// attempt budget is exhausted. COMPLETED returns the response;
+// FAILED/CANCELLED/REJECTED/BLOCKED fail signing; anything else waits
+// pollInterval and retries. Cancellation of ctx aborts the wait.
 func (s *Signer) pollForSignature(ctx context.Context, txID string) (transactionResponse, error) {
 	for attempt := 0; attempt < s.maxPollAttempts; attempt++ {
 		response, err := s.getTransaction(ctx, txID)
@@ -225,5 +223,5 @@ func (s *Signer) pollForSignature(ctx context.Context, txID string) (transaction
 		"transaction polling timeout after %d attempts - signing request may still complete", s.maxPollAttempts))
 }
 
-// is2xx reports whether status is a success status (reqwest is_success parity).
+// is2xx reports whether status is a success status.
 func is2xx(status int) bool { return status >= 200 && status <= 299 }

@@ -11,8 +11,7 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// testRSAKey is a throwaway RSA key for unit tests only — the same PKCS#8 fixture
-// the Rust fireblocks tests use.
+// testRSAKey is a throwaway PKCS#8 RSA key for unit tests only.
 const testRSAKey = `-----BEGIN PRIVATE KEY-----
 MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDKKw7fHhfK3/Ts
 rAqsNCrDsjmyBTHx/AUCOTM+tZph2ZOyDSH9nZO4JkzLrW6Vfk7EZvlP3QjLiXEG

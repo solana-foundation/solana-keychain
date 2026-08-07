@@ -50,8 +50,8 @@ func createTestTransaction(payer solana.PublicKey) (*solana.Transaction, error) 
 	)
 }
 
-// testSeed is the fixed 32-byte Ed25519 seed shared with the testutils module
-// and the Rust/TS test fixtures, so the golden vectors stay pinned.
+// testSeed is the fixed 32-byte Ed25519 seed shared with the testutils module,
+// so the golden vectors stay pinned.
 var testSeed = [ed25519.SeedSize]byte{
 	1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
 	17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,

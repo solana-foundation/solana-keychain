@@ -17,11 +17,10 @@ import (
 )
 
 // awaitingApprovalDetail is the error detail used whenever a transaction is
-// stuck awaiting approvals this signer cannot provide (Rust wording).
+// stuck awaiting approvals this signer cannot provide.
 const awaitingApprovalDetail = "Crossmint transaction is awaiting approval; additional signer approvals are required"
 
-// Signer signs transactions through the Crossmint Wallets API. It is the Go
-// analog of the Rust CrossmintSigner and the TS crossmint signer: transactions
+// Signer signs transactions through the Crossmint Wallets API: transactions
 // are created remotely, polled to a terminal status, optionally auto-approved
 // with the HKDF-derived server signer key, and the wallet's signature is
 // extracted from the response and verified locally.
@@ -46,10 +45,8 @@ type Signer struct {
 // Ensure Signer satisfies the core contract at compile time.
 var _ core.Signer = (*Signer)(nil)
 
-// New builds a Crossmint signer and resolves the wallet's public key. It is the
-// Go analog of Rust's CrossmintSigner::new followed by init() (the same work the
-// Signer::from_crossmint factory and the TS createCrossmintSigner factory do),
-// so the returned signer is ready to use.
+// New builds a Crossmint signer and resolves the wallet's public key, so the
+// returned signer is ready to use.
 func New(ctx context.Context, cfg Config) (*Signer, error) {
 	if cfg.APIKey == "" {
 		return nil, core.NewSignerError(core.CodeConfigError, "api_key must not be empty")
@@ -113,7 +110,6 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		signingKey:      signingKey,
 	}
 
-	// Port of the Rust init(): resolve wallet details and the signer pubkey.
 	wallet, err := s.fetchWallet(ctx)
 	if err != nil {
 		return nil, err
@@ -136,8 +132,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 // Pubkey returns the Crossmint wallet's Solana public key.
 func (s *Signer) Pubkey() solana.PublicKey { return s.publicKey }
 
-// String renders the signer without any secret material — the Go analog of the
-// Rust redacting Debug impl.
+// String renders the signer without any secret material.
 func (s Signer) String() string {
 	return "crossmint.Signer{pubkey: " + s.publicKey.String() + ", apiBaseURL: " + s.apiBaseURL + "}"
 }
@@ -147,15 +142,14 @@ func (s Signer) GoString() string { return s.String() }
 
 // SignMessage is intentionally unsupported: Crossmint does not expose raw
 // message signing for Solana wallets, so this always fails with
-// CodeSigningFailed (parity with the Rust and TS implementations).
+// CodeSigningFailed.
 func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, error) {
 	return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
 		"Crossmint sign_message is not supported for Solana wallets in this signer")
 }
 
 // SignTransaction submits tx to Crossmint, polls it to completion, extracts
-// and verifies the wallet's signature, and adds it to tx. Port of the Rust
-// sign_and_serialize + sign_transaction.
+// and verifies the wallet's signature, and adds it to tx.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.publicKey.IsZero() {
 		return core.SignedTransaction{}, core.NewSignerError(core.CodeConfigError, "signer not initialized")
@@ -194,8 +188,7 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 }
 
 // IsAvailable reports whether the Crossmint wallet can be fetched within the
-// availability timeout. Errors are swallowed (parity with the Rust
-// check_availability).
+// availability timeout. Errors are swallowed.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, availabilityTimeout)
 	defer cancel()
@@ -203,11 +196,10 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 	return err == nil
 }
 
-// pollTransaction drives a created transaction to a terminal state. Port of
-// the Rust poll_transaction: "success" returns, "failed" errors, the first
-// "awaiting-approval" triggers a single approval attempt, and anything else
-// waits pollInterval and re-fetches, for at most maxPollAttempts iterations
-// before the final-status check.
+// pollTransaction drives a created transaction to a terminal state: "success"
+// returns, "failed" errors, the first "awaiting-approval" triggers a single
+// approval attempt, and anything else waits pollInterval and re-fetches, for
+// at most maxPollAttempts iterations before the final-status check.
 func (s *Signer) pollTransaction(ctx context.Context, response transactionResponse) (transactionResponse, error) {
 	approvalSubmitted := false
 	for i := 0; i < s.maxPollAttempts; i++ {
@@ -252,7 +244,7 @@ func (s *Signer) pollTransaction(ctx context.Context, response transactionRespon
 }
 
 // failedTransactionError builds the SigningFailed error for a "failed" status,
-// carrying the (sanitized) remote error payload like the Rust poll_transaction.
+// carrying the (sanitized) remote error payload.
 func failedTransactionError(response transactionResponse) error {
 	detail := "unknown error"
 	if raw := bytes.TrimSpace(response.Error); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
@@ -268,8 +260,7 @@ func failedTransactionError(response transactionResponse) error {
 
 // handleAwaitingApproval signs the pending approval challenge addressed to
 // this signer's locator with the derived server signer key, or fails when no
-// key is configured or no matching challenge is pending. Port of the Rust
-// handle_awaiting_approval + submit_approval.
+// key is configured or no matching challenge is pending.
 func (s *Signer) handleAwaitingApproval(ctx context.Context, response transactionResponse) (transactionResponse, error) {
 	if s.signingKey == nil || s.signerLocator == "" {
 		return transactionResponse{}, core.NewSignerError(core.CodeSigningFailed, awaitingApprovalDetail)
@@ -312,9 +303,9 @@ func (s *Signer) handleAwaitingApproval(ctx context.Context, response transactio
 }
 
 // extractSignatureFromResponse pulls this wallet's signature out of a terminal
-// transaction response. Port of the Rust extract_signature_from_response: the
-// serialized onChain.transaction is tried first; onChain.txId is only accepted
-// if it verifies against the originally requested message bytes.
+// transaction response: the serialized onChain.transaction is tried first;
+// onChain.txId is only accepted if it verifies against the originally
+// requested message bytes.
 func (s *Signer) extractSignatureFromResponse(response transactionResponse, expectedMessage []byte) (solana.Signature, error) {
 	if response.OnChain != nil {
 		if response.OnChain.Transaction != nil {
@@ -342,8 +333,7 @@ func (s *Signer) extractSignatureFromResponse(response transactionResponse, expe
 
 // extractSignatureFromSerializedTransaction decodes the base58 onChain.transaction,
 // locates this wallet's required-signer position, and verifies the signature
-// against that transaction's own message bytes. Port of the Rust
-// extract_signature_from_serialized_transaction.
+// against that transaction's own message bytes.
 func (s *Signer) extractSignatureFromSerializedTransaction(serializedTransaction string) (solana.Signature, error) {
 	raw, err := base58.Decode(serializedTransaction)
 	if err != nil {
@@ -393,7 +383,7 @@ func (s *Signer) extractSignatureFromSerializedTransaction(serializedTransaction
 }
 
 // verifySignatureMatchesMessage checks a remote signature against this wallet's
-// pubkey. Port of the Rust verify_signature_matches_message.
+// pubkey.
 func (s *Signer) verifySignatureMatchesMessage(signature solana.Signature, message []byte) error {
 	if core.VerifyEd25519(s.publicKey, message, signature) {
 		return nil
@@ -402,7 +392,6 @@ func (s *Signer) verifySignatureMatchesMessage(signature solana.Signature, messa
 }
 
 // decodeBase58Signature decodes a base58 string into a 64-byte signature.
-// Port of the Rust decode_base58_signature.
 func decodeBase58Signature(signatureStr string) (solana.Signature, bool) {
 	raw, err := base58.Decode(signatureStr)
 	if err != nil || len(raw) != core.SignatureLength {
@@ -413,8 +402,7 @@ func decodeBase58Signature(signatureStr string) (solana.Signature, bool) {
 	return sig, true
 }
 
-// sleepContext waits for d or until ctx is cancelled (the Go analog of the
-// Rust tokio::time::sleep between polls).
+// sleepContext waits for d or until ctx is cancelled.
 func sleepContext(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()

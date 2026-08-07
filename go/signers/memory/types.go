@@ -1,10 +1,8 @@
-// Package memory provides an in-memory Ed25519 SolanaSigner — the Go analog of the
-// Rust MemorySigner and the @solana/keychain-memory package. The private key is held
+// Package memory provides an in-memory Ed25519 SolanaSigner. The private key is held
 // in process memory; this backend is intended for local development and testing.
 package memory
 
-// Config configures a memory signer. Exactly one source field must be set (parity
-// with the Rust MemorySignerConfig and the TS MemorySignerConfig).
+// Config configures a memory signer. Exactly one source field must be set.
 type Config struct {
 	// PrivateKey is a raw Ed25519 private key: 64 bytes (seed‖pubkey, the Solana CLI
 	// layout) or 32 bytes (seed only; the public key is derived). It is a plain byte

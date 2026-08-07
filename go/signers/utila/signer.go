@@ -15,11 +15,10 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// Signer signs transactions with a Solana wallet held in a Utila vault. It is
-// the Go analog of the Rust UtilaSigner and the TS UtilaSigner: transactions are
-// initiated remotely with signing designated to the service account, polled
-// until Utila reports them SIGNED, and the wallet's signature is extracted from
-// the returned wire transaction and verified locally.
+// Signer signs transactions with a Solana wallet held in a Utila vault:
+// transactions are initiated remotely with signing designated to the service
+// account, polled until Utila reports them SIGNED, and the wallet's signature
+// is extracted from the returned wire transaction and verified locally.
 //
 // All fields are immutable after New, so a Signer is safe for concurrent use.
 type Signer struct {
@@ -40,8 +39,7 @@ type Signer struct {
 var _ core.Signer = (*Signer)(nil)
 
 // New builds a Utila signer and initializes it by fetching the wallet's Solana
-// address (parity with Rust Signer::from_utila, which runs init() internally,
-// and the TS createUtilaSigner factory). The returned signer is ready to use.
+// address. The returned signer is ready to use.
 func New(ctx context.Context, cfg Config) (*Signer, error) {
 	for _, field := range []struct{ name, value string }{
 		{"service_account_email", cfg.ServiceAccountEmail},
@@ -104,7 +102,6 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		designatedSigners:   designatedSigners,
 	}
 
-	// Port of the Rust init(): fetch the wallet's Solana address.
 	wallet, err := s.fetchWallet(ctx)
 	if err != nil {
 		return nil, err
@@ -126,8 +123,8 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 // Pubkey returns the Utila wallet's Solana public key (fetched during New).
 func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
-// String renders the signer without any secret material — the Go analog of the
-// Rust redacting Debug impl (public_key, vault_id, wallet_id, network only).
+// String renders the signer without any secret material: only the pubkey,
+// vault ID, wallet ID, and network are included.
 func (s Signer) String() string {
 	return "utila.Signer{pubkey: " + s.pubkey.String() + ", vaultID: " + s.vaultID +
 		", walletID: " + s.walletID + ", network: " + s.network + "}"
@@ -137,8 +134,7 @@ func (s Signer) String() string {
 func (s Signer) GoString() string { return s.String() }
 
 // SignMessage is intentionally unsupported: Utila does not expose raw message
-// signing for Solana wallets, so this always fails with CodeSigningFailed
-// (parity with the Rust and TS implementations).
+// signing for Solana wallets, so this always fails with CodeSigningFailed.
 func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, error) {
 	return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
 		"Utila sign_message is not supported for Solana wallets in this signer")
@@ -146,7 +142,7 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 
 // SignTransaction submits tx to Utila, polls it to the SIGNED state, extracts
 // and verifies the wallet's signature from the returned wire transaction, and
-// adds it to tx. Port of the Rust sign_and_serialize + sign_transaction.
+// adds it to tx.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.pubkey.IsZero() {
 		return core.SignedTransaction{}, core.NewSignerError(core.CodeConfigError,
@@ -192,8 +188,7 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 }
 
 // IsAvailable reports whether the Utila wallet can be fetched within the
-// availability timeout. Errors are swallowed (parity with the Rust
-// check_availability).
+// availability timeout. Errors are swallowed.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, availabilityTimeout)
 	defer cancel()
@@ -201,10 +196,10 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 	return err == nil
 }
 
-// pollSignedTransaction drives an initiated transaction to the SIGNED state.
-// Port of the Rust poll_signed_transaction: SIGNED returns, a terminal-failure
-// state fails signing, anything else waits pollInterval and re-fetches, for at
-// most maxPollAttempts iterations before the final-state check.
+// pollSignedTransaction drives an initiated transaction to the SIGNED state:
+// SIGNED returns, a terminal-failure state fails signing, anything else waits
+// pollInterval and re-fetches, for at most maxPollAttempts iterations before
+// the final-state check.
 func (s *Signer) pollSignedTransaction(ctx context.Context, transaction utilaTransaction) (utilaTransaction, error) {
 	for attempt := 0; attempt < s.maxPollAttempts; attempt++ {
 		switch {
@@ -248,9 +243,8 @@ func terminalStateError(state transactionState) error {
 // extractSignatureFromRawTransaction decodes the base64 wire transaction Utila
 // returned, requires its message bytes to equal the locally requested message,
 // locates this wallet's required-signer position, and verifies the signature
-// before surfacing it. Port of the Rust extract_signature_from_raw_transaction
-// (solana-go's Transaction decodes legacy and versioned messages alike, so the
-// Rust VersionedTransaction/Transaction branches collapse into one path).
+// before surfacing it. solana-go's Transaction decodes legacy and versioned
+// messages alike, so both wire formats share this one path.
 func (s *Signer) extractSignatureFromRawTransaction(rawTransaction string, expectedMessage []byte) (solana.Signature, error) {
 	raw, err := base64.StdEncoding.DecodeString(rawTransaction)
 	if err != nil {
@@ -303,7 +297,7 @@ func (s *Signer) extractSignatureFromRawTransaction(rawTransaction string, expec
 }
 
 // extractTransactionID returns the trailing segment of a transaction resource
-// name ("vaults/{v}/transactions/{id}"). Port of the Rust extract_transaction_id.
+// name ("vaults/{v}/transactions/{id}").
 func extractTransactionID(name string) (string, error) {
 	if idx := strings.LastIndexByte(name, '/'); idx >= 0 {
 		name = name[idx+1:]
@@ -316,7 +310,7 @@ func extractTransactionID(name string) (string, error) {
 }
 
 // trimWalletID reduces a full wallet resource name to the id after the last
-// "/wallets/" marker. Port of the Rust trim_wallet_id.
+// "/wallets/" marker.
 func trimWalletID(value string) string {
 	const marker = "/wallets/"
 	if idx := strings.LastIndex(value, marker); idx >= 0 {
@@ -325,8 +319,7 @@ func trimWalletID(value string) string {
 	return value
 }
 
-// sleepContext waits for d or until ctx is cancelled (the Go analog of the
-// Rust tokio::time::sleep between polls).
+// sleepContext waits for d or until ctx is cancelled.
 func sleepContext(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()

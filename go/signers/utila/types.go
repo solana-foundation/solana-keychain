@@ -1,5 +1,4 @@
-// Package utila provides a SolanaSigner backed by the Utila API — the Go analog
-// of the Rust utila module and the @solana/keychain-utila package. Transactions
+// Package utila provides a SolanaSigner backed by the Utila API. Transactions
 // are initiated against an existing Solana wallet in a Utila vault, polled until
 // Utila reports them SIGNED, and the wallet's signature is extracted from the
 // returned wire transaction and verified locally. Every request is authenticated
@@ -13,33 +12,29 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
-// Defaults mirroring the Rust utila module constants.
+// Defaults applied to optional Config fields.
 const (
-	// DefaultAPIBaseURL is the production Utila API endpoint (Rust DEFAULT_API_BASE_URL).
+	// DefaultAPIBaseURL is the production Utila API endpoint.
 	DefaultAPIBaseURL = "https://api.utila.io"
-	// DefaultPollInterval is the delay between transaction status polls
-	// (Rust DEFAULT_POLL_INTERVAL_MS, TS pollIntervalMs default).
+	// DefaultPollInterval is the delay between transaction status polls.
 	DefaultPollInterval = time.Second
-	// DefaultMaxPollAttempts bounds the polling loop (Rust DEFAULT_MAX_POLL_ATTEMPTS).
+	// DefaultMaxPollAttempts bounds the polling loop.
 	DefaultMaxPollAttempts = 60
 )
 
-// utilaAPIAudience is the fixed audience claim of the service-account JWT
-// (Rust UTILA_API_AUDIENCE).
+// utilaAPIAudience is the fixed audience claim of the service-account JWT.
 const utilaAPIAudience = "https://api.utila.io/"
 
-// tokenTTL is the service-account access token lifetime (Rust TOKEN_TTL_MINUTES).
+// tokenTTL is the service-account access token lifetime.
 const tokenTTL = 55 * time.Minute
 
-// availabilityTimeout bounds the wallet fetch performed by IsAvailable
-// (Rust AVAILABILITY_TIMEOUT).
+// availabilityTimeout bounds the wallet fetch performed by IsAvailable.
 const availabilityTimeout = 5 * time.Second
 
 // maxResponseBytes caps how much of a remote response body is read.
 const maxResponseBytes = 1 << 20
 
-// Config configures a Utila signer. It mirrors the Rust UtilaSignerConfig and
-// the TS UtilaSignerConfig.
+// Config configures a Utila signer.
 type Config struct {
 	// ServiceAccountEmail is the Utila service account email, used as the JWT
 	// subject and the default designated signer. Required.
@@ -67,8 +62,7 @@ type Config struct {
 	APIBaseURL string
 
 	// PollInterval is the delay between transaction status polls. Zero means
-	// DefaultPollInterval; negative values are rejected (Go analog of the Rust
-	// poll_interval_ms Option, where an explicit 0 is rejected).
+	// DefaultPollInterval; negative values are rejected.
 	PollInterval time.Duration
 
 	// MaxPollAttempts bounds the polling loop. Zero means DefaultMaxPollAttempts;
@@ -89,9 +83,9 @@ type Config struct {
 	HTTPClient *http.Client
 }
 
-// Wire types for the Utila REST API (Go analogs of the Rust utila/types.rs module).
+// Wire types for the Utila REST API.
 
-// walletResponse is the GET wallet payload. Port of the Rust WalletResponse.
+// walletResponse is the GET wallet payload.
 type walletResponse struct {
 	Wallet *walletData `json:"wallet"`
 }
@@ -104,8 +98,8 @@ type solanaDetails struct {
 	Address *string `json:"address"`
 }
 
-// initiateTransactionRequest is the transactions:initiate request body. Port of
-// the Rust InitiateTransactionRequest (designatedSigners is omitted when empty).
+// initiateTransactionRequest is the transactions:initiate request body;
+// designatedSigners is omitted when empty.
 type initiateTransactionRequest struct {
 	Details           initiateTransactionDetails `json:"details"`
 	DesignatedSigners []string                   `json:"designatedSigners,omitempty"`
@@ -123,14 +117,12 @@ type solanaSerializedTransaction struct {
 	TryReplaceBlockhash bool   `json:"tryReplaceBlockhash"`
 }
 
-// transactionEnvelope wraps every Utila transaction payload. Port of the Rust
-// TransactionEnvelope.
+// transactionEnvelope wraps every Utila transaction payload.
 type transactionEnvelope struct {
 	Transaction *utilaTransaction `json:"transaction"`
 }
 
-// utilaTransaction is the Utila transaction object. Port of the Rust
-// UtilaTransaction.
+// utilaTransaction is the Utila transaction object.
 type utilaTransaction struct {
 	Name              string                  `json:"name"`
 	State             transactionState        `json:"state"`
@@ -143,13 +135,14 @@ type utilaSolanaTransaction struct {
 
 // transactionState is a Utila transaction lifecycle state. Unrecognized values
 // never match SIGNED or a terminal-failure state and so keep the polling loop
-// going, matching the Rust #[serde(other)] Unknown fallback.
+// going.
 type transactionState string
 
 // stateSigned is the polling success state.
 const stateSigned transactionState = "SIGNED"
 
-// terminalFailureStates mirrors the Rust TransactionState::is_terminal_failure set.
+// terminalFailureStates holds the states from which a transaction can never
+// reach SIGNED.
 var terminalFailureStates = map[transactionState]struct{}{
 	"DECLINED_BY_AML_POLICY": {},
 	"MINED_FAILED":           {},

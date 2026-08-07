@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// TestErrorMessageIsRedacted ports the Rust test_display_is_redacted_for_all_variants:
-// neither Error() nor GoString() may ever contain the per-error detail or cause.
+// Neither Error() nor GoString() may ever contain the per-error detail or cause,
+// for any code.
 func TestErrorMessageIsRedacted(t *testing.T) {
 	const secret = "sensitive-secret-material"
 	codes := []Code{
@@ -30,7 +30,7 @@ func TestErrorMessageIsRedacted(t *testing.T) {
 	}
 }
 
-// TestErrorStableMessages ports the Rust test_display_messages_are_stable_and_generic.
+// Each code's generic message is a stable string callers can rely on.
 func TestErrorStableMessages(t *testing.T) {
 	cases := map[Code]string{
 		CodeInvalidPrivateKey:  "Invalid private key format",

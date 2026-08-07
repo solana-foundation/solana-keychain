@@ -19,16 +19,14 @@ import (
 // signerSecretPrefix is the expected prefix of a Crossmint server signer secret.
 const signerSecretPrefix = "xmsk1_"
 
-// hkdfSalt is the fixed HKDF salt used by Crossmint server-signer derivation
-// (parity with the Rust Hkdf::<Sha256>::new(Some(b"crossmint"), ...) and the TS
-// hkdfSync('sha256', ikm, 'crossmint', info, 32)).
+// hkdfSalt is the fixed HKDF salt used by Crossmint server-signer derivation.
 const hkdfSalt = "crossmint"
 
 // deriveSigningKey derives the Ed25519 approval key from a server signer
-// secret. Exact port of the Rust derive_signing_key: the secret's 64 hex chars
-// (after an optional "xmsk1_" prefix) are the HKDF-SHA256 IKM, the salt is
-// "crossmint", the info string is "{projectId}:{environment}:solana-ed25519"
-// (both extracted from the API key), and the 32-byte output is the Ed25519 seed.
+// secret: the secret's 64 hex chars (after an optional "xmsk1_" prefix) are
+// the HKDF-SHA256 IKM, the salt is "crossmint", the info string is
+// "{projectId}:{environment}:solana-ed25519" (both extracted from the API
+// key), and the 32-byte output is the Ed25519 seed.
 func deriveSigningKey(secret, apiKey string) (ed25519.PrivateKey, error) {
 	projectID, environment, err := parseAPIKey(apiKey)
 	if err != nil {
@@ -55,8 +53,8 @@ func deriveSigningKey(secret, apiKey string) (ed25519.PrivateKey, error) {
 }
 
 // parseAPIKey extracts the projectId and environment from a Crossmint API key.
-// Port of the Rust parse_api_key. Format: {ck|sk}_{environment}_{base58data},
-// where the base58 data decodes to the UTF-8 string "projectId:nacl_signature".
+// Format: {ck|sk}_{environment}_{base58data}, where the base58 data decodes to
+// the UTF-8 string "projectId:nacl_signature".
 func parseAPIKey(apiKey string) (projectID, environment string, err error) {
 	parts := strings.SplitN(apiKey, "_", 3)
 	if len(parts) < 3 {

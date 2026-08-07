@@ -15,9 +15,8 @@ import (
 // maxResponseBytes caps how much of a Dfns response body is read.
 const maxResponseBytes = 1 << 20 // 1 MiB
 
-// marshalJSON encodes v without HTML escaping so the produced bytes match the
-// Rust serde_json output byte-for-byte (serde_json does not escape `<`, `>`,
-// or `&`). This matters for the user-action client data, whose exact bytes are
+// marshalJSON encodes v without HTML escaping, leaving `<`, `>`, and `&`
+// intact. This matters for the user-action client data, whose exact bytes are
 // signed and verified by Dfns.
 func marshalJSON(v any) ([]byte, error) {
 	var buf bytes.Buffer
@@ -36,7 +35,7 @@ func marshalJSON(v any) ([]byte, error) {
 // map to CodeHTTPError — except errors that already carry a signer code (such
 // as the HTTPS-only transport's CodeConfigError), whose code is preserved.
 // Non-2xx responses map to CodeRemoteAPIError with the sanitized body appended
-// to errPrefix, mirroring the Rust status handling.
+// to errPrefix.
 func (s *Signer) do(ctx context.Context, method, path string, body []byte, extraHeaders map[string]string, errPrefix string) ([]byte, error) {
 	var reader io.Reader
 	if body != nil {
