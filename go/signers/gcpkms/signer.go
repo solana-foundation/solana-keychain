@@ -26,6 +26,15 @@ type Signer struct {
 // Ensure Signer satisfies the core contract at compile time.
 var _ core.Signer = (*Signer)(nil)
 
+// String renders the signer without config detail, so fmt's reflective struct
+// printing cannot surface the key resource name or client internals.
+func (s Signer) String() string {
+	return "gcpkms.Signer{pubkey: " + s.pubkey.String() + "}"
+}
+
+// GoString mirrors String so %#v cannot leak either.
+func (s Signer) GoString() string { return s.String() }
+
 // New builds a GCP KMS signer from cfg. When cfg.Client is nil it dials the
 // official KMS client (I/O), so the returned signer is ready to use — parity
 // with the Rust Signer::from_gcp_kms and the TS async factory.

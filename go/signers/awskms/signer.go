@@ -35,6 +35,15 @@ type Signer struct {
 // Ensure Signer satisfies the core contract at compile time.
 var _ core.Signer = (*Signer)(nil)
 
+// String renders the signer without config detail, so fmt's reflective struct
+// printing cannot surface the key ARN or client internals.
+func (s Signer) String() string {
+	return "awskms.Signer{pubkey: " + s.pub.String() + "}"
+}
+
+// GoString mirrors String so %#v cannot leak either.
+func (s Signer) GoString() string { return s.String() }
+
 // New builds an AWS KMS signer from cfg. The public key is validated first
 // (parity with the Rust constructor, which fails on an invalid pubkey before
 // loading AWS config). When cfg.Client is nil, the default AWS configuration is
