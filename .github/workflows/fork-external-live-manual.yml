@@ -36,6 +36,7 @@ jobs:
           CI_SIGNER_CROSSMINT_ENABLED: ${{ vars.CI_SIGNER_CROSSMINT_ENABLED }}
           CI_SIGNER_OPENFORT_ENABLED: ${{ vars.CI_SIGNER_OPENFORT_ENABLED }}
           CI_SIGNER_UTILA_ENABLED: ${{ vars.CI_SIGNER_UTILA_ENABLED }}
+          CI_SIGNER_FORDEFI_ENABLED: ${{ vars.CI_SIGNER_FORDEFI_ENABLED }}
         with:
           script: |
             const parseVar = (name) => {
@@ -62,6 +63,7 @@ jobs:
               crossmint: parseVar('CI_SIGNER_CROSSMINT_ENABLED'),
               openfort: parseVar('CI_SIGNER_OPENFORT_ENABLED'),
               utila: parseVar('CI_SIGNER_UTILA_ENABLED'),
+              fordefi: parseVar('CI_SIGNER_FORDEFI_ENABLED'),
             };
 
             const rustFeatureOrder = [
@@ -78,6 +80,7 @@ jobs:
               'crossmint',
               'openfort',
               'utila',
+              'fordefi',
             ];
 
             const rustLiveTestMap = [
@@ -92,6 +95,7 @@ jobs:
               ['crossmint', 'test_crossmint_integration'],
               ['openfort', 'test_openfort_integration'],
               ['utila', 'test_utila_integration'],
+              ['fordefi', 'test_fordefi_integration'],
             ];
 
             const tsLivePackageMap = [
@@ -106,6 +110,7 @@ jobs:
               ['crossmint', 'crossmint'],
               ['openfort', 'openfort'],
               ['utila', 'utila'],
+              ['fordefi', 'fordefi'],
             ];
 
             const rustFeatures = rustFeatureOrder.filter((backend) => enabled[backend]);
