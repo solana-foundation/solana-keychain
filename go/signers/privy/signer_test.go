@@ -173,7 +173,7 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 // newTestSigner starts an httptest server for mux and returns a ready signer.
 func newTestSigner(t *testing.T, mux *http.ServeMux) *Signer {
 	t.Helper()
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 	s, err := New(context.Background(), testConfig(srv))
 	if err != nil {
@@ -215,7 +215,7 @@ func TestNewUnauthorized(t *testing.T) {
 	mux.HandleFunc("GET "+walletPath, func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized"})
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 
 	_, err := New(context.Background(), testConfig(srv))
@@ -232,7 +232,7 @@ func TestNewInvalidPublicKey(t *testing.T) {
 			"chain_type": "solana",
 		})
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 
 	_, err := New(context.Background(), testConfig(srv))
@@ -260,7 +260,7 @@ func TestNewRejectsNonSolanaWallet(t *testing.T) {
 			mux.HandleFunc("GET "+walletPath, func(w http.ResponseWriter, _ *http.Request) {
 				writeJSON(w, http.StatusOK, wallet)
 			})
-			srv := httptest.NewServer(mux)
+			srv := httptest.NewTLSServer(mux)
 			t.Cleanup(srv.Close)
 
 			_, err := New(context.Background(), testConfig(srv))
@@ -287,7 +287,7 @@ func TestNewDefaultClientRejectsHTTP(t *testing.T) {
 func TestStringDoesNotLeakSecrets(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, testutils.TestPublicKey().String())
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 
 	cfg := testConfig(srv)
@@ -305,6 +305,10 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 		fmt.Sprintf("%+v", s),
 		fmt.Sprintf("%s", s), //nolint:staticcheck // deliberately exercising the %s verb path
 		fmt.Sprintf("%#v", s),
+		fmt.Sprintf("%v", *s),
+		fmt.Sprintf("%+v", *s),
+		fmt.Sprintf("%s", *s), //nolint:staticcheck // deliberately exercising the %s verb path
+		fmt.Sprintf("%#v", *s),
 	} {
 		if strings.Contains(rendered, testAppSecret) || strings.Contains(rendered, s.authHeader()) {
 			t.Errorf("rendered signer leaks secrets: %s", rendered)
@@ -397,7 +401,7 @@ func TestSignMessageAuthorizationContextHeaders(t *testing.T) {
 		}
 		signatureResponse(w, want)
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 
 	cfg := testConfig(srv)
@@ -440,7 +444,7 @@ func TestSignMessageAuthorizationRequestExpiry(t *testing.T) {
 		mu.Unlock()
 		signatureResponse(w, signWith(priv, message))
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 
 	cfg := testConfig(srv)
@@ -491,7 +495,7 @@ func TestSignMessageAuthorizationRequestExpiry(t *testing.T) {
 func TestSignMessageEmptyAuthorizationContext(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, testutils.TestPublicKey().String())
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 
 	cfg := testConfig(srv)
@@ -577,9 +581,9 @@ func TestSignMessageUnauthorized(t *testing.T) {
 	assertCode(t, err, core.CodeRemoteAPIError)
 }
 
-// TestSignMessageRemoteErrorSanitized checks that hostile remote error bodies are
-// sanitized before reaching the error detail.
-func TestSignMessageRemoteErrorSanitized(t *testing.T) {
+// TestSignMessageRemoteErrorBodyDiscarded checks that non-2xx response bodies
+// never reach the error detail — only the status code does (Rust parity).
+func TestSignMessageRemoteErrorBodyDiscarded(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, testutils.TestPublicKey().String())
 	mux.HandleFunc("POST "+rpcPath, func(w http.ResponseWriter, _ *http.Request) {
@@ -595,8 +599,10 @@ func TestSignMessageRemoteErrorSanitized(t *testing.T) {
 	if !strings.Contains(detail, "API error 500") {
 		t.Errorf("detail %q should mention the status", detail)
 	}
-	if !strings.Contains(detail, "bad thing with [31mcontrol chars") {
-		t.Errorf("detail %q should contain the sanitized body", detail)
+	// Rust parity: the response body is deliberately discarded on non-2xx —
+	// only the status code may appear in the detail.
+	if strings.Contains(detail, "bad thing") {
+		t.Errorf("detail %q should not embed the remote response body", detail)
 	}
 	for _, r := range detail {
 		if r < 0x20 || r == 0x7f {

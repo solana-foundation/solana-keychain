@@ -87,6 +87,9 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 	if baseURL == "" {
 		baseURL = DefaultAPIBaseURL
 	}
+	if !strings.HasPrefix(baseURL, "https://") {
+		return nil, core.NewSignerError(core.CodeConfigError, "dfns api_base_url must use HTTPS")
+	}
 	client := cfg.HTTPClient
 	if client == nil {
 		client = core.NewHTTPClient(cfg.HTTPClientConfig)
@@ -209,12 +212,12 @@ func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
 // String renders the signer without any secret material — the Go analog of the
 // Rust redacting Debug impl.
-func (s *Signer) String() string {
+func (s Signer) String() string {
 	return "dfns.Signer{pubkey: " + s.pubkey.String() + ", walletID: " + s.walletID + ", keyID: " + s.keyID + "}"
 }
 
 // GoString mirrors String so %#v cannot leak secrets either.
-func (s *Signer) GoString() string { return s.String() }
+func (s Signer) GoString() string { return s.String() }
 
 // SignMessage signs arbitrary bytes via the Dfns Keys API "Message" kind
 // (hex-encoded with a 0x prefix) and verifies the returned signature against

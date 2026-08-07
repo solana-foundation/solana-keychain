@@ -94,7 +94,7 @@ func newTestSigner(t *testing.T, srv *httptest.Server, address string) *Signer {
 // newServer starts an httptest server that is closed on test cleanup.
 func newServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(handler)
+	srv := httptest.NewTLSServer(handler)
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -165,7 +165,7 @@ func TestNewRejectsInvalidAddress(t *testing.T) {
 }
 
 func TestPubkey(t *testing.T) {
-	s, err := New(testConfig("http://localhost", nil))
+	s, err := New(testConfig("https://localhost", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestPubkey(t *testing.T) {
 }
 
 func TestStringDoesNotLeakSecrets(t *testing.T) {
-	s, err := New(testConfig("http://localhost", nil))
+	s, err := New(testConfig("https://localhost", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,6 +184,10 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 		fmt.Sprintf("%+v", s),
 		s.String(),
 		fmt.Sprintf("%#v", s),
+		fmt.Sprintf("%v", *s),
+		fmt.Sprintf("%+v", *s),
+		fmt.Sprintf("%s", *s), //nolint:staticcheck // deliberately exercising the %s verb path
+		fmt.Sprintf("%#v", *s),
 	} {
 		if strings.Contains(rendered, testEd25519Key()) || strings.Contains(rendered, testWalletSecret()) {
 			t.Errorf("rendered signer leaks secrets: %s", rendered)
@@ -195,7 +199,7 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 }
 
 func TestSignMessageInvalidAPIKeySecret(t *testing.T) {
-	cfg := testConfig("http://localhost", nil)
+	cfg := testConfig("https://localhost", nil)
 	cfg.APIKeySecret = "not-base64"
 	s, err := New(cfg)
 	if err != nil {
@@ -206,7 +210,7 @@ func TestSignMessageInvalidAPIKeySecret(t *testing.T) {
 }
 
 func TestSignMessageInvalidWalletSecret(t *testing.T) {
-	cfg := testConfig("http://localhost", nil)
+	cfg := testConfig("https://localhost", nil)
 	cfg.WalletSecret = "not-base64"
 	s, err := New(cfg)
 	if err != nil {
@@ -480,7 +484,7 @@ func TestIsAvailable(t *testing.T) {
 	})
 
 	t.Run("unreachable", func(t *testing.T) {
-		srv := httptest.NewServer(http.NotFoundHandler())
+		srv := httptest.NewTLSServer(http.NotFoundHandler())
 		srv.Close() // immediately unreachable
 		cfg := testConfig(srv.URL, srv.Client())
 		s, err := New(cfg)
@@ -494,17 +498,20 @@ func TestIsAvailable(t *testing.T) {
 }
 
 func TestHTTPSEnforcementDefaultClient(t *testing.T) {
-	srv := newServer(t, func(http.ResponseWriter, *http.Request) {
-		t.Error("no request should reach a plain-HTTP server through the default client")
-	})
-
-	cfg := testConfig(srv.URL, nil) // nil HTTPClient => default HTTPS-only client
-	s, err := New(cfg)
-	if err != nil {
-		t.Fatal(err)
+	// The scheme check fires at construction, regardless of client (a custom
+	// client must not be able to bypass HTTPS enforcement).
+	for name, client := range map[string]*http.Client{
+		"default client": nil,
+		"custom client":  http.DefaultClient,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := New(testConfig("http://127.0.0.1:1", client))
+			if err == nil {
+				t.Fatal("expected error for http:// base URL")
+			}
+			assertCode(t, err, core.CodeConfigError)
+		})
 	}
-	_, err = s.SignMessage(context.Background(), []byte("test"))
-	assertCode(t, err, core.CodeConfigError)
 }
 
 // detailOf extracts the private detail for test diagnostics.

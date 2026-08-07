@@ -128,13 +128,13 @@ func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
 // String renders the signer without any secret material — the Go analog of the
 // Rust redacting Debug impl (public_key, vault_id, wallet_id, network only).
-func (s *Signer) String() string {
+func (s Signer) String() string {
 	return "utila.Signer{pubkey: " + s.pubkey.String() + ", vaultID: " + s.vaultID +
 		", walletID: " + s.walletID + ", network: " + s.network + "}"
 }
 
 // GoString mirrors String so %#v cannot leak secrets either.
-func (s *Signer) GoString() string { return s.String() }
+func (s Signer) GoString() string { return s.String() }
 
 // SignMessage is intentionally unsupported: Utila does not expose raw message
 // signing for Solana wallets, so this always fails with CodeSigningFailed

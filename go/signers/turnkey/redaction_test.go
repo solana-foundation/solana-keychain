@@ -25,6 +25,10 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 		fmt.Sprintf("%+v", s),
 		fmt.Sprintf("%s", s), //nolint:staticcheck // deliberately exercising the %s verb path
 		fmt.Sprintf("%#v", s),
+		fmt.Sprintf("%v", *s),
+		fmt.Sprintf("%+v", *s),
+		fmt.Sprintf("%s", *s), //nolint:staticcheck // deliberately exercising the %s verb path
+		fmt.Sprintf("%#v", *s),
 	} {
 		if strings.Contains(rendered, privHex) {
 			t.Errorf("rendered signer leaks the API private key: %s", rendered)

@@ -308,7 +308,7 @@ func TestNewInitMalformedJSON(t *testing.T) {
 	})
 
 	_, err := New(context.Background(), testConfig(srv, "sk_test-key"))
-	assertCode(t, err, core.CodeParsingError)
+	assertCode(t, err, core.CodeSerializationError)
 }
 
 func TestNewInitMissingTypeField(t *testing.T) {
@@ -495,7 +495,7 @@ func TestSignMessageMalformedJSON(t *testing.T) {
 	s.pubkey = pub
 
 	_, err := s.SignMessage(context.Background(), []byte("test"))
-	assertCode(t, err, core.CodeParsingError)
+	assertCode(t, err, core.CodeSerializationError)
 }
 
 func TestSignMessageVerificationFailure(t *testing.T) {

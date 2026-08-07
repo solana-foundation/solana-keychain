@@ -156,12 +156,12 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 
 // String renders the signer without exposing the API key or wallet ID — the Go
 // analog of the Rust redacting Debug impl.
-func (s *Signer) String() string {
+func (s Signer) String() string {
 	return "para.Signer{pubkey: " + s.pubkey.String() + "}"
 }
 
 // GoString redacts the %#v representation the same way as String.
-func (s *Signer) GoString() string { return s.String() }
+func (s Signer) GoString() string { return s.String() }
 
 // fetchWallet retrieves wallet info from GET /v1/wallets/{walletId}. Port of
 // the Rust fetch_wallet.
@@ -172,7 +172,7 @@ func (s *Signer) fetchWallet(ctx context.Context) (*walletResponse, error) {
 	}
 	var wallet walletResponse
 	if err := json.Unmarshal(body, &wallet); err != nil {
-		return nil, core.WrapSignerError(core.CodeParsingError, "failed to parse para wallet response", err)
+		return nil, core.WrapSignerError(core.CodeSerializationError, "failed to parse para wallet response", err)
 	}
 	return &wallet, nil
 }
@@ -191,7 +191,7 @@ func (s *Signer) signBytes(ctx context.Context, data []byte) (solana.Signature, 
 	}
 	var response signRawResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeParsingError, "failed to parse para sign-raw response", err)
+		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse para sign-raw response", err)
 	}
 	if response.Signature == nil {
 		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "missing signature in response")

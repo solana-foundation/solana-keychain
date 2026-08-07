@@ -99,12 +99,12 @@ func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
 // String renders the signer without any secret material — the Go analog of the
 // Rust redacting Debug impl.
-func (s *Signer) String() string {
+func (s Signer) String() string {
 	return "openfort.Signer{accountID: " + s.accountID + ", pubkey: " + s.pubkey.String() + ", baseURL: " + s.baseURL + "}"
 }
 
 // GoString mirrors String so %#v cannot leak secrets either.
-func (s *Signer) GoString() string { return s.String() }
+func (s Signer) GoString() string { return s.String() }
 
 // SignMessage signs arbitrary bytes via the Openfort API and verifies the
 // returned ed25519 signature against the signer's address.

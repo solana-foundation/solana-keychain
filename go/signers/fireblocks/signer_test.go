@@ -61,7 +61,7 @@ func newTestSigner(t *testing.T, address string, configure func(mux *http.ServeM
 	if configure != nil {
 		configure(mux)
 	}
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 
 	s, err := New(context.Background(), Config{
@@ -101,7 +101,7 @@ func TestNewDefaultsAndFetchesPubkey(t *testing.T) {
 // may reach Fireblocks before the rejection.
 func TestNewRejectsProgramCallBeforeAnyNetworkCall(t *testing.T) {
 	var requests atomic.Int64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
 		writeJSON(w, map[string]any{"addresses": []map[string]string{{"address": testutils.TestPublicKey().String()}}})
 	}))
@@ -136,7 +136,7 @@ func TestNewAPIError(t *testing.T) {
 	mux.HandleFunc(addressesPath, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 
 	_, err := New(context.Background(), Config{
@@ -196,6 +196,10 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 		fmt.Sprintf("%v", s),
 		fmt.Sprintf("%+v", s),
 		fmt.Sprintf("%#v", s),
+		fmt.Sprintf("%v", *s),
+		fmt.Sprintf("%+v", *s),
+		fmt.Sprintf("%s", *s), //nolint:staticcheck // deliberately exercising the %s verb path
+		fmt.Sprintf("%#v", *s),
 		fmt.Sprintf("%s", s), //nolint:staticcheck // deliberately exercising the %s verb path
 	} {
 		if strings.Contains(rendered, testAPIKey) {

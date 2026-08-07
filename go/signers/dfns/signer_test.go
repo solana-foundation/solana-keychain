@@ -203,7 +203,7 @@ func TestNewSuccess(t *testing.T) {
 		hits.Add(1)
 		walletHandler(testPubkeyHex)(w, r)
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	defer srv.Close()
 
 	s := newTestSigner(t, srv)
@@ -224,7 +224,7 @@ func TestNewAPIError(t *testing.T) {
 	mux.HandleFunc("GET /wallets/test-wallet-id", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	defer srv.Close()
 
 	_, err := New(context.Background(), testConfig(srv))
@@ -244,7 +244,7 @@ func TestNewInvalidScheme(t *testing.T) {
 		_, _ = io.WriteString(w, `{"id":"test-wallet-id","status":"Active","network":"Ethereum",`+
 			`"signingKey":{"id":"key-id","scheme":"ECDSA","curve":"secp256k1","publicKey":"abcd"}}`)
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	defer srv.Close()
 
 	_, err := New(context.Background(), testConfig(srv))
@@ -256,20 +256,31 @@ func TestNewInvalidScheme(t *testing.T) {
 	}
 }
 
-// TestNewHTTPSEnforcement checks that the default client (nil HTTPClient)
-// refuses a plain-HTTP base URL with a CONFIG_ERROR.
+// TestNewHTTPSEnforcement checks that a plain-HTTP base URL is refused with a
+// CONFIG_ERROR at construction, for both the default and a custom client (a
+// custom client must not be able to bypass HTTPS enforcement).
 func TestNewHTTPSEnforcement(t *testing.T) {
-	srv := httptest.NewServer(walletHandler(testPubkeyHex))
-	defer srv.Close()
-
-	cfg := testConfig(srv)
-	cfg.HTTPClient = nil // default HTTPS-only client
-	_, err := New(context.Background(), cfg)
-	if err == nil {
-		t.Fatal("expected error for http:// URL with the default client")
-	}
-	if code, _ := core.CodeOf(err); code != core.CodeConfigError {
-		t.Errorf("got %s, want CONFIG_ERROR", code)
+	for name, client := range map[string]*http.Client{
+		"default client": nil,
+		"custom client":  http.DefaultClient,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := Config{
+				AuthToken:     "test-token",
+				CredID:        "test-cred",
+				PrivateKeyPEM: testEd25519PEM,
+				WalletID:      "test-wallet-id",
+				APIBaseURL:    "http://127.0.0.1:1",
+				HTTPClient:    client,
+			}
+			_, err := New(context.Background(), cfg)
+			if err == nil {
+				t.Fatal("expected error for http:// base URL")
+			}
+			if code, _ := core.CodeOf(err); code != core.CodeConfigError {
+				t.Errorf("got %s, want CONFIG_ERROR", code)
+			}
+		})
 	}
 }
 
@@ -281,7 +292,7 @@ func TestRemoteErrorSanitized(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(w, "evil\x00body\nwith\tcontrol\x1bchars")
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	defer srv.Close()
 
 	_, err := New(context.Background(), testConfig(srv))
@@ -330,7 +341,7 @@ func TestSignMessageSuccess(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, signedResponseJSON(sig))
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	defer srv.Close()
 
 	s := newTestSigner(t, srv)
@@ -371,7 +382,7 @@ func TestSignMessageVerificationFailure(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, signedResponseJSON(sig))
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	defer srv.Close()
 
 	s := newTestSigner(t, srv)
@@ -393,7 +404,7 @@ func TestSignMessageAPIError(t *testing.T) {
 	mux.HandleFunc("POST /keys/"+testKeyID+"/signatures", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	defer srv.Close()
 
 	s := newTestSigner(t, srv)
@@ -438,7 +449,7 @@ func TestSignTransactionSuccess(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, signedResponseJSON(sig))
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	defer srv.Close()
 
 	s := newTestSigner(t, srv)
@@ -495,7 +506,7 @@ func TestSignTransactionVerificationFailure(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, signedResponseJSON(sig))
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	defer srv.Close()
 
 	s := newTestSigner(t, srv)
@@ -515,7 +526,7 @@ func TestSignTransactionVerificationFailure(t *testing.T) {
 // degraded response afterwards.
 func TestIsAvailable(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		srv := httptest.NewServer(walletHandler(testPubkeyHex))
+		srv := httptest.NewTLSServer(walletHandler(testPubkeyHex))
 		defer srv.Close()
 
 		s := newTestSigner(t, srv)
@@ -550,7 +561,7 @@ func TestIsAvailable(t *testing.T) {
 				}
 				degraded(w, r)
 			})
-			srv := httptest.NewServer(mux)
+			srv := httptest.NewTLSServer(mux)
 			defer srv.Close()
 
 			s := newTestSigner(t, srv)
@@ -564,7 +575,7 @@ func TestIsAvailable(t *testing.T) {
 // TestStringDoesNotLeakSecrets checks that no fmt rendering of the signer
 // exposes the credential private key or the auth token.
 func TestStringDoesNotLeakSecrets(t *testing.T) {
-	srv := httptest.NewServer(walletHandler(testPubkeyHex))
+	srv := httptest.NewTLSServer(walletHandler(testPubkeyHex))
 	defer srv.Close()
 
 	s := newTestSigner(t, srv)
@@ -572,6 +583,10 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 		fmt.Sprintf("%v", s),
 		fmt.Sprintf("%+v", s),
 		fmt.Sprintf("%#v", s),
+		fmt.Sprintf("%v", *s),
+		fmt.Sprintf("%+v", *s),
+		fmt.Sprintf("%s", *s), //nolint:staticcheck // deliberately exercising the %s verb path
+		fmt.Sprintf("%#v", *s),
 		fmt.Sprintf("%s", s), //nolint:staticcheck // deliberately exercising the %s verb path
 	} {
 		if strings.Contains(rendered, testEd25519PEM) || strings.Contains(rendered, "test-auth-token") {

@@ -28,9 +28,10 @@ func SignMessages(ctx context.Context, s Signer, messages [][]byte, opts BatchOp
 	if opts.MaxConcurrency > 0 {
 		g.SetLimit(opts.MaxConcurrency)
 	}
+	start := time.Now()
 	for i := range messages {
 		g.Go(func() error {
-			if err := stagger(ctx, i, opts.RequestDelay); err != nil {
+			if err := stagger(ctx, start, i, opts.RequestDelay); err != nil {
 				return err
 			}
 			sig, err := s.SignMessage(ctx, messages[i])
@@ -55,9 +56,10 @@ func SignTransactions(ctx context.Context, s Signer, txs []*solana.Transaction, 
 	if opts.MaxConcurrency > 0 {
 		g.SetLimit(opts.MaxConcurrency)
 	}
+	start := time.Now()
 	for i := range txs {
 		g.Go(func() error {
-			if err := stagger(ctx, i, opts.RequestDelay); err != nil {
+			if err := stagger(ctx, start, i, opts.RequestDelay); err != nil {
 				return err
 			}
 			signed, err := s.SignTransaction(ctx, txs[i])
@@ -74,13 +76,21 @@ func SignTransactions(ctx context.Context, s Signer, txs []*solana.Transaction, 
 	return out, nil
 }
 
-// stagger sleeps index*delay (respecting ctx) before a task starts, mirroring the
-// TS per-index delay used for rate limiting.
-func stagger(ctx context.Context, index int, delay time.Duration) error {
+// stagger delays task index until start+index*delay (respecting ctx), mirroring
+// the TS per-index delay used for rate limiting. The target is anchored to the
+// batch start rather than to when the task acquires a concurrency slot: with
+// MaxConcurrency set, slot waits already provide the pacing, and adding a full
+// index*delay on top would compound into minutes on large batches — long past
+// blockhash expiry. A task whose target time has already passed starts at once.
+func stagger(ctx context.Context, start time.Time, index int, delay time.Duration) error {
 	if delay <= 0 || index == 0 {
 		return nil
 	}
-	timer := time.NewTimer(time.Duration(index) * delay)
+	wait := time.Until(start.Add(time.Duration(index) * delay))
+	if wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():

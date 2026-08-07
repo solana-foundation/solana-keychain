@@ -78,12 +78,12 @@ func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
 // String renders the signer without any secret material — the Go analog of the
 // Rust redacting Debug impl.
-func (s *Signer) String() string {
+func (s Signer) String() string {
 	return "vault.Signer{pubkey: " + s.pubkey.String() + "}"
 }
 
 // GoString mirrors String so %#v cannot leak secrets either.
-func (s *Signer) GoString() string { return s.String() }
+func (s Signer) GoString() string { return s.String() }
 
 // SignMessage signs arbitrary bytes via the Vault transit sign endpoint.
 func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {

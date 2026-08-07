@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gagliardetto/solana-go"
 
@@ -51,6 +52,9 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 	if baseURL == "" {
 		baseURL = DefaultAPIBaseURL
 	}
+	if !strings.HasPrefix(baseURL, "https://") {
+		return nil, core.NewSignerError(core.CodeConfigError, "privy api_base_url must use HTTPS")
+	}
 	s := &Signer{
 		appID:                        cfg.AppID,
 		appSecret:                    cfg.AppSecret,
@@ -73,12 +77,12 @@ func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
 // String renders the signer without any secret material — the Go analog of the
 // Rust redacting Debug impl.
-func (s *Signer) String() string {
+func (s Signer) String() string {
 	return "privy.Signer{pubkey: " + s.pubkey.String() + ", apiBaseURL: " + s.apiBaseURL + "}"
 }
 
 // GoString mirrors String so %#v cannot leak secrets either.
-func (s *Signer) GoString() string { return s.String() }
+func (s Signer) GoString() string { return s.String() }
 
 // SignMessage signs arbitrary bytes with the Privy wallet and verifies the
 // returned signature against the wallet's public key before returning it.
@@ -141,7 +145,7 @@ func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 
 	var wallet walletResponse
 	if err := json.Unmarshal(body, &wallet); err != nil {
-		return solana.PublicKey{}, core.WrapSignerError(core.CodeParsingError, "failed to parse privy wallet response", err)
+		return solana.PublicKey{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse privy wallet response", err)
 	}
 
 	// Guard the wallet shape before parsing (parity with the TS privy signer;
@@ -203,7 +207,7 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 
 	var signResp signMessageResponse
 	if err := json.Unmarshal(body, &signResp); err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeParsingError, "failed to parse privy signing response", err)
+		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse privy signing response", err)
 	}
 
 	raw, err := base64.StdEncoding.DecodeString(signResp.Data.Signature)
@@ -244,8 +248,11 @@ func (s *Signer) do(req *http.Request, what string) ([]byte, error) {
 		return nil, core.WrapSignerError(core.CodeHTTPError, "failed to read "+what+" response", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Only the status code goes into the detail: the Rust implementation
+		// deliberately discards the response body here, and the other Go
+		// backends do the same.
 		return nil, core.NewSignerError(core.CodeRemoteAPIError,
-			what+" failed: API error "+strconv.Itoa(resp.StatusCode)+": "+core.SanitizeRemoteResponse(string(body)))
+			what+" failed: API error "+strconv.Itoa(resp.StatusCode))
 	}
 	return body, nil
 }

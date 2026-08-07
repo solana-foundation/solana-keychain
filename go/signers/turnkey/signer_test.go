@@ -70,7 +70,7 @@ func signResultBody(sig []byte) string {
 // Rust wiremock matchers + expect(1)).
 func signServer(t *testing.T, status int, body string, calls *int32) *httptest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(calls, 1)
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", r.Method)
@@ -174,7 +174,7 @@ func TestSignMessageRequestBody(t *testing.T) {
 	message := []byte("test message")
 	sig := ed25519.Sign(priv, message)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req signRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Error(err)
@@ -372,7 +372,7 @@ func TestSignOversizedComponent(t *testing.T) {
 
 func TestIsAvailable(t *testing.T) {
 	var calls int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&calls, 1)
 		if r.Method != http.MethodPost || r.URL.Path != whoAmIPath {
 			t.Errorf("got %s %s, want POST %s", r.Method, r.URL.Path, whoAmIPath)
@@ -408,7 +408,7 @@ func TestIsAvailable(t *testing.T) {
 
 func TestIsNotAvailable(t *testing.T) {
 	var calls int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&calls, 1)
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -427,7 +427,7 @@ func TestIsNotAvailable(t *testing.T) {
 }
 
 func TestIsNotAvailableUnreachable(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	client := srv.Client()
 	url := srv.URL
 	srv.Close() // connection refused from here on
@@ -542,18 +542,23 @@ func TestAssembleSignatureLeftPads(t *testing.T) {
 }
 
 func TestHTTPSEnforcement(t *testing.T) {
-	cfg := testConfig(t, testutils.TestPublicKey().String(), nil)
-	cfg.APIBaseURL = "http://127.0.0.1:1"
-	// HTTPClient left nil: the default client must reject plain HTTP.
-	s, err := New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = s.SignMessage(context.Background(), []byte("test"))
-	if err == nil {
-		t.Fatal("expected error for non-HTTPS base URL")
-	}
-	if code, _ := core.CodeOf(err); code != core.CodeConfigError {
-		t.Errorf("got %s, want CONFIG_ERROR", code)
+	// The scheme check fires at construction, regardless of client (a custom
+	// client must not be able to bypass HTTPS enforcement).
+	for name, client := range map[string]*http.Client{
+		"default client": nil,
+		"custom client":  http.DefaultClient,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := testConfig(t, testutils.TestPublicKey().String(), nil)
+			cfg.APIBaseURL = "http://127.0.0.1:1"
+			cfg.HTTPClient = client
+			_, err := New(cfg)
+			if err == nil {
+				t.Fatal("expected error for non-HTTPS base URL")
+			}
+			if code, _ := core.CodeOf(err); code != core.CodeConfigError {
+				t.Errorf("got %s, want CONFIG_ERROR", code)
+			}
+		})
 	}
 }

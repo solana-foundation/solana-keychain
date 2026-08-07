@@ -617,3 +617,25 @@ _check-release-tools:
     fi
     command -v cargo-set-version >/dev/null || { echo "Install: cargo install cargo-edit"; exit 1; }
     command -v git-cliff >/dev/null || { echo "Install: cargo install git-cliff"; exit 1; }
+
+# Prepare the Go signer modules for publishing: after tagging and pushing
+# go/core/{{version}} and go/testutils/{{version}}, this drops the in-repo
+# replace directives and pins the real released versions (replace directives
+# are ignored when a module is consumed as a dependency, so a module is only
+# publishable once its requires resolve on the proxy). Tag the signer modules
+# after committing the result.
+[working-directory: 'go']
+go-release-prep version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for mod in signers/*/go.mod; do
+        dir=$(dirname "$mod")
+        echo "==> $dir"
+        (cd "$dir" && \
+            go mod edit \
+                -dropreplace=github.com/solana-foundation/solana-keychain/go/core \
+                -dropreplace=github.com/solana-foundation/solana-keychain/go/testutils \
+                -require=github.com/solana-foundation/solana-keychain/go/core@{{version}} \
+                -require=github.com/solana-foundation/solana-keychain/go/testutils@{{version}} && \
+            go mod tidy)
+    done

@@ -51,8 +51,17 @@ Requires **Go 1.25+** (the `gcpkms` module requires the toolchain floor set by
 for the on-chain types and canonical transaction serialization.
 
 Until the first `go/...` version tags are published, `@latest` cannot resolve
-the in-repo `go/core` dependency; releases will tag `go/core` and `go/testutils`
-before the signer modules.
+the in-repo `go/core` dependency. The signer modules use `replace` directives
+during development, and `replace` only applies to the main module — a signer is
+publishable only once its `require`s point at real released versions. The
+release sequence is therefore:
+
+1. Tag and push `go/core/vX.Y.Z` and `go/testutils/vX.Y.Z` (`core` has no
+   in-repo dependencies — not even in its tests — so it is always taggable
+   first).
+2. Run `just go-release-prep vX.Y.Z` to drop the `replace` directives and pin
+   the released versions in every signer module; commit.
+3. Tag and push `go/signers/<name>/vX.Y.Z` for each signer.
 
 ## Quick Start
 

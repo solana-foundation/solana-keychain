@@ -75,6 +75,10 @@ func TestSanitizeRemoteResponse(t *testing.T) {
 		{"trim", "  hello  ", "hello"},
 		{"control chars replaced", "a\x00b\x07c", "a b c"},
 		{"keeps normal text", "Bad Request: invalid wallet", "Bad Request: invalid wallet"},
+		{"unicode space separators collapse", "a\u00a0\u2007b\u2009c\u3000d", "a b c d"},
+		{"line and paragraph separators collapse", "a\u2028b\u2029c", "a b c"},
+		{"BOM collapses", "a\ufeffb \ufeff c", "a b c"},
+		{"unicode whitespace only", "\u00a0\u2028\ufeff", "[empty remote response]"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

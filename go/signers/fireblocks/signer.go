@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gagliardetto/solana-go"
@@ -60,6 +61,9 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 	if apiBaseURL == "" {
 		apiBaseURL = DefaultAPIBaseURL
 	}
+	if !strings.HasPrefix(apiBaseURL, "https://") {
+		return nil, core.NewSignerError(core.CodeConfigError, "fireblocks api_base_url must use HTTPS")
+	}
 	pollInterval := cfg.PollInterval
 	if pollInterval <= 0 {
 		pollInterval = DefaultPollInterval
@@ -93,13 +97,13 @@ func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
 // String renders the signer without any secret material — the Go analog of the
 // Rust redacting Debug impl.
-func (s *Signer) String() string {
+func (s Signer) String() string {
 	return "fireblocks.Signer{pubkey: " + s.pubkey.String() +
 		", vaultAccountID: " + s.vaultAccountID + ", apiBaseURL: " + s.apiBaseURL + "}"
 }
 
 // GoString mirrors String so %#v cannot leak secrets either.
-func (s *Signer) GoString() string { return s.String() }
+func (s Signer) GoString() string { return s.String() }
 
 // SignMessage signs arbitrary bytes with a Fireblocks RAW operation and returns
 // the verified 64-byte signature. Port of the Rust sign_message.

@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"github.com/gagliardetto/solana-go"
-
-	"github.com/solana-foundation/solana-keychain/go/testutils"
 )
 
 // goldenSigner is a tiny in-package signer so this golden test does not import the
@@ -19,7 +17,7 @@ type goldenSigner struct {
 }
 
 func newGoldenSigner() goldenSigner {
-	priv := testutils.TestPrivateKey()
+	priv := testPrivateKey()
 	var pub solana.PublicKey
 	copy(pub[:], priv.Public().(ed25519.PublicKey))
 	return goldenSigner{priv: priv, pub: pub}
@@ -37,7 +35,7 @@ func TestGoldenSerialization(t *testing.T) {
 	)
 
 	gs := newGoldenSigner()
-	tx, err := testutils.CreateTestTransaction(gs.pub)
+	tx, err := createTestTransaction(gs.pub)
 	if err != nil {
 		t.Fatal(err)
 	}

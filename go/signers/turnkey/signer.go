@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gagliardetto/solana-go"
@@ -54,6 +55,9 @@ func New(cfg Config) (*Signer, error) {
 	if baseURL == "" {
 		baseURL = DefaultAPIBaseURL
 	}
+	if !strings.HasPrefix(baseURL, "https://") {
+		return nil, core.NewSignerError(core.CodeConfigError, "turnkey api_base_url must use HTTPS")
+	}
 	return &Signer{
 		organizationID: cfg.OrganizationID,
 		privateKeyID:   cfg.PrivateKeyID,
@@ -70,12 +74,12 @@ func (s *Signer) Pubkey() solana.PublicKey { return s.publicKey }
 
 // String renders the signer without any secret material — the Go analog of the
 // Rust redacting Debug impl.
-func (s *Signer) String() string {
+func (s Signer) String() string {
 	return "turnkey.Signer{pubkey: " + s.publicKey.String() + "}"
 }
 
 // GoString mirrors String so %#v cannot leak secrets either.
-func (s *Signer) GoString() string { return s.String() }
+func (s Signer) GoString() string { return s.String() }
 
 // SignMessage signs arbitrary bytes via the Turnkey sign_raw_payload activity
 // and returns the 64-byte Ed25519 signature.

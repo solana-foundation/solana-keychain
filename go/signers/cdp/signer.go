@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/gagliardetto/solana-go"
@@ -70,6 +71,9 @@ func New(cfg Config) (*Signer, error) {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
+	if !strings.HasPrefix(baseURL, "https://") {
+		return nil, core.NewSignerError(core.CodeConfigError, "cdp api_base_url must use HTTPS")
+	}
 	apiHost, err := extractHost(baseURL)
 	if err != nil {
 		return nil, err
@@ -96,12 +100,12 @@ func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
 // String renders the signer without any secret material — the Go analog of the
 // Rust redacting Debug impl.
-func (s *Signer) String() string {
+func (s Signer) String() string {
 	return "cdp.Signer{pubkey: " + s.pubkey.String() + ", apiBaseURL: " + s.apiBaseURL + "}"
 }
 
 // GoString mirrors String so %#v cannot leak secrets either.
-func (s *Signer) GoString() string { return s.String() }
+func (s Signer) GoString() string { return s.String() }
 
 // SignMessage signs arbitrary bytes via the CDP signMessage endpoint and
 // verifies the returned signature against this signer's public key.

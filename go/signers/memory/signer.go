@@ -33,6 +33,15 @@ func New(cfg Config) (*Signer, error) {
 // Pubkey returns the signer's public key.
 func (s *Signer) Pubkey() solana.PublicKey { return s.pub }
 
+// String renders the signer without any secret material — without it, fmt's
+// reflective struct printing would dump the raw private-key bytes.
+func (s Signer) String() string {
+	return "memory.Signer{pubkey: " + s.pub.String() + "}"
+}
+
+// GoString mirrors String so %#v cannot leak secrets either.
+func (s Signer) GoString() string { return s.String() }
+
 // SignMessage signs arbitrary bytes with the in-memory key. Ed25519 signing is
 // deterministic and never fails for a valid key, so it always returns a nil error.
 func (s *Signer) SignMessage(_ context.Context, message []byte) (solana.Signature, error) {

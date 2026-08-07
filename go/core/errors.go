@@ -122,7 +122,11 @@ func CodeOf(err error) (Code, bool) {
 
 const defaultRemoteErrorResponseMaxLength = 256
 
-var whitespaceRun = regexp.MustCompile(`\s+`)
+// whitespaceRun matches what JavaScript's \s matches: Go's \s covers only ASCII
+// whitespace, so Unicode space separators (\p{Zs}: NBSP, ideographic space, …),
+// line/paragraph separators (U+2028/U+2029), and the BOM (U+FEFF) are added
+// explicitly to keep the collapse byte-for-byte equal to the TS sanitizer.
+var whitespaceRun = regexp.MustCompile(`[\s\p{Zs}\x{2028}\x{2029}\x{FEFF}]+`)
 
 // isDisallowedASCIIControl matches the same code points the TypeScript core
 // strips: everything <= 0x08, 0x0b, 0x0c, 0x0e–0x1f, and 0x7f. Tab (0x09),

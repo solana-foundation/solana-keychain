@@ -727,6 +727,10 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 		fmt.Sprintf("%v", s),
 		fmt.Sprintf("%+v", s),
 		fmt.Sprintf("%#v", s),
+		fmt.Sprintf("%v", *s),
+		fmt.Sprintf("%+v", *s),
+		fmt.Sprintf("%s", *s), //nolint:staticcheck // deliberately exercising the %s verb path
+		fmt.Sprintf("%#v", *s),
 		fmt.Sprintf("%s", s), //nolint:staticcheck // deliberately exercising the %s verb path
 	} {
 		for _, leak := range leaks {

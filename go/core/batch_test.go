@@ -74,3 +74,21 @@ func TestStaggerCancellationReturnsSignerError(t *testing.T) {
 		t.Error("underlying context.Canceled should remain reachable via errors.Is")
 	}
 }
+
+// TestStaggerAnchorsToBatchStart pins the stagger semantics: the delay target is
+// start+index*delay measured from the batch start, so a task whose slot opened
+// after its target time (e.g. behind a slow task with MaxConcurrency set) starts
+// immediately instead of compounding another index*delay of sleep.
+func TestStaggerAnchorsToBatchStart(t *testing.T) {
+	start := time.Now().Add(-time.Hour)
+	done := make(chan error, 1)
+	go func() { done <- stagger(context.Background(), start, 5, time.Minute) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stagger slept relative to slot acquisition instead of batch start")
+	}
+}

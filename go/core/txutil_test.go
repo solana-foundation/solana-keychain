@@ -4,13 +4,11 @@ import (
 	"testing"
 
 	"github.com/gagliardetto/solana-go"
-
-	"github.com/solana-foundation/solana-keychain/go/testutils"
 )
 
 func TestSerializeRoundTrips(t *testing.T) {
-	payer := testutils.TestPublicKey()
-	tx, err := testutils.CreateTestTransaction(payer)
+	payer := testPublicKey()
+	tx, err := createTestTransaction(payer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,8 +30,8 @@ func TestSerializeRoundTrips(t *testing.T) {
 }
 
 func TestSigningPositionAndAddSignature(t *testing.T) {
-	payer := testutils.TestPublicKey()
-	tx, err := testutils.CreateTestTransaction(payer)
+	payer := testPublicKey()
+	tx, err := createTestTransaction(payer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,8 +68,8 @@ func TestSigningPositionAndAddSignature(t *testing.T) {
 }
 
 func TestSigningPositionNotFound(t *testing.T) {
-	payer := testutils.TestPublicKey()
-	tx, _ := testutils.CreateTestTransaction(payer)
+	payer := testPublicKey()
+	tx, _ := createTestTransaction(payer)
 
 	var notSigner solana.PublicKey
 	notSigner[0] = 0xFF
@@ -85,8 +83,8 @@ func TestSigningPositionNotFound(t *testing.T) {
 }
 
 func TestClassifyPartialWhenMultiSig(t *testing.T) {
-	payer := testutils.TestPublicKey()
-	tx, _ := testutils.CreateTestTransaction(payer)
+	payer := testPublicKey()
+	tx, _ := createTestTransaction(payer)
 	// Force a second required signer that we won't provide.
 	tx.Message.Header.NumRequiredSignatures = 2
 	tx.Message.AccountKeys = append(solana.PublicKeySlice{tx.Message.AccountKeys[0], func() solana.PublicKey {
