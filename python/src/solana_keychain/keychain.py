@@ -24,6 +24,7 @@ _BACKENDS: dict[str, tuple[str, str, str]] = {
         "FireblocksSignerConfig",
         "create_fireblocks_signer",
     ),
+    "fordefi": ("solana_keychain.fordefi", "FordefiSignerConfig", "create_fordefi_signer"),
     "gcp-kms": ("solana_keychain.gcp_kms", "GcpKmsSignerConfig", "create_gcp_kms_signer"),
     "memory": ("solana_keychain.memory", "MemorySignerConfig", "create_memory_signer"),
     "openfort": ("solana_keychain.openfort", "OpenfortSignerConfig", "create_openfort_signer"),

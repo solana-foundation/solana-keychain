@@ -25,6 +25,7 @@ library offers a consistent API across all signing methods.
 | **Turnkey** | Non-custodial key management via Turnkey | `solana_keychain.turnkey` | ✅ Available |
 | **AWS KMS** | AWS Key Management Service with Ed25519 signing | `solana_keychain.aws_kms` | ✅ Available |
 | **Fireblocks** | Fireblocks institutional custody platform | `solana_keychain.fireblocks` | ✅ Available |
+| **Fordefi** | Fordefi institutional MPC custody platform | `solana_keychain.fordefi` | ✅ Available |
 | **GCP KMS** | Google Cloud Key Management Service with Ed25519 signing | `solana_keychain.gcp_kms` | ✅ Available |
 | **Dfns** | Dfns wallet infrastructure with Ed25519 signing | `solana_keychain.dfns` | ✅ Available |
 | **Para** | MPC wallets with Para infrastructure | `solana_keychain.para` | ✅ Available |
@@ -42,6 +43,7 @@ pip install 'solana-keychain[cdp]'       # adds the CDP backend
 pip install 'solana-keychain[crossmint]' # adds the Crossmint backend
 pip install 'solana-keychain[dfns]'      # adds the Dfns backend
 pip install 'solana-keychain[fireblocks]' # adds the Fireblocks backend
+pip install 'solana-keychain[fordefi]'   # adds the Fordefi backend
 pip install 'solana-keychain[gcp-kms]'   # adds the GCP KMS backend
 pip install 'solana-keychain[openfort]'  # adds the Openfort backend
 pip install 'solana-keychain[privy]'     # adds the Privy backend

@@ -8,6 +8,7 @@ substring-matches marker keywords, and every test here carries ``parametrize``.
 """
 
 import os
+from pathlib import Path
 
 import pytest
 from solders.pubkey import Pubkey
@@ -125,6 +126,37 @@ async def make_fireblocks_signer() -> SolanaSigner:
             # Test vaults hold devnet assets; the library default is mainnet SOL.
             asset_id=optional_env("FIREBLOCKS_ASSET_ID") or "SOL_TEST",
             api_base_url=optional_env("FIREBLOCKS_API_BASE_URL") or DEFAULT_API_BASE_URL,
+        )
+    )
+
+
+def _resolve_pem_path(raw: str) -> Path:
+    """Relative PEM paths are resolved against the repo root, so the same
+    ``.env`` value works for every language's integration suite."""
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+    return Path(__file__).parents[3] / path
+
+
+async def make_fordefi_signer() -> SolanaSigner:
+    from solana_keychain.fordefi import FordefiSignerConfig, create_fordefi_signer
+    from solana_keychain.fordefi.signer import DEFAULT_API_BASE_URL
+
+    env = require_env(
+        "FORDEFI_ACCESS_TOKEN",
+        "FORDEFI_BB_VAULT_ID",
+        "FORDEFI_BB_PUBLIC_KEY",
+        "FORDEFI_PRIVATE_KEY_PEM_PATH",
+    )
+    private_key_pem = _resolve_pem_path(env["FORDEFI_PRIVATE_KEY_PEM_PATH"]).read_text()
+    return await create_fordefi_signer(
+        FordefiSignerConfig(
+            access_token=env["FORDEFI_ACCESS_TOKEN"],
+            vault_id=env["FORDEFI_BB_VAULT_ID"],
+            public_key=env["FORDEFI_BB_PUBLIC_KEY"],
+            private_key_pem=private_key_pem,
+            api_base_url=optional_env("FORDEFI_API_BASE_URL") or DEFAULT_API_BASE_URL,
         )
     )
 
@@ -253,6 +285,7 @@ _MESSAGE_CAPABLE = {
     "privy": make_privy_signer,
     "para": make_para_signer,
     "fireblocks": make_fireblocks_signer,
+    "fordefi": make_fordefi_signer,
     "cdp": make_cdp_signer,
     "dfns": make_dfns_signer,
     "openfort": make_openfort_signer,

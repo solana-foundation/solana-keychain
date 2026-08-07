@@ -17,7 +17,7 @@ from solana_keychain.keychain import _BACKENDS
 
 
 def test_supports_all_thirteen_backends() -> None:
-    assert len(SUPPORTED_BACKENDS) == 13
+    assert len(SUPPORTED_BACKENDS) == 14
     assert SUPPORTED_BACKENDS == tuple(sorted(SUPPORTED_BACKENDS))
 
 

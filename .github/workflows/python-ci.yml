@@ -23,6 +23,7 @@ jobs:
           CI_SIGNER_PRIVY_ENABLED: ${{ vars.CI_SIGNER_PRIVY_ENABLED || 'true' }}
           CI_SIGNER_TURNKEY_ENABLED: ${{ vars.CI_SIGNER_TURNKEY_ENABLED || 'true' }}
           CI_SIGNER_FIREBLOCKS_ENABLED: ${{ vars.CI_SIGNER_FIREBLOCKS_ENABLED || 'true' }}
+          CI_SIGNER_FORDEFI_ENABLED: ${{ vars.CI_SIGNER_FORDEFI_ENABLED || 'true' }}
           CI_SIGNER_AWS_KMS_ENABLED: ${{ vars.CI_SIGNER_AWS_KMS_ENABLED || 'true' }}
           CI_SIGNER_GCP_KMS_ENABLED: ${{ vars.CI_SIGNER_GCP_KMS_ENABLED || 'true' }}
           CI_SIGNER_PARA_ENABLED: ${{ vars.CI_SIGNER_PARA_ENABLED || 'true' }}
@@ -48,6 +49,7 @@ jobs:
               ['privy', 'CI_SIGNER_PRIVY_ENABLED'],
               ['turnkey', 'CI_SIGNER_TURNKEY_ENABLED'],
               ['fireblocks', 'CI_SIGNER_FIREBLOCKS_ENABLED'],
+              ['fordefi', 'CI_SIGNER_FORDEFI_ENABLED'],
               ['aws-kms', 'CI_SIGNER_AWS_KMS_ENABLED'],
               ['gcp-kms', 'CI_SIGNER_GCP_KMS_ENABLED'],
               ['para', 'CI_SIGNER_PARA_ENABLED'],

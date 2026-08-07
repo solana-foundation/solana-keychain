@@ -28,7 +28,7 @@ Solana Kit compatible signer implementation for Node.js and browser environments
 
 Async signer library built on [`solders`](https://pypi.org/project/solders/) for canonical transaction serialization.
 
-- **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila
+- **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila, Fordefi
 - **Features**: Async/await, optional extras so heavy provider SDKs stay out of the base install, strict typing
 - [View Python Documentation →](python/README.md)
 
