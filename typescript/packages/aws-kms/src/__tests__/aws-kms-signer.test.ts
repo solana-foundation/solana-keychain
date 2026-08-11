@@ -334,6 +334,9 @@ describe('AwsKmsSigner', () => {
         it('signs when the signer instance is frozen', async () => {
             const keyPair = await generateKeyPairSigner();
 
+            // This suite clears calls but not implementations between tests, so reset
+            // before arming the mock to keep this test independent of its neighbours.
+            mockSend.mockReset();
             mockSend.mockResolvedValue({
                 Signature: new Uint8Array(64).fill(0x42),
             });

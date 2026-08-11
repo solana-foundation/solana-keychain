@@ -473,6 +473,9 @@ describe('VaultSigner', () => {
         });
 
         it('signs when the signer instance is frozen', async () => {
+            // This suite clears calls but not implementations between tests, so reset
+            // before arming the mock to keep this test independent of its neighbours.
+            vi.mocked(fetch).mockReset();
             vi.mocked(fetch).mockResolvedValueOnce(
                 new Response(JSON.stringify({ data: { signature: 'vault:v1:' + 'a'.repeat(86) } }), { status: 200 }),
             );
