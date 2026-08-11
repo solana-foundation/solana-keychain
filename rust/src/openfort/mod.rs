@@ -253,6 +253,7 @@ impl OpenfortSigner {
         let api_host = extract_host(&base_url)?;
         let http_client_config = config.http_client_config.unwrap_or_default();
         let client = reqwest::Client::builder()
+            .use_rustls_tls()
             .timeout(http_client_config.resolved_request_timeout())
             .connect_timeout(http_client_config.resolved_connect_timeout())
             .https_only(true)
