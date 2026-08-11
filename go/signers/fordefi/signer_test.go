@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -24,6 +23,7 @@ import (
 	"time"
 
 	"github.com/gagliardetto/solana-go"
+	computebudget "github.com/gagliardetto/solana-go/programs/compute-budget"
 	"github.com/gagliardetto/solana-go/programs/system"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
@@ -629,16 +629,12 @@ func TestSignTransactionNativeSuccess(t *testing.T) {
 // setComputeUnitPrice is the kind of priority-fee instruction Fordefi adds when
 // the submitted message carries no ComputeBudget instructions.
 func setComputeUnitPrice(microLamports uint64) solana.Instruction {
-	data := []byte{setComputeUnitPriceOpcode}
-	return solana.NewInstruction(computeBudgetProgramID, nil,
-		binary.LittleEndian.AppendUint64(data, microLamports))
+	return computebudget.NewSetComputeUnitPriceInstruction(microLamports).Build()
 }
 
 // requestHeapFrame is a non-fee ComputeBudget instruction Fordefi never adds.
 func requestHeapFrame() solana.Instruction {
-	data := []byte{1}
-	return solana.NewInstruction(computeBudgetProgramID, nil,
-		binary.LittleEndian.AppendUint32(data, 256*1024))
+	return computebudget.NewRequestHeapFrameInstruction(256 * 1024).Build()
 }
 
 // testRecipient is the transfer destination testutils.CreateTestTransaction uses.
