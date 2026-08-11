@@ -133,10 +133,10 @@ jobs:
 
             const goLiveModuleMap = [
               // gcpkms omitted: Workload Identity OIDC is not available in the fork external-live environment.
-              // fordefi omitted: no Go backend.
               ['privy', 'signers/privy'],
               ['turnkey', 'signers/turnkey'],
               ['fireblocks', 'signers/fireblocks'],
+              ['fordefi', 'signers/fordefi'],
               ['aws_kms', 'signers/awskms'],
               ['para', 'signers/para'],
               ['cdp', 'signers/cdp'],
