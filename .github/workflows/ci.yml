@@ -98,6 +98,8 @@ jobs:
               ['fordefi', 'test_fordefi_integration'],
               ['aws_kms', 'test_aws_kms_integration'],
               ['gcp_kms', 'test_gcp_kms_integration'],
+              ['para', 'test_para_integration'],
+              ['cdp', 'test_cdp_integration'],
               ['dfns', 'test_dfns_integration'],
               ['crossmint', 'test_crossmint_integration'],
               ['openfort', 'test_openfort_integration'],
