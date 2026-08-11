@@ -184,7 +184,10 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 	}
 
 	if broadcast != nil {
-		return core.Classify(broadcast, "", sig), nil
+		// Crossmint has already landed this transaction, so the operation is
+		// finished whether or not the copy it returns shows every signature slot
+		// filled, and there is nothing left for the caller to send.
+		return core.SignedTransaction{Signature: sig, Completeness: core.Complete}, nil
 	}
 
 	if err := core.AddSignature(tx, s.publicKey, sig); err != nil {

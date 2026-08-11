@@ -225,7 +225,7 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
                 await new Promise(resolve => setTimeout(resolve, this.requestDelayMs));
             }
             config?.abortSignal?.throwIfAborted();
-            results.push(await this.signTransactionManaged(transaction));
+            results.push(await this.signTransactionManaged(transaction, config?.abortSignal));
         }
         return results;
     }
@@ -239,13 +239,19 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
         }
     }
 
+    /**
+     * `abortSignal` stops this client from waiting; it cannot recall work Crossmint
+     * has already accepted, so an aborted transaction may still land server-side.
+     */
     private async signTransactionManaged(
         transaction: Transaction & TransactionWithinSizeLimit & TransactionWithLifetime,
+        abortSignal?: AbortSignal,
     ): Promise<SignatureBytes> {
         let response = await this.createTransaction(transaction);
         let approvalSubmitted = false;
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
+            abortSignal?.throwIfAborted();
             const pending = this.findPendingApprovalForSigner(response);
             if (
                 response.status === 'awaiting-approval' &&
@@ -266,6 +272,7 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
             }
 
             await new Promise(resolve => setTimeout(resolve, this.pollIntervalMs));
+            abortSignal?.throwIfAborted();
             response = await this.getTransaction(response.id);
         }
 

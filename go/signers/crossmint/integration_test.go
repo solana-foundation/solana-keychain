@@ -4,7 +4,6 @@ package crossmint
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"os"
 	"strings"
@@ -111,12 +110,19 @@ func TestIntegrationSignTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SignTransaction: %v", err)
 	}
-	raw, err := base64.StdEncoding.DecodeString(res.EncodedTransaction)
-	if err != nil {
-		t.Fatalf("encoded transaction is not valid base64: %v", err)
+	if len(res.Signature) != core.SignatureLength {
+		t.Fatalf("signature length = %d, want %d", len(res.Signature), core.SignatureLength)
 	}
-	if _, err := solana.TransactionFromBytes(raw); err != nil {
-		t.Fatalf("failed to decode signed transaction: %v", err)
+	// Crossmint sponsors gas, so it rewrites the transaction, signs its own bytes
+	// and broadcasts server-side. The signature identifies what it landed and
+	// there is nothing left for the caller to send.
+	if res.EncodedTransaction != "" {
+		t.Error("a Crossmint-broadcast transaction leaves nothing for the caller to send")
+	}
+	for _, sig := range tx.Signatures {
+		if !sig.IsZero() {
+			t.Error("the caller's transaction must not carry a signature over other bytes")
+		}
 	}
 }
 

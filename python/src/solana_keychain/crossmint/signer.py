@@ -428,7 +428,10 @@ class CrossmintSigner(SolanaSigner):
         )
 
         if broadcast_transaction is not None:
-            return classify_signed_transaction(broadcast_transaction, "", signature)
+            # Crossmint has already landed this transaction, so the operation is
+            # finished whether or not the copy it returns shows every signature
+            # slot filled, and there is nothing left for the caller to send.
+            return SignedTransaction(encoded_transaction="", signature=signature, is_complete=True)
 
         add_signature_to_transaction(transaction, public_key, signature)
         return classify_signed_transaction(

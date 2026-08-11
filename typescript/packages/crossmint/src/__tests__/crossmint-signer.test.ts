@@ -353,6 +353,36 @@ describe('CrossmintSigner', () => {
             expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
         });
 
+        /**
+         * Aborting stops this client from waiting; it cannot recall work Crossmint
+         * has accepted, so the point is that polling ends rather than running to
+         * the full attempt budget.
+         */
+        it('stops polling when the abort signal fires mid-flight', async () => {
+            const controller = new AbortController();
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse())
+                .mockResolvedValueOnce(
+                    new Response(JSON.stringify({ id: 'tx-abort', status: 'pending' }), { status: 201 }),
+                )
+                .mockImplementation(async () => {
+                    controller.abort();
+                    return new Response(JSON.stringify({ id: 'tx-abort', status: 'pending' }), { status: 200 });
+                });
+
+            const signer = await createCrossmintSigner({
+                ...mockConfig,
+                maxPollAttempts: 50,
+                pollIntervalMs: 1,
+            });
+
+            await expect(
+                signer.signAndSendTransactions([createMockTransaction()], { abortSignal: controller.signal }),
+            ).rejects.toThrow();
+            // Far fewer than the 50-attempt budget: wallet + create + a poll or two.
+            expect(vi.mocked(fetch).mock.calls.length).toBeLessThan(6);
+        });
+
         it('exposes a TransactionSendingSigner so Kit routes it through send, not partial signing', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
             const signer = await createCrossmintSigner(mockConfig);

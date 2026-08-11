@@ -17,19 +17,6 @@ const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 const DEFAULT_POLL_INTERVAL_MS: u64 = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 60;
 
-/// Whether every required signature slot of a Crossmint-broadcast transaction is
-/// filled. The legacy-only [`TransactionUtil::has_all_required_signatures`] cannot
-/// inspect the versioned transaction Crossmint returns.
-fn versioned_is_fully_signed(transaction: &VersionedTransaction) -> bool {
-    let required = usize::from(transaction.message.header().num_required_signatures);
-    transaction.signatures.len() >= required
-        && transaction
-            .signatures
-            .iter()
-            .take(required)
-            .all(|signature| *signature != Signature::default())
-}
-
 /// Configuration for creating a CrossmintSigner
 #[derive(Clone)]
 pub struct CrossmintSignerConfig {
@@ -668,13 +655,11 @@ impl CrossmintSigner {
         let (signature, broadcast) =
             self.extract_signature_from_response(&final_response, &expected_message)?;
 
-        if let Some(broadcast) = broadcast {
-            let signed_transaction = (String::new(), signature);
-            return Ok(if versioned_is_fully_signed(&broadcast) {
-                SignTransactionResult::Complete(signed_transaction)
-            } else {
-                SignTransactionResult::Partial(signed_transaction)
-            });
+        if broadcast.is_some() {
+            // Crossmint has already landed this transaction, so the operation is
+            // finished whether or not the copy it returns shows every signature
+            // slot filled, and there is nothing left for the caller to send.
+            return Ok(SignTransactionResult::Complete((String::new(), signature)));
         }
 
         TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;

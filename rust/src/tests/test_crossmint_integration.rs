@@ -8,7 +8,6 @@ pub const TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY: &str = "TEST_CROSSMINT_SIGNER_DE
 #[cfg(feature = "crossmint")]
 #[cfg(test)]
 mod tests {
-    use base64::{engine::general_purpose::STANDARD, Engine};
     use dotenvy::dotenv;
     use std::env;
     use std::str::FromStr;
@@ -112,12 +111,20 @@ mod tests {
 
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
 
-        let decoded_bytes = STANDARD
-            .decode(&base64_txn)
-            .expect("Failed to decode base64 transaction");
-
-        let _: crate::sdk_adapter::Transaction =
-            bincode::deserialize(&decoded_bytes).expect("Failed to deserialize transaction");
+        // Crossmint sponsors gas, so it rewrites the transaction, signs its own
+        // bytes and broadcasts server-side. The signature identifies what it
+        // landed and there is nothing left for the caller to send.
+        assert!(
+            base64_txn.is_empty(),
+            "a Crossmint-broadcast transaction leaves nothing for the caller to send"
+        );
+        assert!(
+            transaction
+                .signatures
+                .iter()
+                .all(|s| *s == crate::sdk_adapter::Signature::default()),
+            "the caller's transaction must not carry a signature over other bytes"
+        );
     }
 
     #[tokio::test]

@@ -107,9 +107,10 @@ async def assert_transaction_roundtrip(
     than balances or program execution.
 
     ``signs_caller_bytes=False`` for broadcast-managed services that rewrite the
-    transaction before signing: their signature covers their own bytes, so only
-    its shape and the encoded result can be checked. Each signer verifies the
-    signature against the bytes it actually covers internally.
+    transaction before signing and broadcast it themselves: their signature covers
+    their own bytes, so only its shape can be checked, and there is nothing left
+    for the caller to send. Each signer verifies the signature against the bytes it
+    actually covers internally.
     """
     message = Message.new_with_blockhash([], signer.pubkey, await fetch_latest_blockhash())
     transaction = Transaction.new_unsigned(message)
@@ -117,6 +118,8 @@ async def assert_transaction_roundtrip(
 
     assert result.is_complete
     assert len(bytes(result.signature)) == 64
-    assert Transaction.from_bytes(base64.b64decode(result.encoded_transaction))
     if signs_caller_bytes:
+        assert Transaction.from_bytes(base64.b64decode(result.encoded_transaction))
         assert result.signature.verify(signer.pubkey, transaction.message_data())
+    else:
+        assert result.encoded_transaction == ""
