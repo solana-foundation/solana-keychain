@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # ready_for_review re-runs the live tests that the draft gate below skips.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'go/**'
       - '.github/workflows/go-ci.yml'
@@ -156,7 +158,10 @@ jobs:
 
   go-integration-test:
     needs: resolve-signers
-    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) && needs.resolve-signers.outputs.go_integration_module_count != '0' }}
+    # Live tests call third-party signing providers, so they are skipped on
+    # draft pull requests: open a PR as a draft to iterate without spending
+    # provider rate limits, and mark it ready for review to run them.
+    if: ${{ (github.event_name != 'pull_request' || (!github.event.pull_request.head.repo.fork && !github.event.pull_request.draft)) && needs.resolve-signers.outputs.go_integration_module_count != '0' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
