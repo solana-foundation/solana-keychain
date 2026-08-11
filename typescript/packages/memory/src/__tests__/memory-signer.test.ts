@@ -11,6 +11,7 @@ import {
     setTransactionMessageFeePayer,
     setTransactionMessageLifetimeUsingBlockhash,
 } from '@solana/kit';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 import { generateKeyPair } from '@solana/keys';
 import { describe, expect, it } from 'vitest';
 
@@ -158,6 +159,27 @@ describe('createMemorySigner', () => {
             const sig = dict?.[signer.address];
             expect(sig).toBeDefined();
             expect(sig?.length).toBe(64);
+        });
+
+        it('signs when the signer instance is frozen', async () => {
+            const signer = await createMemorySignerFromBytes(TEST_KEYPAIR_BYTES);
+            const transaction = pipe(
+                createTransactionMessage({ version: 0 }),
+                tx => setTransactionMessageFeePayer(signer.address, tx),
+                tx =>
+                    setTransactionMessageLifetimeUsingBlockhash(
+                        {
+                            blockhash: blockhash('11111111111111111111111111111111'),
+                            lastValidBlockHeight: 0n,
+                        },
+                        tx,
+                    ),
+                compileTransaction,
+            );
+
+            const [dict] = await assertSignerSurvivesFreeze(signer, () => signer.signTransactions([transaction]));
+
+            expect(dict?.[signer.address]?.length).toBe(64);
         });
     });
 

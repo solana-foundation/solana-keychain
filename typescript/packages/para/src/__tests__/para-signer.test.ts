@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
@@ -450,6 +451,20 @@ describe('ParaSigner', () => {
                     method: 'POST',
                 }),
             );
+        });
+
+        it('signs when the signer instance is frozen', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse()).mockResolvedValueOnce(mockSignResponse());
+
+            const signer = await ParaSigner.create(mockConfig);
+            const mockTransaction = {
+                messageBytes: new Uint8Array([1, 2, 3, 4]),
+                signatures: {},
+            } as any;
+
+            const [result] = await assertSignerSurvivesFreeze(signer, () => signer.signTransactions([mockTransaction]));
+
+            expect(result).toHaveProperty(MOCK_ADDRESS);
         });
 
         it('should return empty array for empty input', async () => {

@@ -1,6 +1,7 @@
 import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 
 import { createFireblocksSigner, FireblocksSigner } from '../fireblocks-signer.js';
 import type { FireblocksSignerConfig } from '../types.js';
@@ -592,6 +593,44 @@ describe('FireblocksSigner', () => {
             const result = await signer.signTransactions([transaction]);
 
             expect(result).toHaveLength(1);
+            expect(result[0]).toHaveProperty(signer.address);
+        });
+
+        it('signs when the signer instance is frozen', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ addresses: [{ address: keyPair.address }] }),
+            });
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ id: 'tx-123', status: 'SUBMITTED' }),
+            });
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    id: 'tx-123',
+                    signedMessages: [{ signature: { fullSig: '42'.repeat(64) } }],
+                    status: 'COMPLETED',
+                }),
+            });
+
+            const signer = new FireblocksSigner({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+
+            await signer.init();
+
+            const transaction = {
+                messageBytes: new Uint8Array([1, 2, 3, 4]),
+                signatures: {},
+            } as unknown as Parameters<typeof signer.signTransactions>[0][0];
+
+            const result = await assertSignerSurvivesFreeze(signer, () => signer.signTransactions([transaction]));
+
             expect(result[0]).toHaveProperty(signer.address);
         });
 

@@ -1,3 +1,4 @@
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { VaultSigner } from '../vault-signer.js';
@@ -469,6 +470,24 @@ describe('VaultSigner', () => {
                     method: 'POST',
                 }),
             );
+        });
+
+        it('signs when the signer instance is frozen', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce(
+                new Response(JSON.stringify({ data: { signature: 'vault:v1:' + 'a'.repeat(86) } }), { status: 200 }),
+            );
+
+            const signer = new VaultSigner(mockConfig);
+            const mockTransaction = {
+                '"__transactionSize:@solana/kit"': 100,
+                lifetimeConstraint: { blockhash: 'test', lastValidBlockHeight: 100n },
+                messageBytes: new Uint8Array([1, 2, 3, 4]),
+                signatures: {},
+            } as any;
+
+            const [result] = await assertSignerSurvivesFreeze(signer, () => signer.signTransactions([mockTransaction]));
+
+            expect(result).toHaveProperty(mockConfig.publicKey);
         });
     });
 });

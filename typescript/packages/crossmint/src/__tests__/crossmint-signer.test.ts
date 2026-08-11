@@ -18,6 +18,7 @@ vi.mock('@solana/transactions', async importOriginal => {
 });
 
 import { assertIsSolanaSigner, assertSignatureValid } from '@solana/keychain-core';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 import { getTransactionDecoder } from '@solana/transactions';
 import { createCrossmintSigner } from '../crossmint-signer.js';
 
@@ -262,6 +263,30 @@ describe('CrossmintSigner', () => {
                 signature: MOCK_SIGNATURE_BYTES,
                 signerAddress: signer.address,
             });
+        });
+
+        it('signs when the signer instance is frozen', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse())
+                .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'tx-1', status: 'pending' }), { status: 201 }))
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({ id: 'tx-1', onChain: { txId: MOCK_SIGNATURE_B58 }, status: 'success' }),
+                        { status: 200 },
+                    ),
+                );
+
+            const signer = await createCrossmintSigner({
+                ...mockConfig,
+                maxPollAttempts: 2,
+                pollIntervalMs: 1,
+            });
+
+            const results = await assertSignerSurvivesFreeze(signer, () =>
+                signer.signTransactions([createMockTransaction()]),
+            );
+
+            expect(results[0]![signer.address]).toBeDefined();
         });
 
         it('signs sequentially and stops creating transactions after a failure', async () => {

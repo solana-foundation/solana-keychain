@@ -1057,6 +1057,7 @@ Before submitting your PR:
 - [ ] Added to README.md supported backends table
 - [ ] CI changes included
 - [ ] TypeScript package with unit + integration tests
+- [ ] TypeScript unit suite asserts the [frozen-instance contract](#frozen-instance-contract-typescript)
 - [ ] Python module with unit + integration tests, registered in the umbrella `_BACKENDS`
 - [ ] Python optional extra declared (if the backend needs a provider SDK)
 - [ ] Umbrella package updated (7 files — see [Umbrella Package](#umbrella-package))
@@ -1119,6 +1120,30 @@ mod tests {
         // Use mock_server.uri() as your api_base_url
     }
 }
+```
+
+### Frozen-instance contract (TypeScript)
+
+`@solana/signers` calls `Object.freeze` on a signer when it is attached to a
+transaction message via `setTransactionMessageFeePayerSigner`, so a signer must
+treat its own instance as immutable once constructed. Anything cached lazily on
+the signing path — an access token, a derived key, a client handle — has to live
+in a nested object created by the constructor, because `Object.freeze` is
+shallow.
+
+Every backend's unit suite asserts this with `assertSignerSurvivesFreeze` from
+`@solana/keychain-test-utils`. Add one alongside your happy-path signing test,
+reusing the same mocks:
+
+```ts
+it('signs when the signer instance is frozen', async () => {
+    mockSignResponse();
+
+    const signer = await createYourServiceSigner(mockConfig);
+    const result = await assertSignerSurvivesFreeze(signer, () => signer.signTransactions([mockTransaction]));
+
+    expect(result[0]).toHaveProperty(signer.address);
+});
 ```
 
 ## Example PR Structure

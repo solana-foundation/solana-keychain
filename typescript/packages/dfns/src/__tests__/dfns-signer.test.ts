@@ -1,5 +1,6 @@
 import * as nodeCrypto from 'node:crypto';
 
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
@@ -215,6 +216,33 @@ describe('DfnsSigner', () => {
 
             const sig = result[0]![signer.address]!;
             expect(sig.length).toBe(64);
+        });
+
+        it('signs when the signer instance is frozen', async () => {
+            mockWalletFetch();
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createUserActionInitResponse(),
+                ok: true,
+            });
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createUserActionResponse(),
+                ok: true,
+            });
+
+            mockFetch.mockResolvedValueOnce({
+                json: async () => createSignatureResponse('11'.repeat(32), '22'.repeat(32)),
+                ok: true,
+            });
+
+            const signer = await DfnsSigner.create(defaultConfig);
+
+            const result = await assertSignerSurvivesFreeze(signer, () =>
+                signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }]),
+            );
+
+            expect(result[0]?.[signer.address]).toBeDefined();
         });
 
         it('accepts escaped-newline PEM keys for auth challenge signing', async () => {

@@ -1,6 +1,7 @@
 import { address } from '@solana/addresses';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 
 import { GcpKmsSigner } from '../gcp-kms-signer.js';
 import type { GcpKmsSignerConfig } from '../types.js';
@@ -357,6 +358,24 @@ describe('GcpKmsSigner', () => {
             expect(mockFetch).toHaveBeenCalledTimes(1);
 
             assertAuthorizedRequest(SIGN_ENDPOINT, 'POST');
+        });
+
+        it('signs when the signer instance is frozen', async () => {
+            mockFetch.mockResolvedValue(createJsonResponse({ signature: TEST_SIGNATURE_BASE64 }));
+
+            const signer = new GcpKmsSigner({
+                keyName: TEST_KEY_NAME,
+                publicKey: TEST_PUBLIC_KEY,
+            });
+
+            const transaction = {
+                messageBytes: new Uint8Array([1, 2, 3, 4]),
+                signatures: {},
+            } as any;
+
+            const result = await assertSignerSurvivesFreeze(signer, () => signer.signTransactions([transaction]));
+
+            expect(result[0]).toHaveProperty(signer.address);
         });
 
         it('should sign multiple transactions successfully', async () => {

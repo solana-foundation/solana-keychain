@@ -1,5 +1,6 @@
 import { Address } from '@solana/addresses';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 import { type Transaction, type TransactionWithinSizeLimit, type TransactionWithLifetime } from '@solana/transactions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -325,6 +326,18 @@ describe('OpenfortSigner', () => {
             expect(result).toHaveLength(1);
             const [, init] = mockFetch.mock.calls[1] as [string, RequestInit];
             expect(JSON.parse(init.body as string)).toEqual({ data: '0xdeadbeef' });
+        });
+
+        it('signs when the signer instance is frozen', async () => {
+            mockGetAccount();
+            const signer = await OpenfortSigner.create(makeConfig());
+
+            mockSign();
+            const tx = createMockTransaction(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
+
+            const result = await assertSignerSurvivesFreeze(signer, () => signer.signTransactions([tx]));
+
+            expect(result).toHaveLength(1);
         });
     });
 

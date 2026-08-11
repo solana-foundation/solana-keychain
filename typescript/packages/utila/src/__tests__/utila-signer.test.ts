@@ -16,6 +16,7 @@ vi.mock('@solana/transactions', async importOriginal => {
 });
 
 import { assertIsSolanaSigner, assertSignatureValid } from '@solana/keychain-core';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 import { getTransactionDecoder } from '@solana/transactions';
 import { createUtilaAccessToken, createUtilaSigner } from '../utila-signer.js';
 import { TEST_EMAIL, TEST_RSA_PRIVATE_KEY } from './setup.js';
@@ -250,7 +251,7 @@ describe('UtilaSigner', () => {
             expect(fetchCall(2)[0]).toBe('https://api.test.utila.io/v2/vaults/vault-test/transactions/tx-1?view=FULL');
         });
 
-        it('signs when the signer instance is frozen, as @solana/signers freezes fee-payer signers', async () => {
+        it('signs when the signer instance is frozen', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse())
                 .mockResolvedValueOnce(
@@ -278,8 +279,9 @@ describe('UtilaSigner', () => {
                 maxPollAttempts: 2,
                 pollIntervalMs: 1,
             });
-            Object.freeze(signer);
-            const results = await signer.signTransactions([createMockTransaction()]);
+            const results = await assertSignerSurvivesFreeze(signer, () =>
+                signer.signTransactions([createMockTransaction()]),
+            );
 
             expect(results).toHaveLength(1);
             expect(results[0]![signer.address]).toEqual(MOCK_SIGNATURE_BYTES);

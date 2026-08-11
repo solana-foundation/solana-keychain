@@ -1,6 +1,7 @@
 import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 
 import { AwsKmsSigner } from '../aws-kms-signer.js';
 import type { AwsKmsSignerConfig } from '../types.js';
@@ -328,6 +329,28 @@ describe('AwsKmsSigner', () => {
             expect(result).toHaveLength(1);
             expect(result[0]).toHaveProperty(signer.address);
             expect(mockSend).toHaveBeenCalledTimes(1);
+        });
+
+        it('signs when the signer instance is frozen', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            mockSend.mockResolvedValue({
+                Signature: new Uint8Array(64).fill(0x42),
+            });
+
+            const signer = new AwsKmsSigner({
+                keyId: TEST_KEY_ID,
+                publicKey: keyPair.address,
+            });
+
+            const transaction = {
+                messageBytes: new Uint8Array([1, 2, 3, 4]),
+                signatures: {},
+            } as unknown as Parameters<typeof signer.signTransactions>[0][0];
+
+            const result = await assertSignerSurvivesFreeze(signer, () => signer.signTransactions([transaction]));
+
+            expect(result[0]).toHaveProperty(signer.address);
         });
     });
 

@@ -7,6 +7,7 @@ import {
     TransactionWithLifetime,
 } from '@solana/transactions';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PrivySigner } from '../privy-signer.js';
@@ -302,6 +303,25 @@ describe('PrivySigner', () => {
             const message = createSignableMessage(messageContent);
             const [sigDict] = await signer.signMessages([message]);
             expect(sigDict).toBeTruthy();
+            expect(sigDict?.[signer.address]).toBeTruthy();
+        });
+
+        it('signs when the signer instance is frozen', async () => {
+            const keyPair = await generateKeyPair();
+            const keyPairSigner = await createSignerFromKeyPair(keyPair);
+
+            setupMockWalletResponse(keyPairSigner.address);
+
+            const signer = await PrivySigner.create(mockConfig);
+
+            const messageContent = new Uint8Array([1, 2, 3, 4]);
+            const signature = await signBytes(keyPair.privateKey, messageContent);
+            setupMockSignMessageResponse(Buffer.from(signature).toString('base64'));
+
+            const [sigDict] = await assertSignerSurvivesFreeze(signer, () =>
+                signer.signMessages([createSignableMessage(messageContent)]),
+            );
+
             expect(sigDict?.[signer.address]).toBeTruthy();
         });
 

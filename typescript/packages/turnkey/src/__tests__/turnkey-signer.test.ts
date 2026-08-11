@@ -8,6 +8,7 @@ import {
     TransactionWithLifetime,
 } from '@solana/transactions';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createTurnkeySigner, TurnkeySigner } from '../turnkey-signer.js';
@@ -237,6 +238,27 @@ describe('TurnkeySigner', () => {
             const [sigDict] = await signer.signMessages([message]);
 
             expect(sigDict).toBeTruthy();
+            expect(sigDict?.[signer.address]).toBeTruthy();
+        });
+
+        it('signs when the signer instance is frozen', async () => {
+            const keyPair = await generateKeyPair();
+            const keyPairSigner = await createSignerFromKeyPair(keyPair);
+
+            const signer = new TurnkeySigner({ ...mockConfig, publicKey: keyPairSigner.address });
+
+            const messageContent = new Uint8Array([1, 2, 3, 4]);
+            const signature = await signBytes(keyPair.privateKey, messageContent);
+
+            setupMockSignResponse(
+                Buffer.from(signature.slice(0, 32)).toString('hex'),
+                Buffer.from(signature.slice(32, 64)).toString('hex'),
+            );
+
+            const [sigDict] = await assertSignerSurvivesFreeze(signer, () =>
+                signer.signMessages([createSignableMessage(messageContent)]),
+            );
+
             expect(sigDict?.[signer.address]).toBeTruthy();
         });
 

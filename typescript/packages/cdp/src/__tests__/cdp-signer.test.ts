@@ -2,6 +2,7 @@ import * as nodeCrypto from 'node:crypto';
 
 import { Address } from '@solana/addresses';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 import { generateKeyPairSigner } from '@solana/signers';
 import {
     type Base64EncodedWireTransaction,
@@ -212,6 +213,18 @@ describe('CdpSigner', () => {
             const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
             expect(url).toContain('/sign/message');
             expect(JSON.parse(init.body as string)).toMatchObject({ message: 'hello' });
+        });
+
+        it('signs when the signer instance is frozen', async () => {
+            const base58Sig = '5LfnqEfGPFBaHHeQBiNkgQ2EPy4FkVLKE7cjMYc7gv6EjE8Vs5gqaXcZHjpxr3yj5TMt7j3JdJPkXfnwXxXiNAh';
+            mockFetch.mockResolvedValue(new Response(JSON.stringify({ signature: base58Sig }), { status: 200 }));
+
+            const signer = await CdpSigner.create(makeConfig());
+            const message = { content: new TextEncoder().encode('hello'), signatures: {} };
+
+            const result = await assertSignerSurvivesFreeze(signer, () => signer.signMessages([message]));
+
+            expect(result[0]?.[TEST_ADDRESS as Address]).toBeDefined();
         });
 
         it('handles multiple messages with requestDelayMs', async () => {

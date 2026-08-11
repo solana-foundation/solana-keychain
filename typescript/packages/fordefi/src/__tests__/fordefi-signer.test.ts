@@ -3,6 +3,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { assertIsSolanaSigner, assertSignatureValid, extractSignatureFromWireTransaction } from '@solana/keychain-core';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
 import { isTransactionSendingSigner } from '@solana/signers';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
@@ -301,6 +302,20 @@ describe('FordefiSigner', () => {
             expect(postOpts.headers).toHaveProperty('Authorization', 'Bearer test-token');
             expect(postOpts.headers).toHaveProperty('x-signature');
             expect(postOpts.headers).toHaveProperty('x-timestamp');
+        });
+
+        it('signs when the signer instance is frozen', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse())
+                .mockResolvedValueOnce(mockCreateTxResponse())
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64));
+
+            const signer = await FordefiSigner.create(mockConfig);
+            const mockTx = { messageBytes: new Uint8Array(32) } as never;
+
+            const results = await assertSignerSurvivesFreeze(signer, () => signer.signTransactions([mockTx]));
+
+            expect(results[0]).toHaveProperty(MOCK_ADDRESS);
         });
 
         it('should return the raw Fordefi signature directly without wire-tx round-trip', async () => {
