@@ -12,7 +12,14 @@ from cryptography.hazmat.primitives.serialization import (
     NoEncryption,
     PrivateFormat,
 )
+from solders.hash import Hash
+from solders.instruction import AccountMeta, Instruction
 from solders.keypair import Keypair
+from solders.message import Message
+from solders.pubkey import Pubkey
+from solders.signature import Signature
+from solders.system_program import TransferParams, transfer
+from solders.transaction import Transaction
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.fordefi import (
@@ -22,6 +29,7 @@ from solana_keychain.fordefi import (
     PemRequestSigner,
     create_fordefi_signer,
 )
+from solana_keychain.fordefi.signer import COMPUTE_BUDGET_PROGRAM_ID
 from tests.util import create_test_transaction, create_two_signer_transaction
 
 API_BASE_URL = "https://fordefi.example.com"
@@ -373,11 +381,53 @@ async def test_sign_message_native_mode_uses_solana_message() -> None:
     }
 
 
-def make_signed_wire_transaction(keypair: Keypair) -> tuple[str, Any]:
-    transaction = create_test_transaction(keypair.pubkey())
+def rebuild_with_fresh_blockhash(
+    transaction: Transaction, extra_instructions: list[Instruction] | None = None
+) -> Transaction:
+    """The transaction as Fordefi returns it: fresh blockhash, optional added fees."""
+    instructions = (extra_instructions or []) + decompile_instructions(transaction)
+    message = Message.new_with_blockhash(
+        instructions, transaction.message.account_keys[0], Hash.new_unique()
+    )
+    return Transaction.new_unsigned(message)
+
+
+def decompile_instructions(transaction: Transaction) -> list[Instruction]:
+    message = transaction.message
+    keys = message.account_keys
+    header = message.header
+    signers = header.num_required_signatures
+    writable_signers = signers - header.num_readonly_signed_accounts
+    writable_unsigned_end = len(keys) - header.num_readonly_unsigned_accounts
+    return [
+        Instruction(
+            keys[compiled.program_id_index],
+            bytes(compiled.data),
+            [
+                AccountMeta(
+                    keys[index],
+                    is_signer=index < signers,
+                    is_writable=index < writable_signers
+                    or signers <= index < writable_unsigned_end,
+                )
+                for index in compiled.accounts
+            ],
+        )
+        for compiled in message.instructions
+    ]
+
+
+def sign_wire_transaction(keypair: Keypair, transaction: Transaction) -> tuple[str, Any]:
     signature = keypair.sign_message(transaction.message_data())
-    transaction.signatures = [signature]
+    required = transaction.message.header.num_required_signatures
+    transaction.signatures = [signature] + [Signature.default()] * (required - 1)
     return base64.b64encode(bytes(transaction)).decode("ascii"), signature
+
+
+def mock_native_response(keypair: Keypair, returned: Transaction) -> Any:
+    raw_transaction, signature = sign_wire_transaction(keypair, returned)
+    mock_sign_flow(status_response("completed", raw_transaction=raw_transaction))
+    return signature
 
 
 @respx.mock
@@ -386,12 +436,8 @@ async def test_sign_transaction_native_success() -> None:
     signer = make_signer(
         keypair, chain="solana_mainnet", fee={"type": "priority", "priority_level": "high"}
     )
-    raw_transaction, signature = make_signed_wire_transaction(keypair)
-    mock_sign_flow(
-        status_response("signed"),
-        status_response("completed", raw_transaction=raw_transaction),
-    )
     transaction = create_test_transaction(keypair.pubkey())
+    signature = mock_native_response(keypair, rebuild_with_fresh_blockhash(transaction))
 
     result = await signer.sign_transaction(transaction)
 
@@ -405,6 +451,25 @@ async def test_sign_transaction_native_success() -> None:
     assert body["details"]["push_mode"] == "auto"
     assert body["details"]["fee"] == {"type": "priority", "priority_level": "high"}
     assert body["details"]["data"] == base64.b64encode(transaction.message_data()).decode("ascii")
+
+
+@respx.mock
+async def test_sign_transaction_native_accepts_added_compute_budget_instructions() -> None:
+    """Fordefi sets the priority fee itself when the submitted message has no
+    ComputeBudget instructions, so those additions must not be rejected."""
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    transaction = create_test_transaction(keypair.pubkey())
+    set_compute_unit_price = Instruction(
+        COMPUTE_BUDGET_PROGRAM_ID, bytes([3]) + (5_000).to_bytes(8, "little"), []
+    )
+    signature = mock_native_response(
+        keypair, rebuild_with_fresh_blockhash(transaction, [set_compute_unit_price])
+    )
+
+    result = await signer.sign_transaction(transaction)
+
+    assert result.signature == signature
 
 
 @respx.mock
@@ -422,10 +487,73 @@ async def test_sign_transaction_native_verifies_against_returned_message() -> No
     keypair = Keypair()
     signer = make_signer(keypair, chain="solana_devnet")
     transaction = create_test_transaction(keypair.pubkey())
-    returned = create_test_transaction(keypair.pubkey())
+    returned = rebuild_with_fresh_blockhash(transaction)
     returned.signatures = [keypair.sign_message(transaction.message_data())]
     raw_transaction = base64.b64encode(bytes(returned)).decode("ascii")
     mock_sign_flow(status_response("completed", raw_transaction=raw_transaction))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+
+
+@respx.mock
+async def test_sign_transaction_native_rejects_substituted_recipient() -> None:
+    """A different transaction signed by the same vault must not be reported as
+    a successful signing of the submitted one."""
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    transaction = create_test_transaction(keypair.pubkey())
+    substituted = create_test_transaction(keypair.pubkey(), Pubkey.new_unique())
+    mock_native_response(keypair, substituted)
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+
+
+@respx.mock
+async def test_sign_transaction_native_rejects_changed_lamport_amount() -> None:
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    recipient = Pubkey.new_unique()
+    transaction = create_test_transaction(keypair.pubkey(), recipient)
+    inflated = transfer(
+        TransferParams(from_pubkey=keypair.pubkey(), to_pubkey=recipient, lamports=500_000_000)
+    )
+    returned = Transaction.new_unsigned(
+        Message.new_with_blockhash([inflated], keypair.pubkey(), Hash.new_unique())
+    )
+    mock_native_response(keypair, returned)
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+
+
+@respx.mock
+async def test_sign_transaction_native_rejects_dropped_instruction() -> None:
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    transaction = create_test_transaction(keypair.pubkey())
+    fee_only = Instruction(COMPUTE_BUDGET_PROGRAM_ID, bytes([3]) + (1).to_bytes(8, "little"), [])
+    returned = Transaction.new_unsigned(
+        Message.new_with_blockhash([fee_only], keypair.pubkey(), Hash.new_unique())
+    )
+    mock_native_response(keypair, returned)
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+
+
+@respx.mock
+async def test_sign_transaction_native_rejects_extra_signer_in_returned_transaction() -> None:
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    transaction = create_test_transaction(keypair.pubkey())
+    returned = create_two_signer_transaction(keypair.pubkey(), Keypair().pubkey())
+    mock_native_response(keypair, returned)
+
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_transaction(transaction)
     assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED

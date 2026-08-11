@@ -3,7 +3,9 @@ package fordefi
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -279,6 +281,95 @@ func (s *Signer) signSolanaMessage(ctx context.Context, message []byte) (solana.
 	return extractSignature(result)
 }
 
+// computeBudgetProgramID is the only program Fordefi may add instructions for:
+// it sets the priority fee when the submitted message carries none.
+var computeBudgetProgramID = solana.MustPublicKeyFromBase58("ComputeBudget111111111111111111111111111111")
+
+// resolvedInstruction is an instruction with its account indices resolved to
+// pubkeys and their signer and writable flags, so two messages stay comparable
+// even when they order or extend AccountKeys differently.
+type resolvedInstruction struct {
+	programID solana.PublicKey
+	accounts  string
+	data      string
+}
+
+func resolveInstructions(message *solana.Message) ([]resolvedInstruction, error) {
+	keys := message.AccountKeys
+	header := message.Header
+	signers := int(header.NumRequiredSignatures)
+	writableSigners := signers - int(header.NumReadonlySignedAccounts)
+	writableUnsignedEnd := len(keys) - int(header.NumReadonlyUnsignedAccounts)
+
+	indexOutOfRange := core.NewSignerError(core.CodeSerializationError,
+		"transaction references an account index outside its account keys")
+
+	resolved := make([]resolvedInstruction, 0, len(message.Instructions))
+	for _, instruction := range message.Instructions {
+		if int(instruction.ProgramIDIndex) >= len(keys) {
+			return nil, indexOutOfRange
+		}
+		var accounts strings.Builder
+		for _, index := range instruction.Accounts {
+			if int(index) >= len(keys) {
+				return nil, indexOutOfRange
+			}
+			writable := int(index) < writableSigners ||
+				(int(index) >= signers && int(index) < writableUnsignedEnd)
+			fmt.Fprintf(&accounts, "%s:%t:%t,", keys[index], int(index) < signers, writable)
+		}
+		resolved = append(resolved, resolvedInstruction{
+			programID: keys[instruction.ProgramIDIndex],
+			accounts:  accounts.String(),
+			data:      base64.StdEncoding.EncodeToString(instruction.Data),
+		})
+	}
+	return resolved, nil
+}
+
+// assertOnlyBlockhashAndFeeRewrites rejects a Fordefi-returned message that
+// changes more than Fordefi may change.
+//
+// Fordefi overwrites the recent blockhash immediately before signing, and adds
+// ComputeBudget instructions to set the priority fee when the submitted message
+// carries none. Everything else — the signer set, the fee payer, and every
+// submitted instruction — must survive verbatim, so a substituted transaction
+// cannot be reported as a successful signing result.
+func assertOnlyBlockhashAndFeeRewrites(requested, returned *solana.Message) error {
+	requestedSigners := int(requested.Header.NumRequiredSignatures)
+	returnedSigners := int(returned.Header.NumRequiredSignatures)
+	if requestedSigners > len(requested.AccountKeys) || returnedSigners > len(returned.AccountKeys) ||
+		!slices.Equal(requested.AccountKeys[:requestedSigners], returned.AccountKeys[:returnedSigners]) {
+		return core.NewSignerError(core.CodeSigningFailed,
+			"Fordefi returned a transaction with a different signer set")
+	}
+
+	submitted, err := resolveInstructions(requested)
+	if err != nil {
+		return err
+	}
+	returnedInstructions, err := resolveInstructions(returned)
+	if err != nil {
+		return err
+	}
+
+	matched := 0
+	for _, instruction := range returnedInstructions {
+		switch {
+		case matched < len(submitted) && instruction == submitted[matched]:
+			matched++
+		case !instruction.programID.Equals(computeBudgetProgramID):
+			return core.NewSignerError(core.CodeSigningFailed,
+				"Fordefi returned a transaction with instructions that do not match the submitted message")
+		}
+	}
+	if matched != len(submitted) {
+		return core.NewSignerError(core.CodeSigningFailed,
+			"Fordefi returned a transaction missing submitted instructions")
+	}
+	return nil
+}
+
 // requireSoleRequiredSigner rejects native-mode transactions with additional
 // required signers: native auto-broadcast submits message bytes only, so other
 // signers' partial signatures would be dropped.
@@ -294,7 +385,9 @@ func (s *Signer) requireSoleRequiredSigner(tx *solana.Transaction) error {
 // signTransactionNative signs tx via the native solana_transaction path.
 // Fordefi may modify the transaction (at minimum the blockhash), so the
 // signature is verified against the returned message bytes and tx is replaced
-// with the returned transaction.
+// with the returned transaction. The returned transaction must otherwise match
+// the submitted one: only a fresh blockhash and added ComputeBudget
+// instructions are accepted.
 func (s *Signer) signTransactionNative(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if err := s.requireSoleRequiredSigner(tx); err != nil {
 		return core.SignedTransaction{}, err
@@ -357,6 +450,10 @@ func (s *Signer) signTransactionNative(ctx context.Context, tx *solana.Transacti
 	if !core.VerifyEd25519(s.pubkey, returnedMessage, signature) {
 		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
 			"signature verification failed against Fordefi-returned message")
+	}
+
+	if err := assertOnlyBlockhashAndFeeRewrites(&tx.Message, &returned.Message); err != nil {
+		return core.SignedTransaction{}, err
 	}
 
 	*tx = *returned

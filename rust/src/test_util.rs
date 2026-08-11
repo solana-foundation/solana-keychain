@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use crate::sdk_adapter::{AccountMeta, Hash, Instruction, Message, Pubkey, Transaction};
 
-fn create_transfer_instruction(from: &Pubkey, to: &Pubkey, lamports: u64) -> Instruction {
+pub fn create_transfer_instruction(from: &Pubkey, to: &Pubkey, lamports: u64) -> Instruction {
     Instruction {
         program_id: Pubkey::from_str("11111111111111111111111111111111").unwrap(),
         accounts: vec![AccountMeta::new(*from, true), AccountMeta::new(*to, false)],

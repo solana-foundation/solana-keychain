@@ -48,6 +48,7 @@
         "@solana/codecs-strings": ">=6.0.1",
         "@solana/keys": ">=6.0.1",
         "@solana/signers": ">=6.0.1",
+        "@solana/transaction-messages": ">=6.0.1",
         "@solana/transactions": ">=6.0.1"
     },
     "publishConfig": {
@@ -56,9 +57,11 @@
     "devDependencies": {
         "@solana/addresses": "^7.0.0",
         "@solana/codecs-strings": "^7.0.0",
+        "@solana/instructions": "^7.0.0",
         "@solana/keychain-test-utils": "workspace:*",
         "@solana/keys": "^7.0.0",
         "@solana/signers": "^7.0.0",
+        "@solana/transaction-messages": "^7.0.0",
         "@solana/transactions": "^7.0.0",
         "dotenv": "^17.4.2"
     }

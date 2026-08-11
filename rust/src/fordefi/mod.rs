@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::SignerError;
 use crate::http_client_config::HttpClientConfig;
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Message, Pubkey, Signature, Transaction};
 use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
 use crate::transaction_util::TransactionUtil;
 pub use request_signer::{FordefiRequestSigner, PemRequestSigner};
@@ -30,6 +30,97 @@ const DEFAULT_POLL_INTERVAL_MS: u64 = 2000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 50;
 const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const VAULT_VERIFICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const COMPUTE_BUDGET_PROGRAM_ID: &str = "ComputeBudget111111111111111111111111111111";
+
+/// An instruction with its account indices resolved to pubkeys and their signer
+/// and writable flags, so two messages stay comparable even when they order or
+/// extend `account_keys` differently.
+type ResolvedInstruction = (Pubkey, Vec<(Pubkey, bool, bool)>, Vec<u8>);
+
+fn resolved_instructions(message: &Message) -> Result<Vec<ResolvedInstruction>, SignerError> {
+    let keys = &message.account_keys;
+    let header = &message.header;
+    let signers = header.num_required_signatures as usize;
+    let writable_signers = signers.saturating_sub(header.num_readonly_signed_accounts as usize);
+    let writable_unsigned_end = keys
+        .len()
+        .saturating_sub(header.num_readonly_unsigned_accounts as usize);
+
+    let key_at = |index: usize| -> Result<Pubkey, SignerError> {
+        keys.get(index).copied().ok_or_else(|| {
+            SignerError::SerializationError(
+                "Transaction references an account index outside its account keys".to_string(),
+            )
+        })
+    };
+
+    message
+        .instructions
+        .iter()
+        .map(|instruction| {
+            let accounts = instruction
+                .accounts
+                .iter()
+                .map(|&index| {
+                    let index = index as usize;
+                    Ok((
+                        key_at(index)?,
+                        index < signers,
+                        index < writable_signers
+                            || (index >= signers && index < writable_unsigned_end),
+                    ))
+                })
+                .collect::<Result<Vec<_>, SignerError>>()?;
+            Ok((
+                key_at(instruction.program_id_index as usize)?,
+                accounts,
+                instruction.data.clone(),
+            ))
+        })
+        .collect()
+}
+
+/// Reject a Fordefi-returned message that changes more than Fordefi may change.
+///
+/// Fordefi overwrites the recent blockhash immediately before signing, and adds
+/// ComputeBudget instructions to set the priority fee when the submitted message
+/// carries none. Everything else — the signer set, the fee payer, and every
+/// submitted instruction — must survive verbatim, so a substituted transaction
+/// cannot be reported as a successful signing result.
+fn assert_only_blockhash_and_fee_rewrites(
+    requested: &Message,
+    returned: &Message,
+) -> Result<(), SignerError> {
+    let requested_signers = requested.header.num_required_signatures as usize;
+    let returned_signers = returned.header.num_required_signatures as usize;
+    if requested.account_keys.get(..requested_signers)
+        != returned.account_keys.get(..returned_signers)
+    {
+        return Err(SignerError::SigningFailed(
+            "Fordefi returned a transaction with a different signer set".to_string(),
+        ));
+    }
+
+    let submitted = resolved_instructions(requested)?;
+    let mut matched = 0;
+    for instruction in resolved_instructions(returned)? {
+        if matched < submitted.len() && instruction == submitted[matched] {
+            matched += 1;
+        } else if instruction.0.to_string() != COMPUTE_BUDGET_PROGRAM_ID {
+            return Err(SignerError::SigningFailed(
+                "Fordefi returned a transaction with instructions that do not match the \
+                 submitted message"
+                    .to_string(),
+            ));
+        }
+    }
+    if matched != submitted.len() {
+        return Err(SignerError::SigningFailed(
+            "Fordefi returned a transaction missing submitted instructions".to_string(),
+        ));
+    }
+    Ok(())
+}
 
 /// Configuration for creating a FordefiSigner.
 #[derive(Clone)]
@@ -486,6 +577,10 @@ impl FordefiSigner {
     /// returned message bytes, not the original. The caller's `transaction` is
     /// replaced with the Fordefi-returned transaction.
     ///
+    /// The returned transaction is checked against the submitted one first: a
+    /// fresh blockhash and added ComputeBudget instructions are accepted, any
+    /// other difference is a [`SignerError::SigningFailed`].
+    ///
     /// Because native mode uses `push_mode: "auto"`, Fordefi has already broadcast
     /// the transaction on-chain by the time this returns. Re-sending it would be
     /// superfluous, so the returned serialized-transaction string is intentionally
@@ -538,6 +633,8 @@ impl FordefiSigner {
                 "Signature verification failed against Fordefi-returned message".to_string(),
             ));
         }
+
+        assert_only_blockhash_and_fee_rewrites(&transaction.message, &returned_tx.message)?;
 
         // Replace the caller's transaction with the Fordefi-signed one
         *transaction = returned_tx;
@@ -750,8 +847,11 @@ impl SolanaSigner for FordefiSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sdk_adapter::{keypair_pubkey, Keypair, Signer as SdkSigner};
-    use crate::test_util::create_test_transaction;
+    use crate::sdk_adapter::{keypair_pubkey, Hash, Instruction, Keypair, Signer as SdkSigner};
+    use crate::test_util::{
+        create_test_transaction, create_test_transaction_with_recipient,
+        create_transfer_instruction,
+    };
     use p256::ecdsa::SigningKey;
     use wiremock::{
         matchers::{header, method, path, path_regex},
@@ -1676,6 +1776,147 @@ mod tests {
             "native mode should return an empty serialized transaction"
         );
         assert!(sig.verify(&pubkey.to_bytes(), &message_data));
+    }
+
+    /// Fordefi's own rewrite: same instructions, freshly stamped blockhash.
+    fn with_fresh_blockhash(tx: &Transaction) -> Transaction {
+        let mut rewritten = tx.clone();
+        rewritten.message.recent_blockhash = Hash::new_unique();
+        rewritten
+    }
+
+    fn compute_budget_instruction() -> Instruction {
+        Instruction {
+            program_id: Pubkey::from_str(COMPUTE_BUDGET_PROGRAM_ID).unwrap(),
+            accounts: vec![],
+            data: {
+                let mut data = vec![3];
+                data.extend_from_slice(&5_000u64.to_le_bytes());
+                data
+            },
+        }
+    }
+
+    #[test]
+    fn test_fordefi_native_accepts_fresh_blockhash() {
+        let pubkey = Pubkey::new_unique();
+        let tx = create_test_transaction(&pubkey);
+        let returned = with_fresh_blockhash(&tx);
+
+        assert!(
+            assert_only_blockhash_and_fee_rewrites(&tx.message, &returned.message).is_ok(),
+            "a re-stamped blockhash is Fordefi's documented rewrite"
+        );
+    }
+
+    /// Fordefi sets the priority fee itself when the submitted message carries no
+    /// ComputeBudget instructions, so those additions must not be rejected.
+    #[test]
+    fn test_fordefi_native_accepts_added_compute_budget_instructions() {
+        let pubkey = Pubkey::new_unique();
+        let recipient = Pubkey::new_unique();
+        let tx = create_test_transaction_with_recipient(&pubkey, &recipient);
+
+        let instructions = vec![
+            compute_budget_instruction(),
+            create_transfer_instruction(&pubkey, &recipient, 1_000_000),
+        ];
+        let mut returned = Transaction::new_unsigned(Message::new(&instructions, Some(&pubkey)));
+        returned.message.recent_blockhash = Hash::new_unique();
+
+        assert!(
+            assert_only_blockhash_and_fee_rewrites(&tx.message, &returned.message).is_ok(),
+            "Fordefi-added priority fee instructions must be accepted"
+        );
+    }
+
+    #[test]
+    fn test_fordefi_native_rejects_substituted_recipient() {
+        let pubkey = Pubkey::new_unique();
+        let tx = create_test_transaction(&pubkey);
+        let substituted = create_test_transaction(&pubkey);
+
+        let result = assert_only_blockhash_and_fee_rewrites(&tx.message, &substituted.message);
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    #[test]
+    fn test_fordefi_native_rejects_changed_lamport_amount() {
+        let pubkey = Pubkey::new_unique();
+        let recipient = Pubkey::new_unique();
+        let tx = create_test_transaction_with_recipient(&pubkey, &recipient);
+
+        let mut returned = tx.clone();
+        let data = &mut returned.message.instructions[0].data;
+        let inflated = 500_000_000u64.to_le_bytes();
+        data[4..12].copy_from_slice(&inflated);
+
+        let result = assert_only_blockhash_and_fee_rewrites(&tx.message, &returned.message);
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    #[test]
+    fn test_fordefi_native_rejects_dropped_instruction() {
+        let pubkey = Pubkey::new_unique();
+        let tx = create_test_transaction(&pubkey);
+        let returned =
+            Transaction::new_unsigned(Message::new(&[compute_budget_instruction()], Some(&pubkey)));
+
+        let result = assert_only_blockhash_and_fee_rewrites(&tx.message, &returned.message);
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    #[test]
+    fn test_fordefi_native_rejects_extra_signer() {
+        let pubkey = Pubkey::new_unique();
+        let tx = create_test_transaction(&pubkey);
+
+        let mut returned = tx.clone();
+        returned
+            .message
+            .account_keys
+            .insert(1, Pubkey::new_unique());
+        returned.message.header.num_required_signatures = 2;
+
+        let result = assert_only_blockhash_and_fee_rewrites(&tx.message, &returned.message);
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    /// A different transaction validly signed by the same vault must not come back
+    /// through `sign_transaction` as a successful signing of the submitted one.
+    #[tokio::test]
+    async fn test_fordefi_native_sign_transaction_rejects_substituted_transaction() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_test_signer(&mock_server.uri(), pubkey);
+
+        let substituted = create_test_transaction(&pubkey);
+        let wire_b64 = STANDARD.encode(build_mock_wire_transaction(
+            &keypair,
+            &substituted.message_data(),
+        ));
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "native-tx-1"
+            })))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/transactions/native-tx-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "state": "completed",
+                "raw_transaction": wire_b64
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let mut tx = create_test_transaction(&pubkey);
+        let result = signer.sign_transaction(&mut tx).await;
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
     }
 
     #[tokio::test]
