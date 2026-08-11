@@ -42,6 +42,7 @@ DEFAULT_MAX_POLL_ATTEMPTS = 50
 SUPPORTED_CHAINS = ("solana_devnet", "solana_mainnet")
 
 COMPUTE_BUDGET_PROGRAM_ID = Pubkey.from_string("ComputeBudget111111111111111111111111111111")
+_FEE_SETTING_COMPUTE_BUDGET_OPCODES = (2, 3)
 
 _AVAILABILITY_TIMEOUT_SECONDS = 5.0
 _VAULT_VERIFICATION_TIMEOUT_SECONDS = 10.0
@@ -102,14 +103,24 @@ def _resolved_instructions(message: Message) -> list[_ResolvedInstruction]:
         ) from None
 
 
+def _is_fee_setting_instruction(instruction: _ResolvedInstruction) -> bool:
+    program_id, _, data = instruction
+    return (
+        program_id == COMPUTE_BUDGET_PROGRAM_ID
+        and len(data) >= 1
+        and data[0] in _FEE_SETTING_COMPUTE_BUDGET_OPCODES
+    )
+
+
 def _assert_only_blockhash_and_fee_rewrites(requested: Message, returned: Message) -> None:
     """Reject a Fordefi-returned message that changes more than Fordefi may change.
 
-    Fordefi overwrites the recent blockhash immediately before signing, and adds
-    ComputeBudget instructions to set the priority fee when the submitted
-    message contains none. Everything else — the signer set, the fee payer, and
-    every submitted instruction — must survive verbatim, so a substituted
-    transaction cannot be reported as a successful signing result.
+    Fordefi overwrites the recent blockhash immediately before signing, and sets
+    the priority fee — SetComputeUnitLimit / SetComputeUnitPrice — only when the
+    submitted message contains no ComputeBudget instructions of its own.
+    Everything else — the signer set, the fee payer, and every submitted
+    instruction — must survive verbatim, so a substituted transaction cannot be
+    reported as a successful signing result.
     """
     requested_signers = requested.account_keys[: requested.header.num_required_signatures]
     returned_signers = returned.account_keys[: returned.header.num_required_signatures]
@@ -120,11 +131,14 @@ def _assert_only_blockhash_and_fee_rewrites(requested: Message, returned: Messag
         )
 
     submitted = _resolved_instructions(requested)
+    fordefi_may_add_fees = all(
+        instruction[0] != COMPUTE_BUDGET_PROGRAM_ID for instruction in submitted
+    )
     matched = 0
     for instruction in _resolved_instructions(returned):
         if matched < len(submitted) and instruction == submitted[matched]:
             matched += 1
-        elif instruction[0] != COMPUTE_BUDGET_PROGRAM_ID:
+        elif not (fordefi_may_add_fees and _is_fee_setting_instruction(instruction)):
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED,
                 "Fordefi returned a transaction with instructions that do not match "
@@ -414,8 +428,9 @@ class FordefiSigner(SolanaSigner):
         the configured vault are supported.
 
         The transaction Fordefi returns is checked against the submitted one:
-        a fresh blockhash and added ComputeBudget instructions are accepted,
-        any other difference raises ``SIGNING_FAILED``.
+        a fresh blockhash is accepted, as are added fee-setting ComputeBudget
+        instructions when the submitted message carried none. Any other
+        difference raises ``SIGNING_FAILED``.
         """
         if self._chain is not None:
             return await self._sign_transaction_native(transaction)

@@ -31,6 +31,7 @@ const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 50;
 const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const VAULT_VERIFICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const COMPUTE_BUDGET_PROGRAM_ID: &str = "ComputeBudget111111111111111111111111111111";
+const FEE_SETTING_COMPUTE_BUDGET_OPCODES: [u8; 2] = [2, 3];
 
 /// An instruction with its account indices resolved to pubkeys and their signer
 /// and writable flags, so two messages stay comparable even when they order or
@@ -80,13 +81,26 @@ fn resolved_instructions(message: &Message) -> Result<Vec<ResolvedInstruction>, 
         .collect()
 }
 
+fn is_compute_budget(instruction: &ResolvedInstruction) -> bool {
+    instruction.0.to_string() == COMPUTE_BUDGET_PROGRAM_ID
+}
+
+fn is_fee_setting_instruction(instruction: &ResolvedInstruction) -> bool {
+    is_compute_budget(instruction)
+        && instruction
+            .2
+            .first()
+            .is_some_and(|opcode| FEE_SETTING_COMPUTE_BUDGET_OPCODES.contains(opcode))
+}
+
 /// Reject a Fordefi-returned message that changes more than Fordefi may change.
 ///
-/// Fordefi overwrites the recent blockhash immediately before signing, and adds
-/// ComputeBudget instructions to set the priority fee when the submitted message
-/// carries none. Everything else — the signer set, the fee payer, and every
-/// submitted instruction — must survive verbatim, so a substituted transaction
-/// cannot be reported as a successful signing result.
+/// Fordefi overwrites the recent blockhash immediately before signing, and sets
+/// the priority fee — SetComputeUnitLimit / SetComputeUnitPrice — only when the
+/// submitted message carries no ComputeBudget instructions of its own.
+/// Everything else — the signer set, the fee payer, and every submitted
+/// instruction — must survive verbatim, so a substituted transaction cannot be
+/// reported as a successful signing result.
 fn assert_only_blockhash_and_fee_rewrites(
     requested: &Message,
     returned: &Message,
@@ -102,11 +116,12 @@ fn assert_only_blockhash_and_fee_rewrites(
     }
 
     let submitted = resolved_instructions(requested)?;
+    let fordefi_may_add_fees = !submitted.iter().any(is_compute_budget);
     let mut matched = 0;
     for instruction in resolved_instructions(returned)? {
         if matched < submitted.len() && instruction == submitted[matched] {
             matched += 1;
-        } else if instruction.0.to_string() != COMPUTE_BUDGET_PROGRAM_ID {
+        } else if !(fordefi_may_add_fees && is_fee_setting_instruction(&instruction)) {
             return Err(SignerError::SigningFailed(
                 "Fordefi returned a transaction with instructions that do not match the \
                  submitted message"
@@ -578,8 +593,9 @@ impl FordefiSigner {
     /// replaced with the Fordefi-returned transaction.
     ///
     /// The returned transaction is checked against the submitted one first: a
-    /// fresh blockhash and added ComputeBudget instructions are accepted, any
-    /// other difference is a [`SignerError::SigningFailed`].
+    /// fresh blockhash is accepted, as are added fee-setting ComputeBudget
+    /// instructions when the submitted message carried none. Any other
+    /// difference is a [`SignerError::SigningFailed`].
     ///
     /// Because native mode uses `push_mode: "auto"`, Fordefi has already broadcast
     /// the transaction on-chain by the time this returns. Re-sending it would be
@@ -1785,16 +1801,21 @@ mod tests {
         rewritten
     }
 
-    fn compute_budget_instruction() -> Instruction {
+    fn compute_budget_instruction_with_opcode(opcode: u8) -> Instruction {
         Instruction {
             program_id: Pubkey::from_str(COMPUTE_BUDGET_PROGRAM_ID).unwrap(),
             accounts: vec![],
             data: {
-                let mut data = vec![3];
+                let mut data = vec![opcode];
                 data.extend_from_slice(&5_000u64.to_le_bytes());
                 data
             },
         }
+    }
+
+    /// SetComputeUnitPrice, the fee rewrite Fordefi performs.
+    fn compute_budget_instruction() -> Instruction {
+        compute_budget_instruction_with_opcode(3)
     }
 
     #[test]
@@ -1828,6 +1849,52 @@ mod tests {
             assert_only_blockhash_and_fee_rewrites(&tx.message, &returned.message).is_ok(),
             "Fordefi-added priority fee instructions must be accepted"
         );
+    }
+
+    /// Fordefi only sets fees for requests carrying no ComputeBudget
+    /// instructions, so an addition alongside caller-supplied compute controls
+    /// is a substitution.
+    #[test]
+    fn test_fordefi_native_rejects_added_fees_when_request_had_compute_budget() {
+        let pubkey = Pubkey::new_unique();
+        let recipient = Pubkey::new_unique();
+        let transfer = create_transfer_instruction(&pubkey, &recipient, 1_000_000);
+
+        let tx = Transaction::new_unsigned(Message::new(
+            &[compute_budget_instruction(), transfer.clone()],
+            Some(&pubkey),
+        ));
+        let returned = Transaction::new_unsigned(Message::new(
+            &[
+                compute_budget_instruction(),
+                compute_budget_instruction_with_opcode(3),
+                transfer,
+            ],
+            Some(&pubkey),
+        ));
+
+        let result = assert_only_blockhash_and_fee_rewrites(&tx.message, &returned.message);
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    /// Only SetComputeUnitLimit and SetComputeUnitPrice are fee-setting; a
+    /// RequestHeapFrame addition is not something Fordefi does.
+    #[test]
+    fn test_fordefi_native_rejects_non_fee_compute_budget_addition() {
+        let pubkey = Pubkey::new_unique();
+        let recipient = Pubkey::new_unique();
+        let tx = create_test_transaction_with_recipient(&pubkey, &recipient);
+
+        let returned = Transaction::new_unsigned(Message::new(
+            &[
+                compute_budget_instruction_with_opcode(1),
+                create_transfer_instruction(&pubkey, &recipient, 1_000_000),
+            ],
+            Some(&pubkey),
+        ));
+
+        let result = assert_only_blockhash_and_fee_rewrites(&tx.message, &returned.message);
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
     }
 
     #[test]
