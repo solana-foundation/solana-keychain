@@ -453,23 +453,84 @@ async def test_sign_transaction_native_success() -> None:
     assert body["details"]["data"] == base64.b64encode(transaction.message_data()).decode("ascii")
 
 
+def set_compute_unit_price_instruction(micro_lamports: int = 5_000) -> Instruction:
+    return Instruction(
+        COMPUTE_BUDGET_PROGRAM_ID, bytes([3]) + micro_lamports.to_bytes(8, "little"), []
+    )
+
+
+def set_compute_unit_limit_instruction(units: int = 200_000) -> Instruction:
+    return Instruction(COMPUTE_BUDGET_PROGRAM_ID, bytes([2]) + units.to_bytes(4, "little"), [])
+
+
 @respx.mock
-async def test_sign_transaction_native_accepts_added_compute_budget_instructions() -> None:
+async def test_sign_transaction_native_accepts_added_fee_instructions() -> None:
     """Fordefi sets the priority fee itself when the submitted message has no
     ComputeBudget instructions, so those additions must not be rejected."""
     keypair = Keypair()
     signer = make_signer(keypair, chain="solana_devnet")
     transaction = create_test_transaction(keypair.pubkey())
-    set_compute_unit_price = Instruction(
-        COMPUTE_BUDGET_PROGRAM_ID, bytes([3]) + (5_000).to_bytes(8, "little"), []
-    )
     signature = mock_native_response(
-        keypair, rebuild_with_fresh_blockhash(transaction, [set_compute_unit_price])
+        keypair,
+        rebuild_with_fresh_blockhash(
+            transaction,
+            [set_compute_unit_limit_instruction(), set_compute_unit_price_instruction()],
+        ),
     )
 
     result = await signer.sign_transaction(transaction)
 
     assert result.signature == signature
+
+
+@respx.mock
+async def test_sign_transaction_native_rejects_added_fees_when_request_had_compute_budget() -> None:
+    """Fordefi only sets fees for requests carrying no ComputeBudget instructions,
+    so an addition alongside caller-supplied compute controls is a substitution."""
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    recipient = Pubkey.new_unique()
+    transfer_ix = transfer(
+        TransferParams(from_pubkey=keypair.pubkey(), to_pubkey=recipient, lamports=1_000_000)
+    )
+    transaction = Transaction.new_unsigned(
+        Message.new_with_blockhash(
+            [set_compute_unit_price_instruction(10), transfer_ix], keypair.pubkey(), Hash.default()
+        )
+    )
+    returned = Transaction.new_unsigned(
+        Message.new_with_blockhash(
+            [
+                set_compute_unit_price_instruction(10),
+                set_compute_unit_price_instruction(10_000_000),
+                transfer_ix,
+            ],
+            keypair.pubkey(),
+            Hash.new_unique(),
+        )
+    )
+    mock_native_response(keypair, returned)
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+
+
+@respx.mock
+async def test_sign_transaction_native_rejects_non_fee_compute_budget_addition() -> None:
+    """Only SetComputeUnitLimit and SetComputeUnitPrice are fee-setting; a
+    RequestHeapFrame addition is not something Fordefi does."""
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    transaction = create_test_transaction(keypair.pubkey())
+    request_heap_frame = Instruction(
+        COMPUTE_BUDGET_PROGRAM_ID, bytes([1]) + (256 * 1024).to_bytes(4, "little"), []
+    )
+    mock_native_response(keypair, rebuild_with_fresh_blockhash(transaction, [request_heap_frame]))
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
 
 
 @respx.mock

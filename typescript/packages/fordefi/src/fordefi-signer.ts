@@ -65,6 +65,8 @@ const FAILURE_STATES = new Set([
 
 /** The only program Fordefi may add instructions for: it sets the priority fee. */
 const COMPUTE_BUDGET_PROGRAM_ADDRESS = 'ComputeBudget111111111111111111111111111111' as Address;
+/** SetComputeUnitLimit and SetComputeUnitPrice, the fee rewrites Fordefi performs. */
+const FEE_SETTING_COMPUTE_BUDGET_OPCODES = new Set([2, 3]);
 
 /** Legacy and v0 compiled messages; v1 stores instructions in a different shape. */
 type CompiledMessageWithInstructions = Extract<CompiledTransactionMessage, { instructions: readonly unknown[] }>;
@@ -83,7 +85,17 @@ function assertHasInstructions(message: CompiledTransactionMessage): CompiledMes
  * so two compiled messages stay comparable even when they order or extend
  * `staticAccounts` differently.
  */
-function resolveInstructions(message: CompiledMessageWithInstructions): { key: string; programAddress: Address }[] {
+type ResolvedInstruction = { key: string; opcode: number | undefined; programAddress: Address };
+
+function isFeeSettingInstruction(instruction: ResolvedInstruction): boolean {
+    return (
+        instruction.programAddress === COMPUTE_BUDGET_PROGRAM_ADDRESS &&
+        instruction.opcode !== undefined &&
+        FEE_SETTING_COMPUTE_BUDGET_OPCODES.has(instruction.opcode)
+    );
+}
+
+function resolveInstructions(message: CompiledMessageWithInstructions): ResolvedInstruction[] {
     const accounts = message.staticAccounts;
     const { numReadonlyNonSignerAccounts, numReadonlySignerAccounts, numSignerAccounts } = message.header;
     const writableSignerEnd = numSignerAccounts - numReadonlySignerAccounts;
@@ -106,17 +118,22 @@ function resolveInstructions(message: CompiledMessageWithInstructions): { key: s
             return `${addressAt(index)}:${index < numSignerAccounts}:${isWritable}`;
         });
         const programAddress = addressAt(instruction.programAddressIndex);
-        const data = Array.from(instruction.data ?? []).join(',');
-        return { key: `${programAddress}|${metas.join(',')}|${data}`, programAddress };
+        const dataBytes = Array.from(instruction.data ?? []);
+        return {
+            key: `${programAddress}|${metas.join(',')}|${dataBytes.join(',')}`,
+            opcode: dataBytes[0],
+            programAddress,
+        };
     });
 }
 
 /**
  * Rejects a Fordefi-returned message that changes more than Fordefi may change.
  *
- * Fordefi overwrites the recent blockhash immediately before signing, and adds
- * ComputeBudget instructions to set the priority fee when the submitted message
- * carries none. Everything else — the signer set, the fee payer, and every
+ * Fordefi overwrites the recent blockhash immediately before signing, and sets
+ * the priority fee (SetComputeUnitLimit / SetComputeUnitPrice) only when the
+ * submitted message carries no ComputeBudget instructions of its own.
+ * Everything else — the signer set, the fee payer, and every
  * submitted instruction — must survive verbatim, so a substituted transaction
  * cannot be reported as a successful signing result.
  */
@@ -138,11 +155,14 @@ function assertOnlyBlockhashAndFeeRewrites(requestedBytes: TransactionMessageByt
     }
 
     const submitted = resolveInstructions(requested);
+    const fordefiMayAddFees = submitted.every(
+        instruction => instruction.programAddress !== COMPUTE_BUDGET_PROGRAM_ADDRESS,
+    );
     let matched = 0;
     for (const instruction of resolveInstructions(returned)) {
         if (matched < submitted.length && instruction.key === submitted[matched]!.key) {
             matched++;
-        } else if (instruction.programAddress !== COMPUTE_BUDGET_PROGRAM_ADDRESS) {
+        } else if (!(fordefiMayAddFees && isFeeSettingInstruction(instruction))) {
             throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                 message: 'Fordefi returned a transaction with instructions that do not match the submitted message',
             });
@@ -565,7 +585,8 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
      * dictionary to be applied to the caller's original message.
      *
      * The returned transaction is checked against the submitted one: a fresh
-     * blockhash and added ComputeBudget instructions are accepted, any other
+     * blockhash is accepted, as are added fee-setting ComputeBudget
+     * instructions when the submitted message carried none. Any other
      * difference rejects with `SIGNER_SIGNING_FAILED`.
      */
     private async signAndSendNativeTransactions(

@@ -98,11 +98,18 @@ function transferInstruction(recipient: Address, lamports: number): Instruction 
     };
 }
 
-function setComputeUnitPriceInstruction(): Instruction {
-    return {
-        data: new Uint8Array([3, 136, 19, 0, 0, 0, 0, 0, 0]),
-        programAddress: COMPUTE_BUDGET_PROGRAM_ADDRESS,
-    };
+function setComputeUnitPriceInstruction(microLamports = 5000): Instruction {
+    const data = new Uint8Array(9);
+    data[0] = 3;
+    new DataView(data.buffer).setBigUint64(1, BigInt(microLamports), true);
+    return { data, programAddress: COMPUTE_BUDGET_PROGRAM_ADDRESS };
+}
+
+function requestHeapFrameInstruction(): Instruction {
+    const data = new Uint8Array(5);
+    data[0] = 1;
+    new DataView(data.buffer).setUint32(1, 256 * 1024, true);
+    return { data, programAddress: COMPUTE_BUDGET_PROGRAM_ADDRESS };
 }
 
 /** Compile a real legacy transaction message and return its wire message bytes. */
@@ -640,6 +647,61 @@ describe('FordefiSigner', () => {
             const signer = await FordefiSigner.create(nativeConfig);
             const results = await signer.signAndSendTransactions([mockNativeTransaction()]);
             expect(results).toHaveLength(1);
+        });
+
+        /**
+         * Fordefi only sets fees for requests carrying no ComputeBudget instructions,
+         * so an addition alongside caller-supplied compute controls is a substitution.
+         */
+        it('should reject added fee instructions when the request already had ComputeBudget', async () => {
+            const submitted = {
+                messageBytes: compiledMessageBytes([
+                    setComputeUnitPriceInstruction(10),
+                    transferInstruction(RECIPIENT_ADDRESS, 1_000_000),
+                ]),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+            const wireTx = mockWireTransaction(
+                compiledMessageBytes(
+                    [
+                        setComputeUnitPriceInstruction(10),
+                        setComputeUnitPriceInstruction(10_000_000),
+                        transferInstruction(RECIPIENT_ADDRESS, 1_000_000),
+                    ],
+                    FRESH_BLOCKHASH,
+                ),
+            );
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse())
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-double-fee'))
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
+
+            const signer = await FordefiSigner.create(nativeConfig);
+            await expect(signer.signAndSendTransactions([submitted])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+        });
+
+        /**
+         * Only SetComputeUnitLimit and SetComputeUnitPrice are fee-setting; a
+         * RequestHeapFrame addition is not something Fordefi does.
+         */
+        it('should reject a non-fee ComputeBudget addition', async () => {
+            const wireTx = mockWireTransaction(
+                compiledMessageBytes(
+                    [requestHeapFrameInstruction(), transferInstruction(RECIPIENT_ADDRESS, 1_000_000)],
+                    FRESH_BLOCKHASH,
+                ),
+            );
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse())
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-heap'))
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
+
+            const signer = await FordefiSigner.create(nativeConfig);
+            await expect(signer.signAndSendTransactions([mockNativeTransaction()])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
         });
 
         /**

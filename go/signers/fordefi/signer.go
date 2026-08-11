@@ -285,6 +285,11 @@ func (s *Signer) signSolanaMessage(ctx context.Context, message []byte) (solana.
 // it sets the priority fee when the submitted message carries none.
 var computeBudgetProgramID = solana.MustPublicKeyFromBase58("ComputeBudget111111111111111111111111111111")
 
+const (
+	setComputeUnitLimitOpcode = 2
+	setComputeUnitPriceOpcode = 3
+)
+
 // resolvedInstruction is an instruction with its account indices resolved to
 // pubkeys and their signer and writable flags, so two messages stay comparable
 // even when they order or extend AccountKeys differently.
@@ -292,6 +297,13 @@ type resolvedInstruction struct {
 	programID solana.PublicKey
 	accounts  string
 	data      string
+	opcode    byte
+	hasOpcode bool
+}
+
+func (r resolvedInstruction) isFeeSetting() bool {
+	return r.programID.Equals(computeBudgetProgramID) && r.hasOpcode &&
+		(r.opcode == setComputeUnitLimitOpcode || r.opcode == setComputeUnitPriceOpcode)
 }
 
 func resolveInstructions(message *solana.Message) ([]resolvedInstruction, error) {
@@ -318,11 +330,16 @@ func resolveInstructions(message *solana.Message) ([]resolvedInstruction, error)
 				(int(index) >= signers && int(index) < writableUnsignedEnd)
 			fmt.Fprintf(&accounts, "%s:%t:%t,", keys[index], int(index) < signers, writable)
 		}
-		resolved = append(resolved, resolvedInstruction{
+		entry := resolvedInstruction{
 			programID: keys[instruction.ProgramIDIndex],
 			accounts:  accounts.String(),
 			data:      base64.StdEncoding.EncodeToString(instruction.Data),
-		})
+		}
+		if len(instruction.Data) > 0 {
+			entry.opcode = instruction.Data[0]
+			entry.hasOpcode = true
+		}
+		resolved = append(resolved, entry)
 	}
 	return resolved, nil
 }
@@ -330,11 +347,12 @@ func resolveInstructions(message *solana.Message) ([]resolvedInstruction, error)
 // assertOnlyBlockhashAndFeeRewrites rejects a Fordefi-returned message that
 // changes more than Fordefi may change.
 //
-// Fordefi overwrites the recent blockhash immediately before signing, and adds
-// ComputeBudget instructions to set the priority fee when the submitted message
-// carries none. Everything else — the signer set, the fee payer, and every
-// submitted instruction — must survive verbatim, so a substituted transaction
-// cannot be reported as a successful signing result.
+// Fordefi overwrites the recent blockhash immediately before signing, and sets
+// the priority fee (SetComputeUnitLimit / SetComputeUnitPrice) only when the
+// submitted message carries no ComputeBudget instructions of its own.
+// Everything else — the signer set, the fee payer, and every submitted
+// instruction — must survive verbatim, so a substituted transaction cannot be
+// reported as a successful signing result.
 func assertOnlyBlockhashAndFeeRewrites(requested, returned *solana.Message) error {
 	requestedSigners := int(requested.Header.NumRequiredSignatures)
 	returnedSigners := int(returned.Header.NumRequiredSignatures)
@@ -353,12 +371,15 @@ func assertOnlyBlockhashAndFeeRewrites(requested, returned *solana.Message) erro
 		return err
 	}
 
+	fordefiMayAddFees := !slices.ContainsFunc(submitted, func(instruction resolvedInstruction) bool {
+		return instruction.programID.Equals(computeBudgetProgramID)
+	})
 	matched := 0
 	for _, instruction := range returnedInstructions {
 		switch {
 		case matched < len(submitted) && instruction == submitted[matched]:
 			matched++
-		case !instruction.programID.Equals(computeBudgetProgramID):
+		case !fordefiMayAddFees || !instruction.isFeeSetting():
 			return core.NewSignerError(core.CodeSigningFailed,
 				"Fordefi returned a transaction with instructions that do not match the submitted message")
 		}
@@ -386,8 +407,8 @@ func (s *Signer) requireSoleRequiredSigner(tx *solana.Transaction) error {
 // Fordefi may modify the transaction (at minimum the blockhash), so the
 // signature is verified against the returned message bytes and tx is replaced
 // with the returned transaction. The returned transaction must otherwise match
-// the submitted one: only a fresh blockhash and added ComputeBudget
-// instructions are accepted.
+// the submitted one: only a fresh blockhash is accepted, plus added fee-setting
+// ComputeBudget instructions when the submitted message carried none.
 func (s *Signer) signTransactionNative(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if err := s.requireSoleRequiredSigner(tx); err != nil {
 		return core.SignedTransaction{}, err

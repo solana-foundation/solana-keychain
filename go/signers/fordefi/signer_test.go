@@ -629,9 +629,16 @@ func TestSignTransactionNativeSuccess(t *testing.T) {
 // setComputeUnitPrice is the kind of priority-fee instruction Fordefi adds when
 // the submitted message carries no ComputeBudget instructions.
 func setComputeUnitPrice(microLamports uint64) solana.Instruction {
-	data := []byte{3}
+	data := []byte{setComputeUnitPriceOpcode}
 	return solana.NewInstruction(computeBudgetProgramID, nil,
 		binary.LittleEndian.AppendUint64(data, microLamports))
+}
+
+// requestHeapFrame is a non-fee ComputeBudget instruction Fordefi never adds.
+func requestHeapFrame() solana.Instruction {
+	data := []byte{1}
+	return solana.NewInstruction(computeBudgetProgramID, nil,
+		binary.LittleEndian.AppendUint32(data, 256*1024))
 }
 
 // testRecipient is the transfer destination testutils.CreateTestTransaction uses.
@@ -682,6 +689,38 @@ func TestNativeRewriteAcceptsAddedComputeBudgetInstructions(t *testing.T) {
 
 	if err := assertOnlyBlockhashAndFeeRewrites(&tx.Message, &returned.Message); err != nil {
 		t.Errorf("Fordefi-added priority fee instructions must be accepted, got %v", err)
+	}
+}
+
+// Fordefi only sets fees for requests carrying no ComputeBudget instructions,
+// so an addition alongside caller-supplied compute controls is a substitution.
+func TestNativeRewriteRejectsAddedFeesWhenRequestHadComputeBudget(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	transfer := system.NewTransferInstruction(testutils.TestTransferLamports, pub, testRecipient(t, pub)).Build()
+	tx := buildTransaction(t, pub, setComputeUnitPrice(10), transfer)
+	returned := buildTransaction(t, pub,
+		setComputeUnitPrice(10), setComputeUnitPrice(10_000_000), transfer)
+
+	err := assertOnlyBlockhashAndFeeRewrites(&tx.Message, &returned.Message)
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Errorf("got %s, want SIGNING_FAILED", code)
+	}
+}
+
+// Only SetComputeUnitLimit and SetComputeUnitPrice are fee-setting; a
+// RequestHeapFrame addition is not something Fordefi does.
+func TestNativeRewriteRejectsNonFeeComputeBudgetAddition(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transfer := system.NewTransferInstruction(testutils.TestTransferLamports, pub, testRecipient(t, pub)).Build()
+	returned := buildTransaction(t, pub, requestHeapFrame(), transfer)
+
+	err = assertOnlyBlockhashAndFeeRewrites(&tx.Message, &returned.Message)
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Errorf("got %s, want SIGNING_FAILED", code)
 	}
 }
 
