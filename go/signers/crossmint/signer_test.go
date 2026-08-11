@@ -495,6 +495,57 @@ func TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes(t *testing.T
 	if res.Signature != remoteSignature {
 		t.Errorf("signature = %s, want %s", res.Signature, remoteSignature)
 	}
+	// Crossmint sponsors gas, so it is the fee payer and the message it signs
+	// differs from the caller's. Its signature must never be placed in the
+	// caller's transaction, which could not verify with it.
+	if res.EncodedTransaction != "" {
+		t.Error("a Crossmint-broadcast transaction leaves nothing for the caller to send")
+	}
+	for _, sig := range localTx.Signatures {
+		if !sig.IsZero() {
+			t.Error("the caller's transaction must not carry a signature over other bytes")
+		}
+	}
+}
+
+// A returned transaction whose message matches the submitted one really is signed
+// over the caller's bytes, so the signature belongs in the caller's transaction.
+func TestSignTransactionUnrewrittenTransactionSignsCallerBytes(t *testing.T) {
+	priv := testutils.TestPrivateKey()
+	signerPubkey := pubkeyOf(priv)
+
+	localTx, err := testutils.CreateTestTransaction(signerPubkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	returned, err := testutils.CreateTestTransaction(signerPubkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onChainTransaction, expectedSignature := signAndEncodeB58(t, returned, priv)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, signerPubkey.String()))
+	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+			`{"id":"tx-exact","status":"success","onChain":{"transaction":%q}}`, onChainTransaction))
+	})
+	srv := startServer(t, mux)
+
+	cfg := baseConfig(srv)
+	cfg.MaxPollAttempts = 1
+	s := newTestSigner(t, cfg)
+
+	res, err := s.SignTransaction(context.Background(), localTx)
+	if err != nil {
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+	}
+	if res.EncodedTransaction == "" {
+		t.Error("an unrewritten transaction is the caller's to broadcast")
+	}
+	if len(localTx.Signatures) == 0 || localTx.Signatures[0] != expectedSignature {
+		t.Error("the signature covers the caller's bytes and belongs in its transaction")
+	}
 }
 
 func TestSignTransactionPrefersOnChainTransactionSignatureOverTxIDFallback(t *testing.T) {

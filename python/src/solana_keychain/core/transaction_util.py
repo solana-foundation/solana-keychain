@@ -5,7 +5,7 @@ import base64
 from solders.message import Message, MessageV0
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction
+from solders.transaction import Transaction, VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.signer import SignedTransaction
@@ -66,7 +66,7 @@ def add_signature_to_transaction(
     transaction.signatures = signatures
 
 
-def has_all_required_signatures(transaction: Transaction) -> bool:
+def has_all_required_signatures(transaction: Transaction | VersionedTransaction) -> bool:
     """True when every required signature slot holds a non-default signature."""
     num_required = transaction.message.header.num_required_signatures
     signatures = transaction.signatures
@@ -77,7 +77,9 @@ def has_all_required_signatures(transaction: Transaction) -> bool:
 
 
 def classify_signed_transaction(
-    transaction: Transaction, encoded_transaction: str, signature: Signature
+    transaction: Transaction | VersionedTransaction,
+    encoded_transaction: str,
+    signature: Signature,
 ) -> SignedTransaction:
     """Build a SignedTransaction marked complete or partial."""
     return SignedTransaction(

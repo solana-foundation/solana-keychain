@@ -317,7 +317,7 @@ class CrossmintSigner(SolanaSigner):
 
     def _extract_signature_from_serialized_transaction(
         self, serialized_transaction: str
-    ) -> Signature:
+    ) -> tuple[Signature, VersionedTransaction]:
         try:
             transaction_bytes = base58.b58decode(serialized_transaction)
         except ValueError:
@@ -356,27 +356,36 @@ class CrossmintSigner(SolanaSigner):
                 "Crossmint onChain.transaction did not contain a signer signature",
             )
         signature = signatures[position]
-        # Verify against the bytes Crossmint actually signed, not the caller's:
-        # Crossmint is a broadcast-managed signer that rewrites the transaction
-        # (gas sponsorship, priority fee, its own blockhash) and broadcasts
-        # server-side, so a strict check against caller bytes rejects legitimately
-        # landed transactions.
+        # Crossmint sponsors gas, so when it rewrites it becomes the fee payer and
+        # the message it signs differs from the caller's. Verify against the bytes
+        # Crossmint actually signed; the returned transaction travels with the
+        # signature so the caller is never handed it over its own message.
         self._verify_signature_matches_message(signature, signed_message_bytes(message))
-        return signature
+        return signature, transaction
 
     def _extract_signature_from_response(
         self, response: dict[str, Any], expected_message: bytes
-    ) -> Signature:
+    ) -> tuple[Signature, VersionedTransaction | None]:
+        """The signing result, plus the broadcast transaction when Crossmint rewrote one.
+
+        A non-``None`` transaction means Crossmint changed the message before
+        signing and broadcast the result server-side, so its signature covers
+        Crossmint's bytes rather than the caller's.
+        """
         on_chain = response.get("onChain")
         if isinstance(on_chain, dict):
             serialized_transaction = on_chain.get("transaction")
             if isinstance(serialized_transaction, str):
                 try:
-                    return self._extract_signature_from_serialized_transaction(
+                    signature, returned = self._extract_signature_from_serialized_transaction(
                         serialized_transaction
                     )
                 except SignerError:
-                    pass
+                    if not isinstance(on_chain.get("txId"), str):
+                        raise
+                else:
+                    rewritten = signed_message_bytes(returned.message) != expected_message
+                    return signature, returned if rewritten else None
 
             tx_id = on_chain.get("txId")
             if isinstance(tx_id, str):
@@ -391,7 +400,7 @@ class CrossmintSigner(SolanaSigner):
                         "Crossmint onChain.txId was not a valid Solana signature",
                     ) from None
                 self._verify_signature_matches_message(signature, expected_message)
-                return signature
+                return signature, None
 
         raise SignerError(
             SignerErrorCode.SIGNING_FAILED,
@@ -399,13 +408,27 @@ class CrossmintSigner(SolanaSigner):
         )
 
     async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
+        """Sign ``transaction`` through Crossmint's managed wallet flow.
+
+        Crossmint may rewrite the transaction (it sponsors gas, so it becomes the
+        fee payer) and broadcast it itself. When it does, ``transaction`` is left
+        unmodified and ``encoded_transaction`` is empty: the returned signature
+        identifies the transaction Crossmint landed, and it does not cover the
+        caller's message. Only when Crossmint signs the caller's exact bytes is
+        the signature placed in ``transaction``.
+        """
         public_key = self._initialized_pubkey()
         expected_message = transaction.message_data()
         transaction_b58 = base58.b58encode(bytes(transaction)).decode("ascii")
 
         create_response = await self._create_transaction(transaction_b58)
         final_response = await self._poll_transaction(create_response)
-        signature = self._extract_signature_from_response(final_response, expected_message)
+        signature, broadcast_transaction = self._extract_signature_from_response(
+            final_response, expected_message
+        )
+
+        if broadcast_transaction is not None:
+            return classify_signed_transaction(broadcast_transaction, "", signature)
 
         add_signature_to_transaction(transaction, public_key, signature)
         return classify_signed_transaction(

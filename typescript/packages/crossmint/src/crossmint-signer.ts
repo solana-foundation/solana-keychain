@@ -3,7 +3,6 @@ import { getBase16Encoder, getBase58Decoder, getBase58Encoder, getBase64Encoder 
 import {
     assertHttpsUrl,
     assertSignatureValid,
-    createSignatureDictionary,
     createSignerError,
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
@@ -15,7 +14,12 @@ import {
     validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
-import { SignableMessage, SignatureDictionary } from '@solana/signers';
+import {
+    SignableMessage,
+    SignatureDictionary,
+    TransactionSendingSigner,
+    TransactionSendingSignerConfig,
+} from '@solana/signers';
 import {
     getBase64EncodedWireTransaction,
     getTransactionDecoder,
@@ -32,9 +36,21 @@ import type {
     CrossmintWalletResponse,
 } from './types.js';
 
+/**
+ * Crossmint signer shape.
+ *
+ * Crossmint executes transactions server-side and sponsors gas, which makes it
+ * the fee payer, so the message it signs generally differs from the caller's. Its
+ * signatures therefore cannot be applied to the caller's transaction, and it must
+ * be used through Kit's {@link TransactionSendingSigner} flow rather than as a
+ * partial signer.
+ */
+export interface CrossmintSendingSigner<TAddress extends string = string>
+    extends SolanaSigner<TAddress>, TransactionSendingSigner<TAddress> {}
+
 export async function createCrossmintSigner<TAddress extends string = string>(
     config: CrossmintSignerConfig,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<CrossmintSendingSigner<TAddress>> {
     return await CrossmintSigner.create(config);
 }
 
@@ -52,8 +68,11 @@ let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
  * Crossmint is a broadcast-managed signer: it rewrites the transaction (gas
  * sponsorship, priority fee, its own blockhash) and broadcasts server-side, so
  * returned signatures cover Crossmint's bytes, not the caller's `messageBytes`.
+ * The signature is a send result identifying what Crossmint landed, which is why
+ * this signer implements {@link TransactionSendingSigner} instead of returning
+ * signature dictionaries keyed to the caller's message.
  */
-class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class CrossmintSigner<TAddress extends string = string> implements CrossmintSendingSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly apiKey: string;
     private readonly walletLocator: string;
@@ -176,8 +195,23 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
     }
 
     async signTransactions(
-        transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        _transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]> {
+        return await Promise.reject(
+            createSignerError(SignerErrorCode.CONFIG_ERROR, {
+                address: this.address,
+                message:
+                    'Crossmint rewrites and broadcasts transactions server-side, so its signature does not cover the caller message; use signAndSendTransactions() or signAndSendTransactionMessageWithSigners()',
+            }),
+        );
+    }
+
+    async signAndSendTransactions(
+        transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        config?: TransactionSendingSignerConfig,
+    ): Promise<readonly SignatureBytes[]> {
+        config?.abortSignal?.throwIfAborted();
+
         // Sign sequentially, not via Promise.all: each transaction has
         // irreversible server-side effects (createTransaction, and auto-approval
         // when signerSecret is set). Concurrent submission means a failure in one
@@ -185,13 +219,13 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         // and may execute, leading to duplicate spends on retry. Sequential
         // execution stops on the first error before any further transaction is
         // created.
-        const results: SignatureDictionary[] = [];
+        const results: SignatureBytes[] = [];
         for (const [index, transaction] of transactions.entries()) {
             if (this.requestDelayMs > 0 && index > 0) {
                 await new Promise(resolve => setTimeout(resolve, this.requestDelayMs));
             }
-            const signature = await this.signTransactionManaged(transaction);
-            results.push(createSignatureDictionary({ signature, signerAddress: this.address }));
+            config?.abortSignal?.throwIfAborted();
+            results.push(await this.signTransactionManaged(transaction));
         }
         return results;
     }
@@ -404,8 +438,10 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSigner<
         }
 
         // Verify against the bytes Crossmint actually signed, not the caller's
-        // messageBytes: Crossmint rewrites the tx (blockhash/fees) before signing,
-        // so a strict check against caller bytes would reject legitimately landed txs.
+        // messageBytes: Crossmint sponsors gas, so when it rewrites it becomes the
+        // fee payer and a strict check against caller bytes would reject
+        // legitimately landed transactions. The signature is only ever returned as
+        // a send result, never applied to the caller's message.
         await assertSignatureValid({
             data: decodedTransaction.messageBytes,
             signature,

@@ -341,13 +341,14 @@ async def test_awaiting_approval_with_no_matching_entry_fails() -> None:
 
 
 @respx.mock
-async def test_rewritten_transaction_signature_is_accepted() -> None:
+async def test_rewritten_transaction_is_reported_as_a_broadcast_result() -> None:
+    """Crossmint sponsors gas, so it is the fee payer and the message it signs
+    differs from the caller's. Its signature must never be placed in the caller's
+    transaction, which could not verify with it."""
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
 
-    # Crossmint rewrites the transaction before signing (gas sponsorship, priority
-    # fee, its own blockhash), so the returned signature covers its bytes.
     rewritten = create_test_transaction(keypair.pubkey())
     assert rewritten.message_data() != transaction.message_data()
     expected_signature = keypair.sign_message(rewritten.message_data())
@@ -364,7 +365,61 @@ async def test_rewritten_transaction_signature_is_accepted() -> None:
     )
 
     result = await signer.sign_transaction(transaction)
+
     assert result.signature == expected_signature
+    assert result.is_complete
+    assert result.encoded_transaction == ""
+    assert all(sig == Signature.default() for sig in transaction.signatures)
+    assert not expected_signature.verify(keypair.pubkey(), transaction.message_data())
+
+
+@respx.mock
+async def test_unrewritten_returned_transaction_is_placed_in_the_caller_transaction() -> None:
+    """When Crossmint returns the submitted message unchanged, the signature does
+    cover the caller's bytes, so it belongs in the caller's transaction."""
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    transaction = create_test_transaction(keypair.pubkey())
+    expected_signature = keypair.sign_message(transaction.message_data())
+
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=tx_response(
+                "success",
+                onChain={"transaction": signed_transaction_b58(keypair, transaction)},
+            ),
+        )
+    )
+
+    result = await signer.sign_transaction(transaction)
+
+    assert result.signature == expected_signature
+    assert result.encoded_transaction
+    assert list(transaction.signatures) == [expected_signature]
+
+
+@respx.mock
+async def test_caller_exact_signature_is_placed_in_the_caller_transaction() -> None:
+    """When Crossmint signs the submitted bytes unchanged, the signature belongs
+    in the caller's transaction and the caller can broadcast it."""
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    transaction = create_test_transaction(keypair.pubkey())
+    expected_signature = keypair.sign_message(transaction.message_data())
+
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(
+            200, json=tx_response("success", onChain={"txId": str(expected_signature)})
+        )
+    )
+
+    result = await signer.sign_transaction(transaction)
+
+    assert result.signature == expected_signature
+    assert result.encoded_transaction
+    assert list(transaction.signatures) == [expected_signature]
+    assert expected_signature.verify(keypair.pubkey(), transaction.message_data())
 
 
 @respx.mock
