@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/programs/system"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
 	"github.com/solana-foundation/solana-keychain/go/testutils"
@@ -621,6 +623,172 @@ func TestSignTransactionNativeSuccess(t *testing.T) {
 	}
 	if len(tx.Signatures) == 0 || tx.Signatures[0] != signature {
 		t.Error("caller's transaction must be replaced with the Fordefi-signed one")
+	}
+}
+
+// setComputeUnitPrice is the kind of priority-fee instruction Fordefi adds when
+// the submitted message carries no ComputeBudget instructions.
+func setComputeUnitPrice(microLamports uint64) solana.Instruction {
+	data := []byte{3}
+	return solana.NewInstruction(computeBudgetProgramID, nil,
+		binary.LittleEndian.AppendUint64(data, microLamports))
+}
+
+// testRecipient is the transfer destination testutils.CreateTestTransaction uses.
+func testRecipient(t *testing.T, payer solana.PublicKey) solana.PublicKey {
+	t.Helper()
+	tx, err := testutils.CreateTestTransaction(payer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tx.Message.AccountKeys[1]
+}
+
+func buildTransaction(t *testing.T, payer solana.PublicKey, instructions ...solana.Instruction) *solana.Transaction {
+	t.Helper()
+	var blockhash solana.Hash
+	blockhash[0] = 0x77
+	tx, err := solana.NewTransaction(instructions, blockhash, solana.TransactionPayer(payer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tx
+}
+
+func TestNativeRewriteAcceptsFreshBlockhash(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	returned := *tx
+	returned.Message.RecentBlockhash = solana.Hash{0x55}
+
+	if err := assertOnlyBlockhashAndFeeRewrites(&tx.Message, &returned.Message); err != nil {
+		t.Errorf("a re-stamped blockhash is Fordefi's documented rewrite, got %v", err)
+	}
+}
+
+// Fordefi sets the priority fee itself when the submitted message carries no
+// ComputeBudget instructions, so those additions must not be rejected.
+func TestNativeRewriteAcceptsAddedComputeBudgetInstructions(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transfer := system.NewTransferInstruction(testutils.TestTransferLamports, pub, testRecipient(t, pub)).Build()
+	returned := buildTransaction(t, pub, setComputeUnitPrice(5_000), transfer)
+
+	if err := assertOnlyBlockhashAndFeeRewrites(&tx.Message, &returned.Message); err != nil {
+		t.Errorf("Fordefi-added priority fee instructions must be accepted, got %v", err)
+	}
+}
+
+func TestNativeRewriteRejectsSubstitutedRecipient(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attacker := solana.MustPublicKeyFromBase58("11111111111111111111111111111112")
+	substituted := buildTransaction(t, pub,
+		system.NewTransferInstruction(testutils.TestTransferLamports, pub, attacker).Build())
+
+	err = assertOnlyBlockhashAndFeeRewrites(&tx.Message, &substituted.Message)
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Errorf("got %s, want SIGNING_FAILED", code)
+	}
+}
+
+func TestNativeRewriteRejectsChangedLamportAmount(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inflated := buildTransaction(t, pub,
+		system.NewTransferInstruction(500_000_000, pub, testRecipient(t, pub)).Build())
+
+	err = assertOnlyBlockhashAndFeeRewrites(&tx.Message, &inflated.Message)
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Errorf("got %s, want SIGNING_FAILED", code)
+	}
+}
+
+func TestNativeRewriteRejectsDroppedInstruction(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feeOnly := buildTransaction(t, pub, setComputeUnitPrice(1))
+
+	err = assertOnlyBlockhashAndFeeRewrites(&tx.Message, &feeOnly.Message)
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Errorf("got %s, want SIGNING_FAILED", code)
+	}
+}
+
+func TestNativeRewriteRejectsExtraSigner(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	returned := *tx
+	returned.Message.AccountKeys = append([]solana.PublicKey{pub,
+		solana.MustPublicKeyFromBase58("11111111111111111111111111111112")},
+		tx.Message.AccountKeys[1:]...)
+	returned.Message.Header.NumRequiredSignatures = 2
+
+	err = assertOnlyBlockhashAndFeeRewrites(&tx.Message, &returned.Message)
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Errorf("got %s, want SIGNING_FAILED", code)
+	}
+}
+
+// A different transaction validly signed by the same vault must not come back
+// through SignTransaction as a successful signing of the submitted one.
+func TestSignTransactionNativeRejectsSubstitutedTransaction(t *testing.T) {
+	priv := testutils.TestPrivateKey()
+	pub := testutils.TestPublicKey()
+
+	attacker := solana.MustPublicKeyFromBase58("11111111111111111111111111111112")
+	substituted := buildTransaction(t, pub,
+		system.NewTransferInstruction(testutils.TestTransferLamports, pub, attacker).Build())
+	substitutedMsg, err := substituted.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	substituted.Signatures = []solana.Signature{solana.SignatureFromBytes(ed25519.Sign(priv, substitutedMsg))}
+	wireBytes, err := substituted.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, map[string]any{"id": "tx-123"})
+		})
+		mux.HandleFunc(transactionsPath+"/tx-123", func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, map[string]any{
+				"state":           "completed",
+				"raw_transaction": base64.StdEncoding.EncodeToString(wireBytes),
+			})
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	if err == nil {
+		t.Fatal("expected a substituted transaction to be rejected")
+	}
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Errorf("got %s, want SIGNING_FAILED", code)
 	}
 }
 

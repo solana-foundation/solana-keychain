@@ -22,9 +22,11 @@ import {
     TransactionSendingSigner,
     TransactionSendingSignerConfig,
 } from '@solana/signers';
+import { type CompiledTransactionMessage, getCompiledTransactionMessageDecoder } from '@solana/transaction-messages';
 import {
     Base64EncodedWireTransaction,
     Transaction,
+    type TransactionMessageBytes,
     TransactionWithinSizeLimit,
     TransactionWithLifetime,
 } from '@solana/transactions';
@@ -60,6 +62,98 @@ const FAILURE_STATES = new Set([
     'insufficient_funds',
     'mined_reverted',
 ]);
+
+/** The only program Fordefi may add instructions for: it sets the priority fee. */
+const COMPUTE_BUDGET_PROGRAM_ADDRESS = 'ComputeBudget111111111111111111111111111111' as Address;
+
+/** Legacy and v0 compiled messages; v1 stores instructions in a different shape. */
+type CompiledMessageWithInstructions = Extract<CompiledTransactionMessage, { instructions: readonly unknown[] }>;
+
+function assertHasInstructions(message: CompiledTransactionMessage): CompiledMessageWithInstructions {
+    if (!('instructions' in message)) {
+        return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            message: 'Fordefi native mode supports only legacy and v0 transaction messages',
+        });
+    }
+    return message;
+}
+
+/**
+ * An instruction keyed by its resolved program address, account metas, and data,
+ * so two compiled messages stay comparable even when they order or extend
+ * `staticAccounts` differently.
+ */
+function resolveInstructions(message: CompiledMessageWithInstructions): { key: string; programAddress: Address }[] {
+    const accounts = message.staticAccounts;
+    const { numReadonlyNonSignerAccounts, numReadonlySignerAccounts, numSignerAccounts } = message.header;
+    const writableSignerEnd = numSignerAccounts - numReadonlySignerAccounts;
+    const writableNonSignerEnd = accounts.length - numReadonlyNonSignerAccounts;
+
+    const addressAt = (index: number): Address => {
+        const address = accounts[index];
+        if (address === undefined) {
+            return throwSignerError(SignerErrorCode.SERIALIZATION_ERROR, {
+                message: 'Transaction references an account index outside its account list',
+            });
+        }
+        return address;
+    };
+
+    return message.instructions.map(instruction => {
+        const metas = (instruction.accountIndices ?? []).map(index => {
+            const isWritable =
+                index < writableSignerEnd || (index >= numSignerAccounts && index < writableNonSignerEnd);
+            return `${addressAt(index)}:${index < numSignerAccounts}:${isWritable}`;
+        });
+        const programAddress = addressAt(instruction.programAddressIndex);
+        const data = Array.from(instruction.data ?? []).join(',');
+        return { key: `${programAddress}|${metas.join(',')}|${data}`, programAddress };
+    });
+}
+
+/**
+ * Rejects a Fordefi-returned message that changes more than Fordefi may change.
+ *
+ * Fordefi overwrites the recent blockhash immediately before signing, and adds
+ * ComputeBudget instructions to set the priority fee when the submitted message
+ * carries none. Everything else — the signer set, the fee payer, and every
+ * submitted instruction — must survive verbatim, so a substituted transaction
+ * cannot be reported as a successful signing result.
+ */
+function assertOnlyBlockhashAndFeeRewrites(requestedBytes: TransactionMessageBytes, returnedBytes: Uint8Array): void {
+    const decoder = getCompiledTransactionMessageDecoder();
+    const requested = assertHasInstructions(decoder.decode(requestedBytes));
+    const returned = assertHasInstructions(decoder.decode(returnedBytes));
+
+    const requestedSigners = requested.staticAccounts.slice(0, requested.header.numSignerAccounts);
+    const returnedSigners = returned.staticAccounts.slice(0, returned.header.numSignerAccounts);
+    if (
+        requested.version !== returned.version ||
+        requestedSigners.length !== returnedSigners.length ||
+        requestedSigners.some((address, index) => address !== returnedSigners[index])
+    ) {
+        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            message: 'Fordefi returned a transaction with a different signer set',
+        });
+    }
+
+    const submitted = resolveInstructions(requested);
+    let matched = 0;
+    for (const instruction of resolveInstructions(returned)) {
+        if (matched < submitted.length && instruction.key === submitted[matched]!.key) {
+            matched++;
+        } else if (instruction.programAddress !== COMPUTE_BUDGET_PROGRAM_ADDRESS) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message: 'Fordefi returned a transaction with instructions that do not match the submitted message',
+            });
+        }
+    }
+    if (matched !== submitted.length) {
+        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            message: 'Fordefi returned a transaction missing submitted instructions',
+        });
+    }
+}
 
 /**
  * Signs Fordefi API-request payloads for the `x-signature` header.
@@ -469,6 +563,10 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
      * returned transaction itself. The result is therefore the on-chain
      * transaction identifier (the first wire signature), not a signature
      * dictionary to be applied to the caller's original message.
+     *
+     * The returned transaction is checked against the submitted one: a fresh
+     * blockhash and added ComputeBudget instructions are accepted, any other
+     * difference rejects with `SIGNER_SIGNING_FAILED`.
      */
     private async signAndSendNativeTransactions(
         transactions: readonly (Transaction | (Transaction & TransactionWithLifetime))[],
@@ -516,6 +614,7 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
                     signature: signerSignature,
                     signerAddress: this.address,
                 });
+                assertOnlyBlockhashAndFeeRewrites(transaction.messageBytes, messageBytes);
                 config?.abortSignal?.throwIfAborted();
                 return transactionSignature;
             },

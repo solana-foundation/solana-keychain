@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from solders.message import Message
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import Transaction
@@ -40,6 +41,8 @@ DEFAULT_POLL_INTERVAL_MS = 2000
 DEFAULT_MAX_POLL_ATTEMPTS = 50
 SUPPORTED_CHAINS = ("solana_devnet", "solana_mainnet")
 
+COMPUTE_BUDGET_PROGRAM_ID = Pubkey.from_string("ComputeBudget111111111111111111111111111111")
+
 _AVAILABILITY_TIMEOUT_SECONDS = 5.0
 _VAULT_VERIFICATION_TIMEOUT_SECONDS = 10.0
 
@@ -61,6 +64,77 @@ _TERMINAL_FAILURE_STATES = frozenset(
 
 def _timestamp_ms() -> int:
     return int(time.time() * 1000)
+
+
+_AccountMeta = tuple[Pubkey, bool, bool]
+_ResolvedInstruction = tuple[Pubkey, tuple[_AccountMeta, ...], bytes]
+
+
+def _resolved_instructions(message: Message) -> list[_ResolvedInstruction]:
+    """Instructions with account indices resolved to pubkeys and their flags.
+
+    Resolving away the indices makes two messages comparable even when they
+    order or extend ``account_keys`` differently.
+    """
+    keys = message.account_keys
+    header = message.header
+    signers = header.num_required_signatures
+    writable_signers = signers - header.num_readonly_signed_accounts
+    writable_unsigned_end = len(keys) - header.num_readonly_unsigned_accounts
+
+    def account_meta(index: int) -> _AccountMeta:
+        writable = index < writable_signers or signers <= index < writable_unsigned_end
+        return keys[index], index < signers, writable
+
+    try:
+        return [
+            (
+                keys[instruction.program_id_index],
+                tuple(account_meta(index) for index in instruction.accounts),
+                bytes(instruction.data),
+            )
+            for instruction in message.instructions
+        ]
+    except IndexError:
+        raise SignerError(
+            SignerErrorCode.SERIALIZATION_ERROR,
+            "Transaction references an account index outside its account keys",
+        ) from None
+
+
+def _assert_only_blockhash_and_fee_rewrites(requested: Message, returned: Message) -> None:
+    """Reject a Fordefi-returned message that changes more than Fordefi may change.
+
+    Fordefi overwrites the recent blockhash immediately before signing, and adds
+    ComputeBudget instructions to set the priority fee when the submitted
+    message contains none. Everything else — the signer set, the fee payer, and
+    every submitted instruction — must survive verbatim, so a substituted
+    transaction cannot be reported as a successful signing result.
+    """
+    requested_signers = requested.account_keys[: requested.header.num_required_signatures]
+    returned_signers = returned.account_keys[: returned.header.num_required_signatures]
+    if list(returned_signers) != list(requested_signers):
+        raise SignerError(
+            SignerErrorCode.SIGNING_FAILED,
+            "Fordefi returned a transaction with a different signer set",
+        )
+
+    submitted = _resolved_instructions(requested)
+    matched = 0
+    for instruction in _resolved_instructions(returned):
+        if matched < len(submitted) and instruction == submitted[matched]:
+            matched += 1
+        elif instruction[0] != COMPUTE_BUDGET_PROGRAM_ID:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi returned a transaction with instructions that do not match "
+                "the submitted message",
+            )
+    if matched != len(submitted):
+        raise SignerError(
+            SignerErrorCode.SIGNING_FAILED,
+            "Fordefi returned a transaction missing submitted instructions",
+        )
 
 
 @dataclass
@@ -103,6 +177,8 @@ class FordefiSigner(SolanaSigner):
     Black-box mode (default) signs the caller's exact message bytes and the
     caller broadcasts. Native mode (``chain`` set) lets Fordefi replace the
     blockhash and fees, sign, and auto-broadcast; see ``sign_transaction``.
+    Rewrites beyond the blockhash and added ComputeBudget instructions are
+    rejected rather than reported as a successful signing result.
     """
 
     def __init__(self, config: FordefiSignerConfig) -> None:
@@ -336,6 +412,10 @@ class FordefiSigner(SolanaSigner):
         unmodified — the returned signature identifies the on-chain
         transaction. Only legacy transactions whose sole required signer is
         the configured vault are supported.
+
+        The transaction Fordefi returns is checked against the submitted one:
+        a fresh blockhash and added ComputeBudget instructions are accepted,
+        any other difference raises ``SIGNING_FAILED``.
         """
         if self._chain is not None:
             return await self._sign_transaction_native(transaction)
@@ -393,6 +473,7 @@ class FordefiSigner(SolanaSigner):
             )
         signature = signatures[position]
         self._verify_signature(signature, returned.message_data())
+        _assert_only_blockhash_and_fee_rewrites(transaction.message, returned.message)
         return classify_signed_transaction(returned, "", signature)
 
     async def sign_message(self, message: bytes) -> Signature:

@@ -2,8 +2,18 @@ import { generateKeyPairSync } from 'node:crypto';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { type Address } from '@solana/addresses';
+import { AccountRole, type Instruction } from '@solana/instructions';
 import { assertIsSolanaSigner, assertSignatureValid, extractSignatureFromWireTransaction } from '@solana/keychain-core';
 import { isTransactionSendingSigner } from '@solana/signers';
+import {
+    appendTransactionMessageInstruction,
+    compileTransactionMessage,
+    createTransactionMessage,
+    getCompiledTransactionMessageEncoder,
+    setTransactionMessageFeePayer,
+    setTransactionMessageLifetimeUsingBlockhash,
+} from '@solana/transaction-messages';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
@@ -67,6 +77,59 @@ function mockPollResponse(state: string, sigBase64?: string, rawTransaction?: st
         body.raw_transaction = rawTransaction;
     }
     return new Response(JSON.stringify(body), { status: 200 });
+}
+
+const COMPUTE_BUDGET_PROGRAM_ADDRESS = 'ComputeBudget111111111111111111111111111111' as Address;
+const RECIPIENT_ADDRESS = 'SysvarC1ock11111111111111111111111111111111' as Address;
+const OTHER_RECIPIENT_ADDRESS = 'SysvarRent111111111111111111111111111111111' as Address;
+type TestBlockhash = Parameters<typeof setTransactionMessageLifetimeUsingBlockhash>[0]['blockhash'];
+const MOCK_BLOCKHASH = '11111111111111111111111111111111' as TestBlockhash;
+const FRESH_BLOCKHASH = 'GHtXQBsoZHVnNFa9YevAzFr17DJjgHXk3ycTKD5xD3Zi' as TestBlockhash;
+
+/** A System-transfer-shaped instruction: one writable-signer payer, one writable recipient. */
+function transferInstruction(recipient: Address, lamports: number): Instruction {
+    return {
+        accounts: [
+            { address: MOCK_ADDRESS as Address, role: AccountRole.WRITABLE_SIGNER },
+            { address: recipient, role: AccountRole.WRITABLE },
+        ],
+        data: new Uint8Array([2, 0, 0, 0, lamports, 0, 0, 0, 0, 0, 0, 0]),
+        programAddress: '11111111111111111111111111111112' as Address,
+    };
+}
+
+function setComputeUnitPriceInstruction(): Instruction {
+    return {
+        data: new Uint8Array([3, 136, 19, 0, 0, 0, 0, 0, 0]),
+        programAddress: COMPUTE_BUDGET_PROGRAM_ADDRESS,
+    };
+}
+
+/** Compile a real legacy transaction message and return its wire message bytes. */
+function compiledMessageBytes(
+    instructions: readonly Instruction[],
+    blockhash: TestBlockhash = MOCK_BLOCKHASH,
+    feePayer: Address = MOCK_ADDRESS as Address,
+): Uint8Array<ArrayBuffer> {
+    const message = instructions.reduce(
+        (acc, instruction) => appendTransactionMessageInstruction(instruction, acc),
+        setTransactionMessageLifetimeUsingBlockhash(
+            { blockhash, lastValidBlockHeight: 100n },
+            setTransactionMessageFeePayer(feePayer, createTransactionMessage({ version: 'legacy' })),
+        ) as Parameters<typeof appendTransactionMessageInstruction>[1],
+    );
+    const encoded = getCompiledTransactionMessageEncoder().encode(compileTransactionMessage(message as never));
+    const bytes = new Uint8Array(encoded.length);
+    bytes.set(encoded);
+    return bytes;
+}
+
+/** A submitted transaction carrying a single transfer, as the caller would build it. */
+function mockNativeTransaction(recipient: Address = RECIPIENT_ADDRESS, lamports = 1_000_000): never {
+    return {
+        messageBytes: compiledMessageBytes([transferInstruction(recipient, lamports)]),
+        signatures: { [MOCK_ADDRESS]: null },
+    } as never;
 }
 
 /** Build a fake base64 wire transaction (1-byte sig count + 64-byte sig + message). */
@@ -459,7 +522,11 @@ describe('FordefiSigner', () => {
 
     describe('signAndSendTransactions (native solana mode)', () => {
         it('should expose a TransactionSendingSigner and return the broadcast transaction signature', async () => {
-            const returnedMessage = new Uint8Array(32).fill(0xcd);
+            // Fordefi's own rewrite: same instruction, freshly stamped blockhash.
+            const returnedMessage = compiledMessageBytes(
+                [transferInstruction(RECIPIENT_ADDRESS, 1_000_000)],
+                FRESH_BLOCKHASH,
+            );
             const wireTx = mockWireTransaction(returnedMessage);
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockVaultResponse())
@@ -473,10 +540,7 @@ describe('FordefiSigner', () => {
                 ),
             ).toBe(true);
 
-            const mockTx = {
-                messageBytes: new Uint8Array(32),
-                signatures: { [MOCK_ADDRESS]: null },
-            } as never;
+            const mockTx = mockNativeTransaction();
             const results = await signer.signAndSendTransactions([mockTx]);
             expect(results).toHaveLength(1);
             expect(results[0]).toEqual(MOCK_SIGNATURE_BYTES);
@@ -541,7 +605,9 @@ describe('FordefiSigner', () => {
         });
 
         it('should poll through intermediate pushable states', async () => {
-            const wireTx = mockWireTransaction();
+            const wireTx = mockWireTransaction(
+                compiledMessageBytes([transferInstruction(RECIPIENT_ADDRESS, 1_000_000)], FRESH_BLOCKHASH),
+            );
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockVaultResponse())
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-push'))
@@ -550,13 +616,98 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
 
             const signer = await FordefiSigner.create({ ...nativeConfig, pollIntervalMs: 1 });
-            const mockTx = {
-                messageBytes: new Uint8Array(32),
-                signatures: { [MOCK_ADDRESS]: null },
-            } as never;
-            const results = await signer.signAndSendTransactions([mockTx]);
+            const results = await signer.signAndSendTransactions([mockNativeTransaction()]);
             expect(results).toHaveLength(1);
             expect(fetch).toHaveBeenCalledTimes(5);
+        });
+
+        /**
+         * Fordefi sets the priority fee itself when the submitted message carries no
+         * ComputeBudget instructions, so those additions must not be rejected.
+         */
+        it('should accept a returned transaction with added ComputeBudget instructions', async () => {
+            const wireTx = mockWireTransaction(
+                compiledMessageBytes(
+                    [setComputeUnitPriceInstruction(), transferInstruction(RECIPIENT_ADDRESS, 1_000_000)],
+                    FRESH_BLOCKHASH,
+                ),
+            );
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse())
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-fee'))
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
+
+            const signer = await FordefiSigner.create(nativeConfig);
+            const results = await signer.signAndSendTransactions([mockNativeTransaction()]);
+            expect(results).toHaveLength(1);
+        });
+
+        /**
+         * A different transaction signed by the same vault must not be reported as a
+         * successful signing of the submitted one.
+         */
+        it('should reject a returned transaction with a substituted recipient', async () => {
+            const wireTx = mockWireTransaction(
+                compiledMessageBytes([transferInstruction(OTHER_RECIPIENT_ADDRESS, 1_000_000)], FRESH_BLOCKHASH),
+            );
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse())
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-swap'))
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
+
+            const signer = await FordefiSigner.create(nativeConfig);
+            await expect(signer.signAndSendTransactions([mockNativeTransaction()])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+        });
+
+        it('should reject a returned transaction with a changed lamport amount', async () => {
+            const wireTx = mockWireTransaction(
+                compiledMessageBytes([transferInstruction(RECIPIENT_ADDRESS, 250)], FRESH_BLOCKHASH),
+            );
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse())
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-amount'))
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
+
+            const signer = await FordefiSigner.create(nativeConfig);
+            await expect(signer.signAndSendTransactions([mockNativeTransaction()])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+        });
+
+        it('should reject a returned transaction that dropped the submitted instruction', async () => {
+            const wireTx = mockWireTransaction(
+                compiledMessageBytes([setComputeUnitPriceInstruction()], FRESH_BLOCKHASH),
+            );
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse())
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-dropped'))
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
+
+            const signer = await FordefiSigner.create(nativeConfig);
+            await expect(signer.signAndSendTransactions([mockNativeTransaction()])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+        });
+
+        it('should reject a returned transaction with a different fee payer', async () => {
+            const wireTx = mockWireTransaction(
+                compiledMessageBytes(
+                    [transferInstruction(RECIPIENT_ADDRESS, 1_000_000)],
+                    FRESH_BLOCKHASH,
+                    OTHER_RECIPIENT_ADDRESS,
+                ),
+            );
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse())
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-payer'))
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
+
+            const signer = await FordefiSigner.create(nativeConfig);
+            await expect(signer.signAndSendTransactions([mockNativeTransaction()])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
         });
 
         it('should throw when raw_transaction is missing from response', async () => {

@@ -70,6 +70,7 @@
         "@solana/codecs-strings": ">=6.0.1",
         "@solana/keys": ">=6.0.1",
         "@solana/signers": ">=6.0.1",
+        "@solana/transaction-messages": ">=6.0.1",
         "@solana/transactions": ">=6.0.1"
     },
     "publishConfig": {
