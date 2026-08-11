@@ -2,7 +2,7 @@ import * as nodeCrypto from 'node:crypto';
 
 import { Address } from '@solana/addresses';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
-import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils/frozen-signer-contract';
 import { generateKeyPairSigner } from '@solana/signers';
 import {
     type Base64EncodedWireTransaction,
@@ -215,9 +215,14 @@ describe('CdpSigner', () => {
             expect(JSON.parse(init.body as string)).toMatchObject({ message: 'hello' });
         });
 
+        // Exercised via signMessages: this backend's signTransactions happy path cannot
+        // complete against mocks. Both paths share the same auth and caching machinery.
         it('signs when the signer instance is frozen', async () => {
             const base58Sig = '5LfnqEfGPFBaHHeQBiNkgQ2EPy4FkVLKE7cjMYc7gv6EjE8Vs5gqaXcZHjpxr3yj5TMt7j3JdJPkXfnwXxXiNAh';
-            mockFetch.mockResolvedValue(new Response(JSON.stringify({ signature: base58Sig }), { status: 200 }));
+            // Fresh Response per call: a Response body can only be read once.
+            mockFetch.mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ signature: base58Sig }), { status: 200 })),
+            );
 
             const signer = await CdpSigner.create(makeConfig());
             const message = { content: new TextEncoder().encode('hello'), signatures: {} };

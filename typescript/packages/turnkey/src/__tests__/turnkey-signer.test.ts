@@ -8,7 +8,7 @@ import {
     TransactionWithLifetime,
 } from '@solana/transactions';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
-import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils/frozen-signer-contract';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createTurnkeySigner, TurnkeySigner } from '../turnkey-signer.js';
@@ -241,6 +241,8 @@ describe('TurnkeySigner', () => {
             expect(sigDict?.[signer.address]).toBeTruthy();
         });
 
+        // Exercised via signMessages: this backend's signTransactions happy path cannot
+        // complete against mocks. Both paths share the same auth and caching machinery.
         it('signs when the signer instance is frozen', async () => {
             const keyPair = await generateKeyPair();
             const keyPairSigner = await createSignerFromKeyPair(keyPair);

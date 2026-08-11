@@ -1,4 +1,3 @@
-export { assertSignerSurvivesFreeze } from './frozen-signer-contract.js';
 export { runSignerIntegrationTest } from './integration-test-runner.js';
 export { airdropLamports, formatSimulationResult, truncateAddress } from './litesvm-helpers.js';
 export { createTestKeypair, type TestKeypair } from './test-keypair.js';

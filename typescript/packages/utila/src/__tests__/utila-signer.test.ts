@@ -16,7 +16,7 @@ vi.mock('@solana/transactions', async importOriginal => {
 });
 
 import { assertIsSolanaSigner, assertSignatureValid } from '@solana/keychain-core';
-import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils/frozen-signer-contract';
 import { getTransactionDecoder } from '@solana/transactions';
 import { createUtilaAccessToken, createUtilaSigner } from '../utila-signer.js';
 import { TEST_EMAIL, TEST_RSA_PRIVATE_KEY } from './setup.js';

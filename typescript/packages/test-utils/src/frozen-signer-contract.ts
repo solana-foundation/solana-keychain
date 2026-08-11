@@ -1,12 +1,18 @@
 import type { SolanaSigner } from '@solana/keychain-core';
 
 /**
- * Matches the `TypeError` messages engines raise when code writes to a property
- * of a frozen object under strict mode. V8 and JavaScriptCore word this
- * differently, and the message differs again for adding a new property versus
- * overwriting an existing one.
+ * Matches the `TypeError` messages engines raise when code mutates a property
+ * of a frozen object under strict mode. The wording varies by engine and by
+ * the kind of mutation — overwriting an existing property, adding a new one,
+ * defining one, or deleting one:
+ *
+ * - V8: `Cannot assign to read only property 'x' of object '#<Signer>'`
+ * - V8: `Cannot add property x, object is not extensible`
+ * - V8: `Cannot define property x, object is not extensible`
+ * - V8: `Cannot delete property 'x' of #<Signer>`
+ * - JavaScriptCore: `Attempted to assign to readonly property.`
  */
-const FROZEN_WRITE_MESSAGE = /read[ -]only property|not extensible|object is not extensible|Attempted to assign to/i;
+const FROZEN_WRITE_MESSAGE = /read[ -]?only property|not extensible|Cannot delete property|Attempted to assign to/i;
 
 /**
  * Asserts that a signer can still sign after `Object.freeze`.
@@ -46,12 +52,30 @@ export async function assertSignerSurvivesFreeze<TReturn>(
         return await exercise();
     } catch (error) {
         if (error instanceof TypeError && FROZEN_WRITE_MESSAGE.test(error.message)) {
-            error.message =
-                `${error.message} — the signer wrote to its own instance while signing. ` +
-                '@solana/signers freezes fee-payer signers in setTransactionMessageFeePayerSigner, ' +
-                'so state cached during signing must live in a nested object created by the constructor ' +
-                '(Object.freeze is shallow).';
+            throw explainFrozenWrite(error);
         }
         throw error;
     }
+}
+
+/**
+ * Builds a replacement error that keeps the original throw site's frames.
+ *
+ * `stack` embeds the message in its first line and is materialized when the
+ * error is constructed, so annotating in place would leave `message` and
+ * `stack` disagreeing and reporters that print `stack` would show none of the
+ * guidance. Rebuilding both together keeps them consistent.
+ */
+function explainFrozenWrite(error: TypeError): Error {
+    const explained = new Error(
+        `${error.message} — the signer wrote to its own instance while signing. ` +
+            '@solana/signers freezes fee-payer signers in setTransactionMessageFeePayerSigner, ' +
+            'so state cached during signing must live in a nested object created by the constructor ' +
+            '(Object.freeze is shallow).',
+    );
+    const originalFrames = error.stack?.split('\n').slice(1).join('\n');
+    if (originalFrames) {
+        explained.stack = `${explained.name}: ${explained.message}\n${originalFrames}`;
+    }
+    return explained;
 }

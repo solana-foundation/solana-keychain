@@ -1,7 +1,7 @@
 import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
-import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils/frozen-signer-contract';
 
 import { AwsKmsSigner } from '../aws-kms-signer.js';
 import type { AwsKmsSignerConfig } from '../types.js';

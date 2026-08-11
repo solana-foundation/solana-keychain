@@ -18,7 +18,7 @@ vi.mock('@solana/transactions', async importOriginal => {
 });
 
 import { assertIsSolanaSigner, assertSignatureValid } from '@solana/keychain-core';
-import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils/frozen-signer-contract';
 import { getTransactionDecoder } from '@solana/transactions';
 import { createCrossmintSigner } from '../crossmint-signer.js';
 

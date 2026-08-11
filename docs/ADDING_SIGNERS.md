@@ -1132,8 +1132,10 @@ in a nested object created by the constructor, because `Object.freeze` is
 shallow.
 
 Every backend's unit suite asserts this with `assertSignerSurvivesFreeze` from
-`@solana/keychain-test-utils`. Add one alongside your happy-path signing test,
-reusing the same mocks:
+`@solana/keychain-test-utils/frozen-signer-contract` — the subpath rather than
+the package root, so unit tests don't load the `litesvm` native binding the
+root barrel pulls in for integration helpers. Add one alongside your happy-path
+signing test, reusing the same mocks:
 
 ```ts
 it('signs when the signer instance is frozen', async () => {

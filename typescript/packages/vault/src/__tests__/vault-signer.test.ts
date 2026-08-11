@@ -1,4 +1,4 @@
-import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils/frozen-signer-contract';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { VaultSigner } from '../vault-signer.js';

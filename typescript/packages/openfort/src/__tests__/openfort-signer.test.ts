@@ -1,6 +1,6 @@
 import { Address } from '@solana/addresses';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
-import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils/frozen-signer-contract';
 import { type Transaction, type TransactionWithinSizeLimit, type TransactionWithLifetime } from '@solana/transactions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 

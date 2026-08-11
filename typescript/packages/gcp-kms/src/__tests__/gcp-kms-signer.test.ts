@@ -1,7 +1,7 @@
 import { address } from '@solana/addresses';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
-import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils/frozen-signer-contract';
 
 import { GcpKmsSigner } from '../gcp-kms-signer.js';
 import type { GcpKmsSignerConfig } from '../types.js';

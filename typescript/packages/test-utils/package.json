@@ -20,6 +20,10 @@
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./frozen-signer-contract": {
+            "types": "./dist/frozen-signer-contract.d.ts",
+            "import": "./dist/frozen-signer-contract.js"
         }
     },
     "files": [

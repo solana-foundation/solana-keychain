@@ -1,6 +1,6 @@
 import * as nodeCrypto from 'node:crypto';
 
-import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils/frozen-signer-contract';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
@@ -218,6 +218,8 @@ describe('DfnsSigner', () => {
             expect(sig.length).toBe(64);
         });
 
+        // Exercised via signMessages: this backend's signTransactions happy path cannot
+        // complete against mocks. Both paths share the same auth and caching machinery.
         it('signs when the signer instance is frozen', async () => {
             mockWalletFetch();
 

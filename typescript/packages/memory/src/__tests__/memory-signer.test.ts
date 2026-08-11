@@ -11,7 +11,7 @@ import {
     setTransactionMessageFeePayer,
     setTransactionMessageLifetimeUsingBlockhash,
 } from '@solana/kit';
-import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils';
+import { assertSignerSurvivesFreeze } from '@solana/keychain-test-utils/frozen-signer-contract';
 import { generateKeyPair } from '@solana/keys';
 import { describe, expect, it } from 'vitest';
 
