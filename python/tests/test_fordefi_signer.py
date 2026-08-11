@@ -12,6 +12,11 @@ from cryptography.hazmat.primitives.serialization import (
     NoEncryption,
     PrivateFormat,
 )
+from solders.compute_budget import (
+    request_heap_frame,
+    set_compute_unit_limit,
+    set_compute_unit_price,
+)
 from solders.hash import Hash
 from solders.instruction import AccountMeta, Instruction
 from solders.keypair import Keypair
@@ -29,7 +34,6 @@ from solana_keychain.fordefi import (
     PemRequestSigner,
     create_fordefi_signer,
 )
-from solana_keychain.fordefi.signer import COMPUTE_BUDGET_PROGRAM_ID
 from tests.util import create_test_transaction, create_two_signer_transaction
 
 API_BASE_URL = "https://fordefi.example.com"
@@ -453,16 +457,6 @@ async def test_sign_transaction_native_success() -> None:
     assert body["details"]["data"] == base64.b64encode(transaction.message_data()).decode("ascii")
 
 
-def set_compute_unit_price_instruction(micro_lamports: int = 5_000) -> Instruction:
-    return Instruction(
-        COMPUTE_BUDGET_PROGRAM_ID, bytes([3]) + micro_lamports.to_bytes(8, "little"), []
-    )
-
-
-def set_compute_unit_limit_instruction(units: int = 200_000) -> Instruction:
-    return Instruction(COMPUTE_BUDGET_PROGRAM_ID, bytes([2]) + units.to_bytes(4, "little"), [])
-
-
 @respx.mock
 async def test_sign_transaction_native_accepts_added_fee_instructions() -> None:
     """Fordefi sets the priority fee itself when the submitted message has no
@@ -474,7 +468,7 @@ async def test_sign_transaction_native_accepts_added_fee_instructions() -> None:
         keypair,
         rebuild_with_fresh_blockhash(
             transaction,
-            [set_compute_unit_limit_instruction(), set_compute_unit_price_instruction()],
+            [set_compute_unit_limit(200_000), set_compute_unit_price(5_000)],
         ),
     )
 
@@ -495,14 +489,14 @@ async def test_sign_transaction_native_rejects_added_fees_when_request_had_compu
     )
     transaction = Transaction.new_unsigned(
         Message.new_with_blockhash(
-            [set_compute_unit_price_instruction(10), transfer_ix], keypair.pubkey(), Hash.default()
+            [set_compute_unit_price(10), transfer_ix], keypair.pubkey(), Hash.default()
         )
     )
     returned = Transaction.new_unsigned(
         Message.new_with_blockhash(
             [
-                set_compute_unit_price_instruction(10),
-                set_compute_unit_price_instruction(10_000_000),
+                set_compute_unit_price(10),
+                set_compute_unit_price(10_000_000),
                 transfer_ix,
             ],
             keypair.pubkey(),
@@ -523,10 +517,9 @@ async def test_sign_transaction_native_rejects_non_fee_compute_budget_addition()
     keypair = Keypair()
     signer = make_signer(keypair, chain="solana_devnet")
     transaction = create_test_transaction(keypair.pubkey())
-    request_heap_frame = Instruction(
-        COMPUTE_BUDGET_PROGRAM_ID, bytes([1]) + (256 * 1024).to_bytes(4, "little"), []
+    mock_native_response(
+        keypair, rebuild_with_fresh_blockhash(transaction, [request_heap_frame(256 * 1024)])
     )
-    mock_native_response(keypair, rebuild_with_fresh_blockhash(transaction, [request_heap_frame]))
 
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_transaction(transaction)
@@ -596,7 +589,7 @@ async def test_sign_transaction_native_rejects_dropped_instruction() -> None:
     keypair = Keypair()
     signer = make_signer(keypair, chain="solana_devnet")
     transaction = create_test_transaction(keypair.pubkey())
-    fee_only = Instruction(COMPUTE_BUDGET_PROGRAM_ID, bytes([3]) + (1).to_bytes(8, "little"), [])
+    fee_only = set_compute_unit_price(1)
     returned = Transaction.new_unsigned(
         Message.new_with_blockhash([fee_only], keypair.pubkey(), Hash.new_unique())
     )

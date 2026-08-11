@@ -14,6 +14,8 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from solders.compute_budget import ID as COMPUTE_BUDGET_PROGRAM_ID
+from solders.compute_budget import set_compute_unit_limit, set_compute_unit_price
 from solders.message import Message
 from solders.pubkey import Pubkey
 from solders.signature import Signature
@@ -41,8 +43,10 @@ DEFAULT_POLL_INTERVAL_MS = 2000
 DEFAULT_MAX_POLL_ATTEMPTS = 50
 SUPPORTED_CHAINS = ("solana_devnet", "solana_mainnet")
 
-COMPUTE_BUDGET_PROGRAM_ID = Pubkey.from_string("ComputeBudget111111111111111111111111111111")
-_FEE_SETTING_COMPUTE_BUDGET_OPCODES = (2, 3)
+_FEE_SETTING_COMPUTE_BUDGET_OPCODES = (
+    bytes(set_compute_unit_limit(0).data)[0],
+    bytes(set_compute_unit_price(0).data)[0],
+)
 
 _AVAILABILITY_TIMEOUT_SECONDS = 5.0
 _VAULT_VERIFICATION_TIMEOUT_SECONDS = 10.0

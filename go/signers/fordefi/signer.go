@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gagliardetto/solana-go"
+	computebudget "github.com/gagliardetto/solana-go/programs/compute-budget"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
@@ -281,15 +282,6 @@ func (s *Signer) signSolanaMessage(ctx context.Context, message []byte) (solana.
 	return extractSignature(result)
 }
 
-// computeBudgetProgramID is the only program Fordefi may add instructions for:
-// it sets the priority fee when the submitted message carries none.
-var computeBudgetProgramID = solana.MustPublicKeyFromBase58("ComputeBudget111111111111111111111111111111")
-
-const (
-	setComputeUnitLimitOpcode = 2
-	setComputeUnitPriceOpcode = 3
-)
-
 // resolvedInstruction is an instruction with its account indices resolved to
 // pubkeys and their signer and writable flags, so two messages stay comparable
 // even when they order or extend AccountKeys differently.
@@ -302,8 +294,9 @@ type resolvedInstruction struct {
 }
 
 func (r resolvedInstruction) isFeeSetting() bool {
-	return r.programID.Equals(computeBudgetProgramID) && r.hasOpcode &&
-		(r.opcode == setComputeUnitLimitOpcode || r.opcode == setComputeUnitPriceOpcode)
+	return r.programID.Equals(computebudget.ProgramID) && r.hasOpcode &&
+		(r.opcode == computebudget.Instruction_SetComputeUnitLimit ||
+			r.opcode == computebudget.Instruction_SetComputeUnitPrice)
 }
 
 func resolveInstructions(message *solana.Message) ([]resolvedInstruction, error) {
@@ -372,7 +365,7 @@ func assertOnlyBlockhashAndFeeRewrites(requested, returned *solana.Message) erro
 	}
 
 	fordefiMayAddFees := !slices.ContainsFunc(submitted, func(instruction resolvedInstruction) bool {
-		return instruction.programID.Equals(computeBudgetProgramID)
+		return instruction.programID.Equals(computebudget.ProgramID)
 	})
 	matched := 0
 	for _, instruction := range returnedInstructions {
