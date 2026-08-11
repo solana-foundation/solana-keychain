@@ -250,6 +250,41 @@ describe('UtilaSigner', () => {
             expect(fetchCall(2)[0]).toBe('https://api.test.utila.io/v2/vaults/vault-test/transactions/tx-1?view=FULL');
         });
 
+        it('signs when the signer instance is frozen, as @solana/signers freezes fee-payer signers', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse())
+                .mockResolvedValueOnce(
+                    jsonResponse({
+                        transaction: {
+                            name: 'vaults/vault-test/transactions/tx-1',
+                            state: 'AWAITING_SIGNATURE',
+                        },
+                    }),
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({
+                        transaction: {
+                            name: 'vaults/vault-test/transactions/tx-1',
+                            solanaTransaction: {
+                                rawTransaction: MOCK_RAW_TRANSACTION,
+                            },
+                            state: 'SIGNED',
+                        },
+                    }),
+                );
+
+            const signer = await createUtilaSigner({
+                ...mockConfig,
+                maxPollAttempts: 2,
+                pollIntervalMs: 1,
+            });
+            Object.freeze(signer);
+            const results = await signer.signTransactions([createMockTransaction()]);
+
+            expect(results).toHaveLength(1);
+            expect(results[0]![signer.address]).toEqual(MOCK_SIGNATURE_BYTES);
+        });
+
         it('throws on terminal Utila state', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse())

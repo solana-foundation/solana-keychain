@@ -103,7 +103,9 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
     private readonly serviceAccountPrivateKey: ImportedPrivateKey;
     private readonly vaultId: string;
     private readonly walletId: string;
-    private accessToken: { expiresAtMs: number; tokenPromise: Promise<string> } | null = null;
+    private readonly tokenCache: { entry: { expiresAtMs: number; tokenPromise: Promise<string> } | null } = {
+        entry: null,
+    };
 
     static async create<TAddress extends string = string>(config: UtilaSignerConfig): Promise<UtilaSigner<TAddress>> {
         validateRequired('serviceAccountEmail', config.serviceAccountEmail);
@@ -335,21 +337,27 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
      * {@link TOKEN_REFRESH_MARGIN_MS} of expiry. The pending mint promise is
      * cached (not the resolved token) so concurrent callers share one mint;
      * a failed mint evicts itself so the next call retries.
+     *
+     * The cache lives in a nested `tokenCache` object rather than directly on
+     * the instance because `@solana/signers` freezes fee-payer signers
+     * (`Object.freeze` is shallow, so the nested object stays writable).
      */
     private getAccessToken(): Promise<string> {
-        if (!this.accessToken || Date.now() >= this.accessToken.expiresAtMs - TOKEN_REFRESH_MARGIN_MS) {
-            const entry = {
-                expiresAtMs: Date.now() + TOKEN_TTL_MS,
-                tokenPromise: createUtilaAccessToken(this.serviceAccountEmail, this.serviceAccountPrivateKey),
-            };
-            this.accessToken = entry;
-            entry.tokenPromise.catch(() => {
-                if (this.accessToken === entry) {
-                    this.accessToken = null;
-                }
-            });
+        const cached = this.tokenCache.entry;
+        if (cached && Date.now() < cached.expiresAtMs - TOKEN_REFRESH_MARGIN_MS) {
+            return cached.tokenPromise;
         }
-        return this.accessToken.tokenPromise;
+        const entry = {
+            expiresAtMs: Date.now() + TOKEN_TTL_MS,
+            tokenPromise: createUtilaAccessToken(this.serviceAccountEmail, this.serviceAccountPrivateKey),
+        };
+        this.tokenCache.entry = entry;
+        entry.tokenPromise.catch(() => {
+            if (this.tokenCache.entry === entry) {
+                this.tokenCache.entry = null;
+            }
+        });
+        return entry.tokenPromise;
     }
 
     private async request<T>(path: string, method: 'GET' | 'POST', body?: unknown): Promise<T> {
