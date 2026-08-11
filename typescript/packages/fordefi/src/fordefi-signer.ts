@@ -71,10 +71,21 @@ const FEE_SETTING_COMPUTE_BUDGET_OPCODES = new Set([2, 3]);
 /** Legacy and v0 compiled messages; v1 stores instructions in a different shape. */
 type CompiledMessageWithInstructions = Extract<CompiledTransactionMessage, { instructions: readonly unknown[] }>;
 
-function assertHasInstructions(message: CompiledTransactionMessage): CompiledMessageWithInstructions {
+function assertComparableMessage(message: CompiledTransactionMessage): CompiledMessageWithInstructions {
     if (!('instructions' in message)) {
         return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
             message: 'Fordefi native mode supports only legacy and v0 transaction messages',
+        });
+    }
+    // Account indices are resolved against `staticAccounts` to compare intent, and
+    // an address sourced from a lookup table is not in there. Resolving such an
+    // index positionally without also comparing the lookup tables would reopen the
+    // substitution gap this comparison exists to close, so refuse instead. The
+    // other three languages support only legacy transactions in native mode.
+    if ('addressTableLookups' in message && (message.addressTableLookups?.length ?? 0) > 0) {
+        return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            message:
+                'Fordefi native mode cannot verify a transaction that sources accounts from an address lookup table; submit a transaction with only static accounts',
         });
     }
     return message;
@@ -139,8 +150,8 @@ function resolveInstructions(message: CompiledMessageWithInstructions): Resolved
  */
 function assertOnlyBlockhashAndFeeRewrites(requestedBytes: TransactionMessageBytes, returnedBytes: Uint8Array): void {
     const decoder = getCompiledTransactionMessageDecoder();
-    const requested = assertHasInstructions(decoder.decode(requestedBytes));
-    const returned = assertHasInstructions(decoder.decode(returnedBytes));
+    const requested = assertComparableMessage(decoder.decode(requestedBytes));
+    const returned = assertComparableMessage(decoder.decode(returnedBytes));
 
     const requestedSigners = requested.staticAccounts.slice(0, requested.header.numSignerAccounts);
     const returnedSigners = returned.staticAccounts.slice(0, returned.header.numSignerAccounts);

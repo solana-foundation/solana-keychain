@@ -82,6 +82,7 @@ function mockPollResponse(state: string, sigBase64?: string, rawTransaction?: st
 const COMPUTE_BUDGET_PROGRAM_ADDRESS = 'ComputeBudget111111111111111111111111111111' as Address;
 const RECIPIENT_ADDRESS = 'SysvarC1ock11111111111111111111111111111111' as Address;
 const OTHER_RECIPIENT_ADDRESS = 'SysvarRent111111111111111111111111111111111' as Address;
+const LOOKUP_TABLE_ADDRESS = 'SysvarS1otHashes111111111111111111111111111' as Address;
 type TestBlockhash = Parameters<typeof setTransactionMessageLifetimeUsingBlockhash>[0]['blockhash'];
 const MOCK_BLOCKHASH = '11111111111111111111111111111111' as TestBlockhash;
 const FRESH_BLOCKHASH = 'GHtXQBsoZHVnNFa9YevAzFr17DJjgHXk3ycTKD5xD3Zi' as TestBlockhash;
@@ -126,6 +127,41 @@ function compiledMessageBytes(
         ) as Parameters<typeof appendTransactionMessageInstruction>[1],
     );
     const encoded = getCompiledTransactionMessageEncoder().encode(compileTransactionMessage(message as never));
+    const bytes = new Uint8Array(encoded.length);
+    bytes.set(encoded);
+    return bytes;
+}
+
+/**
+ * A v0 message that sources an account from an address lookup table, which is the
+ * one shape the static-account comparison cannot resolve.
+ */
+function compiledV0MessageBytesWithLookupTable(): Uint8Array<ArrayBuffer> {
+    const compiled = {
+        addressTableLookups: [
+            {
+                lookupTableAddress: LOOKUP_TABLE_ADDRESS,
+                readonlyIndexes: [],
+                writableIndexes: [1],
+            },
+        ],
+        header: {
+            numReadonlyNonSignerAccounts: 1,
+            numReadonlySignerAccounts: 0,
+            numSignerAccounts: 1,
+        },
+        instructions: [
+            {
+                accountIndices: [0, 2],
+                data: new Uint8Array([2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]),
+                programAddressIndex: 1,
+            },
+        ],
+        lifetimeToken: FRESH_BLOCKHASH,
+        staticAccounts: [MOCK_ADDRESS as Address, '11111111111111111111111111111112' as Address],
+        version: 0,
+    };
+    const encoded = getCompiledTransactionMessageEncoder().encode(compiled as never);
     const bytes = new Uint8Array(encoded.length);
     bytes.set(encoded);
     return bytes;
@@ -708,6 +744,29 @@ describe('FordefiSigner', () => {
          * A different transaction signed by the same vault must not be reported as a
          * successful signing of the submitted one.
          */
+        /**
+         * The intent comparison resolves account indices against `staticAccounts`, so
+         * an address sourced from a lookup table is not resolvable. It must say so
+         * clearly rather than failing as a malformed-transaction error.
+         */
+        it('should reject an address-lookup-table transaction with a clear error', async () => {
+            const submitted = {
+                messageBytes: compiledV0MessageBytesWithLookupTable(),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+            const wireTx = mockWireTransaction(compiledV0MessageBytesWithLookupTable());
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse())
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-alt'))
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
+
+            const signer = await FordefiSigner.create(nativeConfig);
+            await expect(signer.signAndSendTransactions([submitted])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+                message: expect.stringContaining('address lookup table'),
+            });
+        });
+
         it('should reject a returned transaction with a substituted recipient', async () => {
             const wireTx = mockWireTransaction(
                 compiledMessageBytes([transferInstruction(OTHER_RECIPIENT_ADDRESS, 1_000_000)], FRESH_BLOCKHASH),
