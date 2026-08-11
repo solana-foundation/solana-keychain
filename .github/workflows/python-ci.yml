@@ -43,8 +43,8 @@ jobs:
               return raw === 'true';
             };
 
-            // Same live-credential set as the other language CIs (utila and
-            // vault run locally via `just py-test-integration`).
+            // Same live-credential set as the other language CIs (vault runs
+            // locally via `just py-test-integration`).
             const integrationOrder = [
               ['privy', 'CI_SIGNER_PRIVY_ENABLED'],
               ['turnkey', 'CI_SIGNER_TURNKEY_ENABLED'],
@@ -57,6 +57,7 @@ jobs:
               ['dfns', 'CI_SIGNER_DFNS_ENABLED'],
               ['crossmint', 'CI_SIGNER_CROSSMINT_ENABLED'],
               ['openfort', 'CI_SIGNER_OPENFORT_ENABLED'],
+              ['utila', 'CI_SIGNER_UTILA_ENABLED'],
             ];
             const backends = integrationOrder
               .filter(([, variable]) => parseVar(variable))

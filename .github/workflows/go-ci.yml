@@ -110,8 +110,8 @@ jobs:
             core.setOutput('go_unit_module_count', String(goUnitModules.length));
             core.setOutput('go_modules_space', goUnitModules.join(' '));
 
-            // Same live-credential set as the TS CI (utila and vault run
-            // locally via `just go-test-integration`, as in Rust/TS).
+            // Same live-credential set as the TS CI (vault runs locally via
+            // `just go-test-integration`, as in Rust/TS).
             const goIntegrationOrder = [
               'privy',
               'turnkey',
@@ -124,6 +124,7 @@ jobs:
               'crossmint',
               'openfort',
               'fordefi',
+              'utila',
             ];
             const goIntegrationModules = goIntegrationOrder
               .filter((signer) => enabled[signer])

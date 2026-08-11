@@ -129,6 +129,7 @@ jobs:
               ['dfns', 'dfns'],
               ['crossmint', 'crossmint'],
               ['openfort', 'openfort'],
+              ['utila', 'utila'],
             ];
 
             const goLiveModuleMap = [
@@ -143,6 +144,7 @@ jobs:
               ['dfns', 'signers/dfns'],
               ['crossmint', 'signers/crossmint'],
               ['openfort', 'signers/openfort'],
+              ['utila', 'signers/utila'],
             ];
 
             const rustFeatures = rustFeatureOrder.filter((backend) => enabled[backend]);
