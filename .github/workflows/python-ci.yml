@@ -31,6 +31,7 @@ jobs:
           CI_SIGNER_DFNS_ENABLED: ${{ vars.CI_SIGNER_DFNS_ENABLED || 'true' }}
           CI_SIGNER_CROSSMINT_ENABLED: ${{ vars.CI_SIGNER_CROSSMINT_ENABLED || 'true' }}
           CI_SIGNER_OPENFORT_ENABLED: ${{ vars.CI_SIGNER_OPENFORT_ENABLED || 'true' }}
+          CI_SIGNER_UTILA_ENABLED: ${{ vars.CI_SIGNER_UTILA_ENABLED || 'true' }}
         with:
           script: |
             const parseVar = (name) => {
