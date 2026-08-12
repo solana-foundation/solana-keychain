@@ -44,6 +44,13 @@ type Config struct {
 	// provided, the signer derives an Ed25519 keypair via HKDF-SHA256 and
 	// automatically signs any `awaiting-approval` transactions from the
 	// Crossmint API.
+	//
+	// Trust boundary: the approval challenge is the message of the transaction
+	// Crossmint will execute, which is not derivable from the one submitted because
+	// Crossmint rewrites it to sponsor gas. Setting this delegates to Crossmint the
+	// choice of what gets approved. The signer confirms after the fact that its
+	// approval covers the transaction that executed, not that the transaction
+	// matches the caller's intent.
 	SignerSecret string
 
 	// Signer is an optional explicit signer locator forwarded on transaction

@@ -11,7 +11,17 @@ export interface CrossmintSignerConfig {
      */
     requestDelayMs?: number;
     signer?: string;
-    /** Server signer secret (`xmsk1_<64hex>`). When set, automatically signs awaiting-approval transactions. */
+    /**
+     * Server signer secret (`xmsk1_<64hex>`). When set, automatically signs
+     * awaiting-approval transactions.
+     *
+     * Trust boundary: the approval challenge is the message of the transaction
+     * Crossmint will execute, which is not derivable from the one submitted because
+     * Crossmint rewrites it to sponsor gas. Setting this delegates to Crossmint the
+     * choice of what gets approved. The signer confirms after the fact that its
+     * approval covers the transaction that executed, not that the transaction
+     * matches the caller's intent.
+     */
     signerSecret?: string;
     walletLocator: string;
 }
@@ -46,8 +56,14 @@ export interface CrossmintTransactionApprovals {
         // string (e.g. `server:<address>`) lives at `signer.locator`.
         signer?: { locator?: string };
     }>;
+    /**
+     * Approvals Crossmint has already collected. A rewritten transaction's wallet
+     * signature appears here rather than in a signature slot of the returned
+     * transaction.
+     */
     submitted?: Array<{
         signature?: string;
+        signer?: { address?: string; locator?: string };
     }>;
 }
 

@@ -495,6 +495,217 @@ func TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes(t *testing.T
 	if res.Signature != remoteSignature {
 		t.Errorf("signature = %s, want %s", res.Signature, remoteSignature)
 	}
+	// Crossmint sponsors gas, so it is the fee payer and the message it signs
+	// differs from the caller's. Its signature must never be placed in the
+	// caller's transaction, which could not verify with it.
+	if res.EncodedTransaction != "" {
+		t.Error("a Crossmint-broadcast transaction leaves nothing for the caller to send")
+	}
+	for _, sig := range localTx.Signatures {
+		if !sig.IsZero() {
+			t.Error("the caller's transaction must not carry a signature over other bytes")
+		}
+	}
+}
+
+// A returned transaction whose message matches the submitted one really is signed
+// over the caller's bytes, so the signature belongs in the caller's transaction.
+// A smart wallet is signed by its delegated signer, not by the wallet address the
+// API reports, so the delegated key must be a verification candidate.
+func TestSignTransactionLocatesDelegatedSignerSignature(t *testing.T) {
+	secret := signerSecretPrefix + strings.Repeat("ab", 32)
+	derivableAPIKey := "sk_staging_" + base58.Encode([]byte("proj:sig"))
+	delegatedPriv, err := deriveSigningKey(secret, derivableAPIKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegated := solana.PublicKeyFromBytes(delegatedPriv.Public().(ed25519.PublicKey))
+	walletPub := testutils.TestPublicKey()
+	if delegated.Equals(walletPub) {
+		t.Fatal("delegated signer must differ from the wallet address for this test")
+	}
+
+	rewritten, err := testutils.CreateTestTransaction(delegated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewrittenMsg, err := rewritten.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedSignature := solana.SignatureFromBytes(ed25519.Sign(delegatedPriv, rewrittenMsg))
+	rewritten.Signatures = []solana.Signature{expectedSignature}
+	wireBytes, err := rewritten.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, derivableAPIKey, walletPub.String()))
+	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+			`{"id":"tx-delegated","status":"success","onChain":{"transaction":%q}}`,
+			base58.Encode(wireBytes)))
+	})
+	srv := startServer(t, mux)
+
+	cfg := baseConfig(srv)
+	cfg.APIKey = derivableAPIKey
+	cfg.MaxPollAttempts = 1
+	cfg.SignerSecret = secret
+	s := newTestSigner(t, cfg)
+
+	localTx, err := testutils.CreateTestTransaction(walletPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.SignTransaction(context.Background(), localTx)
+	if err != nil {
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+	}
+	if res.Signature != expectedSignature {
+		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
+	}
+	if !s.Pubkey().Equals(walletPub) {
+		t.Error("the wallet address remains the signer's public identity")
+	}
+}
+
+// A wallet can be configured with both SignerSecret and an explicit Signer locator
+// naming a different key, e.g. the wallet's admin signer. Either may be the key
+// that actually signs, so both must be candidates.
+func TestSignTransactionExplicitLocatorSignerIsACandidate(t *testing.T) {
+	walletPub := testutils.TestPublicKey()
+	adminPriv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x7c}, ed25519.SeedSize))
+	admin := solana.PublicKeyFromBytes(adminPriv.Public().(ed25519.PublicKey))
+
+	rewritten, err := testutils.CreateTestTransaction(admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewrittenMsg, err := rewritten.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedSignature := solana.SignatureFromBytes(ed25519.Sign(adminPriv, rewrittenMsg))
+	rewritten.Signatures = []solana.Signature{expectedSignature}
+	wireBytes, err := rewritten.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	derivableAPIKey := "sk_staging_" + base58.Encode([]byte("proj:sig"))
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, derivableAPIKey, walletPub.String()))
+	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+			`{"id":"tx-admin","status":"success","onChain":{"transaction":%q}}`, base58.Encode(wireBytes)))
+	})
+	srv := startServer(t, mux)
+
+	cfg := baseConfig(srv)
+	cfg.APIKey = derivableAPIKey
+	cfg.MaxPollAttempts = 1
+	cfg.SignerSecret = signerSecretPrefix + strings.Repeat("ab", 32)
+	cfg.Signer = "server:" + admin.String()
+	s := newTestSigner(t, cfg)
+
+	localTx, err := testutils.CreateTestTransaction(walletPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.SignTransaction(context.Background(), localTx)
+	if err != nil {
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+	}
+	if res.Signature != expectedSignature {
+		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
+	}
+}
+
+// Widening the candidate set must not accept a key that is neither the wallet
+// address nor the configured delegated signer.
+func TestSignTransactionRejectsUnrelatedSignerKey(t *testing.T) {
+	walletPub := testutils.TestPublicKey()
+	strangerPriv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x5a}, ed25519.SeedSize))
+	stranger := solana.PublicKeyFromBytes(strangerPriv.Public().(ed25519.PublicKey))
+
+	rewritten, err := testutils.CreateTestTransaction(stranger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewrittenMsg, err := rewritten.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewritten.Signatures = []solana.Signature{solana.SignatureFromBytes(ed25519.Sign(strangerPriv, rewrittenMsg))}
+	wireBytes, err := rewritten.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	derivableAPIKey := "sk_staging_" + base58.Encode([]byte("proj:sig"))
+	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, derivableAPIKey, walletPub.String()))
+	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+			`{"id":"tx-stranger","status":"success","onChain":{"transaction":%q}}`,
+			base58.Encode(wireBytes)))
+	})
+	srv := startServer(t, mux)
+
+	cfg := baseConfig(srv)
+	cfg.APIKey = derivableAPIKey
+	cfg.MaxPollAttempts = 1
+	cfg.SignerSecret = signerSecretPrefix + strings.Repeat("ab", 32)
+	s := newTestSigner(t, cfg)
+
+	localTx, err := testutils.CreateTestTransaction(walletPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), localTx)
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Errorf("got %s, want SIGNING_FAILED", code)
+	}
+}
+
+func TestSignTransactionUnrewrittenTransactionSignsCallerBytes(t *testing.T) {
+	priv := testutils.TestPrivateKey()
+	signerPubkey := pubkeyOf(priv)
+
+	localTx, err := testutils.CreateTestTransaction(signerPubkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	returned, err := testutils.CreateTestTransaction(signerPubkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onChainTransaction, expectedSignature := signAndEncodeB58(t, returned, priv)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, signerPubkey.String()))
+	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+			`{"id":"tx-exact","status":"success","onChain":{"transaction":%q}}`, onChainTransaction))
+	})
+	srv := startServer(t, mux)
+
+	cfg := baseConfig(srv)
+	cfg.MaxPollAttempts = 1
+	s := newTestSigner(t, cfg)
+
+	res, err := s.SignTransaction(context.Background(), localTx)
+	if err != nil {
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+	}
+	if res.EncodedTransaction == "" {
+		t.Error("an unrewritten transaction is the caller's to broadcast")
+	}
+	if len(localTx.Signatures) == 0 || localTx.Signatures[0] != expectedSignature {
+		t.Error("the signature covers the caller's bytes and belongs in its transaction")
+	}
 }
 
 func TestSignTransactionPrefersOnChainTransactionSignatureOverTxIDFallback(t *testing.T) {

@@ -50,6 +50,20 @@ pub struct OnChainData {
 pub struct Approvals {
     #[serde(default)]
     pub pending: Vec<PendingApproval>,
+    /// Approvals Crossmint has already collected. A rewritten transaction's wallet
+    /// signature appears here rather than in a signature slot of the returned
+    /// transaction.
+    #[serde(default)]
+    pub submitted: Vec<SubmittedApproval>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmittedApproval {
+    #[serde(default)]
+    pub signature: Option<String>,
+    #[serde(default)]
+    pub signer: Option<ApprovalSigner>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,4 +80,6 @@ pub struct PendingApproval {
 pub struct ApprovalSigner {
     #[serde(default)]
     pub locator: Option<String>,
+    #[serde(default)]
+    pub address: Option<String>,
 }

@@ -52,6 +52,13 @@ class CrossmintSignerConfig:
     (``xmsk1_<64hex>``); when provided, an Ed25519 keypair is derived from it and
     ``awaiting-approval`` transactions are approved automatically. ``signer``
     overrides the delegated-signer locator (default ``server:<derived pubkey>``).
+
+    Trust boundary for ``signer_secret``: the approval challenge is the message of
+    the transaction Crossmint will execute, which is not derivable from the one
+    submitted because Crossmint rewrites it to sponsor gas. Setting it delegates to
+    Crossmint the choice of what gets approved. The signer confirms after the fact
+    that its approval covers the transaction that executed, not that the transaction
+    matches the caller's intent.
     """
 
     api_key: str = field(repr=False)
@@ -71,7 +78,7 @@ class CrossmintSigner(SolanaSigner):
     sponsorship, priority fee, its own blockhash) and broadcasts server-side, so
     returned signatures cover Crossmint's bytes rather than the caller's.
 
-    ``init()`` must be awaited before signing — it resolves the wallet address.
+    ``init()`` must be awaited before signing; it resolves the wallet address.
     ``create_crossmint_signer()`` does this for you. ``sign_message`` is
     intentionally unsupported: the Wallets API signs transactions only.
     """
@@ -104,6 +111,24 @@ class CrossmintSigner(SolanaSigner):
         if config.signer_secret is not None:
             self._signing_key = derive_signing_key(config.signer_secret, config.api_key)
             self._signer = config.signer or f"server:{self._signing_key.pubkey()}"
+        self._delegated_pubkeys = self._resolve_delegated_pubkeys()
+
+    def _resolve_delegated_pubkeys(self) -> list[Pubkey]:
+        """Every delegated-signer key the configuration makes known.
+
+        A smart wallet signs through its delegated signer, not the wallet address.
+        Both sources are collected because a ``signer`` locator may name a different
+        key than ``signer_secret`` derives, and either can be the one that signs.
+        """
+        candidates: list[Pubkey] = []
+        if self._signing_key is not None:
+            candidates.append(self._signing_key.pubkey())
+        if self._signer is not None and self._signer.startswith("server:"):
+            try:
+                candidates.append(Pubkey.from_string(self._signer.removeprefix("server:").strip()))
+            except Exception:
+                pass
+        return candidates
 
     def __repr__(self) -> str:
         return f"CrossmintSigner(pubkey={self._public_key}, wallet_locator={self._wallet_locator})"
@@ -309,16 +334,18 @@ class CrossmintSigner(SolanaSigner):
             json_body={"approvals": [{"signer": self._signer, "signature": str(signature)}]},
         )
 
-    def _verify_signature_matches_message(self, signature: Signature, message: bytes) -> None:
-        if not signature.verify(self._initialized_pubkey(), message):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Crossmint returned a signature for different bytes",
-            )
+    def _verification_candidates(self) -> list[Pubkey]:
+        """Keys that may have signed: the wallet address for ``mpc``, the delegated
+        signer for ``smart``. The response does not say which, so try both."""
+        candidates = [self._initialized_pubkey()]
+        for delegated in self._delegated_pubkeys:
+            if delegated not in candidates:
+                candidates.append(delegated)
+        return candidates
 
     def _extract_signature_from_serialized_transaction(
         self, serialized_transaction: str
-    ) -> Signature:
+    ) -> tuple[Signature, VersionedTransaction]:
         try:
             transaction_bytes = base58.b58decode(serialized_transaction)
         except ValueError:
@@ -346,43 +373,95 @@ class CrossmintSigner(SolanaSigner):
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED, "Invalid account index: not enough account keys"
             )
-        public_key = self._initialized_pubkey()
-        try:
-            position = account_keys[:num_required].index(public_key)
-        except ValueError:
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Failed to locate signer pubkey in Crossmint transaction",
-            ) from None
-
+        # Require a verifying signature, not just presence in a slot: the wallet
+        # address can occupy a slot it never signed.
+        signer_slots = account_keys[:num_required]
+        signed_bytes = signed_message_bytes(message)
         signatures = list(transaction.signatures)
-        if position >= len(signatures) or signatures[position] == Signature.default():
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Crossmint onChain.transaction did not contain a signer signature",
-            )
-        signature = signatures[position]
-        # Verify against the bytes Crossmint actually signed, not the caller's:
-        # Crossmint is a broadcast-managed signer that rewrites the transaction
-        # (gas sponsorship, priority fee, its own blockhash) and broadcasts
-        # server-side, so a strict check against caller bytes rejects legitimately
-        # landed transactions.
-        self._verify_signature_matches_message(signature, signed_message_bytes(message))
-        return signature
+        for candidate in self._verification_candidates():
+            if candidate not in signer_slots:
+                continue
+            position = signer_slots.index(candidate)
+            if position >= len(signatures) or signatures[position] == Signature.default():
+                continue
+            if signatures[position].verify(candidate, signed_bytes):
+                return signatures[position], transaction
+        raise SignerError(
+            SignerErrorCode.SIGNING_FAILED,
+            "No configured signer holds a verifying signature in the Crossmint transaction",
+        )
+
+    def _extract_signature_from_approvals(
+        self, response: dict[str, Any], serialized_transaction: str
+    ) -> tuple[Signature, VersionedTransaction] | None:
+        """This wallet's signature over the transaction Crossmint executed.
+
+        For a rewritten transaction it arrives in ``approvals.submitted`` covering the
+        rewritten message, not in a signature slot. Verified locally regardless.
+        """
+        approvals = response.get("approvals")
+        submitted = approvals.get("submitted") if isinstance(approvals, dict) else None
+        if not isinstance(submitted, list) or not submitted:
+            return None
+        try:
+            transaction = VersionedTransaction.from_bytes(base58.b58decode(serialized_transaction))
+        except Exception:
+            return None
+        executed_message = signed_message_bytes(transaction.message)
+        candidates = self._verification_candidates()
+        for entry in submitted:
+            if not isinstance(entry, dict):
+                continue
+            signer = entry.get("signer")
+            address = signer.get("address") if isinstance(signer, dict) else None
+            encoded = entry.get("signature")
+            if not isinstance(address, str) or not isinstance(encoded, str):
+                continue
+            try:
+                approver = Pubkey.from_string(address)
+                signature = Signature.from_bytes(base58.b58decode(encoded))
+            except Exception:
+                continue
+            if approver in candidates and signature.verify(approver, executed_message):
+                return signature, transaction
+        return None
 
     def _extract_signature_from_response(
         self, response: dict[str, Any], expected_message: bytes
-    ) -> Signature:
+    ) -> tuple[Signature, VersionedTransaction | None]:
+        """The signing result, plus the broadcast transaction when Crossmint rewrote one.
+
+        A non-``None`` transaction means Crossmint changed the message before
+        signing and broadcast the result server-side, so its signature covers
+        Crossmint's bytes rather than the caller's.
+        """
         on_chain = response.get("onChain")
         if isinstance(on_chain, dict):
+            embedded_error: SignerError | None = None
             serialized_transaction = on_chain.get("transaction")
             if isinstance(serialized_transaction, str):
                 try:
-                    return self._extract_signature_from_serialized_transaction(
+                    signature, returned = self._extract_signature_from_serialized_transaction(
                         serialized_transaction
                     )
-                except SignerError:
-                    pass
+                except SignerError as transaction_error:
+                    # A rewritten transaction's signature is in approvals.submitted.
+                    approved = self._extract_signature_from_approvals(
+                        response, serialized_transaction
+                    )
+                    if approved is not None:
+                        return approved
+                    # The txId path can only succeed when Crossmint signed the caller's
+                    # exact bytes, so for a rewritten transaction it is not a real
+                    # fallback. Keep the embedded-transaction error as the reported
+                    # cause: it says which check failed, where txId says only that a
+                    # signature did not cover the caller's message.
+                    if not isinstance(on_chain.get("txId"), str):
+                        raise
+                    embedded_error = transaction_error
+                else:
+                    rewritten = signed_message_bytes(returned.message) != expected_message
+                    return signature, returned if rewritten else None
 
             tx_id = on_chain.get("txId")
             if isinstance(tx_id, str):
@@ -396,8 +475,17 @@ class CrossmintSigner(SolanaSigner):
                         SignerErrorCode.SIGNING_FAILED,
                         "Crossmint onChain.txId was not a valid Solana signature",
                     ) from None
-                self._verify_signature_matches_message(signature, expected_message)
-                return signature
+                # A txId counts only if it covers the caller's bytes, and any
+                # configured signer may have produced it.
+                if not any(
+                    signature.verify(candidate, expected_message)
+                    for candidate in self._verification_candidates()
+                ):
+                    raise embedded_error or SignerError(
+                        SignerErrorCode.SIGNING_FAILED,
+                        "Crossmint returned a signature for different bytes",
+                    )
+                return signature, None
 
         raise SignerError(
             SignerErrorCode.SIGNING_FAILED,
@@ -405,13 +493,30 @@ class CrossmintSigner(SolanaSigner):
         )
 
     async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
+        """Sign ``transaction`` through Crossmint's managed wallet flow.
+
+        Crossmint may rewrite the transaction (it sponsors gas, so it becomes the
+        fee payer) and broadcast it itself. When it does, ``transaction`` is left
+        unmodified and ``encoded_transaction`` is empty: the returned signature
+        identifies the transaction Crossmint landed, and it does not cover the
+        caller's message. Only when Crossmint signs the caller's exact bytes is
+        the signature placed in ``transaction``.
+        """
         public_key = self._initialized_pubkey()
         expected_message = transaction.message_data()
         transaction_b58 = base58.b58encode(bytes(transaction)).decode("ascii")
 
         create_response = await self._create_transaction(transaction_b58)
         final_response = await self._poll_transaction(create_response)
-        signature = self._extract_signature_from_response(final_response, expected_message)
+        signature, broadcast_transaction = self._extract_signature_from_response(
+            final_response, expected_message
+        )
+
+        if broadcast_transaction is not None:
+            # Crossmint has already landed this transaction, so the operation is
+            # finished whether or not the copy it returns shows every signature
+            # slot filled, and there is nothing left for the caller to send.
+            return SignedTransaction(encoded_transaction="", signature=signature, is_complete=True)
 
         add_signature_to_transaction(transaction, public_key, signature)
         return classify_signed_transaction(

@@ -32,8 +32,13 @@ const signer = await createCrossmintSigner({
 
 ## Behavior Notes
 
-1. `signTransactions` uses a managed flow similar to Fireblocks `PROGRAM_CALL` style: create transaction, poll status, then extract a signature from Crossmint response data.
-2. `signMessages` is intentionally unsupported and throws a signer error.
+1. Crossmint executes transactions server-side and sponsors gas, which makes it the fee payer, so the message it signs generally differs from the one you submitted. Use `signAndSendTransactions()` (or `signAndSendTransactionMessageWithSigners()`): the returned value is the signature identifying the transaction Crossmint landed, not a signature over your message bytes.
+2. `signTransactions` rejects with `SIGNER_CONFIG_ERROR`. A signature dictionary would claim to cover your message, which it does not.
+3. `signMessages` is intentionally unsupported and throws a signer error.
+
+```typescript
+const [signature] = await signer.signAndSendTransactions([transaction]);
+```
 
 ## License
 

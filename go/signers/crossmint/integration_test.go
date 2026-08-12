@@ -4,7 +4,6 @@ package crossmint
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"os"
 	"strings"
@@ -15,29 +14,6 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core"
 	"github.com/solana-foundation/solana-keychain/go/testutils"
 )
-
-// resolveTestSignerPubkeyOverride handles wallets whose admin signer differs
-// from the derived server signer: the expected signing key can be pinned via
-// TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY (or inferred from a "server:"
-// CROSSMINT_SIGNER locator).
-func resolveTestSignerPubkeyOverride() (solana.PublicKey, bool) {
-	resolved := strings.TrimSpace(os.Getenv("TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY"))
-	if resolved == "" {
-		locator := strings.TrimSpace(os.Getenv("CROSSMINT_SIGNER"))
-		resolved = strings.TrimSpace(strings.TrimPrefix(locator, "server:"))
-		if resolved == locator {
-			resolved = ""
-		}
-	}
-	if resolved == "" {
-		return solana.PublicKey{}, false
-	}
-	pub, err := solana.PublicKeyFromBase58(resolved)
-	if err != nil {
-		return solana.PublicKey{}, false
-	}
-	return pub, true
-}
 
 // integrationSigner builds a signer against the live Crossmint API configured
 // by the environment, via `just go-test-integration` (loads .env) or CI with
@@ -53,9 +29,6 @@ func integrationSigner(t *testing.T) *Signer {
 	})
 	if err != nil {
 		t.Fatalf("failed to create crossmint signer: %v", err)
-	}
-	if pub, ok := resolveTestSignerPubkeyOverride(); ok {
-		s.publicKey = pub
 	}
 	return s
 }
@@ -84,7 +57,7 @@ func TestIntegrationSignMessageNotSupported(t *testing.T) {
 	}
 }
 
-// Signs a minimal empty-instruction transaction with a real blockhash — the
+// Signs a minimal empty-instruction transaction with a real blockhash: the
 // backend validates and finalizes the transaction server-side, so this stays
 // focused on remote signing behavior rather than balance/program execution.
 func TestIntegrationSignTransaction(t *testing.T) {
@@ -111,12 +84,19 @@ func TestIntegrationSignTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SignTransaction: %v", err)
 	}
-	raw, err := base64.StdEncoding.DecodeString(res.EncodedTransaction)
-	if err != nil {
-		t.Fatalf("encoded transaction is not valid base64: %v", err)
+	if len(res.Signature) != core.SignatureLength {
+		t.Fatalf("signature length = %d, want %d", len(res.Signature), core.SignatureLength)
 	}
-	if _, err := solana.TransactionFromBytes(raw); err != nil {
-		t.Fatalf("failed to decode signed transaction: %v", err)
+	// Crossmint sponsors gas, so it rewrites the transaction, signs its own bytes
+	// and broadcasts server-side. The signature identifies what it landed and
+	// there is nothing left for the caller to send.
+	if res.EncodedTransaction != "" {
+		t.Error("a Crossmint-broadcast transaction leaves nothing for the caller to send")
+	}
+	for _, sig := range tx.Signatures {
+		if !sig.IsZero() {
+			t.Error("the caller's transaction must not carry a signature over other bytes")
+		}
 	}
 }
 

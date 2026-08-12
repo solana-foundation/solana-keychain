@@ -10,7 +10,6 @@ substring-matches marker keywords, and every test here carries ``parametrize``.
 import os
 
 import pytest
-from solders.pubkey import Pubkey
 
 from solana_keychain.core.signer import SolanaSigner
 from tests.integration.conftest import (
@@ -182,29 +181,12 @@ async def make_dfns_signer() -> SolanaSigner:
     )
 
 
-def _crossmint_delegated_signer_pubkey() -> Pubkey | None:
-    """A Crossmint smart wallet's transactions are signed by its delegated signer,
-    never by the wallet address the API reports, so signature checks must run
-    against the delegated key. Prefer the explicit test override, else derive it
-    from the ``server:<pubkey>`` signer locator."""
-    override = optional_env("TEST_CROSSMINT_SIGNER_DERIVED_PUBKEY")
-    if not override:
-        locator = optional_env("CROSSMINT_SIGNER")
-        override = locator.removeprefix("server:").strip() if locator else ""
-    if not override:
-        return None
-    try:
-        return Pubkey.from_string(override)
-    except Exception:
-        return None
-
-
 async def make_crossmint_signer() -> SolanaSigner:
     from solana_keychain.crossmint import CrossmintSignerConfig, create_crossmint_signer
     from solana_keychain.crossmint.signer import DEFAULT_API_BASE_URL
 
     env = require_env("CROSSMINT_API_KEY", "CROSSMINT_WALLET_LOCATOR")
-    signer = await create_crossmint_signer(
+    return await create_crossmint_signer(
         CrossmintSignerConfig(
             api_key=env["CROSSMINT_API_KEY"],
             wallet_locator=env["CROSSMINT_WALLET_LOCATOR"],
@@ -213,10 +195,6 @@ async def make_crossmint_signer() -> SolanaSigner:
             api_base_url=optional_env("CROSSMINT_API_BASE_URL") or DEFAULT_API_BASE_URL,
         )
     )
-    delegated = _crossmint_delegated_signer_pubkey()
-    if delegated is not None:
-        signer._public_key = delegated
-    return signer
 
 
 async def make_openfort_signer() -> SolanaSigner:

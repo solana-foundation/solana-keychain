@@ -3,7 +3,7 @@
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, Transaction, VersionedTransaction};
-use crate::traits::{SignTransactionResult, SignedTransaction};
+use crate::traits::SignTransactionResult;
 use crate::transaction_util::TransactionUtil;
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use std::str::FromStr;
@@ -25,6 +25,13 @@ pub struct CrossmintSignerConfig {
     /// Optional server signer secret (`xmsk1_<64hex>`). When provided, the signer
     /// derives an Ed25519 keypair via HKDF and automatically signs any
     /// `awaiting-approval` transactions from the Crossmint API.
+    ///
+    /// Trust boundary: the approval challenge is the message of the transaction
+    /// Crossmint will execute, which is not derivable from the one submitted because
+    /// Crossmint rewrites it to sponsor gas. Setting this delegates to Crossmint the
+    /// choice of what gets approved. The signer confirms after the fact that its
+    /// approval covers the transaction that executed, not that the transaction
+    /// matches the caller's intent.
     pub signer_secret: Option<String>,
     pub signer: Option<String>,
     pub api_base_url: Option<String>,
@@ -40,13 +47,13 @@ pub struct CrossmintSigner {
     signer: Option<String>,
     api_base_url: String,
     client: reqwest::Client,
-    #[cfg(any(test, feature = "integration-tests"))]
-    pub(crate) public_key: Pubkey,
-    #[cfg(not(any(test, feature = "integration-tests")))]
     public_key: Pubkey,
     poll_interval_ms: u64,
     max_poll_attempts: u32,
     signing_key: Option<ed25519_dalek::SigningKey>,
+    /// Every delegated-signer key the configuration makes known. Smart wallets sign
+    /// with one of these rather than with `public_key`.
+    delegated_pubkeys: Vec<Pubkey>,
 }
 
 impl std::fmt::Debug for CrossmintSigner {
@@ -120,6 +127,9 @@ impl CrossmintSigner {
             (None, config.signer)
         };
 
+        let delegated_pubkeys =
+            Self::resolve_delegated_pubkeys(signing_key.as_ref(), signer.as_deref());
+
         Ok(Self {
             api_key: config.api_key,
             wallet_locator: config.wallet_locator,
@@ -130,7 +140,41 @@ impl CrossmintSigner {
             poll_interval_ms,
             max_poll_attempts,
             signing_key,
+            delegated_pubkeys,
         })
+    }
+
+    /// Every delegated-signer key the configuration makes known.
+    ///
+    /// A smart wallet signs through its delegated signer, not the wallet address.
+    /// Both sources are collected because a `signer` locator may name a different
+    /// key than `signer_secret` derives, and either can be the one that signs.
+    fn resolve_delegated_pubkeys(
+        signing_key: Option<&ed25519_dalek::SigningKey>,
+        signer_locator: Option<&str>,
+    ) -> Vec<Pubkey> {
+        let mut candidates = Vec::new();
+        if let Some(key) = signing_key {
+            candidates.push(Pubkey::from(key.verifying_key().to_bytes()));
+        }
+        if let Some(encoded) = signer_locator.and_then(|l| l.strip_prefix("server:")) {
+            if let Ok(pubkey) = Pubkey::from_str(encoded.trim()) {
+                candidates.push(pubkey);
+            }
+        }
+        candidates
+    }
+
+    /// Keys that may have signed: the wallet address for `mpc`, the delegated signer
+    /// for `smart`. The response does not say which, so try both.
+    fn verification_candidates(&self) -> Vec<Pubkey> {
+        let mut candidates = vec![self.public_key];
+        for delegated in &self.delegated_pubkeys {
+            if !candidates.contains(delegated) {
+                candidates.push(*delegated);
+            }
+        }
+        candidates
     }
 
     /// Initialize signer by resolving wallet details and signer public key.
@@ -516,24 +560,10 @@ impl CrossmintSigner {
         Some(Signature::from(sig_bytes))
     }
 
-    fn verify_signature_matches_message(
-        &self,
-        signature: &Signature,
-        message: &[u8],
-    ) -> Result<(), SignerError> {
-        if signature.verify(&self.public_key.to_bytes(), message) {
-            Ok(())
-        } else {
-            Err(SignerError::SigningFailed(
-                "Crossmint returned a signature for different bytes".to_string(),
-            ))
-        }
-    }
-
     fn extract_signature_from_serialized_transaction(
         &self,
         serialized_transaction: &str,
-    ) -> Result<Signature, SignerError> {
+    ) -> Result<(Signature, VersionedTransaction), SignerError> {
         let bytes = bs58::decode(serialized_transaction)
             .into_vec()
             .map_err(|e| {
@@ -556,46 +586,102 @@ impl CrossmintSigner {
             ));
         }
 
-        let position = signer_keys
-            .iter()
-            .take(required_signers)
-            .position(|key| key == &self.public_key)
-            .ok_or_else(|| {
-                SignerError::SigningFailed(
-                    "Failed to locate signer pubkey in Crossmint transaction".to_string(),
-                )
-            })?;
-
-        let signature = transaction
-            .signatures
-            .get(position)
-            .copied()
-            .filter(|sig| *sig != Signature::default())
-            .ok_or_else(|| {
-                SignerError::SigningFailed(
-                    "Crossmint onChain.transaction did not contain a signer signature".to_string(),
-                )
-            })?;
-
+        // Verify against the bytes Crossmint signed, which differ from the caller's
+        // once it rewrites to sponsor gas. Require a verifying signature, not just
+        // presence in a slot: the wallet address can occupy a slot it never signed.
         let remote_message = transaction.message.serialize();
-        self.verify_signature_matches_message(&signature, &remote_message)?;
-        Ok(signature)
+        let found = self
+            .verification_candidates()
+            .into_iter()
+            .find_map(|candidate| {
+                signer_keys
+                    .iter()
+                    .take(required_signers)
+                    .position(|key| key == &candidate)
+                    .and_then(|position| transaction.signatures.get(position).copied())
+                    .filter(|signature| {
+                        *signature != Signature::default()
+                            && signature.verify(&candidate.to_bytes(), &remote_message)
+                    })
+            });
+
+        match found {
+            Some(signature) => Ok((signature, transaction)),
+            None => Err(SignerError::SigningFailed(
+                "No configured signer holds a verifying signature in the Crossmint transaction"
+                    .to_string(),
+            )),
+        }
     }
 
+    /// This wallet's signature over the transaction Crossmint executed.
+    ///
+    /// For a rewritten transaction it arrives in `approvals.submitted` covering the
+    /// rewritten message, not in a signature slot. Verified locally regardless.
+    fn signature_from_approvals(
+        &self,
+        response: &TransactionResponse,
+        serialized_transaction: &str,
+    ) -> Option<(Signature, VersionedTransaction)> {
+        let submitted = &response.approvals.as_ref()?.submitted;
+        if submitted.is_empty() {
+            return None;
+        }
+        let bytes = bs58::decode(serialized_transaction).into_vec().ok()?;
+        let transaction: VersionedTransaction = bincode::deserialize(&bytes).ok()?;
+        let executed_message = transaction.message.serialize();
+        let candidates = self.verification_candidates();
+        for entry in submitted {
+            let address = entry.signer.as_ref()?.address.as_deref()?;
+            let encoded = entry.signature.as_deref()?;
+            let Ok(approver) = Pubkey::from_str(address) else {
+                continue;
+            };
+            let Some(signature) = Self::decode_base58_signature(encoded) else {
+                continue;
+            };
+            if candidates.contains(&approver)
+                && signature.verify(&approver.to_bytes(), &executed_message)
+            {
+                return Some((signature, transaction));
+            }
+        }
+        None
+    }
+
+    /// The signing result, plus the broadcast transaction when Crossmint rewrote one.
+    ///
+    /// `Some` means the signature covers Crossmint's bytes, not the caller's.
     fn extract_signature_from_response(
         &self,
         response: &TransactionResponse,
         expected_message: &[u8],
-    ) -> Result<Signature, SignerError> {
+    ) -> Result<(Signature, Option<VersionedTransaction>), SignerError> {
+        let mut embedded_error: Option<SignerError> = None;
         if let Some(on_chain) = &response.on_chain {
             if let Some(serialized_transaction) = &on_chain.transaction {
                 // Try to extract from the serialized transaction first. If that
                 // fails, only accept txId if it verifies against the original
                 // requested message bytes.
-                if let Ok(signature) =
-                    self.extract_signature_from_serialized_transaction(serialized_transaction)
-                {
-                    return Ok(signature);
+                match self.extract_signature_from_serialized_transaction(serialized_transaction) {
+                    Ok((signature, returned)) => {
+                        let rewritten = returned.message.serialize() != expected_message;
+                        return Ok((signature, rewritten.then_some(returned)));
+                    }
+                    Err(error) => {
+                        // A rewritten transaction's signature is in approvals.submitted.
+                        if let Some(found) =
+                            self.signature_from_approvals(response, serialized_transaction)
+                        {
+                            return Ok((found.0, Some(found.1)));
+                        }
+                        if on_chain.tx_id.is_none() {
+                            return Err(error);
+                        }
+                        // Keep this error as the cause: it names the check that
+                        // failed, where the txId path only reports a mismatch.
+                        embedded_error = Some(error);
+                    }
                 }
             }
 
@@ -605,8 +691,20 @@ impl CrossmintSigner {
                         "Crossmint onChain.txId was not a valid Solana signature".to_string(),
                     )
                 })?;
-                self.verify_signature_matches_message(&signature, expected_message)?;
-                return Ok(signature);
+                // A txId counts only if it covers the caller's bytes, and any
+                // configured signer may have produced it.
+                let verified = self
+                    .verification_candidates()
+                    .iter()
+                    .any(|candidate| signature.verify(&candidate.to_bytes(), expected_message));
+                if !verified {
+                    return Err(embedded_error.unwrap_or_else(|| {
+                        SignerError::SigningFailed(
+                            "Crossmint returned a signature for different bytes".to_string(),
+                        )
+                    }));
+                }
+                return Ok((signature, None));
             }
         }
 
@@ -615,10 +713,16 @@ impl CrossmintSigner {
         ))
     }
 
+    /// Sign `transaction` through Crossmint's managed wallet flow.
+    ///
+    /// Crossmint may rewrite the transaction to sponsor gas and broadcast it itself.
+    /// When it does, `transaction` is left unmodified and the returned serialized
+    /// transaction is empty, because the signature covers Crossmint's bytes. The
+    /// signature is placed in `transaction` only when Crossmint signed it as given.
     async fn sign_and_serialize(
         &self,
         transaction: &mut Transaction,
-    ) -> Result<SignedTransaction, SignerError> {
+    ) -> Result<SignTransactionResult, SignerError> {
         if self.public_key == Pubkey::default() {
             return Err(SignerError::ConfigError(
                 "Signer not initialized. Call init() first.".to_string(),
@@ -633,13 +737,23 @@ impl CrossmintSigner {
 
         let create_response = self.create_transaction(transaction_b58).await?;
         let final_response = self.poll_transaction(create_response).await?;
-        let signature = self.extract_signature_from_response(&final_response, &expected_message)?;
+        let (signature, broadcast) =
+            self.extract_signature_from_response(&final_response, &expected_message)?;
+
+        if broadcast.is_some() {
+            // Already landed, so complete regardless of the slots the returned copy
+            // shows filled, and nothing is left for the caller to send.
+            return Ok(SignTransactionResult::Complete((String::new(), signature)));
+        }
 
         TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
 
-        Ok((
-            TransactionUtil::serialize_transaction(transaction)?,
-            signature,
+        Ok(TransactionUtil::classify_signed_transaction(
+            transaction,
+            (
+                TransactionUtil::serialize_transaction(transaction)?,
+                signature,
+            ),
         ))
     }
 
@@ -659,11 +773,7 @@ impl SolanaSigner for CrossmintSigner {
         &self,
         tx: &mut Transaction,
     ) -> Result<SignTransactionResult, SignerError> {
-        let signed_transaction = self.sign_and_serialize(tx).await?;
-        Ok(TransactionUtil::classify_signed_transaction(
-            tx,
-            signed_transaction,
-        ))
+        self.sign_and_serialize(tx).await
     }
 
     async fn sign_message(&self, _message: &[u8]) -> Result<Signature, SignerError> {
@@ -715,6 +825,7 @@ mod tests {
             poll_interval_ms,
             max_poll_attempts,
             signing_key: None,
+            delegated_pubkeys: Vec::new(),
         }
     }
 
@@ -974,6 +1085,192 @@ mod tests {
 
         assert_eq!(signature, expected_signature);
         assert!(!_serialized.is_empty());
+    }
+
+    /// A smart wallet is signed by its delegated signer, not by the wallet address
+    /// the API reports, so the delegated key must be a verification candidate.
+    #[tokio::test]
+    async fn test_sign_transaction_locates_delegated_signer_signature() {
+        let server = MockServer::start().await;
+        let wallet_keypair = Keypair::new();
+        let wallet_pubkey = keypair_pubkey(&wallet_keypair);
+        let delegated_keypair = Keypair::new();
+        let delegated_pubkey = keypair_pubkey(&delegated_keypair);
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .respond_with(wallet_response(&wallet_pubkey.to_string()))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 2);
+        signer.delegated_pubkeys = vec![delegated_pubkey];
+        signer.init().await.unwrap();
+
+        let mut local_tx = create_test_transaction(&wallet_pubkey);
+        let mut rewritten_tx = create_test_transaction(&delegated_pubkey);
+        let expected_signature =
+            keypair_sign_message(&delegated_keypair, &rewritten_tx.message_data());
+        TransactionUtil::add_signature_to_transaction(
+            &mut rewritten_tx,
+            &delegated_pubkey,
+            expected_signature,
+        )
+        .unwrap();
+
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "tx-delegated",
+                "status": "success",
+                "onChain": {
+                    "transaction": bs58::encode(bincode::serialize(&rewritten_tx).unwrap())
+                        .into_string()
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let (serialized, signature) = signer
+            .sign_transaction(&mut local_tx)
+            .await
+            .unwrap()
+            .into_signed_transaction();
+
+        assert_eq!(signature, expected_signature);
+        assert!(serialized.is_empty());
+        // The wallet address remains the signer's public identity.
+        assert_eq!(signer.pubkey(), wallet_pubkey);
+    }
+
+    /// A wallet can be configured with both `signer_secret` and an explicit `signer`
+    /// locator naming a different key, e.g. the wallet's admin signer. Either may be
+    /// the key that actually signs, so both must be candidates.
+    #[test]
+    fn test_resolve_delegated_pubkeys_collects_both_sources() {
+        let admin = keypair_pubkey(&Keypair::new());
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let derived = Pubkey::from(signing_key.verifying_key().to_bytes());
+
+        let candidates = CrossmintSigner::resolve_delegated_pubkeys(
+            Some(&signing_key),
+            Some(&format!("server:{admin}")),
+        );
+
+        assert!(
+            candidates.contains(&derived) && candidates.contains(&admin),
+            "both the derived server signer and the locator's admin signer must be candidates, got {candidates:?}"
+        );
+    }
+
+    /// Widening the candidate set must not accept a key that is neither the wallet
+    /// address nor the configured delegated signer.
+    #[tokio::test]
+    async fn test_sign_transaction_rejects_unrelated_signer_key() {
+        let server = MockServer::start().await;
+        let wallet_keypair = Keypair::new();
+        let wallet_pubkey = keypair_pubkey(&wallet_keypair);
+        let stranger = Keypair::new();
+        let stranger_pubkey = keypair_pubkey(&stranger);
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .respond_with(wallet_response(&wallet_pubkey.to_string()))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 2);
+        signer.delegated_pubkeys = vec![keypair_pubkey(&Keypair::new())];
+        signer.init().await.unwrap();
+
+        let mut local_tx = create_test_transaction(&wallet_pubkey);
+        let mut rewritten_tx = create_test_transaction(&stranger_pubkey);
+        let signature = keypair_sign_message(&stranger, &rewritten_tx.message_data());
+        TransactionUtil::add_signature_to_transaction(
+            &mut rewritten_tx,
+            &stranger_pubkey,
+            signature,
+        )
+        .unwrap();
+
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "tx-stranger",
+                "status": "success",
+                "onChain": {
+                    "transaction": bs58::encode(bincode::serialize(&rewritten_tx).unwrap())
+                        .into_string()
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let result = signer.sign_transaction(&mut local_tx).await;
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    /// Crossmint sponsors gas, so it is the fee payer and the message it signs
+    /// differs from the caller's. Its signature must never be placed in the
+    /// caller's transaction, which could not verify with it.
+    #[tokio::test]
+    async fn test_sign_transaction_rewritten_is_reported_as_a_broadcast_result() {
+        let server = MockServer::start().await;
+        let keypair = Keypair::new();
+        let signer_pubkey = keypair_pubkey(&keypair);
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .and(header("x-api-key", "test-api-key"))
+            .respond_with(wallet_response(&signer_pubkey.to_string()))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 2);
+        signer.init().await.unwrap();
+
+        let mut local_tx = create_test_transaction(&signer_pubkey);
+        let mut rewritten_tx = create_test_transaction(&signer_pubkey);
+        assert_ne!(rewritten_tx.message_data(), local_tx.message_data());
+        let expected_signature = keypair_sign_message(&keypair, &rewritten_tx.message_data());
+        TransactionUtil::add_signature_to_transaction(
+            &mut rewritten_tx,
+            &signer_pubkey,
+            expected_signature,
+        )
+        .unwrap();
+
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "tx-123",
+                "status": "success",
+                "chainType": "solana",
+                "walletType": "smart",
+                "onChain": {
+                    "transaction": bs58::encode(bincode::serialize(&rewritten_tx).unwrap())
+                        .into_string()
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let result = signer.sign_transaction(&mut local_tx).await.unwrap();
+        assert!(matches!(result, SignTransactionResult::Complete(_)));
+        let (serialized, signature) = result.into_signed_transaction();
+
+        assert_eq!(signature, expected_signature);
+        assert!(
+            serialized.is_empty(),
+            "a Crossmint-broadcast transaction leaves nothing for the caller to send"
+        );
+        assert!(
+            local_tx
+                .signatures
+                .iter()
+                .all(|s| *s == Signature::default()),
+            "the caller's transaction must not carry a signature over other bytes"
+        );
     }
 
     #[tokio::test]
