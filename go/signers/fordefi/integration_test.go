@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/base64"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/gagliardetto/solana-go"
@@ -21,19 +20,11 @@ import (
 // .env) or CI with Doppler secrets.
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
-	pemPath := requireEnv(t, "FORDEFI_PRIVATE_KEY_PEM_PATH")
-	if !filepath.IsAbs(pemPath) {
-		pemPath = filepath.Join("..", "..", "..", pemPath)
-	}
-	pemBytes, err := os.ReadFile(pemPath)
-	if err != nil {
-		t.Fatalf("failed to read FORDEFI_PRIVATE_KEY_PEM_PATH: %v", err)
-	}
 	s, err := New(context.Background(), Config{
 		AccessToken:   requireEnv(t, "FORDEFI_ACCESS_TOKEN"),
 		VaultID:       requireEnv(t, "FORDEFI_BB_VAULT_ID"),
 		PublicKey:     requireEnv(t, "FORDEFI_BB_PUBLIC_KEY"),
-		PrivateKeyPEM: string(pemBytes),
+		PrivateKeyPEM: requireEnv(t, "FORDEFI_PRIVATE_KEY_PEM"),
 		APIBaseURL:    os.Getenv("FORDEFI_API_BASE_URL"),
 	})
 	if err != nil {

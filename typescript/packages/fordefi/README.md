@@ -103,7 +103,7 @@ Required env vars (shared):
 
 ```
 FORDEFI_ACCESS_TOKEN=<api-token>
-FORDEFI_PRIVATE_KEY_PEM_PATH=<path-to-pem>
+FORDEFI_PRIVATE_KEY_PEM=<pem-content>
 ```
 
 Black box vault:

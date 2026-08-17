@@ -1,17 +1,6 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import type { SolanaSigner } from '@solana/keychain-core';
 import { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
 import { createFordefiSigner } from '../fordefi-signer';
-
-export function resolvePemPath(raw: string): string {
-    if (path.isAbsolute(raw)) return raw;
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const repoRoot = path.resolve(here, '..', '..', '..', '..', '..');
-    return path.resolve(repoRoot, raw);
-}
 
 const SIGNER_TYPE = 'fordefi';
 // LiteSVM integration tests use the black_box signing path (raw bytes, no
@@ -21,7 +10,7 @@ const REQUIRED_ENV_VARS = [
     'FORDEFI_ACCESS_TOKEN',
     'FORDEFI_BB_VAULT_ID',
     'FORDEFI_BB_PUBLIC_KEY',
-    'FORDEFI_PRIVATE_KEY_PEM_PATH',
+    'FORDEFI_PRIVATE_KEY_PEM',
 ];
 
 const CONFIG: SignerTestConfig<SolanaSigner> = {
@@ -30,9 +19,10 @@ const CONFIG: SignerTestConfig<SolanaSigner> = {
     createSigner: () =>
         createFordefiSigner({
             accessToken: process.env.FORDEFI_ACCESS_TOKEN!,
+            apiBaseUrl: process.env.FORDEFI_API_BASE_URL,
             maxPollAttempts: 110,
             pollIntervalMs: 1000,
-            privateKeyPem: fs.readFileSync(resolvePemPath(process.env.FORDEFI_PRIVATE_KEY_PEM_PATH!), 'utf8'),
+            privateKeyPem: process.env.FORDEFI_PRIVATE_KEY_PEM!,
             publicKey: process.env.FORDEFI_BB_PUBLIC_KEY!,
             vaultId: process.env.FORDEFI_BB_VAULT_ID!,
         }),

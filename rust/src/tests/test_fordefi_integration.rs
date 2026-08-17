@@ -1,8 +1,9 @@
 pub const FORDEFI_ACCESS_TOKEN: &str = "FORDEFI_ACCESS_TOKEN";
 pub const FORDEFI_VAULT_ID: &str = "FORDEFI_VAULT_ID";
-pub const FORDEFI_PRIVATE_KEY_PEM_PATH: &str = "FORDEFI_PRIVATE_KEY_PEM_PATH";
+pub const FORDEFI_PRIVATE_KEY_PEM: &str = "FORDEFI_PRIVATE_KEY_PEM";
 pub const FORDEFI_PUBLIC_KEY: &str = "FORDEFI_PUBLIC_KEY";
 pub const FORDEFI_CHAIN: &str = "FORDEFI_CHAIN";
+pub const FORDEFI_API_BASE_URL: &str = "FORDEFI_API_BASE_URL";
 // Black box vault credentials — a black box vault signs raw bytes and is distinct
 // from the Solana (native-mode) vault above. Mirrors the TypeScript integration tests.
 pub const FORDEFI_BB_VAULT_ID: &str = "FORDEFI_BB_VAULT_ID";
@@ -21,19 +22,6 @@ mod tests {
     use crate::tests::litesvm_util::{get_latest_blockhash, simulate_transaction, start_litesvm};
     use crate::traits::SolanaSigner;
     use std::env;
-    use std::path::{Path, PathBuf};
-
-    fn resolve_pem_path(raw: &str) -> PathBuf {
-        let p = Path::new(raw);
-        if p.is_absolute() {
-            p.to_path_buf()
-        } else {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .expect("CARGO_MANIFEST_DIR has no parent")
-                .join(p)
-        }
-    }
 
     /// Build a `FordefiSigner` for the given vault, sharing the access token and
     /// request-signing key from the environment. `chain` selects black box mode
@@ -45,10 +33,8 @@ mod tests {
     ) -> FordefiSigner {
         let access_token = env::var(FORDEFI_ACCESS_TOKEN)
             .expect("FORDEFI_ACCESS_TOKEN must be set for integration tests");
-        let pem_path = env::var(FORDEFI_PRIVATE_KEY_PEM_PATH)
-            .expect("FORDEFI_PRIVATE_KEY_PEM_PATH must be set for integration tests");
-        let private_key_pem =
-            std::fs::read_to_string(resolve_pem_path(&pem_path)).expect("Failed to read PEM file");
+        let private_key_pem = env::var(FORDEFI_PRIVATE_KEY_PEM)
+            .expect("FORDEFI_PRIVATE_KEY_PEM must be set for integration tests");
 
         FordefiSigner::from_config(FordefiSignerConfig {
             access_token,
@@ -56,7 +42,7 @@ mod tests {
             private_key_pem: Some(private_key_pem),
             request_signer: None,
             public_key,
-            api_base_url: None,
+            api_base_url: env::var(FORDEFI_API_BASE_URL).ok(),
             poll_interval_ms: None,
             max_poll_attempts: None,
             http_client_config: None,
@@ -181,11 +167,11 @@ mod tests {
         let rpc_url = env::var("SOLANA_RPC_URL")
             .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
 
-        // Recipient: use env var or a throwaway address
+        // Recipient: explicit env var, else self-transfer so the vault only pays fees
         let to = env::var("DEVNET_RECIPIENT")
             .ok()
             .and_then(|s| Pubkey::from_str(&s).ok())
-            .unwrap_or_else(Pubkey::new_unique);
+            .unwrap_or(from);
 
         let lamports: u64 = 100_000_000; // 0.1 SOL
 
@@ -271,7 +257,7 @@ mod tests {
         let to = env::var("DEVNET_RECIPIENT")
             .ok()
             .and_then(|s| Pubkey::from_str(&s).ok())
-            .unwrap_or_else(Pubkey::new_unique);
+            .unwrap_or(from);
 
         let lamports: u64 = 100_000_000; // 0.1 SOL
 
