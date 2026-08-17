@@ -335,7 +335,12 @@ jobs:
       - name: Install Python dependencies
         if: ${{ needs.resolve-signers.outputs.python_live_backend_count != '0' }}
         working-directory: python
-        run: pip install -e '.[dev]' -c requirements.txt
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -e '.[dev]' -c requirements.txt
+          else
+            pip install -e '.[dev]'
+          fi
 
       - name: Run Python external live integration tests
         if: ${{ needs.resolve-signers.outputs.python_live_backend_count != '0' }}

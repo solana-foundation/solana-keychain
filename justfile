@@ -199,7 +199,10 @@ _py-install:
 
 # Regenerate the Python lockfile (requirements.txt) from pyproject.toml
 [working-directory: 'python']
-py-lock: _py-install
+py-lock:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -d .venv ] || python3 -m venv .venv
     .venv/bin/pip install --quiet uv
     .venv/bin/python -m uv pip compile pyproject.toml --extra dev --universal --python-version 3.10 -o requirements.txt
 
