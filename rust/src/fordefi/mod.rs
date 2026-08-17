@@ -492,7 +492,25 @@ impl FordefiSigner {
         self.validate_native_auto_transaction(transaction)?;
         let message_data = transaction.message_data();
         let tx_id = self.submit_solana_transaction(&message_data).await?;
-        let result = self.poll_for_result(&tx_id, true).await?;
+        // Once the submit is accepted Fordefi is already broadcasting
+        // (push_mode: "auto"), so any later failure leaves an on-chain outcome
+        // this client cannot rule out. Report those as BroadcastUnconfirmed
+        // carrying the Fordefi transaction id instead of a generic error a
+        // caller might blindly retry into a duplicate spend.
+        self.finish_native_broadcast(transaction, &tx_id)
+            .await
+            .map_err(|error| SignerError::BroadcastUnconfirmed {
+                provider_tx_id: tx_id,
+                detail: error.detail_string(),
+            })
+    }
+
+    async fn finish_native_broadcast(
+        &self,
+        transaction: &mut Transaction,
+        tx_id: &str,
+    ) -> Result<SignedTransaction, SignerError> {
+        let result = self.poll_for_result(tx_id, true).await?;
 
         let raw_tx_b64 = result.raw_transaction.as_ref().ok_or_else(|| {
             SignerError::SigningFailed(
@@ -1715,8 +1733,12 @@ mod tests {
 
         let mut tx = create_test_transaction(&pubkey);
         let result = signer.sign_transaction(&mut tx).await;
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+        match result.unwrap_err() {
+            SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
+                assert_eq!(provider_tx_id, "native-tx-no-raw");
+            }
+            other => panic!("Expected BroadcastUnconfirmed, got: {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -1746,8 +1768,19 @@ mod tests {
 
         let mut tx = create_test_transaction(&pubkey);
         let result = signer.sign_transaction(&mut tx).await;
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+        match result.unwrap_err() {
+            SignerError::BroadcastUnconfirmed {
+                provider_tx_id,
+                detail,
+            } => {
+                assert_eq!(provider_tx_id, "native-tx-fail");
+                assert!(
+                    detail.contains("aborted"),
+                    "detail must carry the state, got: {detail}"
+                );
+            }
+            other => panic!("Expected BroadcastUnconfirmed, got: {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -1823,6 +1856,47 @@ mod tests {
         assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
     }
 
+    #[tokio::test]
+    async fn test_fordefi_native_sign_transaction_poll_timeout_is_broadcast_unconfirmed() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_test_signer(&mock_server.uri(), pubkey);
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "native-tx-pending"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/transactions/native-tx-pending"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "state": "pending_signature"
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let mut tx = create_test_transaction(&pubkey);
+        let result = signer.sign_transaction(&mut tx).await;
+        match result.unwrap_err() {
+            SignerError::BroadcastUnconfirmed {
+                provider_tx_id,
+                detail,
+            } => {
+                assert_eq!(provider_tx_id, "native-tx-pending");
+                assert!(
+                    detail.contains("timeout"),
+                    "detail must carry the cause, got: {detail}"
+                );
+            }
+            other => panic!("Expected BroadcastUnconfirmed, got: {other:?}"),
+        }
+    }
+
     // --- Wire transaction parsing tests ---
 
     #[tokio::test]
@@ -1856,11 +1930,12 @@ mod tests {
 
         let mut tx = create_test_transaction(&pubkey);
         let result = signer.sign_transaction(&mut tx).await;
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SignerError::SerializationError(_)
-        ));
+        match result.unwrap_err() {
+            SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
+                assert_eq!(provider_tx_id, "native-tx-malformed");
+            }
+            other => panic!("Expected BroadcastUnconfirmed, got: {other:?}"),
+        }
     }
 
     // --- Custom request-signer (FordefiRequestSigner) tests ---

@@ -571,7 +571,9 @@ describe('FordefiSigner', () => {
                 signatures: { [MOCK_ADDRESS]: null },
             } as never;
             await expect(signer.signAndSendTransactions([mockTx])).rejects.toMatchObject({
-                code: 'SIGNER_SIGNING_FAILED',
+                code: 'SIGNER_BROADCAST_UNCONFIRMED',
+                context: expect.objectContaining({ providerTransactionId: 'tx-no-raw' }) as object,
+                message: expect.stringContaining('tx-no-raw') as string,
             });
         });
 
@@ -587,7 +589,8 @@ describe('FordefiSigner', () => {
                 signatures: { [MOCK_ADDRESS]: null },
             } as never;
             await expect(signer.signAndSendTransactions([mockTx])).rejects.toMatchObject({
-                code: 'SIGNER_SIGNING_FAILED',
+                code: 'SIGNER_BROADCAST_UNCONFIRMED',
+                context: expect.objectContaining({ providerTransactionId: 'tx-fail' }) as object,
             });
         });
     });

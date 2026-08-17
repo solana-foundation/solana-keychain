@@ -3,6 +3,7 @@ package fordefi
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -195,6 +196,10 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 // the returned EncodedTransaction is empty — the transaction is already
 // on-chain, so there is nothing for the caller to send. Only transactions
 // whose sole required signer is the configured vault are supported.
+//
+// Native mode is not retry-safe: any failure after Fordefi accepts the
+// submission returns CodeBroadcastUnconfirmed carrying the Fordefi transaction
+// id; check that transaction with Fordefi before retrying.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.chain != "" {
 		return s.signTransactionNative(ctx, tx)
@@ -319,6 +324,26 @@ func (s *Signer) signTransactionNative(ctx context.Context, tx *solana.Transacti
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}
+	// Once the submit is accepted Fordefi is already broadcasting (push_mode
+	// "auto"), so any later failure leaves an on-chain outcome this client
+	// cannot rule out. Report those as CodeBroadcastUnconfirmed carrying the
+	// Fordefi transaction id instead of a generic error a caller might blindly
+	// retry into a duplicate spend.
+	signed, err := s.finishNativeBroadcast(ctx, tx, txID)
+	if err != nil {
+		detail := err.Error()
+		var se *core.SignerError
+		if errors.As(err, &se) {
+			detail = se.Detail()
+		}
+		return core.SignedTransaction{}, core.NewBroadcastUnconfirmedError(txID, detail)
+	}
+	return signed, nil
+}
+
+// finishNativeBroadcast polls a submitted native transaction to completion and
+// extracts and verifies the vault's signature from the returned wire bytes.
+func (s *Signer) finishNativeBroadcast(ctx context.Context, tx *solana.Transaction, txID string) (core.SignedTransaction, error) {
 	result, err := s.pollForResult(ctx, txID, true)
 	if err != nil {
 		return core.SignedTransaction{}, err

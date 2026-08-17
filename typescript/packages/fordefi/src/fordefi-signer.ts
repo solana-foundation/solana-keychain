@@ -141,6 +141,11 @@ export interface FordefiSignerConfig {
  * Native mode may replace the recent blockhash and fees before signing and
  * broadcasts with `push_mode: 'auto'`, so it must be used through Kit's
  * {@link TransactionSendingSigner} flow rather than as a partial signer.
+ *
+ * Native mode is not retry-safe: any failure after Fordefi accepts the
+ * submission rejects with `BROADCAST_UNCONFIRMED` carrying
+ * `context.providerTransactionId`; check that transaction with Fordefi before
+ * retrying.
  */
 export interface FordefiNativeSigner<TAddress extends string = string>
     extends SolanaSigner<TAddress>, TransactionSendingSigner<TAddress> {}
@@ -490,37 +495,62 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
 
                 const base64Data = Buffer.from(transaction.messageBytes).toString('base64');
                 const txId = await this.submitSolanaTransaction(base64Data);
-                const result = await this.pollForResult(txId, { pushable: true });
-                if (!result.raw_transaction) {
-                    return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                        message: 'Fordefi solana_transaction response missing raw_transaction',
+                // Once the submit is accepted Fordefi is already broadcasting
+                // (push_mode 'auto'), so any later failure leaves an on-chain
+                // outcome this client cannot rule out. Report those as
+                // BROADCAST_UNCONFIRMED carrying the Fordefi transaction id
+                // instead of a generic error a caller might blindly retry into
+                // a duplicate spend.
+                try {
+                    return await this.finishNativeBroadcast(txId, config);
+                } catch (error) {
+                    return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
+                        cause: error,
+                        message: `Fordefi may have executed the transaction, but the outcome could not be confirmed (provider transaction id: ${txId})`,
+                        providerTransactionId: txId,
                     });
                 }
-
-                const signedWireTx = result.raw_transaction as Base64EncodedWireTransaction;
-                const sigDict = extractSignatureFromWireTransaction({
-                    base64WireTransaction: signedWireTx,
-                    signerAddress: this.address,
-                });
-                const signerSignature = sigDict[this.address];
-                if (!signerSignature) {
-                    return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                        address: this.address,
-                        message: 'Fordefi wire transaction did not contain the configured vault signature',
-                    });
-                }
-
-                const { messageBytes, transactionSignature } = FordefiSigner.extractWireTransactionParts(signedWireTx);
-                await assertSignatureValid({
-                    data: messageBytes,
-                    signature: signerSignature,
-                    signerAddress: this.address,
-                });
-                config?.abortSignal?.throwIfAborted();
-                return transactionSignature;
             },
             this.requestDelayMs,
         );
+    }
+
+    /**
+     * Poll a submitted native transaction to completion and extract and verify
+     * the vault's signature from the returned wire bytes.
+     */
+    private async finishNativeBroadcast(
+        txId: string,
+        config?: TransactionSendingSignerConfig,
+    ): Promise<SignatureBytes> {
+        const result = await this.pollForResult(txId, { pushable: true });
+        if (!result.raw_transaction) {
+            return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message: 'Fordefi solana_transaction response missing raw_transaction',
+            });
+        }
+
+        const signedWireTx = result.raw_transaction as Base64EncodedWireTransaction;
+        const sigDict = extractSignatureFromWireTransaction({
+            base64WireTransaction: signedWireTx,
+            signerAddress: this.address,
+        });
+        const signerSignature = sigDict[this.address];
+        if (!signerSignature) {
+            return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                address: this.address,
+                message: 'Fordefi wire transaction did not contain the configured vault signature',
+            });
+        }
+
+        const { messageBytes, transactionSignature } = FordefiSigner.extractWireTransactionParts(signedWireTx);
+        await assertSignatureValid({
+            data: messageBytes,
+            signature: signerSignature,
+            signerAddress: this.address,
+        });
+        config?.abortSignal?.throwIfAborted();
+        return transactionSignature;
     }
 
     /**

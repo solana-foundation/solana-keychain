@@ -42,9 +42,38 @@ pub enum SignerError {
     #[error("IO error")]
     IoError(String),
 
+    /// The provider may have executed the transaction, but the outcome could not
+    /// be confirmed. Raised by broadcast-managed signers (Fordefi native mode,
+    /// Crossmint) for any failure after the provider has accepted the
+    /// transaction. Retrying blindly risks a duplicate spend; check the provider
+    /// transaction id first.
+    #[error("Broadcast unconfirmed; the provider may have executed the transaction (provider transaction id: {provider_tx_id})")]
+    BroadcastUnconfirmed {
+        provider_tx_id: String,
+        detail: String,
+    },
+
     /// Generic error
     #[error("Signer error")]
     Other(String),
+}
+
+impl SignerError {
+    pub(crate) fn detail_string(&self) -> String {
+        match self {
+            Self::InvalidPrivateKey(detail)
+            | Self::InvalidPublicKey(detail)
+            | Self::SigningFailed(detail)
+            | Self::RemoteApiError(detail)
+            | Self::HttpError(detail)
+            | Self::SerializationError(detail)
+            | Self::ConfigError(detail)
+            | Self::NotAvailable(detail)
+            | Self::IoError(detail)
+            | Self::Other(detail) => detail.clone(),
+            Self::BroadcastUnconfirmed { detail, .. } => detail.clone(),
+        }
+    }
 }
 
 impl From<std::io::Error> for SignerError {
@@ -99,6 +128,12 @@ impl fmt::Debug for SignerError {
             SignerError::ConfigError(_) => write!(f, "SignerError::ConfigError([REDACTED])"),
             SignerError::NotAvailable(_) => write!(f, "SignerError::NotAvailable([REDACTED])"),
             SignerError::IoError(_) => write!(f, "SignerError::IoError([REDACTED])"),
+            SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
+                write!(
+                    f,
+                    "SignerError::BroadcastUnconfirmed(provider_tx_id: {provider_tx_id}, [REDACTED])"
+                )
+            }
             SignerError::Other(_) => write!(f, "SignerError::Other([REDACTED])"),
         }
     }
@@ -122,6 +157,10 @@ mod tests {
             SignerError::NotAvailable(secret.to_string()),
             SignerError::IoError(secret.to_string()),
             SignerError::Other(secret.to_string()),
+            SignerError::BroadcastUnconfirmed {
+                provider_tx_id: "tx-id".to_string(),
+                detail: secret.to_string(),
+            },
         ];
 
         for err in cases {
@@ -175,5 +214,19 @@ mod tests {
             format!("{}", SignerError::Other("x".to_string())),
             "Signer error"
         );
+    }
+
+    #[test]
+    fn test_broadcast_unconfirmed_surfaces_tx_id_but_not_detail() {
+        let err = SignerError::BroadcastUnconfirmed {
+            provider_tx_id: "provider-tx-123".to_string(),
+            detail: "sensitive-detail".to_string(),
+        };
+        let display = format!("{err}");
+        assert!(display.contains("provider-tx-123"));
+        assert!(!display.contains("sensitive-detail"));
+        let debug = format!("{err:?}");
+        assert!(debug.contains("provider-tx-123"));
+        assert!(!debug.contains("sensitive-detail"));
     }
 }

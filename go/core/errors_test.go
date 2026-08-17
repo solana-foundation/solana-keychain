@@ -14,6 +14,7 @@ func TestErrorMessageIsRedacted(t *testing.T) {
 		CodeConfigError, CodeExpectedSolanaSigner, CodeHTTPError, CodeInvalidPrivateKey,
 		CodeInvalidPublicKey, CodeIOError, CodeNotAvailable, CodeParsingError,
 		CodeRemoteAPIError, CodeSerializationError, CodeNotInitialized, CodeSigningFailed, CodeOther,
+		CodeBroadcastUnconfirmed,
 	}
 	for _, code := range codes {
 		err := NewSignerError(code, secret)
@@ -48,6 +49,23 @@ func TestErrorStableMessages(t *testing.T) {
 		if got := NewSignerError(code, "x").Error(); got != want {
 			t.Errorf("code %s: Error() = %q, want %q", code, got, want)
 		}
+	}
+}
+
+func TestBroadcastUnconfirmedSurfacesTxIDButNotDetail(t *testing.T) {
+	const secret = "sensitive-secret-material"
+	err := NewBroadcastUnconfirmedError("provider-tx-123", secret)
+	if err.Code != CodeBroadcastUnconfirmed {
+		t.Errorf("Code = %s, want %s", err.Code, CodeBroadcastUnconfirmed)
+	}
+	if !strings.Contains(err.Error(), "provider-tx-123") {
+		t.Errorf("Error() must surface the provider transaction id, got %q", err.Error())
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("Error() leaked detail: %q", err.Error())
+	}
+	if err.Detail() != secret {
+		t.Errorf("Detail() = %q, want the original detail", err.Detail())
 	}
 }
 

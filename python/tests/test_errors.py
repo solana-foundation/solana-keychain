@@ -7,6 +7,9 @@ from solana_keychain import SignerError, SignerErrorCode
 SECRET = "sensitive-secret-material"
 
 EXPECTED_GENERIC_MESSAGES = {
+    SignerErrorCode.BROADCAST_UNCONFIRMED: (
+        "Broadcast unconfirmed; the provider may have executed the transaction"
+    ),
     SignerErrorCode.CONFIG_ERROR: "Configuration error",
     SignerErrorCode.EXPECTED_SOLANA_SIGNER: "Expected a Solana signer",
     SignerErrorCode.HTTP_ERROR: "HTTP request failed",
@@ -50,6 +53,7 @@ def test_pickle_round_trip_preserves_code_and_redacts_detail() -> None:
 
 def test_code_values_are_frozen() -> None:
     assert {code.value for code in SignerErrorCode} == {
+        "SIGNER_BROADCAST_UNCONFIRMED",
         "SIGNER_CONFIG_ERROR",
         "SIGNER_ERROR",
         "SIGNER_EXPECTED_SOLANA_SIGNER",
@@ -64,3 +68,15 @@ def test_code_values_are_frozen() -> None:
         "SIGNER_SERIALIZATION_ERROR",
         "SIGNER_SIGNING_FAILED",
     }
+
+
+def test_broadcast_unconfirmed_surfaces_tx_id_but_not_detail() -> None:
+    error = SignerError(
+        SignerErrorCode.BROADCAST_UNCONFIRMED,
+        SECRET,
+        provider_transaction_id="provider-tx-123",
+    )
+    assert error.provider_transaction_id == "provider-tx-123"
+    assert "provider-tx-123" in str(error)
+    assert SECRET not in str(error)
+    assert SECRET not in repr(error)

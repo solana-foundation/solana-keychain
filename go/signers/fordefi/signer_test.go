@@ -639,8 +639,22 @@ func TestSignTransactionNativeWaitsForCompleted(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected polling timeout when a pushable transaction never completes")
 	}
-	if code, _ := core.CodeOf(err); code != core.CodeRemoteAPIError {
-		t.Errorf("got %s, want REMOTE_API_ERROR", code)
+	assertBroadcastUnconfirmed(t, err, "tx-123")
+}
+
+// assertBroadcastUnconfirmed checks that err is a CodeBroadcastUnconfirmed
+// SignerError carrying the expected provider transaction id.
+func assertBroadcastUnconfirmed(t *testing.T, err error, wantTxID string) {
+	t.Helper()
+	if code, _ := core.CodeOf(err); code != core.CodeBroadcastUnconfirmed {
+		t.Errorf("got %s, want BROADCAST_UNCONFIRMED", code)
+	}
+	var se *core.SignerError
+	if !errors.As(err, &se) || se.ProviderTxID != wantTxID {
+		t.Errorf("error must carry provider transaction id %q, got %v", wantTxID, err)
+	}
+	if !strings.Contains(err.Error(), wantTxID) {
+		t.Errorf("Error() must surface the provider transaction id, got %q", err.Error())
 	}
 }
 
@@ -684,9 +698,7 @@ func TestSignTransactionNativeMissingRawTransaction(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when raw_transaction is missing")
 	}
-	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
-		t.Errorf("got %s, want SIGNING_FAILED", code)
-	}
+	assertBroadcastUnconfirmed(t, err, "tx-123")
 }
 
 func TestSignTransactionNativeUndecodableRawTransaction(t *testing.T) {
@@ -711,9 +723,7 @@ func TestSignTransactionNativeUndecodableRawTransaction(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for an undecodable wire transaction")
 	}
-	if code, _ := core.CodeOf(err); code != core.CodeSerializationError {
-		t.Errorf("got %s, want SERIALIZATION_ERROR", code)
-	}
+	assertBroadcastUnconfirmed(t, err, "tx-123")
 }
 
 func TestSignMessageNativeUsesSolanaMessage(t *testing.T) {

@@ -338,6 +338,20 @@ async def test_sign_message_polling_timeout() -> None:
 
 
 @respx.mock
+async def test_sign_transaction_native_polling_timeout_is_broadcast_unconfirmed() -> None:
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet", max_poll_attempts=3)
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"id": "tx-1"}))
+    respx.get(f"{TRANSACTIONS_URL}/tx-1").mock(
+        return_value=status_response("waiting_for_signing_trigger")
+    )
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id == "tx-1"
+
+
+@respx.mock
 async def test_sign_transaction_black_box_success() -> None:
     keypair = Keypair()
     signer = make_signer(keypair)
@@ -414,7 +428,8 @@ async def test_sign_transaction_native_missing_raw_transaction() -> None:
     mock_sign_flow(status_response("completed"))
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
-    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id == "tx-1"
 
 
 @respx.mock
@@ -428,7 +443,8 @@ async def test_sign_transaction_native_verifies_against_returned_message() -> No
     mock_sign_flow(status_response("completed", raw_transaction=raw_transaction))
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_transaction(transaction)
-    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id == "tx-1"
 
 
 @respx.mock

@@ -336,6 +336,11 @@ class FordefiSigner(SolanaSigner):
         unmodified — the returned signature identifies the on-chain
         transaction. Only legacy transactions whose sole required signer is
         the configured vault are supported.
+
+        Native mode is not retry-safe: any failure after Fordefi accepts the
+        submission raises ``BROADCAST_UNCONFIRMED`` carrying
+        ``provider_transaction_id``; check that transaction with Fordefi
+        before retrying.
         """
         if self._chain is not None:
             return await self._sign_transaction_native(transaction)
@@ -363,6 +368,16 @@ class FordefiSigner(SolanaSigner):
         transaction_id = await self._post_transaction(
             self._solana_transaction_request(transaction.message_data())
         )
+        try:
+            return await self._finish_native_broadcast(transaction_id)
+        except SignerError as error:
+            raise SignerError(
+                SignerErrorCode.BROADCAST_UNCONFIRMED,
+                error._detail,
+                provider_transaction_id=transaction_id,
+            ) from None
+
+    async def _finish_native_broadcast(self, transaction_id: str) -> SignedTransaction:
         result = await self._poll_for_result(transaction_id, pushable=True)
         raw_transaction = result.get("raw_transaction")
         if not isinstance(raw_transaction, str):
