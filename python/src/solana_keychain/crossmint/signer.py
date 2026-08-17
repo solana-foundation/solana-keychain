@@ -9,6 +9,7 @@ from urllib.parse import quote
 import base58
 import httpx
 from solders.keypair import Keypair
+from solders.message import Message, MessageV0
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import Transaction, VersionedTransaction
@@ -334,6 +335,11 @@ class CrossmintSigner(SolanaSigner):
             ) from None
 
         message = transaction.message
+        if not isinstance(message, (Message, MessageV0)):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Crossmint returned a transaction with an unsupported message version",
+            )
         num_required = message.header.num_required_signatures
         account_keys = list(message.account_keys)
         if len(account_keys) < num_required:

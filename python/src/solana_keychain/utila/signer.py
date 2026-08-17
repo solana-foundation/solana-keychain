@@ -17,6 +17,7 @@ except ImportError as error:  # pragma: no cover
     ) from error
 
 import httpx
+from solders.message import Message, MessageV0
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import Transaction, VersionedTransaction
@@ -312,6 +313,11 @@ class UtilaSigner(SolanaSigner):
             ) from None
 
         message = transaction.message
+        if not isinstance(message, (Message, MessageV0)):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Utila returned a transaction with an unsupported message version",
+            )
         if signed_message_bytes(message) != expected_message:
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED,
