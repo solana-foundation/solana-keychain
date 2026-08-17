@@ -148,7 +148,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.0.10
         with:
           version: 11.13.0
       - name: Install dependencies
@@ -176,7 +176,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.0.10
         with:
           version: 11.13.0
       - uses: dopplerhq/secrets-fetch-action@v2.0.0
@@ -219,7 +219,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.0.10
         with:
           version: 11.13.0
       - name: Install dependencies
