@@ -17,8 +17,8 @@ vi.mock('@solana/transactions', async importOriginal => {
     };
 });
 
-import { assertIsSolanaSigner, assertSignatureValid } from '@solana/keychain-core';
-import { isTransactionSendingSigner } from '@solana/signers';
+import { assertSignatureValid, isSolanaSendingSigner, isSolanaSigner } from '@solana/keychain-core';
+import { isMessagePartialSigner, isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
 import { getTransactionDecoder } from '@solana/transactions';
 import { createCrossmintSigner } from '../crossmint-signer.js';
 
@@ -110,7 +110,7 @@ describe('CrossmintSigner', () => {
             const signer = await createCrossmintSigner(mockConfig);
 
             expect(signer.address).toBe(MOCK_ADDRESS);
-            assertIsSolanaSigner(signer);
+            expect(isSolanaSendingSigner(signer)).toBe(true);
             expect(fetch).toHaveBeenCalledWith(
                 'https://api.test.crossmint.com/api/2025-06-09/wallets/userId%3Atest-user%3Asolana%3Asmart',
                 expect.objectContaining({
@@ -205,20 +205,22 @@ describe('CrossmintSigner', () => {
         });
     });
 
-    describe('signMessages', () => {
-        it('returns not supported error', async () => {
+    describe('signer classification', () => {
+        it('is a sending signer in both directions of every guard', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
             const signer = await createCrossmintSigner(mockConfig);
+            const guardInput = signer as unknown as { [key: string]: unknown; address: typeof signer.address };
 
-            const message = {
-                content: new Uint8Array([1, 2, 3]),
-                signatures: {},
-            };
-
-            await expect(signer.signMessages([message])).rejects.toMatchObject({
-                code: 'SIGNER_SIGNING_FAILED',
-                message: expect.stringContaining('not supported'),
-            });
+            // Kit classifies by method presence, so the absent methods are the
+            // contract: a present-but-throwing signTransactions/signMessages
+            // would make Kit partial-sign and fail at runtime.
+            expect('signTransactions' in signer).toBe(false);
+            expect('signMessages' in signer).toBe(false);
+            expect(isTransactionPartialSigner(guardInput)).toBe(false);
+            expect(isMessagePartialSigner(guardInput)).toBe(false);
+            expect(isTransactionSendingSigner(guardInput)).toBe(true);
+            expect(isSolanaSigner(signer)).toBe(false);
+            expect(isSolanaSendingSigner(signer)).toBe(true);
         });
     });
 
@@ -333,24 +335,6 @@ describe('CrossmintSigner', () => {
                 signature: MOCK_SIGNATURE_BYTES,
                 signerAddress: signer.address,
             });
-        });
-
-        /**
-         * Crossmint sponsors gas, so it is the fee payer and the message it signs
-         * differs from the caller's. A signature dictionary keyed to this address
-         * would assert the signature covers the caller's message, which it does not.
-         */
-        it('rejects signTransactions so a rewritten signature is never applied to caller bytes', async () => {
-            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
-            const signer = await createCrossmintSigner(mockConfig);
-
-            await expect(
-                (signer as unknown as { signTransactions: (t: unknown[]) => Promise<unknown> }).signTransactions([
-                    createMockTransaction(),
-                ]),
-            ).rejects.toMatchObject({ code: 'SIGNER_CONFIG_ERROR' });
-            // Rejected locally: no transaction may be created server-side.
-            expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
         });
 
         /**
@@ -494,6 +478,53 @@ describe('CrossmintSigner', () => {
             );
             // The wallet address remains the signer's public identity.
             expect(signer.address).toBe(MOCK_ADDRESS);
+        });
+
+        /**
+         * A submitted approval may carry its identity only as a `server:<address>`
+         * locator, with no `address` field — the same identity format `pending`
+         * entries use.
+         */
+        it('locates a submitted approval identified only by its server locator', async () => {
+            const DELEGATED_ADDRESS = 'SysvarC1ock11111111111111111111111111111111';
+            // No candidate holds a slot signature, so extraction falls through to
+            // approvals.submitted.
+            vi.mocked(getTransactionDecoder).mockReturnValue({
+                decode: vi.fn(() => createDecodedTransaction({ signerAddress: 'someone-else' })),
+            } as any);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse())
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-locator-only',
+                            status: 'success',
+                            approvals: {
+                                submitted: [
+                                    {
+                                        signature: MOCK_SIGNATURE_B58,
+                                        signer: { locator: `server:${DELEGATED_ADDRESS}` },
+                                    },
+                                ],
+                            },
+                            onChain: { transaction: MOCK_SERIALIZED_TRANSACTION_B58 },
+                        }),
+                        { status: 201 },
+                    ),
+                );
+
+            const signer = await createCrossmintSigner({
+                ...mockConfig,
+                maxPollAttempts: 1,
+                pollIntervalMs: 1,
+                signer: `server:${DELEGATED_ADDRESS}`,
+            });
+            const results = await signer.signAndSendTransactions([createMockTransaction()]);
+
+            expect(results[0]).toEqual(MOCK_SIGNATURE_BYTES);
+            expect(assertSignatureValid).toHaveBeenCalledWith(
+                expect.objectContaining({ signerAddress: DELEGATED_ADDRESS }),
+            );
         });
 
         /**

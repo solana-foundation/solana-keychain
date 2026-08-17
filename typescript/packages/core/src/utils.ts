@@ -2,11 +2,16 @@ import { Address, assertIsAddress, getAddressEncoder } from '@solana/addresses';
 import { ReadonlyUint8Array } from '@solana/codecs-core';
 import { getBase64Encoder } from '@solana/codecs-strings';
 import { SignatureBytes, verifySignature } from '@solana/keys';
-import { isMessagePartialSigner, isTransactionPartialSigner, SignatureDictionary } from '@solana/signers';
+import {
+    isMessagePartialSigner,
+    isTransactionPartialSigner,
+    isTransactionSendingSigner,
+    SignatureDictionary,
+} from '@solana/signers';
 import { Base64EncodedWireTransaction, getTransactionDecoder } from '@solana/transactions';
 
 import { SignerErrorCode, throwSignerError } from './errors.js';
-import { SolanaSigner } from './types.js';
+import { SolanaSendingSigner, SolanaSigner } from './types.js';
 
 interface AssertSignatureValidOptions {
     data: ReadonlyUint8Array;
@@ -172,6 +177,19 @@ export function isSolanaSigner<TAddress extends string>(value: {
         isMessagePartialSigner(value) &&
         isTransactionPartialSigner(value)
     );
+}
+
+/**
+ * Checks if the given value is a SolanaSendingSigner (a managed-broadcast
+ * signer). Such signers expose `signAndSendTransactions` and, by design, no
+ * `signTransactions`, so they are never also a {@link SolanaSigner}.
+ * @param value - The value to check
+ * @returns True if the value is a SolanaSendingSigner, false otherwise
+ */
+export function isSolanaSendingSigner<TAddress extends string>(value: {
+    address: Address<TAddress>;
+}): value is SolanaSendingSigner<TAddress> {
+    return 'address' in value && 'isAvailable' in value && isTransactionSendingSigner(value);
 }
 
 /**

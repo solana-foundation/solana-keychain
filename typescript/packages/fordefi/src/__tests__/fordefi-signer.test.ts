@@ -2,8 +2,14 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { assertIsSolanaSigner, assertSignatureValid, extractSignatureFromWireTransaction } from '@solana/keychain-core';
-import { isTransactionSendingSigner } from '@solana/signers';
+import {
+    assertIsSolanaSigner,
+    assertSignatureValid,
+    extractSignatureFromWireTransaction,
+    isSolanaSendingSigner,
+    isSolanaSigner,
+} from '@solana/keychain-core';
+import { isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
@@ -523,18 +529,19 @@ describe('FordefiSigner', () => {
             expect(postOpts.headers).toHaveProperty('x-idempotence-id', expectedId);
         });
 
-        it('should reject partial-signer usage before submitting native remote work', async () => {
+        it('does not expose the partial-signer method in native mode', async () => {
             setupCreateVaultMock();
             const signer = await FordefiSigner.create(nativeConfig);
-            const mockTx = {
-                messageBytes: new Uint8Array(32),
-                signatures: { [MOCK_ADDRESS]: null },
-            } as never;
+            const guardInput = signer as unknown as { [key: string]: unknown; address: typeof signer.address };
 
-            await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
-                code: 'SIGNER_CONFIG_ERROR',
-            });
-            expect(fetch).toHaveBeenCalledTimes(1);
+            // Kit classifies by method presence: a present-but-throwing
+            // signTransactions would make Kit partial-sign and fail at runtime.
+            expect(signer.signTransactions).toBeUndefined();
+            expect('signTransactions' in signer).toBe(false);
+            expect(isTransactionPartialSigner(guardInput)).toBe(false);
+            expect(isTransactionSendingSigner(guardInput)).toBe(true);
+            expect(isSolanaSigner(guardInput)).toBe(false);
+            expect(isSolanaSendingSigner(guardInput)).toBe(true);
         });
 
         it('should reject native multi-signer auto-broadcast before submitting remote work', async () => {
@@ -557,11 +564,13 @@ describe('FordefiSigner', () => {
         it('should not expose TransactionSendingSigner in black box mode', async () => {
             setupCreateVaultMock();
             const signer = await FordefiSigner.create(mockConfig);
-            expect(
-                isTransactionSendingSigner(
-                    signer as unknown as { [key: string]: unknown; address: typeof signer.address },
-                ),
-            ).toBe(false);
+            const guardInput = signer as unknown as { [key: string]: unknown; address: typeof signer.address };
+
+            expect('signAndSendTransactions' in signer).toBe(false);
+            expect(isTransactionSendingSigner(guardInput)).toBe(false);
+            expect(isTransactionPartialSigner(guardInput)).toBe(true);
+            expect(isSolanaSigner(guardInput)).toBe(true);
+            expect(isSolanaSendingSigner(guardInput)).toBe(false);
         });
 
         it('should poll through intermediate pushable states', async () => {

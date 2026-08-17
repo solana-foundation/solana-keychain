@@ -4,6 +4,7 @@ import type {
     SignableMessage,
     SignatureDictionary,
     TransactionPartialSigner,
+    TransactionSendingSigner,
 } from '@solana/signers';
 import type { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
 
@@ -52,4 +53,36 @@ export interface SolanaSigner<TAddress extends string = string>
     signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
     ): Promise<readonly SignatureDictionary[]>;
+}
+
+/**
+ * Unified interface for managed-broadcast signers.
+ *
+ * A backend belongs in this category when it rewrites the transaction message
+ * (e.g. gas sponsorship, its own blockhash or fees) and/or broadcasts
+ * server-side, so its signature cannot be applied to the caller's transaction.
+ * Such a backend must not expose `signTransactions` at all: Kit's signer
+ * classification is duck-typed on method presence, and a present-but-throwing
+ * method makes Kit partial-sign the transaction and fail at runtime. Use these
+ * signers through `signAndSendTransactionMessageWithSigners()` (or
+ * `signAndSendTransactions()` directly); the returned bytes identify the
+ * transaction the provider landed.
+ *
+ * This interface deliberately does not include {@link MessagePartialSigner}.
+ * Intersect it per backend only when the backend genuinely signs messages
+ * (Fordefi native mode does; Crossmint does not).
+ */
+export interface SolanaSendingSigner<TAddress extends string = string> extends TransactionSendingSigner<TAddress> {
+    /**
+     * Get the public key address of this signer
+     */
+    readonly address: Address<TAddress>;
+
+    /**
+     * Check if the signer is available and healthy.
+     * For remote signers, this performs an API health check.
+     *
+     * @throws {SignerError} Some implementations may throw for configuration or initialization errors.
+     */
+    isAvailable(): Promise<boolean>;
 }

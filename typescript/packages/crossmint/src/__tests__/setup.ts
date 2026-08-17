@@ -1,11 +1,20 @@
-import type { SolanaSigner } from '@solana/keychain-core';
-import { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
-import { createCrossmintSigner } from '../crossmint-signer.js';
+import type { TestScenario } from '@solana/keychain-test-utils';
+import { createCrossmintSigner, type CrossmintSendingSigner } from '../crossmint-signer.js';
 
 const SIGNER_TYPE = 'crossmint';
 const REQUIRED_ENV_VARS = ['CROSSMINT_API_KEY', 'CROSSMINT_WALLET_LOCATOR'];
 
-const CONFIG: SignerTestConfig<SolanaSigner> = {
+// Crossmint is a sending signer with no partial-signer methods, so its config
+// does not satisfy `SignerTestConfig` and the shared LiteSVM runner does not
+// apply; the integration test drives the signer directly.
+interface CrossmintTestConfig {
+    createSigner: () => Promise<CrossmintSendingSigner>;
+    requiredEnvVars: string[];
+    signerType: string;
+    testScenarios?: TestScenario[];
+}
+
+const CONFIG: CrossmintTestConfig = {
     signerType: SIGNER_TYPE,
     requiredEnvVars: REQUIRED_ENV_VARS,
     createSigner: async () =>
@@ -24,7 +33,7 @@ const CONFIG: SignerTestConfig<SolanaSigner> = {
         }),
 };
 
-export async function getConfig(scenarios: TestScenario[]): Promise<SignerTestConfig<SolanaSigner>> {
+export async function getConfig(scenarios: TestScenario[]): Promise<CrossmintTestConfig> {
     return {
         ...CONFIG,
         testScenarios: scenarios,

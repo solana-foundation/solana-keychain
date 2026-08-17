@@ -189,6 +189,25 @@ describe('createKeychainSigner', () => {
         }
     });
 
+    it('preserves the Crossmint sending-signer type', async () => {
+        const mod = await import('@solana/keychain-crossmint');
+        const factory = mod.createCrossmintSigner as ReturnType<typeof vi.fn>;
+        const mockSigner = {
+            address: TEST_ADDRESS,
+            isAvailable: vi.fn().mockResolvedValue(true),
+            signAndSendTransactions: vi.fn().mockResolvedValue([]),
+        };
+        factory.mockResolvedValue(mockSigner);
+
+        const signer = await createKeychainSigner({
+            apiKey: 'key',
+            backend: 'crossmint',
+            walletLocator: 'loc',
+        });
+
+        expect(signer.signAndSendTransactions).toBe(mockSigner.signAndSendTransactions);
+    });
+
     it('preserves the native Fordefi TransactionSendingSigner type', async () => {
         const mod = await import('@solana/keychain-fordefi');
         const factory = mod.createFordefiSigner as ReturnType<typeof vi.fn>;

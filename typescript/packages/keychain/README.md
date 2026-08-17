@@ -46,6 +46,21 @@ await signer.signTransactions([transaction]);
 
 The `backend` field determines which signer is created. TypeScript narrows the config type automatically — you get full autocomplete for each backend's required fields.
 
+**Managed-broadcast backends** (Crossmint always; Fordefi when `chain` enables native mode) rewrite the transaction and/or broadcast it server-side, so they return a `SolanaSendingSigner` with `signAndSendTransactions()` instead of `signTransactions()`:
+
+```typescript
+const crossmint = await createKeychainSigner({
+    backend: 'crossmint',
+    apiKey: '...',
+    walletLocator: '...',
+});
+
+// Returns the signature identifying the transaction Crossmint landed.
+const [signature] = await crossmint.signAndSendTransactions([transaction]);
+```
+
+With Kit, use `signAndSendTransactionMessageWithSigners()` for these backends; the partial-signer helpers below apply to every other backend.
+
 ### Resolve Address Without Signing
 
 Use `resolveAddress` to get a signer's Solana address without initializing the full signing pipeline:
@@ -169,7 +184,7 @@ try {
 
 ## Common Interface
 
-All signers implement `SolanaSigner`, which is compatible with `@solana/kit` and `@solana/signers`:
+Most signers implement `SolanaSigner`, which is compatible with `@solana/kit` and `@solana/signers`:
 
 ```typescript
 interface SolanaSigner<TAddress extends string = string> {
@@ -179,6 +194,8 @@ interface SolanaSigner<TAddress extends string = string> {
     isAvailable(): Promise<boolean>;
 }
 ```
+
+Managed-broadcast signers (Crossmint, Fordefi native mode) implement `SolanaSendingSigner` instead — Kit's `TransactionSendingSigner` plus `address` and `isAvailable()` — and deliberately expose no `signTransactions`, because Kit classifies signers by method presence. Use `isSolanaSigner()` / `isSolanaSendingSigner()` from `@solana/keychain-core` to distinguish them at runtime.
 
 ## License
 

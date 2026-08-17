@@ -25,6 +25,20 @@ interface SolanaSigner {
 }
 ```
 
+**`SolanaSendingSigner`** - Interface for managed-broadcast backends. A backend belongs in this category when it rewrites the transaction message and/or broadcasts server-side, so its signature cannot be applied to the caller's transaction. Such signers expose `signAndSendTransactions()` (Kit's `TransactionSendingSigner`) and deliberately **no** `signTransactions` or `signMessages` — Kit classifies signers by duck-typed method presence, and a present-but-throwing method would make Kit misroute the transaction and fail at runtime. Backends that also support message signing intersect `MessagePartialSigner` per package:
+
+```typescript
+import { SolanaSendingSigner } from '@solana/keychain-core';
+
+interface SolanaSendingSigner {
+    address: Address;
+    isAvailable(): Promise<boolean>;
+    signAndSendTransactions(transactions: readonly Transaction[]): Promise<readonly SignatureBytes[]>;
+}
+```
+
+Runtime guards: `isSolanaSigner()`, `assertIsSolanaSigner()`, and `isSolanaSendingSigner()`.
+
 ### Error Handling
 
 ```typescript

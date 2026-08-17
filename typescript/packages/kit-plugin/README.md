@@ -31,6 +31,20 @@ client.identity; // same signer instance
 
 Only the backend a configuration dispatches to is bundled — backend packages are loaded with dynamic `import()`.
 
+## Managed-broadcast backends are excluded
+
+Crossmint, and Fordefi in native mode (`chain` set), rewrite and broadcast transactions server-side. They are Kit `TransactionSendingSigner`s with no `signTransactions`, so they cannot serve as a client `payer` or `identity` — client send flows build, sign, and broadcast themselves, and Kit routes a sending signer only through `signAndSendTransactionMessageWithSigners()`. These plugins reject such configs at compile time (`KeychainKitPluginConfig`). Use the signer directly instead:
+
+```ts
+import { signAndSendTransactionMessageWithSigners } from '@solana/signers';
+import { createKeychainSigner } from '@solana/keychain';
+
+const crossmint = await createKeychainSigner({ backend: 'crossmint', apiKey, walletLocator });
+const signature = await signAndSendTransactionMessageWithSigners(transactionMessage);
+```
+
+Fordefi in black-box mode (no `chain`) is a regular partial signer and remains supported.
+
 ## Plugin variants
 
 | Plugin                    | Sets                                          |

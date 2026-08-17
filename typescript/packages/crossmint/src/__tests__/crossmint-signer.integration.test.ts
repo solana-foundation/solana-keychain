@@ -1,6 +1,5 @@
 import {
     type Blockhash,
-    createSignableMessage,
     createTransactionMessage,
     pipe,
     setTransactionMessageFeePayerSigner,
@@ -59,11 +58,11 @@ describe('CrossmintSigner Integration', () => {
         },
     );
 
-    it.skipIf(!process.env.CROSSMINT_API_KEY)('returns not supported for signMessages', async () => {
-        const { createSigner } = await getConfig(['signMessage']);
+    it.skipIf(!process.env.CROSSMINT_API_KEY)('does not expose partial-signer methods', async () => {
+        const { createSigner } = await getConfig([]);
         const signer = await createSigner();
-        const message = createSignableMessage(new Uint8Array([1, 2, 3]));
-        await expect(signer.signMessages([message])).rejects.toThrow('not supported');
+        expect('signMessages' in signer).toBe(false);
+        expect('signTransactions' in signer).toBe(false);
     });
 
     it.skipIf(!process.env.CROSSMINT_API_KEY)('checks availability', async () => {

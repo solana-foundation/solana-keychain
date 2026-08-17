@@ -106,7 +106,8 @@ See [typescript/README.md](typescript/README.md) for the full package list and u
 ### Gotchas
 
 - **Async construction:** always `await createXSigner(...)` — direct class construction is deprecated and skips `init()`.
-- **`signMessages` quirks (parity with Rust):** `CrossmintSigner` rejects with "not supported". `CdpSigner` requires UTF-8 message bytes.
+- **Managed-broadcast backends (Crossmint, Fordefi native mode):** implement `SolanaSendingSigner` from core — `signAndSendTransactions()` only, with **no** `signTransactions`/`signMessages` (Crossmint) because Kit classifies signers by duck-typed method presence. They are excluded from `@solana/keychain-kit-plugin` at the type level.
+- **`signMessages` quirks (parity with Rust):** `CrossmintSigner` does not expose `signMessages` at all (Rust returns `SigningFailed`). `CdpSigner` requires UTF-8 message bytes.
 - **HTTPS enforced:** all `apiBaseUrl` config fields must reject non-HTTPS URLs — validate with `assertHttpsUrl()` from `@solana/keychain-core`.
 - **Remote API calls:** go through `fetchSignerJson()` from `@solana/keychain-core` — it owns the HTTP_ERROR/REMOTE_API_ERROR/PARSING_ERROR pipeline, response sanitization (`sanitizeRemoteErrorResponse()`), redirect rejection, and a default 60s timeout. Batch signing uses core `signBatchStaggered()` + `validateRequestDelayMs()`.
 - **Integration tests:** use `runSignerIntegrationTest` + per-package `setup.ts`; spun up via `just ts-test-integration` (loads `.env`, starts local Vault).

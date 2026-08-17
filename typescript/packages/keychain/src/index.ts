@@ -9,7 +9,7 @@ export type { BackendName, KeychainSignerConfig } from './types.js';
 // Individual config types (flat re-exports)
 export type { AwsKmsSignerConfig } from '@solana/keychain-aws-kms';
 export type { CdpSignerConfig } from '@solana/keychain-cdp';
-export type { CrossmintSignerConfig } from '@solana/keychain-crossmint';
+export type { CrossmintSendingSigner, CrossmintSignerConfig } from '@solana/keychain-crossmint';
 export type { DfnsSignerConfig } from '@solana/keychain-dfns';
 export type { FireblocksSignerConfig } from '@solana/keychain-fireblocks';
 export type { FordefiNativeSigner, FordefiSignerConfig } from '@solana/keychain-fordefi';

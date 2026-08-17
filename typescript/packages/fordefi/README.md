@@ -16,7 +16,7 @@ The signer supports two modes determined by whether `chain` is provided:
 
 Set `chain` to use Fordefi's native Solana transaction type. Fordefi may modify the transaction (e.g. updating the blockhash or adding compute budget instructions) and broadcasts it on-chain automatically (`push_mode: 'auto'`). Use this with a **Solana vault**.
 
-> **Note:** Native mode is a Kit `TransactionSendingSigner`, because Fordefi may sign a different message than the one supplied by the caller and broadcasts it itself. Use `signAndSendTransactionMessageWithSigners()` or `signAndSendTransactions()`. Calling the partial-signer method `signTransactions()` in native mode fails locally before any transaction is submitted.
+> **Note:** Native mode is a Kit `TransactionSendingSigner` (`FordefiNativeSigner`, built on `SolanaSendingSigner` from `@solana/keychain-core`), because Fordefi may sign a different message than the one supplied by the caller and broadcasts it itself. Use `signAndSendTransactionMessageWithSigners()` or `signAndSendTransactions()`. Native instances expose **no** `signTransactions` — Kit classifies signers by method presence, so its absence is what routes the signer through Kit's sending flow — but message signing (`signMessages`) still works. Black-box instances are the mirror image: `signTransactions` and no `signAndSendTransactions`.
 
 ```typescript
 import { createFordefiSigner } from '@solana/keychain-fordefi';

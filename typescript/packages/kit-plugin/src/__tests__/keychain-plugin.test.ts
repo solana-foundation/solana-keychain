@@ -49,6 +49,33 @@ describe('keychainIdentity', () => {
     });
 });
 
+describe('managed-broadcast exclusion', () => {
+    it('rejects managed-broadcast configs at the type level', () => {
+        // Building the plugin never constructs a signer — that happens when the
+        // plugin is applied to a client — so these calls are side-effect free.
+        // @ts-expect-error Crossmint broadcasts server-side and cannot be a client payer/identity
+        keychainSigner({ apiKey: 'k', backend: 'crossmint', walletLocator: 'w' });
+        keychainPayer({
+            accessToken: 't',
+            backend: 'fordefi',
+            // @ts-expect-error Fordefi native mode (chain set) broadcasts server-side
+            chain: 'solana_mainnet',
+            privateKeyPem: 'p',
+            publicKey: 'x',
+            vaultId: 'v',
+        });
+        // Fordefi black-box mode (no chain) is a partial signer and stays accepted.
+        const plugin = keychainIdentity({
+            accessToken: 't',
+            backend: 'fordefi',
+            privateKeyPem: 'p',
+            publicKey: 'x',
+            vaultId: 'v',
+        });
+        expect(typeof plugin).toBe('function');
+    });
+});
+
 describe('composition', () => {
     it('allows separate payer and identity signers on one client', async () => {
         const otherSeed = new Uint8Array(32).fill(9);

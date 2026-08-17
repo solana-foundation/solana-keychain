@@ -857,6 +857,13 @@ export { YourSigner } from '@solana/keychain-your-signer';
 
 **g) `typescript/scripts/test-treeshake-umbrella.mjs`** — add your package to `SIGNER_MARKERS` (two distinctive strings that appear in your built `dist/` output — verify with grep before picking them) and your factory to the `FACTORIES` list. Without this, your backend leaking into other factories' bundles goes undetected.
 
+**h) Managed-broadcast (sending-signer) backends only** — if your backend rewrites the transaction message and/or broadcasts server-side, its signature cannot be applied to the caller's transaction, so it must be a `SolanaSendingSigner` (see `@solana/keychain-core`) instead of a `SolanaSigner`. That changes the checklist:
+
+- The signer class implements `signAndSendTransactions()` and exposes **no** `signTransactions` (nor `signMessages`, unless the backend genuinely signs messages) — Kit classifies signers by duck-typed method presence, so throwing methods are not enough. See Crossmint, or Fordefi's own-property pattern for a package serving both shapes.
+- Add a typed `createKeychainSigner` overload in `keychain/src/create-keychain-signer.ts` returning your sending-signer type (Crossmint and Fordefi-native have precedents), in addition to the switch case.
+- Add your backend to the exclusions in `KeychainKitPluginConfig` (`typescript/packages/kit-plugin/src/keychain-plugin.ts`) — sending signers cannot serve as a Kit client `payer`/`identity` — and mention it in the kit-plugin README.
+- Assert the guard directions in unit tests: `isTransactionPartialSigner()` false and `isTransactionSendingSigner()` true for your instances.
+
 ### README
 
 Show `createXSigner()` as the primary usage pattern in all examples:

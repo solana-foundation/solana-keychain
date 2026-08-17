@@ -33,8 +33,8 @@ const signer = await createCrossmintSigner({
 ## Behavior Notes
 
 1. Crossmint executes transactions server-side and sponsors gas, which makes it the fee payer, so the message it signs generally differs from the one you submitted. Use `signAndSendTransactions()` (or `signAndSendTransactionMessageWithSigners()`): the returned value is the landed transaction's fee-payer signature, the identifier you can pass to `getTransaction`/`confirmTransaction`, not a signature over your message bytes. Under sponsorship the fee payer is Crossmint's sponsor key; your wallet's own signature is verified internally before the identifier is returned.
-2. `signTransactions` rejects with `SIGNER_CONFIG_ERROR`. A signature dictionary would claim to cover your message, which it does not.
-3. `signMessages` is intentionally unsupported and throws a signer error.
+2. The signer is a `CrossmintSendingSigner` (`SolanaSendingSigner` from `@solana/keychain-core`): it exposes **no** `signTransactions` and **no** `signMessages`. Kit classifies signers by method presence, so their absence is what routes the signer through Kit's sending flow instead of partial signing. Crossmint does not support message signing for Solana wallets.
+3. Because it is a sending signer, it cannot be installed as a Kit client `payer`/`identity` (`@solana/keychain-kit-plugin` rejects the config at compile time). Call it directly, or via `signAndSendTransactionMessageWithSigners()`.
 
 ```typescript
 const [signature] = await signer.signAndSendTransactions([transaction]);

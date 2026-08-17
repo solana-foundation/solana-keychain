@@ -1,6 +1,20 @@
-import type { KeychainSignerConfig } from '@solana/keychain';
+import type { FordefiSignerConfig, KeychainSignerConfig } from '@solana/keychain';
 import { createKeychainSigner } from '@solana/keychain';
 import { extendClient } from '@solana/kit';
+
+/**
+ * Backend configurations these plugins accept: every keychain backend except
+ * the managed-broadcast ones — Crossmint, and Fordefi in native mode (`chain`
+ * set). Those backends rewrite and broadcast transactions server-side, so
+ * they expose `signAndSendTransactions` and no `signTransactions`, and cannot
+ * serve as a client `payer` or `identity`: client send flows build, sign, and
+ * broadcast themselves, and Kit routes a sending signer only through
+ * `signAndSendTransactionMessageWithSigners()`. Create those signers with
+ * `createKeychainSigner()` and use that function directly instead.
+ */
+export type KeychainKitPluginConfig =
+    | Exclude<KeychainSignerConfig, { backend: 'crossmint' | 'fordefi' }>
+    | (FordefiSignerConfig & { backend: 'fordefi'; chain?: undefined });
 
 /**
  * Creates a keychain signer from a backend-tagged configuration and sets it
@@ -29,7 +43,7 @@ import { extendClient } from '@solana/kit';
  * @see {@link keychainPayer}
  * @see {@link keychainIdentity}
  */
-export function keychainSigner(config: KeychainSignerConfig) {
+export function keychainSigner(config: KeychainKitPluginConfig) {
     return async <TClient extends object>(client: TClient) => {
         const signer = await createKeychainSigner(config);
         return extendClient(client, { identity: signer, payer: signer });
@@ -58,7 +72,7 @@ export function keychainSigner(config: KeychainSignerConfig) {
  * @see {@link keychainIdentity}
  * @see {@link keychainSigner}
  */
-export function keychainPayer(config: KeychainSignerConfig) {
+export function keychainPayer(config: KeychainKitPluginConfig) {
     return async <TClient extends object>(client: TClient) => {
         const payer = await createKeychainSigner(config);
         return extendClient(client, { payer });
@@ -88,7 +102,7 @@ export function keychainPayer(config: KeychainSignerConfig) {
  * @see {@link keychainPayer}
  * @see {@link keychainSigner}
  */
-export function keychainIdentity(config: KeychainSignerConfig) {
+export function keychainIdentity(config: KeychainKitPluginConfig) {
     return async <TClient extends object>(client: TClient) => {
         const identity = await createKeychainSigner(config);
         return extendClient(client, { identity });
