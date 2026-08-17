@@ -30,6 +30,7 @@ pub struct ActivityResponse {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Activity {
+    pub status: Option<String>,
     pub result: Option<ActivityResult>,
 }
 

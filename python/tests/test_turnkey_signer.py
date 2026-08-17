@@ -52,7 +52,12 @@ def mock_sign_response(r_hex: str, s_hex: str) -> None:
     respx.post(SIGN_URL).mock(
         return_value=httpx.Response(
             200,
-            json={"activity": {"result": {"signRawPayloadResult": {"r": r_hex, "s": s_hex}}}},
+            json={
+                "activity": {
+                    "status": "ACTIVITY_STATUS_COMPLETED",
+                    "result": {"signRawPayloadResult": {"r": r_hex, "s": s_hex}},
+                }
+            },
         )
     )
 
@@ -185,6 +190,33 @@ async def test_sign_message_rejects_undecodable_component() -> None:
 
 @respx.mock
 async def test_sign_message_missing_result() -> None:
+    keypair = Keypair()
+    respx.post(SIGN_URL).mock(
+        return_value=httpx.Response(200, json={"activity": {"status": "ACTIVITY_STATUS_COMPLETED"}})
+    )
+    signer = make_signer(str(keypair.pubkey()))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_message(b"hello")
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+
+
+@respx.mock
+async def test_sign_message_rejects_non_completed_activity() -> None:
+    keypair = Keypair()
+    respx.post(SIGN_URL).mock(
+        return_value=httpx.Response(
+            200, json={"activity": {"status": "ACTIVITY_STATUS_CONSENSUS_NEEDED"}}
+        )
+    )
+    signer = make_signer(str(keypair.pubkey()))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_message(b"hello")
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert "ACTIVITY_STATUS_CONSENSUS_NEEDED" in excinfo.value._detail
+
+
+@respx.mock
+async def test_sign_message_rejects_missing_activity_status() -> None:
     keypair = Keypair()
     respx.post(SIGN_URL).mock(return_value=httpx.Response(200, json={"activity": {}}))
     signer = make_signer(str(keypair.pubkey()))

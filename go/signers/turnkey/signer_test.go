@@ -11,9 +11,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -61,7 +63,7 @@ func testConfig(t *testing.T, pubkey string, srv *httptest.Server) Config {
 // signResultBody renders the activity JSON Turnkey returns for a signature,
 // split into hex r and s components.
 func signResultBody(sig []byte) string {
-	return `{"activity":{"result":{"signRawPayloadResult":{"r":"` +
+	return `{"activity":{"status":"ACTIVITY_STATUS_COMPLETED","result":{"signRawPayloadResult":{"r":"` +
 		hex.EncodeToString(sig[:32]) + `","s":"` + hex.EncodeToString(sig[32:]) + `"}}}}`
 }
 
@@ -313,7 +315,7 @@ func TestSignUnauthorized(t *testing.T) {
 
 func TestSignInvalidResponse(t *testing.T) {
 	var calls int32
-	srv := signServer(t, http.StatusOK, `{"activity":{}}`, &calls)
+	srv := signServer(t, http.StatusOK, `{"activity":{"status":"ACTIVITY_STATUS_COMPLETED"}}`, &calls)
 	defer srv.Close()
 
 	s, err := New(testConfig(t, testutils.TestPublicKey().String(), srv))
@@ -331,7 +333,7 @@ func TestSignInvalidResponse(t *testing.T) {
 
 func TestSignInvalidHex(t *testing.T) {
 	var calls int32
-	body := `{"activity":{"result":{"signRawPayloadResult":{"r":"not-valid-hex!!!","s":"also-not-valid-hex!!!"}}}}`
+	body := `{"activity":{"status":"ACTIVITY_STATUS_COMPLETED","result":{"signRawPayloadResult":{"r":"not-valid-hex!!!","s":"also-not-valid-hex!!!"}}}}`
 	srv := signServer(t, http.StatusOK, body, &calls)
 	defer srv.Close()
 
@@ -348,9 +350,49 @@ func TestSignInvalidHex(t *testing.T) {
 	}
 }
 
+func TestSignRejectsNonCompletedActivity(t *testing.T) {
+	var calls int32
+	srv := signServer(t, http.StatusOK, `{"activity":{"status":"ACTIVITY_STATUS_CONSENSUS_NEEDED"}}`, &calls)
+	defer srv.Close()
+
+	s, err := New(testConfig(t, testutils.TestPublicKey().String(), srv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignMessage(context.Background(), []byte("test"))
+	if err == nil {
+		t.Fatal("expected error for non-completed activity")
+	}
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Errorf("got %s, want SIGNING_FAILED", code)
+	}
+	var se *core.SignerError
+	if !errors.As(err, &se) || !strings.Contains(se.Detail(), "ACTIVITY_STATUS_CONSENSUS_NEEDED") {
+		t.Errorf("error must name the received status, got %v", err)
+	}
+}
+
+func TestSignRejectsMissingActivityStatus(t *testing.T) {
+	var calls int32
+	srv := signServer(t, http.StatusOK, `{"activity":{}}`, &calls)
+	defer srv.Close()
+
+	s, err := New(testConfig(t, testutils.TestPublicKey().String(), srv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignMessage(context.Background(), []byte("test"))
+	if err == nil {
+		t.Fatal("expected error for missing activity status")
+	}
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Errorf("got %s, want SIGNING_FAILED", code)
+	}
+}
+
 func TestSignOversizedComponent(t *testing.T) {
 	var calls int32
-	body := `{"activity":{"result":{"signRawPayloadResult":{"r":"` +
+	body := `{"activity":{"status":"ACTIVITY_STATUS_COMPLETED","result":{"signRawPayloadResult":{"r":"` +
 		hex.EncodeToString(bytes.Repeat([]byte{0xFF}, 33)) + `","s":"` +
 		hex.EncodeToString(bytes.Repeat([]byte{0x01}, 32)) + `"}}}}`
 	srv := signServer(t, http.StatusOK, body, &calls)

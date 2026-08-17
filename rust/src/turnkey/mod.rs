@@ -149,6 +149,16 @@ impl TurnkeySigner {
         let response_text = response.text().await?;
         let response: ActivityResponse = serde_json::from_str(&response_text)?;
 
+        // Turnkey executes activities optimistically and populates `result` only
+        // once the activity reaches ACTIVITY_STATUS_COMPLETED; anything else
+        // (e.g. CONSENSUS_NEEDED under a quorum policy) carries no signature.
+        let status = response.activity.status.as_deref().unwrap_or("<missing>");
+        if status != "ACTIVITY_STATUS_COMPLETED" {
+            return Err(SignerError::SigningFailed(format!(
+                "Turnkey activity is not completed (status: {status})"
+            )));
+        }
+
         if let Some(result) = response.activity.result {
             if let Some(sign_result) = result.sign_raw_payload_result {
                 // Decode r and s components
@@ -403,6 +413,7 @@ mod tests {
             .and(header("Content-Type", "application/json"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "activity": {
+                    "status": "ACTIVITY_STATUS_COMPLETED",
                     "result": {
                         "signRawPayloadResult": {
                             "r": r_hex,
@@ -449,6 +460,7 @@ mod tests {
             .and(header("Content-Type", "application/json"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "activity": {
+                    "status": "ACTIVITY_STATUS_COMPLETED",
                     "result": {
                         "signRawPayloadResult": {
                             "r": r_hex,
@@ -498,6 +510,7 @@ mod tests {
             .and(path("/public/v1/submit/sign_raw_payload"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "activity": {
+                    "status": "ACTIVITY_STATUS_COMPLETED",
                     "result": {
                         "signRawPayloadResult": {
                             "r": r_hex,
@@ -577,7 +590,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/public/v1/submit/sign_raw_payload"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "activity": {}
+                "activity": { "status": "ACTIVITY_STATUS_COMPLETED" }
             })))
             .expect(1)
             .mount(&mock_server)
@@ -600,6 +613,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_turnkey_sign_rejects_non_completed_activity() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let (api_public_key, api_private_key) = create_test_api_keys();
+
+        Mock::given(method("POST"))
+            .and(path("/public/v1/submit/sign_raw_payload"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "activity": { "status": "ACTIVITY_STATUS_CONSENSUS_NEEDED" }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let mut signer = TurnkeySigner::new(
+            api_public_key,
+            api_private_key,
+            "test-org-id".to_string(),
+            "test-key-id".to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .unwrap();
+        signer.client = reqwest::Client::new();
+        signer.api_base_url = mock_server.uri();
+
+        let result = signer.sign_message(b"test").await;
+        match result.unwrap_err() {
+            SignerError::SigningFailed(message) => {
+                assert!(
+                    message.contains("ACTIVITY_STATUS_CONSENSUS_NEEDED"),
+                    "error must name the received status, got: {message}"
+                );
+            }
+            other => panic!("Expected SigningFailed, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_turnkey_sign_rejects_missing_activity_status() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let (api_public_key, api_private_key) = create_test_api_keys();
+
+        Mock::given(method("POST"))
+            .and(path("/public/v1/submit/sign_raw_payload"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "activity": {}
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let mut signer = TurnkeySigner::new(
+            api_public_key,
+            api_private_key,
+            "test-org-id".to_string(),
+            "test-key-id".to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .unwrap();
+        signer.client = reqwest::Client::new();
+        signer.api_base_url = mock_server.uri();
+
+        let result = signer.sign_message(b"test").await;
+        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    }
+
+    #[tokio::test]
     async fn test_turnkey_sign_invalid_hex() {
         let mock_server = MockServer::start().await;
         let keypair = create_test_keypair();
@@ -610,6 +691,7 @@ mod tests {
             .and(path("/public/v1/submit/sign_raw_payload"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "activity": {
+                    "status": "ACTIVITY_STATUS_COMPLETED",
                     "result": {
                         "signRawPayloadResult": {
                             "r": "not-valid-hex!!!",
@@ -747,6 +829,7 @@ mod tests {
             .and(path("/public/v1/submit/sign_raw_payload"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "activity": {
+                    "status": "ACTIVITY_STATUS_COMPLETED",
                     "result": {
                         "signRawPayloadResult": {
                             "r": r_hex,

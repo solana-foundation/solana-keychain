@@ -147,6 +147,17 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 	if err := json.Unmarshal(respBody, &resp); err != nil {
 		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse sign response", err)
 	}
+	// Turnkey executes activities optimistically and populates result only once
+	// the activity reaches ACTIVITY_STATUS_COMPLETED; anything else (e.g.
+	// CONSENSUS_NEEDED under a quorum policy) carries no signature.
+	if resp.Activity.Status != "ACTIVITY_STATUS_COMPLETED" {
+		status := resp.Activity.Status
+		if status == "" {
+			status = "<missing>"
+		}
+		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
+			"Turnkey activity is not completed (status: "+status+")")
+	}
 	result := resp.Activity.Result
 	if result == nil || result.SignRawPayloadResult == nil {
 		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "invalid response from Turnkey API")

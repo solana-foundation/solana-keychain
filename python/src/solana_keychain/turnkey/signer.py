@@ -175,6 +175,12 @@ class TurnkeySigner(SolanaSigner):
         response = await self._post_stamped("/public/v1/submit/sign_raw_payload", request)
 
         activity = response.get("activity") if isinstance(response, dict) else None
+        status = activity.get("status") if isinstance(activity, dict) else None
+        if status != "ACTIVITY_STATUS_COMPLETED":
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                f"Turnkey activity is not completed (status: {status or '<missing>'})",
+            )
         result = activity.get("result") if isinstance(activity, dict) else None
         sign_result = result.get("signRawPayloadResult") if isinstance(result, dict) else None
         if (

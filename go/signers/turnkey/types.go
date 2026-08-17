@@ -71,8 +71,9 @@ type activityResponse struct {
 	Activity activity `json:"activity"`
 }
 
-// activity carries the (optional) activity result.
+// activity carries the activity status and (optional) result.
 type activity struct {
+	Status string          `json:"status"`
 	Result *activityResult `json:"result"`
 }
 

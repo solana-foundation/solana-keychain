@@ -115,6 +115,22 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
     }
 
     /**
+     * Reject activity responses that have not completed.
+     *
+     * Turnkey executes activities optimistically and populates `result` only once
+     * the activity reaches `ACTIVITY_STATUS_COMPLETED`; anything else (e.g.
+     * `ACTIVITY_STATUS_CONSENSUS_NEEDED` under a quorum policy) carries no signature.
+     */
+    private assertActivityCompleted(activityResponse: ActivityResponse): void {
+        const status = activityResponse.activity?.status;
+        if (status !== 'ACTIVITY_STATUS_COMPLETED') {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message: `Turnkey activity is not completed (status: ${status || '<missing>'})`,
+            });
+        }
+    }
+
+    /**
      * Pad signature component to exactly 32 bytes
      * Components from Turnkey may be shorter than 32 bytes and need left-padding with zeros
      */
@@ -174,6 +190,8 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
             providerName: 'Turnkey',
             url: `${this.apiBaseUrl}/public/v1/submit/sign_raw_payload`,
         });
+
+        this.assertActivityCompleted(activityResponse);
 
         const signResult = activityResponse.activity?.result?.signRawPayloadResult;
         if (!signResult || !signResult.r || !signResult.s) {
@@ -253,6 +271,8 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
             providerName: 'Turnkey',
             url: `${this.apiBaseUrl}/public/v1/submit/sign_transaction`,
         });
+
+        this.assertActivityCompleted(activityResponse);
 
         const signedTransaction = activityResponse.activity?.result?.signTransactionResult?.signedTransaction;
         if (!signedTransaction) {

@@ -74,7 +74,7 @@ describe('TurnkeySigner', () => {
                                 s,
                             },
                         },
-                        status: 'COMPLETED',
+                        status: 'ACTIVITY_STATUS_COMPLETED',
                     },
                 }),
             ok: true,
@@ -383,7 +383,7 @@ describe('TurnkeySigner', () => {
             });
         });
 
-        it('throws structured SIGNER_REMOTE_API_ERROR for malformed response shape', async () => {
+        it('throws SIGNING_FAILED for malformed response shape', async () => {
             const keyPair = await generateKeyPairSigner();
 
             const config = {
@@ -402,8 +402,37 @@ describe('TurnkeySigner', () => {
             const message = createSignableMessage(new Uint8Array([1, 2, 3, 4]));
 
             await expect(signer.signMessages([message])).rejects.toMatchObject({
-                code: 'SIGNER_REMOTE_API_ERROR',
-                message: expect.stringContaining('Missing signature components'),
+                code: 'SIGNER_SIGNING_FAILED',
+                message: expect.stringContaining('not completed'),
+            });
+        });
+
+        it('throws SIGNING_FAILED when the activity is not completed', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            const config = {
+                ...mockConfig,
+                publicKey: keyPair.address,
+            };
+
+            const signer = new TurnkeySigner(config);
+
+            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+                json: () =>
+                    Promise.resolve({
+                        activity: {
+                            status: 'ACTIVITY_STATUS_CONSENSUS_NEEDED',
+                        },
+                    }),
+                ok: true,
+                status: 200,
+            });
+
+            const message = createSignableMessage(new Uint8Array([1, 2, 3, 4]));
+
+            await expect(signer.signMessages([message])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+                message: expect.stringContaining('ACTIVITY_STATUS_CONSENSUS_NEEDED'),
             });
         });
 
@@ -424,7 +453,7 @@ describe('TurnkeySigner', () => {
                             result: {
                                 // Missing signRawPayloadResult
                             },
-                            status: 'COMPLETED',
+                            status: 'ACTIVITY_STATUS_COMPLETED',
                         },
                     }),
                 ok: true,
@@ -488,7 +517,7 @@ describe('TurnkeySigner', () => {
                                     signedTransaction: signedTransactionHex,
                                 },
                             },
-                            status: 'COMPLETED',
+                            status: 'ACTIVITY_STATUS_COMPLETED',
                         },
                     }),
                 ok: true,
@@ -603,7 +632,7 @@ describe('TurnkeySigner', () => {
             });
         });
 
-        it('throws structured SIGNER_REMOTE_API_ERROR for malformed transaction response shape', async () => {
+        it('throws SIGNING_FAILED for malformed transaction response shape', async () => {
             const keyPair = await generateKeyPairSigner();
 
             const config = {
@@ -622,8 +651,8 @@ describe('TurnkeySigner', () => {
             const mockTx = createMockTransaction();
 
             await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
-                code: 'SIGNER_REMOTE_API_ERROR',
-                message: expect.stringContaining('Missing signedTransaction'),
+                code: 'SIGNER_SIGNING_FAILED',
+                message: expect.stringContaining('not completed'),
             });
         });
 
@@ -642,7 +671,7 @@ describe('TurnkeySigner', () => {
                     Promise.resolve({
                         activity: {
                             result: {},
-                            status: 'COMPLETED',
+                            status: 'ACTIVITY_STATUS_COMPLETED',
                         },
                     }),
                 ok: true,
@@ -654,6 +683,35 @@ describe('TurnkeySigner', () => {
             await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
                 message: expect.stringContaining('Missing signedTransaction'),
+            });
+        });
+
+        it('throws SIGNING_FAILED when the activity is not completed', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            const config = {
+                ...mockConfig,
+                publicKey: keyPair.address,
+            };
+
+            const signer = new TurnkeySigner(config);
+
+            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+                json: () =>
+                    Promise.resolve({
+                        activity: {
+                            status: 'ACTIVITY_STATUS_CONSENSUS_NEEDED',
+                        },
+                    }),
+                ok: true,
+                status: 200,
+            });
+
+            const mockTx = createMockTransaction();
+
+            await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+                message: expect.stringContaining('ACTIVITY_STATUS_CONSENSUS_NEEDED'),
             });
         });
     });
