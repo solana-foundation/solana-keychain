@@ -2,6 +2,7 @@
 
 import base64
 from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import quote
 
 import httpx
@@ -15,6 +16,7 @@ from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
+    get_signing_keypair_position,
     serialize_transaction,
 )
 from solana_keychain.privy.authorization import (
@@ -110,14 +112,8 @@ class PrivySigner(SolanaSigner):
                 SignerErrorCode.INVALID_PUBLIC_KEY, "Invalid public key from Privy API"
             ) from None
 
-    async def _sign_bytes(self, message: bytes) -> Signature:
-        public_key = self._initialized_pubkey()
+    async def _post_rpc(self, request: dict[str, Any]) -> Any:
         url = f"{self._api_base_url}/wallets/{quote(self._wallet_id, safe='')}/rpc"
-        request = {
-            "method": "signMessage",
-            "chain_type": "solana",
-            "params": {"message": base64.b64encode(message).decode("ascii"), "encoding": "base64"},
-        }
         authorization_signature, request_expiry = prepare_authorization_headers(
             app_id=self._app_id,
             authorization_config=self._authorization_context,
@@ -133,7 +129,7 @@ class PrivySigner(SolanaSigner):
         if request_expiry is not None:
             headers["privy-request-expiry"] = request_expiry
 
-        response = await fetch_signer_json(
+        return await fetch_signer_json(
             url=url,
             provider_name="Privy",
             method="POST",
@@ -141,6 +137,15 @@ class PrivySigner(SolanaSigner):
             json_body=request,
             client=self._http_client,
         )
+
+    async def _sign_bytes(self, message: bytes) -> Signature:
+        public_key = self._initialized_pubkey()
+        request = {
+            "method": "signMessage",
+            "chain_type": "solana",
+            "params": {"message": base64.b64encode(message).decode("ascii"), "encoding": "base64"},
+        }
+        response = await self._post_rpc(request)
 
         data = response.get("data") if isinstance(response, dict) else None
         signature_b64 = data.get("signature") if isinstance(data, dict) else None
@@ -166,8 +171,49 @@ class PrivySigner(SolanaSigner):
         return signature
 
     async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
-        signature = await self._sign_bytes(transaction.message_data())
-        add_signature_to_transaction(transaction, self._initialized_pubkey(), signature)
+        """Sign via Privy's ``signTransaction`` RPC, submitting the full wire
+        transaction so wallet policies with transaction conditions apply.
+        Policies must allow the ``signTransaction`` method."""
+        public_key = self._initialized_pubkey()
+        request = {
+            "method": "signTransaction",
+            "chain_type": "solana",
+            "params": {
+                "transaction": base64.b64encode(bytes(transaction)).decode("ascii"),
+                "encoding": "base64",
+            },
+        }
+        response = await self._post_rpc(request)
+
+        data = response.get("data") if isinstance(response, dict) else None
+        signed_b64 = data.get("signed_transaction") if isinstance(data, dict) else None
+        if not isinstance(signed_b64, str):
+            raise SignerError(
+                SignerErrorCode.REMOTE_API_ERROR, "No signed_transaction in Privy response"
+            )
+        try:
+            signed = Transaction.from_bytes(base64.b64decode(signed_b64, validate=True))
+        except Exception:
+            raise SignerError(
+                SignerErrorCode.SERIALIZATION_ERROR,
+                "Failed to decode signed transaction returned by Privy",
+            ) from None
+
+        position = get_signing_keypair_position(signed, public_key)
+        signatures = signed.signatures
+        if position >= len(signatures):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Privy signature slot missing from returned transaction",
+            )
+        signature = signatures[position]
+        if not signature.verify(public_key, transaction.message_data()):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Signature verification failed — the returned signature does not match "
+                "the public key",
+            )
+        add_signature_to_transaction(transaction, public_key, signature)
         return classify_signed_transaction(
             transaction, serialize_transaction(transaction), signature
         )

@@ -87,18 +87,61 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 	return s.signBytes(ctx, message)
 }
 
-// SignTransaction signs the transaction's message bytes with the Privy wallet,
-// inserts the signature at this signer's required-signer position, and returns
-// the encoded transaction with its completeness.
+// SignTransaction signs tx via Privy's signTransaction RPC, submitting the
+// full wire transaction so wallet policies with transaction conditions apply.
+// Policies must allow the signTransaction method.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	msg, err := tx.Message.MarshalBinary()
 	if err != nil {
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction message", err)
 	}
-	sig, err := s.signBytes(ctx, msg)
+	unsignedWire, err := tx.MarshalBinary()
+	if err != nil {
+		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction", err)
+	}
+
+	request := signTransactionRequest{
+		Method:    "signTransaction",
+		ChainType: "solana",
+		Params: signTransactionParams{
+			Transaction: base64.StdEncoding.EncodeToString(unsignedWire),
+			Encoding:    "base64",
+		},
+	}
+	body, err := s.postRPC(ctx, request)
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}
+
+	var signResp signTransactionResponse
+	if err := json.Unmarshal(body, &signResp); err != nil {
+		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse privy signing response", err)
+	}
+	signedWire, err := base64.StdEncoding.DecodeString(signResp.Data.SignedTransaction)
+	if err != nil {
+		return core.SignedTransaction{}, core.NewSignerError(core.CodeSerializationError,
+			"failed to decode signed transaction returned by privy")
+	}
+	returned, err := solana.TransactionFromBytes(signedWire)
+	if err != nil {
+		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,
+			"failed to deserialize signed transaction returned by privy", err)
+	}
+
+	position, err := core.SigningPosition(returned, s.pubkey)
+	if err != nil {
+		return core.SignedTransaction{}, err
+	}
+	if position >= len(returned.Signatures) {
+		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
+			"privy signature slot missing from returned transaction")
+	}
+	sig := returned.Signatures[position]
+	if !core.VerifyEd25519(s.pubkey, msg, sig) {
+		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
+			"signature verification failed: the returned signature does not match the public key")
+	}
+
 	if err := core.AddSignature(tx, s.pubkey, sig); err != nil {
 		return core.SignedTransaction{}, err
 	}
@@ -107,6 +150,34 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, err
 	}
 	return core.Classify(tx, encoded, sig), nil
+}
+
+// postRPC sends a wallet RPC request with Privy auth and
+// authorization-signature headers and returns the response body on 2xx.
+func (s *Signer) postRPC(ctx context.Context, request any) ([]byte, error) {
+	url := s.apiBaseURL + "/wallets/" + s.walletID + "/rpc"
+	reqBody, err := json.Marshal(request)
+	if err != nil {
+		return nil, core.WrapSignerError(core.CodeSerializationError, "failed to serialize privy signing request", err)
+	}
+	authHeaders, err := s.prepareAuthorizationHeaders(http.MethodPost, url, request)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, core.WrapSignerError(core.CodeHTTPError, "failed to build privy signing request", err)
+	}
+	req.Header.Set("Authorization", s.authHeader())
+	req.Header.Set("privy-app-id", s.appID)
+	req.Header.Set("Content-Type", "application/json")
+	if authHeaders.signature != "" {
+		req.Header.Set("privy-authorization-signature", authHeaders.signature)
+	}
+	if authHeaders.requestExpiry != "" {
+		req.Header.Set("privy-request-expiry", authHeaders.requestExpiry)
+	}
+	return s.do(req, "privy signing")
 }
 
 // IsAvailable re-fetches the wallet from the Privy API and reports whether it
@@ -161,7 +232,6 @@ func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 // sending the bytes base64-encoded and decoding the base64 signature from the
 // response, then verifies it locally.
 func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signature, error) {
-	url := s.apiBaseURL + "/wallets/" + s.walletID + "/rpc"
 	request := signMessageRequest{
 		Method:    "signMessage",
 		ChainType: "solana",
@@ -170,29 +240,7 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 			Encoding: "base64",
 		},
 	}
-	reqBody, err := json.Marshal(request)
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize privy signing request", err)
-	}
-	authHeaders, err := s.prepareAuthorizationHeaders(http.MethodPost, url, request)
-	if err != nil {
-		return solana.Signature{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeHTTPError, "failed to build privy signing request", err)
-	}
-	req.Header.Set("Authorization", s.authHeader())
-	req.Header.Set("privy-app-id", s.appID)
-	req.Header.Set("Content-Type", "application/json")
-	if authHeaders.signature != "" {
-		req.Header.Set("privy-authorization-signature", authHeaders.signature)
-	}
-	if authHeaders.requestExpiry != "" {
-		req.Header.Set("privy-request-expiry", authHeaders.requestExpiry)
-	}
-
-	body, err := s.do(req, "privy signing")
+	body, err := s.postRPC(ctx, request)
 	if err != nil {
 		return solana.Signature{}, err
 	}

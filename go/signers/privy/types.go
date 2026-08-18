@@ -78,6 +78,31 @@ type signMessageData struct {
 	Encoding  string `json:"encoding"`
 }
 
+// signTransactionRequest is the wallet RPC signTransaction request body.
+type signTransactionRequest struct {
+	Method    string                `json:"method"`
+	ChainType string                `json:"chain_type"`
+	Params    signTransactionParams `json:"params"`
+}
+
+// signTransactionParams carries the base64-encoded wire transaction.
+type signTransactionParams struct {
+	Transaction string `json:"transaction"`
+	Encoding    string `json:"encoding"`
+}
+
+// signTransactionResponse is the wallet RPC signTransaction response body.
+type signTransactionResponse struct {
+	Method string              `json:"method"`
+	Data   signTransactionData `json:"data"`
+}
+
+// signTransactionData carries the base64-encoded signed wire transaction.
+type signTransactionData struct {
+	SignedTransaction string `json:"signed_transaction"`
+	Encoding          string `json:"encoding"`
+}
+
 // walletResponse is the wallet info response; for Solana wallets the address is
 // the public key. Only the fields the signer reads are declared; unknown fields
 // are ignored.

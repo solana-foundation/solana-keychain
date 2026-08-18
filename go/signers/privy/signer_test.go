@@ -145,6 +145,69 @@ func addRPCRoute(t *testing.T, mux *http.ServeMux, respond func(w http.ResponseW
 	})
 }
 
+// addSignTransactionRPCRoute registers the wallet RPC route asserting the
+// signTransaction request shape.
+func addSignTransactionRPCRoute(t *testing.T, mux *http.ServeMux, respond func(w http.ResponseWriter, unsignedWire []byte)) {
+	t.Helper()
+	mux.HandleFunc("POST "+rpcPath, func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("failed to read signing request body: %v", err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Errorf("failed to decode signing request: %v", err)
+		}
+		params, _ := got["params"].(map[string]any)
+		encoded, _ := params["transaction"].(string)
+		want := map[string]any{
+			"method":     "signTransaction",
+			"chain_type": "solana",
+			"params": map[string]any{
+				"transaction": encoded,
+				"encoding":    "base64",
+			},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("signing request body = %s, want exactly %s", body, mustJSON(t, want))
+		}
+		unsignedWire, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			t.Errorf("request transaction is not valid base64: %v", err)
+		}
+		respond(w, unsignedWire)
+	})
+}
+
+// signedTransactionResponse signs the unsigned wire transaction with priv and
+// writes the signTransaction response body.
+func signedTransactionResponse(t *testing.T, w http.ResponseWriter, priv ed25519.PrivateKey, unsignedWire []byte) {
+	t.Helper()
+	tx, err := solana.TransactionFromBytes(unsignedWire)
+	if err != nil {
+		t.Errorf("failed to decode unsigned wire transaction: %v", err)
+		return
+	}
+	msg, err := tx.Message.MarshalBinary()
+	if err != nil {
+		t.Errorf("failed to serialize message: %v", err)
+		return
+	}
+	tx.Signatures = []solana.Signature{signWith(priv, msg)}
+	signedWire, err := tx.MarshalBinary()
+	if err != nil {
+		t.Errorf("failed to serialize signed transaction: %v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"method": "signTransaction",
+		"data": map[string]any{
+			"signed_transaction": base64.StdEncoding.EncodeToString(signedWire),
+			"encoding":           "base64",
+		},
+	})
+}
+
 func mustJSON(t *testing.T, v any) string {
 	t.Helper()
 	b, err := json.Marshal(v)
@@ -614,6 +677,67 @@ func TestSignMessageRemoteErrorBodyDiscarded(t *testing.T) {
 
 // TestSignTransaction checks that signing a transaction inserts the signature
 // at position 0 and yields a complete encoded transaction.
+func TestSignTransactionRejectsSignatureOverDifferentBytes(t *testing.T) {
+	priv := testutils.TestPrivateKey()
+	pub := testutils.TestPublicKey()
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	addWalletRoute(t, mux, pub.String())
+	addSignTransactionRPCRoute(t, mux, func(w http.ResponseWriter, unsignedWire []byte) {
+		other, err := solana.TransactionFromBytes(unsignedWire)
+		if err != nil {
+			t.Errorf("failed to decode unsigned wire transaction: %v", err)
+			return
+		}
+		other.Message.RecentBlockhash = solana.Hash{1}
+		otherWire, err := other.MarshalBinary()
+		if err != nil {
+			t.Errorf("failed to serialize perturbed transaction: %v", err)
+			return
+		}
+		signedTransactionResponse(t, w, priv, otherWire)
+	})
+
+	s := newTestSigner(t, mux)
+	_, err = s.SignTransaction(context.Background(), tx)
+	if err == nil {
+		t.Fatal("expected a signature over different bytes to be rejected")
+	}
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Errorf("got %s, want SIGNING_FAILED", code)
+	}
+}
+
+func TestSignTransactionRejectsMissingSignedTransaction(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	addWalletRoute(t, mux, pub.String())
+	addSignTransactionRPCRoute(t, mux, func(w http.ResponseWriter, _ []byte) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"method": "signTransaction",
+			"data":   map[string]any{},
+		})
+	})
+
+	s := newTestSigner(t, mux)
+	_, err = s.SignTransaction(context.Background(), tx)
+	if err == nil {
+		t.Fatal("expected error for a response without signed_transaction")
+	}
+	if code, _ := core.CodeOf(err); code != core.CodeSerializationError {
+		t.Errorf("got %s, want SERIALIZATION_ERROR", code)
+	}
+}
+
 func TestSignTransaction(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	pub := testutils.TestPublicKey()
@@ -629,8 +753,8 @@ func TestSignTransaction(t *testing.T) {
 
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, pub.String())
-	addRPCRoute(t, mux, func(w http.ResponseWriter, message []byte) {
-		signatureResponse(w, signWith(priv, message))
+	addSignTransactionRPCRoute(t, mux, func(w http.ResponseWriter, unsignedWire []byte) {
+		signedTransactionResponse(t, w, priv, unsignedWire)
 	})
 
 	s := newTestSigner(t, mux)

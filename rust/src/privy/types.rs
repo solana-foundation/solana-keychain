@@ -30,6 +30,33 @@ pub struct SignMessageData {
     pub encoding: String,
 }
 
+#[derive(Serialize)]
+pub struct SignTransactionRequest {
+    pub method: &'static str,
+    pub chain_type: &'static str,
+    pub params: SignTransactionParams,
+}
+
+#[derive(Serialize)]
+pub struct SignTransactionParams {
+    pub transaction: String,
+    pub encoding: &'static str,
+}
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+pub struct SignTransactionResponse {
+    pub method: String,
+    pub data: SignTransactionData,
+}
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+pub struct SignTransactionData {
+    pub signed_transaction: String,
+    pub encoding: String,
+}
+
 // Wallet info response
 #[derive(Deserialize)]
 #[allow(dead_code)]

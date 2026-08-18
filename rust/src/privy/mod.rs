@@ -16,7 +16,10 @@ pub use authorization::{
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::str::FromStr;
-use types::{SignMessageParams, SignMessageRequest, SignMessageResponse, WalletResponse};
+use types::{
+    SignMessageParams, SignMessageRequest, SignMessageResponse, SignTransactionParams,
+    SignTransactionRequest, SignTransactionResponse, WalletResponse,
+};
 
 /// Privy-based signer using Privy's wallet API
 #[derive(Clone)]
@@ -183,27 +186,17 @@ impl PrivySigner {
         })
     }
 
-    /// Sign message bytes using Privy API
-    async fn sign_bytes(&self, serialized: &[u8]) -> Result<Signature, SignerError> {
-        let public_key = self.initialized_pubkey()?;
-
+    /// POST a wallet RPC request with Privy auth and authorization-signature
+    /// headers, returning the response body on 2xx.
+    async fn post_rpc<T: serde::Serialize>(&self, request: &T) -> Result<String, SignerError> {
         let url = format!("{}/wallets/{}/rpc", self.api_base_url, self.wallet_id);
-
-        let request = SignMessageRequest {
-            method: "signMessage",
-            chain_type: "solana",
-            params: SignMessageParams {
-                message: STANDARD.encode(serialized),
-                encoding: "base64",
-            },
-        };
 
         let authorization_headers = prepare_privy_authorization_headers(
             &self.app_id,
             self.authorization_context.as_ref(),
             "POST",
             &url,
-            &request,
+            request,
             self.authorization_request_expiry_ms,
         )?;
 
@@ -221,7 +214,7 @@ impl PrivySigner {
             request_builder = request_builder.header("privy-request-expiry", request_expiry);
         }
 
-        let response = request_builder.json(&request).send().await?;
+        let response = request_builder.json(request).send().await?;
 
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -231,15 +224,31 @@ impl PrivySigner {
                 .unwrap_or_else(|_| "Failed to read error response".to_string());
 
             #[cfg(feature = "unsafe-debug")]
-            log::error!("Privy API sign_message error - status: {status}, response: {_error_text}");
+            log::error!("Privy API rpc error - status: {status}, response: {_error_text}");
 
             #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Privy API sign_message error - status: {status}");
+            log::error!("Privy API rpc error - status: {status}");
 
             return Err(SignerError::RemoteApiError(format!("API error {status}")));
         }
 
-        let response_text = response.text().await?;
+        Ok(response.text().await?)
+    }
+
+    /// Sign message bytes using Privy API
+    async fn sign_bytes(&self, serialized: &[u8]) -> Result<Signature, SignerError> {
+        let public_key = self.initialized_pubkey()?;
+
+        let request = SignMessageRequest {
+            method: "signMessage",
+            chain_type: "solana",
+            params: SignMessageParams {
+                message: STANDARD.encode(serialized),
+                encoding: "base64",
+            },
+        };
+
+        let response_text = self.post_rpc(&request).await?;
         let sign_response: SignMessageResponse = serde_json::from_str(&response_text)?;
 
         let decoded_response = STANDARD
@@ -264,12 +273,55 @@ impl PrivySigner {
         Ok(sig)
     }
 
+    /// Sign via Privy's `signTransaction` RPC, submitting the full wire
+    /// transaction so wallet policies with transaction conditions apply.
+    /// Policies must allow the `signTransaction` method.
     async fn sign_and_serialize(
         &self,
         transaction: &mut Transaction,
     ) -> Result<SignedTransaction, SignerError> {
         let public_key = self.initialized_pubkey()?;
-        let signature = self.sign_bytes(&transaction.message_data()).await?;
+
+        let unsigned_wire = bincode::serialize(transaction).map_err(|e| {
+            SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
+        })?;
+        let request = SignTransactionRequest {
+            method: "signTransaction",
+            chain_type: "solana",
+            params: SignTransactionParams {
+                transaction: STANDARD.encode(&unsigned_wire),
+                encoding: "base64",
+            },
+        };
+
+        let response_text = self.post_rpc(&request).await?;
+        let sign_response: SignTransactionResponse = serde_json::from_str(&response_text)?;
+
+        let signed_wire = STANDARD
+            .decode(&sign_response.data.signed_transaction)
+            .map_err(|_| {
+                SignerError::SerializationError(
+                    "Failed to decode signed transaction returned by Privy".to_string(),
+                )
+            })?;
+        let returned: Transaction = bincode::deserialize(&signed_wire).map_err(|e| {
+            SignerError::SerializationError(format!(
+                "Failed to deserialize signed transaction returned by Privy: {e}"
+            ))
+        })?;
+
+        let position = TransactionUtil::get_signing_keypair_position(&returned, &public_key)?;
+        let signature = returned.signatures.get(position).copied().ok_or_else(|| {
+            SignerError::SigningFailed(
+                "Privy signature slot missing from returned transaction".to_string(),
+            )
+        })?;
+
+        if !signature.verify(&public_key.to_bytes(), &transaction.message_data()) {
+            return Err(SignerError::SigningFailed(
+                "Signature verification failed — the returned signature does not match the public key".to_string(),
+            ));
+        }
 
         TransactionUtil::add_signature_to_transaction(transaction, &public_key, signature)?;
 
@@ -575,9 +627,9 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/wallets/test-wallet-id/rpc"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "method": "signMessage",
+                "method": "signTransaction",
                 "data": {
-                    "signature": STANDARD.encode(signature),
+                    "signed_transaction": STANDARD.encode(bincode::serialize(&signed_tx).unwrap()),
                     "encoding": "base64"
                 }
             })))
@@ -603,6 +655,50 @@ mod tests {
 
         // Verify the transaction is properly serialized
         assert!(!serialized_tx.is_empty());
+        assert_eq!(tx.signatures, vec![signature]);
+    }
+
+    #[tokio::test]
+    async fn test_privy_sign_transaction_rejects_signature_over_different_bytes() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+
+        let mut tx = create_test_transaction(&keypair_pubkey(&keypair));
+        let mut other_tx = create_test_transaction(&keypair_pubkey(&keypair));
+        other_tx.signatures = vec![keypair.sign_message(&other_tx.message_data())];
+
+        Mock::given(method("POST"))
+            .and(path("/wallets/test-wallet-id/rpc"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "method": "signTransaction",
+                "data": {
+                    "signed_transaction": STANDARD.encode(bincode::serialize(&other_tx).unwrap()),
+                    "encoding": "base64"
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let mut signer = PrivySigner::new(
+            "test-app-id".to_string(),
+            "test-app-secret".to_string(),
+            "test-wallet-id".to_string(),
+        );
+        signer.client = reqwest::Client::new();
+        signer.api_base_url = mock_server.uri();
+        signer.public_key = Some(keypair.pubkey());
+
+        let result = signer.sign_transaction(&mut tx).await;
+        match result.unwrap_err() {
+            SignerError::SigningFailed(message) => {
+                assert!(
+                    message.contains("verification failed"),
+                    "expected a verification failure, got: {message}"
+                );
+            }
+            other => panic!("Expected SigningFailed, got: {other:?}"),
+        }
     }
 
     #[tokio::test]

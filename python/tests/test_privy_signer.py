@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from solders.keypair import Keypair
+from solders.transaction import Transaction
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.privy import (
@@ -65,6 +66,27 @@ def mock_wallet_response(address: str, chain_type: str = "solana") -> None:
             200, json={"id": WALLET_ID, "address": address, "chain_type": chain_type}
         )
     )
+
+
+def mock_sign_transaction_response(signed_transaction_b64: str) -> None:
+    respx.post(RPC_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "method": "signTransaction",
+                "data": {"signed_transaction": signed_transaction_b64, "encoding": "base64"},
+            },
+        )
+    )
+
+
+def signed_transaction_b64(keypair: Keypair, transaction: Any) -> str:
+    signed = Transaction(
+        from_keypairs=[keypair],
+        message=transaction.message,
+        recent_blockhash=transaction.message.recent_blockhash,
+    )
+    return base64.b64encode(bytes(signed)).decode("ascii")
 
 
 def mock_sign_response(signature_b64: str) -> None:
@@ -335,13 +357,57 @@ async def test_sign_transaction_success() -> None:
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
     signature = keypair.sign_message(transaction.message_data())
-    mock_sign_response(base64.b64encode(bytes(signature)).decode())
+    unsigned_b64 = base64.b64encode(bytes(transaction)).decode("ascii")
+    mock_sign_transaction_response(signed_transaction_b64(keypair, transaction))
 
     result = await signer.sign_transaction(transaction)
 
     assert result.is_complete
     assert result.signature == signature
     assert list(transaction.signatures) == [signature]
+
+    parsed: dict[str, Any] = json.loads(respx.calls.last.request.content)
+    assert parsed["method"] == "signTransaction"
+    assert parsed["params"] == {"transaction": unsigned_b64, "encoding": "base64"}
+
+
+@respx.mock
+async def test_sign_transaction_rejects_signature_over_different_bytes() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    transaction = create_test_transaction(keypair.pubkey())
+    other_transaction = create_test_transaction(keypair.pubkey())
+    mock_sign_transaction_response(signed_transaction_b64(keypair, other_transaction))
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+
+
+@respx.mock
+async def test_sign_transaction_rejects_undecodable_signed_transaction() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    transaction = create_test_transaction(keypair.pubkey())
+    mock_sign_transaction_response("not-base64!!!")
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SERIALIZATION_ERROR
+
+
+@respx.mock
+async def test_sign_transaction_rejects_missing_signed_transaction() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    transaction = create_test_transaction(keypair.pubkey())
+    respx.post(RPC_URL).mock(
+        return_value=httpx.Response(200, json={"method": "signTransaction", "data": {}})
+    )
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
 
 
 @respx.mock
