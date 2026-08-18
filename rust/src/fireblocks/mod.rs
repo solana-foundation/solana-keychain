@@ -13,7 +13,7 @@ use crate::{
 use std::{str::FromStr, sync::Arc};
 use types::{
     CreateTransactionRequest, CreateTransactionResponse, RawExtraParameters, RawMessage,
-    RawMessageData, TransactionResponse, TransactionSource, VaultAddressesResponse,
+    RawMessageData, TransactionResponse, TransactionSource, VaultAddress, VaultAddressesResponse,
 };
 
 use crate::signature_util::EXPECTED_SIGNATURE_LENGTH;
@@ -186,13 +186,45 @@ impl FireblocksSigner {
                 SignerError::SerializationError("Failed to parse Fireblocks response".to_string())
             })?;
 
-        let address = addresses_response.addresses.first().ok_or_else(|| {
-            SignerError::InvalidPublicKey("Invalid public key from Fireblocks".to_string())
-        })?;
+        let address = self.select_vault_address(&addresses_response.addresses)?;
 
-        Pubkey::from_str(&address.address).map_err(|_| {
+        Pubkey::from_str(&address).map_err(|_| {
             SignerError::InvalidPublicKey("Invalid public key from Fireblocks".to_string())
         })
+    }
+
+    /// Pick the address for the configured asset, failing on an empty or
+    /// ambiguous response: a mistyped vault account or asset id must not yield a
+    /// working signer bound to an unintended fee payer. Entries without an
+    /// `assetId` are kept, since the endpoint is already scoped by asset.
+    fn select_vault_address(&self, addresses: &[VaultAddress]) -> Result<String, SignerError> {
+        let mut unique: Vec<&str> = Vec::with_capacity(addresses.len());
+        for entry in addresses {
+            if entry.address.is_empty() {
+                continue;
+            }
+            if let Some(asset_id) = entry.asset_id.as_deref() {
+                if !asset_id.is_empty() && asset_id != self.asset_id {
+                    continue;
+                }
+            }
+            if !unique.contains(&entry.address.as_str()) {
+                unique.push(&entry.address);
+            }
+        }
+        match unique.as_slice() {
+            [address] => Ok((*address).to_string()),
+            [] => Err(SignerError::InvalidPublicKey(format!(
+                "Fireblocks returned no address for vault account {} asset {}",
+                self.vault_account_id, self.asset_id
+            ))),
+            _ => Err(SignerError::InvalidPublicKey(format!(
+                "Fireblocks returned {} addresses for vault account {} asset {}; cannot choose a signing identity",
+                unique.len(),
+                self.vault_account_id,
+                self.asset_id
+            ))),
+        }
     }
 
     /// Sign raw bytes using RAW operation
@@ -504,6 +536,7 @@ p6B5CCtpBPgD01Vm+bT/JQ==
 -----END PRIVATE KEY-----"#;
 
     const TEST_PUBKEY: &str = "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV";
+    const OTHER_TEST_PUBKEY: &str = "6dNUL7bY6oNCM4vXfB6HrCa3Wa2QhTVowsPYqzTGMTfd";
 
     fn test_signing_key() -> Arc<jsonwebtoken::EncodingKey> {
         Arc::new(jwt::parse_encoding_key(TEST_RSA_KEY).expect("failed to parse test RSA key"))
@@ -590,6 +623,89 @@ p6B5CCtpBPgD01Vm+bT/JQ==
 
         let result = signer.init().await;
         assert!(result.is_ok());
+        assert_eq!(signer.pubkey().to_string(), TEST_PUBKEY);
+    }
+
+    /// Serve `entries` from addresses_paginated and run `init()`.
+    async fn init_with_addresses(
+        mock_server: &MockServer,
+        entries: serde_json::Value,
+    ) -> Result<FireblocksSigner, SignerError> {
+        let mut signer = create_test_signer_uninit(&mock_server.uri());
+        Mock::given(method("GET"))
+            .and(path(
+                "/v1/vault/accounts/test-vault-id/SOL/addresses_paginated",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "addresses": entries })),
+            )
+            .expect(1)
+            .mount(mock_server)
+            .await;
+        signer.init().await?;
+        Ok(signer)
+    }
+
+    #[tokio::test]
+    async fn test_init_selects_address_for_configured_asset() {
+        let mock_server = MockServer::start().await;
+        let signer = init_with_addresses(
+            &mock_server,
+            serde_json::json!([
+                { "address": OTHER_TEST_PUBKEY, "assetId": "SOL_TEST" },
+                { "address": TEST_PUBKEY, "assetId": "SOL" },
+            ]),
+        )
+        .await
+        .expect("init should select the SOL address");
+        assert_eq!(signer.pubkey().to_string(), TEST_PUBKEY);
+    }
+
+    #[tokio::test]
+    async fn test_init_rejects_ambiguous_addresses() {
+        let mock_server = MockServer::start().await;
+        let result = init_with_addresses(
+            &mock_server,
+            serde_json::json!([
+                { "address": TEST_PUBKEY, "assetId": "SOL" },
+                { "address": OTHER_TEST_PUBKEY, "assetId": "SOL" },
+            ]),
+        )
+        .await;
+        assert!(matches!(
+            result.unwrap_err(),
+            SignerError::InvalidPublicKey(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_init_rejects_no_address_for_configured_asset() {
+        let mock_server = MockServer::start().await;
+        let result = init_with_addresses(
+            &mock_server,
+            serde_json::json!([{ "address": TEST_PUBKEY, "assetId": "SOL_TEST" }]),
+        )
+        .await;
+        assert!(matches!(
+            result.unwrap_err(),
+            SignerError::InvalidPublicKey(_)
+        ));
+    }
+
+    /// Duplicate entries for the same address are not ambiguous.
+    #[tokio::test]
+    async fn test_init_accepts_duplicate_address_entries() {
+        let mock_server = MockServer::start().await;
+        let signer = init_with_addresses(
+            &mock_server,
+            serde_json::json!([
+                { "address": TEST_PUBKEY, "assetId": "SOL" },
+                { "address": TEST_PUBKEY, "assetId": "SOL" },
+            ]),
+        )
+        .await
+        .expect("duplicate entries for one address must be accepted");
         assert_eq!(signer.pubkey().to_string(), TEST_PUBKEY);
     }
 

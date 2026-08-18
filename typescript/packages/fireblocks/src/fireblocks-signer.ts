@@ -22,6 +22,7 @@ import type {
     CreateTransactionResponse,
     FireblocksSignerConfig,
     TransactionResponse,
+    VaultAddress,
     VaultAddressesResponse,
 } from './types.js';
 import { FireblocksTransactionStatus, isTerminalStatus } from './types.js';
@@ -179,22 +180,42 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         const uri = `/v1/vault/accounts/${encodeURIComponent(this.vaultAccountId)}/${encodeURIComponent(this.assetId)}/addresses_paginated`;
         const addressesResponse = await this.request<VaultAddressesResponse>('GET', uri);
 
-        const firstAddress = addressesResponse.addresses?.[0]?.address;
-        if (!firstAddress) {
-            throwSignerError(SignerErrorCode.INVALID_PUBLIC_KEY, {
-                message: 'No addresses found in Fireblocks vault',
-            });
-        }
+        const address = this.selectVaultAddress(addressesResponse.addresses ?? []);
 
         try {
-            assertIsAddress(firstAddress);
-            return firstAddress;
+            assertIsAddress(address);
+            return address;
         } catch (error) {
             throwSignerError(SignerErrorCode.INVALID_PUBLIC_KEY, {
                 cause: error,
                 message: 'Invalid address from Fireblocks',
             });
         }
+    }
+
+    /**
+     * Pick the address for the configured asset, failing on an empty or ambiguous
+     * response: a mistyped vault account or asset id must not yield a working
+     * signer bound to an unintended fee payer. Entries without an `assetId` are
+     * kept, since the endpoint is already scoped by asset.
+     */
+    private selectVaultAddress(addresses: readonly VaultAddress[]): string {
+        const unique = [
+            ...new Set(
+                addresses
+                    .filter(entry => entry.address && (!entry.assetId || entry.assetId === this.assetId))
+                    .map(entry => entry.address),
+            ),
+        ];
+        if (unique.length === 1) {
+            return unique[0]!;
+        }
+        throwSignerError(SignerErrorCode.INVALID_PUBLIC_KEY, {
+            message:
+                unique.length === 0
+                    ? `Fireblocks returned no address for vault account ${this.vaultAccountId} asset ${this.assetId}`
+                    : `Fireblocks returned ${unique.length} addresses for vault account ${this.vaultAccountId} asset ${this.assetId}; cannot choose a signing identity`,
+        });
     }
 
     /**

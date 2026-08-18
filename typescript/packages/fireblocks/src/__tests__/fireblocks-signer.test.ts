@@ -326,8 +326,97 @@ describe('FireblocksSigner', () => {
 
             await expect(signer.init()).rejects.toMatchObject({
                 code: 'SIGNER_INVALID_PUBLIC_KEY',
-                message: expect.stringContaining('No addresses found in Fireblocks vault'),
+                message: expect.stringContaining('returned no address'),
             });
+        });
+
+        it('selects the address for the configured asset', async () => {
+            const wanted = await generateKeyPairSigner();
+            const other = await generateKeyPairSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    addresses: [
+                        { address: other.address, assetId: 'SOL_TEST' },
+                        { address: wanted.address, assetId: 'SOL' },
+                    ],
+                }),
+            });
+
+            const signer = new FireblocksSigner({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+            await signer.init();
+
+            expect(signer.address).toBe(wanted.address);
+        });
+
+        it('rejects an ambiguous address response', async () => {
+            const first = await generateKeyPairSigner();
+            const second = await generateKeyPairSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    addresses: [
+                        { address: first.address, assetId: 'SOL' },
+                        { address: second.address, assetId: 'SOL' },
+                    ],
+                }),
+            });
+
+            const signer = new FireblocksSigner({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+
+            await expect(signer.init()).rejects.toMatchObject({
+                code: 'SIGNER_INVALID_PUBLIC_KEY',
+                message: expect.stringContaining('cannot choose a signing identity'),
+            });
+        });
+
+        it('rejects a response with no address for the configured asset', async () => {
+            const other = await generateKeyPairSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ addresses: [{ address: other.address, assetId: 'SOL_TEST' }] }),
+            });
+
+            const signer = new FireblocksSigner({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+
+            await expect(signer.init()).rejects.toMatchObject({
+                code: 'SIGNER_INVALID_PUBLIC_KEY',
+                message: expect.stringContaining('returned no address'),
+            });
+        });
+
+        it('accepts duplicate entries for the same address', async () => {
+            const wanted = await generateKeyPairSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    addresses: [
+                        { address: wanted.address, assetId: 'SOL' },
+                        { address: wanted.address, assetId: 'SOL' },
+                    ],
+                }),
+            });
+
+            const signer = new FireblocksSigner({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+            await signer.init();
+
+            expect(signer.address).toBe(wanted.address);
         });
 
         it('should not re-initialize if already initialized', async () => {

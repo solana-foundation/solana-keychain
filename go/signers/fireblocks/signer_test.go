@@ -95,6 +95,81 @@ func TestNewDefaultsAndFetchesPubkey(t *testing.T) {
 
 // The unsupported PROGRAM_CALL mode fails New with a config error and, failing
 // closed, no request may reach Fireblocks before the rejection.
+// newSignerWithAddresses serves the given addresses_paginated entries.
+func newSignerWithAddresses(t *testing.T, entries []map[string]string) (*Signer, error) {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc(addressesPath, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"addresses": entries})
+	})
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+
+	return New(context.Background(), Config{
+		APIKey:          testAPIKey,
+		PrivateKeyPEM:   testRSAKey,
+		VaultAccountID:  testVaultID,
+		APIBaseURL:      srv.URL,
+		PollInterval:    time.Millisecond,
+		MaxPollAttempts: 3,
+		HTTPClient:      srv.Client(),
+	})
+}
+
+func TestNewSelectsAddressForConfiguredAsset(t *testing.T) {
+	want := testutils.TestPublicKey().String()
+	s, err := newSignerWithAddresses(t, []map[string]string{
+		{"address": "6dNUL7bY6oNCM4vXfB6HrCa3Wa2QhTVowsPYqzTGMTfd", "assetId": "SOL_TEST"},
+		{"address": want, "assetId": "SOL"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Pubkey().String(); got != want {
+		t.Errorf("pubkey = %s, want the SOL address %s", got, want)
+	}
+}
+
+func TestNewRejectsAmbiguousAddresses(t *testing.T) {
+	_, err := newSignerWithAddresses(t, []map[string]string{
+		{"address": testutils.TestPublicKey().String(), "assetId": "SOL"},
+		{"address": "6dNUL7bY6oNCM4vXfB6HrCa3Wa2QhTVowsPYqzTGMTfd", "assetId": "SOL"},
+	})
+	if err == nil {
+		t.Fatal("expected two addresses for the configured asset to be rejected")
+	}
+	if code, _ := core.CodeOf(err); code != core.CodeInvalidPublicKey {
+		t.Errorf("got %s, want INVALID_PUBLIC_KEY", code)
+	}
+}
+
+func TestNewRejectsNoAddressForConfiguredAsset(t *testing.T) {
+	_, err := newSignerWithAddresses(t, []map[string]string{
+		{"address": testutils.TestPublicKey().String(), "assetId": "SOL_TEST"},
+	})
+	if err == nil {
+		t.Fatal("expected an asset-id mismatch to be rejected")
+	}
+	if code, _ := core.CodeOf(err); code != core.CodeInvalidPublicKey {
+		t.Errorf("got %s, want INVALID_PUBLIC_KEY", code)
+	}
+}
+
+// Duplicate entries for the same address are not ambiguous.
+func TestNewAcceptsDuplicateAddressEntries(t *testing.T) {
+	want := testutils.TestPublicKey().String()
+	s, err := newSignerWithAddresses(t, []map[string]string{
+		{"address": want, "assetId": "SOL"},
+		{"address": want, "assetId": "SOL"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Pubkey().String(); got != want {
+		t.Errorf("pubkey = %s, want %s", got, want)
+	}
+}
+
 func TestNewRejectsProgramCallBeforeAnyNetworkCall(t *testing.T) {
 	var requests atomic.Int64
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

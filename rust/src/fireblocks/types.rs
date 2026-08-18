@@ -87,4 +87,5 @@ pub struct VaultAddressesResponse {
 #[serde(rename_all = "camelCase")]
 pub struct VaultAddress {
     pub address: String,
+    pub asset_id: Option<String>,
 }

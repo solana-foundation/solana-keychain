@@ -137,18 +137,45 @@ class FireblocksSigner(SolanaSigner):
         )
         response = await self._get_json(uri)
         addresses = response.get("addresses") if isinstance(response, dict) else None
-        first = addresses[0] if isinstance(addresses, list) and addresses else None
-        address = first.get("address") if isinstance(first, dict) else None
-        if not isinstance(address, str):
-            raise SignerError(
-                SignerErrorCode.INVALID_PUBLIC_KEY, "Invalid public key from Fireblocks"
-            )
+        address = self._select_vault_address(addresses if isinstance(addresses, list) else [])
         try:
             return Pubkey.from_string(address)
         except Exception:
             raise SignerError(
                 SignerErrorCode.INVALID_PUBLIC_KEY, "Invalid public key from Fireblocks"
             ) from None
+
+    def _select_vault_address(self, addresses: list[Any]) -> str:
+        """Pick the address for the configured asset, failing on an empty or
+        ambiguous response: a mistyped vault account or asset id must not yield a
+        working signer bound to an unintended fee payer. Entries without an
+        ``assetId`` are kept, since the endpoint is already scoped by asset.
+        """
+        unique: list[str] = []
+        for entry in addresses:
+            if not isinstance(entry, dict):
+                continue
+            address = entry.get("address")
+            asset_id = entry.get("assetId")
+            if not isinstance(address, str) or not address:
+                continue
+            if isinstance(asset_id, str) and asset_id and asset_id != self._asset_id:
+                continue
+            if address not in unique:
+                unique.append(address)
+        if len(unique) == 1:
+            return unique[0]
+        if not unique:
+            raise SignerError(
+                SignerErrorCode.INVALID_PUBLIC_KEY,
+                f"Fireblocks returned no address for vault account "
+                f"{self._vault_account_id} asset {self._asset_id}",
+            )
+        raise SignerError(
+            SignerErrorCode.INVALID_PUBLIC_KEY,
+            f"Fireblocks returned {len(unique)} addresses for vault account "
+            f"{self._vault_account_id} asset {self._asset_id}; cannot choose a signing identity",
+        )
 
     async def _create_transaction(self, message: bytes) -> str:
         uri = "/v1/transactions"

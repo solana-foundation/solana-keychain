@@ -145,6 +145,77 @@ async def test_init_rejects_empty_addresses() -> None:
 
 
 @respx.mock
+async def test_init_selects_address_for_configured_asset() -> None:
+    wanted = str(Keypair().pubkey())
+    respx.get(ADDRESSES_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "addresses": [
+                    {"address": str(Keypair().pubkey()), "assetId": "SOL_TEST"},
+                    {"address": wanted, "assetId": "SOL"},
+                ]
+            },
+        )
+    )
+    signer = make_signer()
+    await signer.init()
+    assert str(signer.pubkey) == wanted
+
+
+@respx.mock
+async def test_init_rejects_ambiguous_addresses() -> None:
+    respx.get(ADDRESSES_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "addresses": [
+                    {"address": str(Keypair().pubkey()), "assetId": "SOL"},
+                    {"address": str(Keypair().pubkey()), "assetId": "SOL"},
+                ]
+            },
+        )
+    )
+    signer = make_signer()
+    with pytest.raises(SignerError) as excinfo:
+        await signer.init()
+    assert excinfo.value.code == SignerErrorCode.INVALID_PUBLIC_KEY
+
+
+@respx.mock
+async def test_init_rejects_no_address_for_configured_asset() -> None:
+    respx.get(ADDRESSES_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={"addresses": [{"address": str(Keypair().pubkey()), "assetId": "SOL_TEST"}]},
+        )
+    )
+    signer = make_signer()
+    with pytest.raises(SignerError) as excinfo:
+        await signer.init()
+    assert excinfo.value.code == SignerErrorCode.INVALID_PUBLIC_KEY
+
+
+@respx.mock
+async def test_init_accepts_duplicate_address_entries() -> None:
+    wanted = str(Keypair().pubkey())
+    respx.get(ADDRESSES_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "addresses": [
+                    {"address": wanted, "assetId": "SOL"},
+                    {"address": wanted, "assetId": "SOL"},
+                ]
+            },
+        )
+    )
+    signer = make_signer()
+    await signer.init()
+    assert str(signer.pubkey) == wanted
+
+
+@respx.mock
 async def test_init_rejects_invalid_address() -> None:
     mock_addresses_response("not-a-pubkey")
     signer = make_signer()

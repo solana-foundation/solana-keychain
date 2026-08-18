@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -84,6 +85,7 @@ type vaultAddressesResponse struct {
 
 type vaultAddress struct {
 	Address string `json:"address"`
+	AssetID string `json:"assetId"`
 }
 
 // doRequest sends an authenticated request to the Fireblocks API and returns the
@@ -142,14 +144,44 @@ func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 	if err := json.Unmarshal(body, &addresses); err != nil {
 		return solana.PublicKey{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse Fireblocks response", err)
 	}
-	if len(addresses.Addresses) == 0 {
-		return solana.PublicKey{}, core.NewSignerError(core.CodeInvalidPublicKey, "invalid public key from Fireblocks")
+	address, err := s.selectVaultAddress(addresses.Addresses)
+	if err != nil {
+		return solana.PublicKey{}, err
 	}
-	pubkey, err := solana.PublicKeyFromBase58(addresses.Addresses[0].Address)
+	pubkey, err := solana.PublicKeyFromBase58(address)
 	if err != nil {
 		return solana.PublicKey{}, core.WrapSignerError(core.CodeInvalidPublicKey, "invalid public key from Fireblocks", err)
 	}
 	return pubkey, nil
+}
+
+// selectVaultAddress picks the address for the configured asset, failing on an
+// empty or ambiguous response: a mistyped vault account or asset id must not
+// yield a working signer bound to an unintended fee payer. Entries without an
+// assetId are kept, since the endpoint is already scoped by asset.
+func (s *Signer) selectVaultAddress(addresses []vaultAddress) (string, error) {
+	unique := make([]string, 0, len(addresses))
+	seen := make(map[string]bool, len(addresses))
+	for _, entry := range addresses {
+		if entry.Address == "" || (entry.AssetID != "" && entry.AssetID != s.assetID) {
+			continue
+		}
+		if !seen[entry.Address] {
+			seen[entry.Address] = true
+			unique = append(unique, entry.Address)
+		}
+	}
+	switch len(unique) {
+	case 1:
+		return unique[0], nil
+	case 0:
+		return "", core.NewSignerError(core.CodeInvalidPublicKey,
+			"Fireblocks returned no address for vault account "+s.vaultAccountID+" asset "+s.assetID)
+	default:
+		return "", core.NewSignerError(core.CodeInvalidPublicKey,
+			"Fireblocks returned "+strconv.Itoa(len(unique))+" addresses for vault account "+
+				s.vaultAccountID+" asset "+s.assetID+"; cannot choose a signing identity")
+	}
 }
 
 // createTransaction creates a signing request in Fireblocks.

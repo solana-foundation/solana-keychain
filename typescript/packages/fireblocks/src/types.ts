@@ -108,6 +108,7 @@ export interface VaultAddressesResponse {
 
 export interface VaultAddress {
     address: string;
+    assetId?: string;
 }
 
 /**
