@@ -603,10 +603,11 @@ describe('CrossmintSigner', () => {
         });
 
         /**
-         * When both paths fail, the embedded-transaction error is the reported cause:
-         * it names which check failed, where the txId error says only that a signature
-         * did not cover the caller's message, which is expected for a rewritten
-         * transaction and so explains nothing.
+         * When both paths fail, callers still get a stable SignerError code, with
+         * the embedded-transaction error as its cause: it names which check failed,
+         * where the txId error says only that a signature did not cover the caller's
+         * message, which is expected for a rewritten transaction and so explains
+         * nothing.
          */
         it('reports the embedded-transaction failure when txId validation also fails', async () => {
             vi.mocked(getTransactionDecoder).mockReturnValue({
@@ -637,7 +638,76 @@ describe('CrossmintSigner', () => {
                 pollIntervalMs: 1,
             });
 
-            await expect(signer.signAndSendTransactions([createMockTransaction()])).rejects.toThrow('decode failed');
+            await expect(signer.signAndSendTransactions([createMockTransaction()])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+                context: expect.objectContaining({ cause: expect.objectContaining({ message: 'decode failed' }) }),
+            });
+        });
+
+        /**
+         * Under gas sponsorship this wallet's signature is an approval over the
+         * rewritten message and never identifies the landed transaction. The
+         * returned value must be the sponsor fee-payer's slot-0 signature so that
+         * rpc.getTransaction(result) resolves.
+         */
+        it('returns the sponsor fee-payer signature as the transaction id for a sponsored transaction', async () => {
+            const SPONSOR_ADDRESS = 'Sysvar1nstructions1111111111111111111111111';
+            const DELEGATED_ADDRESS = 'SysvarC1ock11111111111111111111111111111111';
+            const SPONSOR_SIGNATURE_BYTES = new Uint8Array(64).fill(9);
+            const APPROVAL_SIGNATURE_B58 = base58Decoder.decode(new Uint8Array(64).fill(5));
+            const rewrittenMessageBytes = new Uint8Array([9, 9, 9]);
+            vi.mocked(getTransactionDecoder).mockReturnValue({
+                decode: vi.fn(() => ({
+                    messageBytes: rewrittenMessageBytes,
+                    signatures: {
+                        [SPONSOR_ADDRESS]: SPONSOR_SIGNATURE_BYTES,
+                        [DELEGATED_ADDRESS]: null,
+                    },
+                })),
+            } as any);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse())
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            id: 'tx-sponsored',
+                            status: 'success',
+                            approvals: {
+                                submitted: [
+                                    {
+                                        signature: APPROVAL_SIGNATURE_B58,
+                                        signer: {
+                                            address: DELEGATED_ADDRESS,
+                                            locator: `server:${DELEGATED_ADDRESS}`,
+                                        },
+                                    },
+                                ],
+                            },
+                            onChain: { transaction: MOCK_SERIALIZED_TRANSACTION_B58 },
+                        }),
+                        { status: 201 },
+                    ),
+                );
+
+            const signer = await createCrossmintSigner({
+                ...mockConfig,
+                maxPollAttempts: 1,
+                pollIntervalMs: 1,
+                signer: `server:${DELEGATED_ADDRESS}`,
+            });
+            const results = await signer.signAndSendTransactions([createMockTransaction()]);
+
+            expect(results[0]).toEqual(SPONSOR_SIGNATURE_BYTES);
+            // The approval gate verified our delegated signer over the executed bytes.
+            expect(assertSignatureValid).toHaveBeenCalledWith(
+                expect.objectContaining({ data: rewrittenMessageBytes, signerAddress: DELEGATED_ADDRESS }),
+            );
+            // The returned identifier is the fee payer's, verified over the same bytes.
+            expect(assertSignatureValid).toHaveBeenCalledWith({
+                data: rewrittenMessageBytes,
+                signature: SPONSOR_SIGNATURE_BYTES,
+                signerAddress: SPONSOR_ADDRESS,
+            });
         });
 
         it('throws on failed transaction status', async () => {

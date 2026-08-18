@@ -8,6 +8,7 @@ import {
     fetchSignerJson,
     normalizeBaseUrl,
     sanitizeRemoteErrorResponse,
+    SignerError,
     SignerErrorCode,
     SolanaSigner,
     throwSignerError,
@@ -66,10 +67,11 @@ let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
 /**
  * Crossmint is a broadcast-managed signer: it rewrites the transaction (gas
  * sponsorship, priority fee, its own blockhash) and broadcasts server-side, so
- * returned signatures cover Crossmint's bytes, not the caller's `messageBytes`.
- * The signature is a send result identifying what Crossmint landed, which is why
- * this signer implements {@link TransactionSendingSigner} instead of returning
- * signature dictionaries keyed to the caller's message.
+ * its signatures cover Crossmint's bytes, not the caller's `messageBytes`.
+ * The returned value is the landed transaction's fee-payer signature, the
+ * identifier Solana RPC looks it up by, which is why this signer implements
+ * {@link TransactionSendingSigner} instead of returning signature dictionaries
+ * keyed to the caller's message.
  */
 class CrossmintSigner<TAddress extends string = string> implements CrossmintSendingSigner<TAddress> {
     readonly address: Address<TAddress>;
@@ -432,11 +434,8 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
         let embeddedError: unknown;
         if (response.onChain?.transaction) {
             try {
-                return await this.extractSignatureFromSerializedTransaction(response.onChain.transaction);
+                return await this.transactionIdFromExecuted(response, response.onChain.transaction);
             } catch (error) {
-                // A rewritten transaction's signature is in approvals.submitted.
-                const approved = await this.signatureFromApprovals(response, response.onChain.transaction);
-                if (approved) return approved;
                 // Keep this error as the cause: it names the check that failed,
                 // where the txId path only reports a mismatch.
                 embeddedError = error;
@@ -460,12 +459,70 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
                     lastError = error;
                 }
             }
-            throw embeddedError ?? lastError;
+            const cause = embeddedError ?? lastError;
+            if (cause instanceof SignerError) throw cause;
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                address: this.address,
+                cause,
+                message: 'Crossmint returned no signature verifiable by a configured signer',
+            });
         }
 
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            cause: embeddedError,
             message: 'Unable to extract signature from Crossmint transaction response',
         });
+    }
+
+    /**
+     * Identifier of the transaction Crossmint landed: its fee-payer (slot 0)
+     * signature, the value Solana RPC addresses transactions by, so the caller
+     * can pass the result to `getTransaction`/`confirmTransaction`. Under gas
+     * sponsorship the fee payer is Crossmint's sponsor key, not this wallet.
+     *
+     * Returned only after a configured signer's signature (in a slot or in
+     * `approvals.submitted`) verifies over the executed bytes, proving this
+     * wallet took part in what landed.
+     */
+    private async transactionIdFromExecuted(
+        response: CrossmintTransactionResponse,
+        serializedTransaction: string,
+    ): Promise<SignatureBytes> {
+        base58Encoder ||= getBase58Encoder();
+        const decoded = getTransactionDecoder().decode(base58Encoder.encode(serializedTransaction));
+
+        const participant =
+            (await this.verifiedSignatureFromSlots(decoded)) ??
+            (await this.verifiedSignatureFromApprovals(response, decoded.messageBytes));
+        if (!participant) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                address: this.address,
+                message: 'No configured signer holds a verifying signature in the Crossmint transaction',
+            });
+        }
+
+        const [feePayer, feePayerSignature] = Object.entries(decoded.signatures)[0] ?? [];
+        if (participant.address === feePayer) {
+            return participant.signature;
+        }
+        if (!feePayerSignature) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message: 'Crossmint transaction carries no fee-payer signature to identify it by',
+            });
+        }
+        try {
+            await assertSignatureValid({
+                data: decoded.messageBytes,
+                signature: feePayerSignature,
+                signerAddress: feePayer as Address,
+            });
+        } catch (error) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                cause: error,
+                message: 'Crossmint fee-payer signature does not verify over the executed transaction',
+            });
+        }
+        return feePayerSignature;
     }
 
     /**
@@ -474,20 +531,12 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
      * For a rewritten transaction it arrives in `approvals.submitted` covering the
      * rewritten message, not in a signature slot. Verified locally regardless.
      */
-    private async signatureFromApprovals(
+    private async verifiedSignatureFromApprovals(
         response: CrossmintTransactionResponse,
-        serializedTransaction: string,
-    ): Promise<SignatureBytes | undefined> {
+        executedMessage: Transaction['messageBytes'],
+    ): Promise<{ address: Address; signature: SignatureBytes } | undefined> {
         const submitted = response.approvals?.submitted;
         if (!submitted?.length) return undefined;
-
-        base58Encoder ||= getBase58Encoder();
-        let executedMessage;
-        try {
-            executedMessage = getTransactionDecoder().decode(base58Encoder.encode(serializedTransaction)).messageBytes;
-        } catch {
-            return undefined;
-        }
 
         const candidates = this.verificationCandidates();
         for (const entry of submitted) {
@@ -500,7 +549,7 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
                     signature,
                     signerAddress: address as Address,
                 });
-                return signature;
+                return { address: address as Address, signature };
             } catch {
                 // Try the next submitted approval.
             }
@@ -522,11 +571,9 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
         return candidates;
     }
 
-    private async extractSignatureFromSerializedTransaction(serializedTransaction: string): Promise<SignatureBytes> {
-        base58Encoder ||= getBase58Encoder();
-        const txBytes = base58Encoder.encode(serializedTransaction);
-        const decodedTransaction = getTransactionDecoder().decode(txBytes);
-
+    private async verifiedSignatureFromSlots(
+        decodedTransaction: Transaction,
+    ): Promise<{ address: Address; signature: SignatureBytes } | undefined> {
         // Verify against the bytes Crossmint signed, which differ from the caller's
         // messageBytes once it rewrites to sponsor gas. Require a verifying signature,
         // not just presence in a slot: the wallet address can occupy a slot it never
@@ -540,15 +587,12 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
                     signature,
                     signerAddress: candidate,
                 });
-                return signature;
+                return { address: candidate, signature };
             } catch {
                 // Try the next configured signer.
             }
         }
-        return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-            address: this.address,
-            message: 'No configured signer holds a verifying signature in the Crossmint transaction',
-        });
+        return undefined;
     }
 }
 

@@ -560,6 +560,41 @@ impl CrossmintSigner {
         Some(Signature::from(sig_bytes))
     }
 
+    /// Identifier of the transaction Crossmint landed: its fee-payer (slot 0)
+    /// signature, the value Solana RPC addresses transactions by. Under gas
+    /// sponsorship the fee payer is Crossmint's sponsor key, not this wallet.
+    fn broadcast_transaction_id(
+        transaction: &VersionedTransaction,
+    ) -> Result<Signature, SignerError> {
+        let fee_payer = transaction
+            .message
+            .static_account_keys()
+            .first()
+            .ok_or_else(|| {
+                SignerError::SigningFailed(
+                    "Crossmint transaction has no fee payer to identify it by".to_string(),
+                )
+            })?;
+        let signature = transaction
+            .signatures
+            .first()
+            .copied()
+            .filter(|signature| *signature != Signature::default())
+            .ok_or_else(|| {
+                SignerError::SigningFailed(
+                    "Crossmint transaction carries no fee-payer signature to identify it by"
+                        .to_string(),
+                )
+            })?;
+        if !signature.verify(&fee_payer.to_bytes(), &transaction.message.serialize()) {
+            return Err(SignerError::SigningFailed(
+                "Crossmint fee-payer signature does not verify over the executed transaction"
+                    .to_string(),
+            ));
+        }
+        Ok(signature)
+    }
+
     fn extract_signature_from_serialized_transaction(
         &self,
         serialized_transaction: &str,
@@ -651,7 +686,8 @@ impl CrossmintSigner {
 
     /// The signing result, plus the broadcast transaction when Crossmint rewrote one.
     ///
-    /// `Some` means the signature covers Crossmint's bytes, not the caller's.
+    /// `Some` means Crossmint landed different bytes than the caller's; the
+    /// signature is then the landed transaction's fee-payer identifier.
     fn extract_signature_from_response(
         &self,
         response: &TransactionResponse,
@@ -665,15 +701,20 @@ impl CrossmintSigner {
                 // requested message bytes.
                 match self.extract_signature_from_serialized_transaction(serialized_transaction) {
                     Ok((signature, returned)) => {
-                        let rewritten = returned.message.serialize() != expected_message;
-                        return Ok((signature, rewritten.then_some(returned)));
+                        if returned.message.serialize() == expected_message {
+                            return Ok((signature, None));
+                        }
+                        let transaction_id = Self::broadcast_transaction_id(&returned)?;
+                        return Ok((transaction_id, Some(returned)));
                     }
                     Err(error) => {
-                        // A rewritten transaction's signature is in approvals.submitted.
-                        if let Some(found) =
+                        // A rewritten transaction's approval in approvals.submitted
+                        // proves this wallet took part in what landed.
+                        if let Some((_, returned)) =
                             self.signature_from_approvals(response, serialized_transaction)
                         {
-                            return Ok((found.0, Some(found.1)));
+                            let transaction_id = Self::broadcast_transaction_id(&returned)?;
+                            return Ok((transaction_id, Some(returned)));
                         }
                         if on_chain.tx_id.is_none() {
                             return Err(error);
@@ -716,8 +757,9 @@ impl CrossmintSigner {
     /// Sign `transaction` through Crossmint's managed wallet flow.
     ///
     /// Crossmint may rewrite the transaction to sponsor gas and broadcast it itself.
-    /// When it does, `transaction` is left unmodified and the returned serialized
-    /// transaction is empty, because the signature covers Crossmint's bytes. The
+    /// When it does, `transaction` is left unmodified, the returned serialized
+    /// transaction is empty, and the returned signature is the landed transaction's
+    /// fee-payer identifier, usable with RPC transaction lookups. The wallet's own
     /// signature is placed in `transaction` only when Crossmint signed it as given.
     async fn sign_and_serialize(
         &self,
@@ -1271,6 +1313,72 @@ mod tests {
                 .all(|s| *s == Signature::default()),
             "the caller's transaction must not carry a signature over other bytes"
         );
+    }
+
+    /// Under gas sponsorship this wallet's signature is an approval over the
+    /// rewritten message and never identifies the landed transaction. The returned
+    /// signature must be the sponsor fee-payer's slot-0 signature, the value RPC
+    /// transaction lookups accept.
+    #[tokio::test]
+    async fn test_sign_transaction_sponsored_returns_fee_payer_transaction_id() {
+        let server = MockServer::start().await;
+        let wallet_keypair = Keypair::new();
+        let wallet_pubkey = keypair_pubkey(&wallet_keypair);
+        let sponsor_keypair = Keypair::new();
+        let sponsor_pubkey = keypair_pubkey(&sponsor_keypair);
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .respond_with(wallet_response(&wallet_pubkey.to_string()))
+            .mount(&server)
+            .await;
+
+        let mut executed_tx = create_test_transaction(&sponsor_pubkey);
+        let sponsor_signature = keypair_sign_message(&sponsor_keypair, &executed_tx.message_data());
+        TransactionUtil::add_signature_to_transaction(
+            &mut executed_tx,
+            &sponsor_pubkey,
+            sponsor_signature,
+        )
+        .unwrap();
+        let approval_signature = keypair_sign_message(&wallet_keypair, &executed_tx.message_data());
+
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "tx-sponsored",
+                "status": "success",
+                "approvals": {
+                    "submitted": [{
+                        "signature": bs58::encode(approval_signature.as_ref()).into_string(),
+                        "signer": { "address": wallet_pubkey.to_string() }
+                    }]
+                },
+                "onChain": {
+                    "transaction": bs58::encode(bincode::serialize(&executed_tx).unwrap())
+                        .into_string()
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 1);
+        signer.init().await.unwrap();
+
+        let mut local_tx = create_test_transaction(&wallet_pubkey);
+        let (serialized, signature) = signer
+            .sign_transaction(&mut local_tx)
+            .await
+            .unwrap()
+            .into_signed_transaction();
+
+        assert_eq!(signature, sponsor_signature);
+        assert_ne!(signature, approval_signature);
+        assert!(serialized.is_empty());
+        assert!(local_tx
+            .signatures
+            .iter()
+            .all(|s| *s == Signature::default()));
     }
 
     #[tokio::test]

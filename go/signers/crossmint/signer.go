@@ -187,9 +187,10 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 // and verifies the wallet's signature.
 //
 // Crossmint may rewrite the transaction to sponsor gas and broadcast it itself.
-// When it does, tx is left unmodified and EncodedTransaction is empty, because the
-// signature covers Crossmint's bytes. The signature is added to tx only when
-// Crossmint signed it as given.
+// When it does, tx is left unmodified, EncodedTransaction is empty, and the
+// returned signature is the landed transaction's fee-payer identifier, usable
+// with RPC transaction lookups. The wallet's own signature is added to tx only
+// when Crossmint signed it as given.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.publicKey.IsZero() {
 		return core.SignedTransaction{}, core.NewSignerError(core.CodeConfigError, "signer not initialized")
@@ -387,13 +388,38 @@ func (s *Signer) signatureFromApprovals(response transactionResponse, serialized
 	return solana.Signature{}, nil, false
 }
 
+// broadcastTransactionID returns the identifier of the transaction Crossmint
+// landed: its fee-payer (slot 0) signature, the value Solana RPC addresses
+// transactions by. Under gas sponsorship the fee payer is Crossmint's sponsor
+// key, not this wallet.
+func broadcastTransactionID(tx *solana.Transaction) (solana.Signature, error) {
+	if len(tx.Message.AccountKeys) == 0 {
+		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
+			"Crossmint transaction has no fee payer to identify it by")
+	}
+	if len(tx.Signatures) == 0 || tx.Signatures[0].IsZero() {
+		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
+			"Crossmint transaction carries no fee-payer signature to identify it by")
+	}
+	message, err := tx.Message.MarshalBinary()
+	if err != nil {
+		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError,
+			"failed to serialize Crossmint transaction message", err)
+	}
+	if !core.VerifyEd25519(tx.Message.AccountKeys[0], message, tx.Signatures[0]) {
+		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
+			"Crossmint fee-payer signature does not verify over the executed transaction")
+	}
+	return tx.Signatures[0], nil
+}
+
 // extractSignatureFromResponse pulls this wallet's signature out of a terminal
 // transaction response, along with the broadcast transaction when Crossmint
 // rewrote one: the serialized onChain.transaction is tried first; onChain.txId is
 // only accepted if it verifies against the originally requested message bytes.
 //
-// A non-nil transaction means the signature covers Crossmint's bytes, not the
-// caller's.
+// A non-nil transaction means Crossmint landed different bytes than the caller's;
+// the signature is then the landed transaction's fee-payer identifier.
 func (s *Signer) extractSignatureFromResponse(response transactionResponse, expectedMessage []byte) (solana.Signature, *solana.Transaction, error) {
 	var embeddedErr error
 	if response.OnChain != nil {
@@ -409,11 +435,20 @@ func (s *Signer) extractSignatureFromResponse(response transactionResponse, expe
 				if bytes.Equal(returnedMessage, expectedMessage) {
 					return sig, nil, nil
 				}
-				return sig, returned, nil
+				txID, idErr := broadcastTransactionID(returned)
+				if idErr != nil {
+					return solana.Signature{}, nil, idErr
+				}
+				return txID, returned, nil
 			case true:
-				// A rewritten transaction's signature is in approvals.submitted.
-				if sig, returned, ok := s.signatureFromApprovals(response, *response.OnChain.Transaction); ok {
-					return sig, returned, nil
+				// A rewritten transaction's approval in approvals.submitted proves
+				// this wallet took part in what landed.
+				if _, returned, ok := s.signatureFromApprovals(response, *response.OnChain.Transaction); ok {
+					txID, idErr := broadcastTransactionID(returned)
+					if idErr != nil {
+						return solana.Signature{}, nil, idErr
+					}
+					return txID, returned, nil
 				}
 				if response.OnChain.TxID == nil {
 					return solana.Signature{}, nil, err

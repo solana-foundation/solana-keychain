@@ -449,11 +449,11 @@ async def test_wallet_address_in_an_unsigned_slot_does_not_shadow_the_delegated_
     signer = await initialized_signer(wallet_keypair, signer_secret=SIGNER_SECRET)
 
     transaction = create_test_transaction(wallet_keypair.pubkey())
-    # Both keys are required signers, wallet address first, and only the delegated
-    # signer actually signed.
-    rewritten = create_two_signer_transaction(wallet_keypair.pubkey(), delegated.pubkey())
+    # Both keys are required signers and only the delegated signer actually
+    # signed; the wallet address occupies a slot it never signed.
+    rewritten = create_two_signer_transaction(delegated.pubkey(), wallet_keypair.pubkey())
     expected_signature = delegated.sign_message(rewritten.message_data())
-    rewritten.signatures = [Signature.default(), expected_signature]
+    rewritten.signatures = [expected_signature, Signature.default()]
 
     respx.post(TRANSACTIONS_URL).mock(
         return_value=httpx.Response(
@@ -495,10 +495,12 @@ async def test_tx_id_signed_by_the_delegated_signer_is_accepted() -> None:
 
 
 @respx.mock
-async def test_rewritten_transaction_signature_comes_from_approvals() -> None:
+async def test_rewritten_transaction_approval_yields_the_fee_payer_transaction_id() -> None:
     """Crossmint rewrites the transaction and executes it, so the only filled
     signature slot belongs to its own fee payer. This wallet's signature appears in
-    approvals.submitted, covering the rewritten message."""
+    approvals.submitted, covering the rewritten message, but never identifies the
+    landed transaction: the returned signature must be the fee payer's, the value
+    RPC transaction lookups accept."""
     wallet_keypair = Keypair()
     delegated = derive_signing_key(SIGNER_SECRET, API_KEY)
     fee_payer = Keypair()
@@ -507,11 +509,12 @@ async def test_rewritten_transaction_signature_comes_from_approvals() -> None:
     transaction = create_test_transaction(wallet_keypair.pubkey())
     # As Crossmint returns it: its fee payer signed, this wallet's slot is empty.
     executed = create_two_signer_transaction(fee_payer.pubkey(), delegated.pubkey())
+    fee_payer_signature = fee_payer.sign_message(executed.message_data())
     executed.signatures = [
-        fee_payer.sign_message(executed.message_data()),
+        fee_payer_signature,
         Signature.default(),
     ]
-    expected_signature = delegated.sign_message(executed.message_data())
+    approval_signature = delegated.sign_message(executed.message_data())
 
     respx.post(TRANSACTIONS_URL).mock(
         return_value=httpx.Response(
@@ -523,7 +526,7 @@ async def test_rewritten_transaction_signature_comes_from_approvals() -> None:
                     "pending": [],
                     "submitted": [
                         {
-                            "signature": str(expected_signature),
+                            "signature": str(approval_signature),
                             "signer": {
                                 "type": "server",
                                 "address": str(delegated.pubkey()),
@@ -539,7 +542,8 @@ async def test_rewritten_transaction_signature_comes_from_approvals() -> None:
 
     result = await signer.sign_transaction(transaction)
 
-    assert result.signature == expected_signature
+    assert result.signature == fee_payer_signature
+    assert result.signature != approval_signature
     assert result.encoded_transaction == ""
     assert all(sig == Signature.default() for sig in transaction.signatures)
 

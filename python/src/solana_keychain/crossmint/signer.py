@@ -426,14 +426,38 @@ class CrossmintSigner(SolanaSigner):
                 return signature, transaction
         return None
 
+    @staticmethod
+    def _broadcast_transaction_id(transaction: VersionedTransaction) -> Signature:
+        """Identifier of the transaction Crossmint landed: its fee-payer (slot 0)
+        signature, the value Solana RPC addresses transactions by. Under gas
+        sponsorship the fee payer is Crossmint's sponsor key, not this wallet."""
+        account_keys = list(transaction.message.account_keys)
+        signatures = list(transaction.signatures)
+        if not account_keys:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Crossmint transaction has no fee payer to identify it by",
+            )
+        if not signatures or signatures[0] == Signature.default():
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Crossmint transaction carries no fee-payer signature to identify it by",
+            )
+        if not signatures[0].verify(account_keys[0], signed_message_bytes(transaction.message)):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Crossmint fee-payer signature does not verify over the executed transaction",
+            )
+        return signatures[0]
+
     def _extract_signature_from_response(
         self, response: dict[str, Any], expected_message: bytes
     ) -> tuple[Signature, VersionedTransaction | None]:
         """The signing result, plus the broadcast transaction when Crossmint rewrote one.
 
         A non-``None`` transaction means Crossmint changed the message before
-        signing and broadcast the result server-side, so its signature covers
-        Crossmint's bytes rather than the caller's.
+        signing and broadcast the result server-side; the signature is then the
+        landed transaction's fee-payer identifier.
         """
         on_chain = response.get("onChain")
         if isinstance(on_chain, dict):
@@ -445,12 +469,14 @@ class CrossmintSigner(SolanaSigner):
                         serialized_transaction
                     )
                 except SignerError as transaction_error:
-                    # A rewritten transaction's signature is in approvals.submitted.
+                    # A rewritten transaction's approval in approvals.submitted
+                    # proves this wallet took part in what landed.
                     approved = self._extract_signature_from_approvals(
                         response, serialized_transaction
                     )
                     if approved is not None:
-                        return approved
+                        _, returned = approved
+                        return self._broadcast_transaction_id(returned), returned
                     # The txId path can only succeed when Crossmint signed the caller's
                     # exact bytes, so for a rewritten transaction it is not a real
                     # fallback. Keep the embedded-transaction error as the reported
@@ -460,8 +486,9 @@ class CrossmintSigner(SolanaSigner):
                         raise
                     embedded_error = transaction_error
                 else:
-                    rewritten = signed_message_bytes(returned.message) != expected_message
-                    return signature, returned if rewritten else None
+                    if signed_message_bytes(returned.message) == expected_message:
+                        return signature, None
+                    return self._broadcast_transaction_id(returned), returned
 
             tx_id = on_chain.get("txId")
             if isinstance(tx_id, str):
@@ -497,10 +524,10 @@ class CrossmintSigner(SolanaSigner):
 
         Crossmint may rewrite the transaction (it sponsors gas, so it becomes the
         fee payer) and broadcast it itself. When it does, ``transaction`` is left
-        unmodified and ``encoded_transaction`` is empty: the returned signature
-        identifies the transaction Crossmint landed, and it does not cover the
-        caller's message. Only when Crossmint signs the caller's exact bytes is
-        the signature placed in ``transaction``.
+        unmodified and ``encoded_transaction`` is empty: the returned signature is
+        the landed transaction's fee-payer signature, usable with RPC transaction
+        lookups, and it does not cover the caller's message. Only when Crossmint
+        signs the caller's exact bytes is the signature placed in ``transaction``.
         """
         public_key = self._initialized_pubkey()
         expected_message = transaction.message_data()

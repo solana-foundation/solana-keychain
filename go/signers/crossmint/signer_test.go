@@ -571,6 +571,72 @@ func TestSignTransactionLocatesDelegatedSignerSignature(t *testing.T) {
 	}
 }
 
+// Under gas sponsorship this wallet's signature is an approval over the
+// rewritten message and never identifies the landed transaction. The returned
+// signature must be the sponsor fee-payer's slot-0 signature, the value RPC
+// transaction lookups accept.
+func TestSignTransactionSponsoredReturnsFeePayerTransactionID(t *testing.T) {
+	secret := signerSecretPrefix + strings.Repeat("cd", 32)
+	derivableAPIKey := "sk_staging_" + base58.Encode([]byte("proj:sig"))
+	delegatedPriv, err := deriveSigningKey(secret, derivableAPIKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegated := solana.PublicKeyFromBytes(delegatedPriv.Public().(ed25519.PublicKey))
+	walletPub := testutils.TestPublicKey()
+
+	sponsorPriv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x5e}, ed25519.SeedSize))
+	sponsor := solana.PublicKeyFromBytes(sponsorPriv.Public().(ed25519.PublicKey))
+	executed, err := testutils.CreateTestTransaction(sponsor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executedMsg, err := executed.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	feePayerSignature := solana.SignatureFromBytes(ed25519.Sign(sponsorPriv, executedMsg))
+	executed.Signatures = []solana.Signature{feePayerSignature}
+	wireBytes, err := executed.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvalSignature := solana.SignatureFromBytes(ed25519.Sign(delegatedPriv, executedMsg))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, derivableAPIKey, walletPub.String()))
+	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+			`{"id":"tx-sponsored","status":"success","approvals":{"submitted":[{"signature":%q,"signer":{"address":%q}}]},"onChain":{"transaction":%q}}`,
+			approvalSignature.String(), delegated.String(), base58.Encode(wireBytes)))
+	})
+	srv := startServer(t, mux)
+
+	cfg := baseConfig(srv)
+	cfg.APIKey = derivableAPIKey
+	cfg.MaxPollAttempts = 1
+	cfg.SignerSecret = secret
+	s := newTestSigner(t, cfg)
+
+	localTx, err := testutils.CreateTestTransaction(walletPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.SignTransaction(context.Background(), localTx)
+	if err != nil {
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+	}
+	if res.Signature != feePayerSignature {
+		t.Errorf("signature = %s, want fee payer %s", res.Signature, feePayerSignature)
+	}
+	if res.Signature == approvalSignature {
+		t.Error("the approval signature must not be returned as the transaction id")
+	}
+	if res.EncodedTransaction != "" {
+		t.Error("a Crossmint-broadcast transaction leaves nothing for the caller to send")
+	}
+}
+
 // A wallet can be configured with both SignerSecret and an explicit Signer locator
 // naming a different key, e.g. the wallet's admin signer. Either may be the key
 // that actually signs, so both must be candidates.
