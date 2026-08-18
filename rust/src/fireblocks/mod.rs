@@ -631,11 +631,21 @@ p6B5CCtpBPgD01Vm+bT/JQ==
         mock_server: &MockServer,
         entries: serde_json::Value,
     ) -> Result<FireblocksSigner, SignerError> {
+        init_with_asset_addresses(mock_server, "SOL", entries).await
+    }
+
+    /// Serve `entries` for a signer configured with `asset_id` and run `init()`.
+    async fn init_with_asset_addresses(
+        mock_server: &MockServer,
+        asset_id: &str,
+        entries: serde_json::Value,
+    ) -> Result<FireblocksSigner, SignerError> {
         let mut signer = create_test_signer_uninit(&mock_server.uri());
+        signer.asset_id = asset_id.to_string();
         Mock::given(method("GET"))
-            .and(path(
-                "/v1/vault/accounts/test-vault-id/SOL/addresses_paginated",
-            ))
+            .and(path(format!(
+                "/v1/vault/accounts/test-vault-id/{asset_id}/addresses_paginated"
+            )))
             .respond_with(
                 ResponseTemplate::new(200)
                     .set_body_json(serde_json::json!({ "addresses": entries })),
@@ -659,6 +669,22 @@ p6B5CCtpBPgD01Vm+bT/JQ==
         )
         .await
         .expect("init should select the SOL address");
+        assert_eq!(signer.pubkey().to_string(), TEST_PUBKEY);
+    }
+
+    #[tokio::test]
+    async fn test_init_selects_address_for_custom_asset_id() {
+        let mock_server = MockServer::start().await;
+        let signer = init_with_asset_addresses(
+            &mock_server,
+            "SOL_TEST",
+            serde_json::json!([
+                { "address": OTHER_TEST_PUBKEY, "assetId": "SOL" },
+                { "address": TEST_PUBKEY, "assetId": "SOL_TEST" },
+            ]),
+        )
+        .await
+        .expect("init should select the configured asset's address");
         assert_eq!(signer.pubkey().to_string(), TEST_PUBKEY);
     }
 

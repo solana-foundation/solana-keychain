@@ -98,8 +98,15 @@ func TestNewDefaultsAndFetchesPubkey(t *testing.T) {
 // newSignerWithAddresses serves the given addresses_paginated entries.
 func newSignerWithAddresses(t *testing.T, entries []map[string]string) (*Signer, error) {
 	t.Helper()
+	return newSignerWithAssetAddresses(t, "", addressesPath, entries)
+}
+
+// newSignerWithAssetAddresses serves entries at path for the given configured
+// asset id ("" means the default).
+func newSignerWithAssetAddresses(t *testing.T, assetID, path string, entries []map[string]string) (*Signer, error) {
+	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc(addressesPath, func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc(path, func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"addresses": entries})
 	})
 	srv := httptest.NewTLSServer(mux)
@@ -109,6 +116,7 @@ func newSignerWithAddresses(t *testing.T, entries []map[string]string) (*Signer,
 		APIKey:          testAPIKey,
 		PrivateKeyPEM:   testRSAKey,
 		VaultAccountID:  testVaultID,
+		AssetID:         assetID,
 		APIBaseURL:      srv.URL,
 		PollInterval:    time.Millisecond,
 		MaxPollAttempts: 3,
@@ -127,6 +135,22 @@ func TestNewSelectsAddressForConfiguredAsset(t *testing.T) {
 	}
 	if got := s.Pubkey().String(); got != want {
 		t.Errorf("pubkey = %s, want the SOL address %s", got, want)
+	}
+}
+
+func TestNewSelectsAddressForCustomAssetID(t *testing.T) {
+	want := testutils.TestPublicKey().String()
+	s, err := newSignerWithAssetAddresses(t, "SOL_TEST",
+		"/v1/vault/accounts/"+testVaultID+"/SOL_TEST/addresses_paginated",
+		[]map[string]string{
+			{"address": "6dNUL7bY6oNCM4vXfB6HrCa3Wa2QhTVowsPYqzTGMTfd", "assetId": "SOL"},
+			{"address": want, "assetId": "SOL_TEST"},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Pubkey().String(); got != want {
+		t.Errorf("pubkey = %s, want the SOL_TEST address %s", got, want)
 	}
 }
 

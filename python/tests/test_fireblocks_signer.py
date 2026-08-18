@@ -164,6 +164,27 @@ async def test_init_selects_address_for_configured_asset() -> None:
 
 
 @respx.mock
+async def test_init_selects_address_for_custom_asset_id() -> None:
+    devnet = str(Keypair().pubkey())
+    respx.get(
+        f"{API_BASE_URL}/v1/vault/accounts/{VAULT_ACCOUNT_ID}/SOL_TEST/addresses_paginated"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "addresses": [
+                    {"address": str(Keypair().pubkey()), "assetId": "SOL"},
+                    {"address": devnet, "assetId": "SOL_TEST"},
+                ]
+            },
+        )
+    )
+    signer = make_signer(asset_id="SOL_TEST")
+    await signer.init()
+    assert str(signer.pubkey) == devnet
+
+
+@respx.mock
 async def test_init_rejects_ambiguous_addresses() -> None:
     respx.get(ADDRESSES_URL).mock(
         return_value=httpx.Response(

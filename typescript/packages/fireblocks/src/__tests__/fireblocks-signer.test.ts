@@ -353,6 +353,30 @@ describe('FireblocksSigner', () => {
             expect(signer.address).toBe(wanted.address);
         });
 
+        it('selects the address for a custom assetId, not the default', async () => {
+            const devnet = await generateKeyPairSigner();
+            const mainnet = await generateKeyPairSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    addresses: [
+                        { address: mainnet.address, assetId: 'SOL' },
+                        { address: devnet.address, assetId: 'SOL_TEST' },
+                    ],
+                }),
+            });
+
+            const signer = new FireblocksSigner({
+                apiKey: TEST_API_KEY,
+                assetId: 'SOL_TEST',
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+            await signer.init();
+
+            expect(signer.address).toBe(devnet.address);
+        });
+
         it('rejects an ambiguous address response', async () => {
             const first = await generateKeyPairSigner();
             const second = await generateKeyPairSigner();
