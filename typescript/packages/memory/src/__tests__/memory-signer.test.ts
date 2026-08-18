@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertIsSolanaSigner, assertSignatureValid } from '@solana/keychain-core';
 import {
     blockhash,
     compileTransaction,
@@ -101,6 +101,32 @@ describe('createMemorySigner', () => {
             const signer = await createMemorySignerFromKeyPair(keyPair);
             expect(typeof signer.address).toBe('string');
             assertIsSolanaSigner(signer);
+        });
+
+        it('rejects a CryptoKeyPair whose public key does not match its private key', async () => {
+            const pairA = await generateKeyPair();
+            const pairB = await generateKeyPair();
+            await expect(
+                createMemorySignerFromKeyPair({ privateKey: pairB.privateKey, publicKey: pairA.publicKey }),
+            ).rejects.toMatchObject({ code: 'SIGNER_INVALID_PRIVATE_KEY' });
+        });
+
+        it('is unaffected by mutating the caller CryptoKeyPair after construction', async () => {
+            const keyPair = { ...(await generateKeyPair()) };
+            const signer = await createMemorySignerFromKeyPair(keyPair);
+            const addressBefore = signer.address;
+
+            keyPair.privateKey = (await generateKeyPair()).privateKey;
+
+            const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
+            const [dict] = await signer.signMessages([message]);
+            const sig = dict?.[addressBefore];
+            expect(sig).toBeInstanceOf(Uint8Array);
+            await assertSignatureValid({
+                data: message.content,
+                signature: sig!,
+                signerAddress: addressBefore,
+            });
         });
 
         it('wraps KeyPairSigner without exposing the underlying keyPair', async () => {

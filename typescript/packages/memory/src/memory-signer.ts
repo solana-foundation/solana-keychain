@@ -1,4 +1,5 @@
 import { SignerError, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana/keychain-core';
+import { signBytes, verifySignature } from '@solana/keys';
 import {
     createKeyPairSignerFromBytes,
     createKeyPairSignerFromPrivateKeyBytes,
@@ -100,14 +101,7 @@ async function resolveKeyPairSigner(config: MemorySignerConfig): Promise<KeyPair
     }
 
     if (config.keyPair !== undefined) {
-        try {
-            return await createSignerFromKeyPair(config.keyPair);
-        } catch (error) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                cause: error,
-                message: 'Failed to create signer from keyPair — keyPair must be a valid Ed25519 CryptoKeyPair',
-            });
-        }
+        return await keyPairSignerFromCryptoKeyPair(config.keyPair);
     }
 
     try {
@@ -124,6 +118,43 @@ async function resolveKeyPairSigner(config: MemorySignerConfig): Promise<KeyPair
         throwSignerError(SignerErrorCode.INVALID_PRIVATE_KEY, {
             cause: error,
             message: 'Invalid private key bytes',
+        });
+    }
+}
+
+/**
+ * The other config sources validate that the public key matches the private key
+ * upstream, but `createSignerFromKeyPair` derives the address from `publicKey`
+ * and signs with `privateKey` without checking they correspond. Prove the match
+ * with a probe signature, and pass a fresh pair object so mutating the caller's
+ * `CryptoKeyPair` afterwards cannot re-point the signer's key.
+ */
+async function keyPairSignerFromCryptoKeyPair(keyPair: CryptoKeyPair): Promise<KeyPairSigner> {
+    const { privateKey, publicKey } = keyPair;
+
+    let matches: boolean;
+    try {
+        const probe = crypto.getRandomValues(new Uint8Array(32));
+        const probeSignature = await signBytes(privateKey, probe);
+        matches = await verifySignature(publicKey, probeSignature, probe);
+    } catch (error) {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            cause: error,
+            message: 'Failed to create signer from keyPair — keyPair must be a valid Ed25519 CryptoKeyPair',
+        });
+    }
+    if (!matches) {
+        throwSignerError(SignerErrorCode.INVALID_PRIVATE_KEY, {
+            message: 'keyPair public key does not match its private key',
+        });
+    }
+
+    try {
+        return await createSignerFromKeyPair({ privateKey, publicKey });
+    } catch (error) {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            cause: error,
+            message: 'Failed to create signer from keyPair — keyPair must be a valid Ed25519 CryptoKeyPair',
         });
     }
 }
