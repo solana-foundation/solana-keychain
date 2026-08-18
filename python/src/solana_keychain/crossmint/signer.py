@@ -391,6 +391,16 @@ class CrossmintSigner(SolanaSigner):
             "No configured signer holds a verifying signature in the Crossmint transaction",
         )
 
+    @staticmethod
+    def _executed_message_bytes(transaction: VersionedTransaction) -> bytes:
+        message = transaction.message
+        if not isinstance(message, (Message, MessageV0)):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Crossmint returned a transaction with an unsupported message version",
+            )
+        return signed_message_bytes(message)
+
     def _extract_signature_from_approvals(
         self, response: dict[str, Any], serialized_transaction: str
     ) -> tuple[Signature, VersionedTransaction] | None:
@@ -407,7 +417,10 @@ class CrossmintSigner(SolanaSigner):
             transaction = VersionedTransaction.from_bytes(base58.b58decode(serialized_transaction))
         except Exception:
             return None
-        executed_message = signed_message_bytes(transaction.message)
+        try:
+            executed_message = self._executed_message_bytes(transaction)
+        except SignerError:
+            return None
         candidates = self._verification_candidates()
         for entry in submitted:
             if not isinstance(entry, dict):
@@ -443,7 +456,9 @@ class CrossmintSigner(SolanaSigner):
                 SignerErrorCode.SIGNING_FAILED,
                 "Crossmint transaction carries no fee-payer signature to identify it by",
             )
-        if not signatures[0].verify(account_keys[0], signed_message_bytes(transaction.message)):
+        if not signatures[0].verify(
+            account_keys[0], CrossmintSigner._executed_message_bytes(transaction)
+        ):
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED,
                 "Crossmint fee-payer signature does not verify over the executed transaction",
@@ -486,7 +501,7 @@ class CrossmintSigner(SolanaSigner):
                         raise
                     embedded_error = transaction_error
                 else:
-                    if signed_message_bytes(returned.message) == expected_message:
+                    if self._executed_message_bytes(returned) == expected_message:
                         return signature, None
                     return self._broadcast_transaction_id(returned), returned
 
