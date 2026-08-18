@@ -12,4 +12,6 @@ ignore = [
     "RUSTSEC-2026-0098",
     # rustls-webpki 0.101.x is pinned by the transitive rustls 0.21 TLS stack.
     "RUSTSEC-2026-0099",
+    # h2 0.3.x has no patched release; pinned by the AWS smithy HTTP stack.
+    "RUSTSEC-2026-0258",
 ]
