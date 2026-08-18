@@ -41,5 +41,5 @@
     "vitest": "^4.1.10"
   },
   "prettier": "@solana/prettier-config-solana",
-  "packageManager": "pnpm@11.13.0"
+  "packageManager": "pnpm@11.22.0"
 }

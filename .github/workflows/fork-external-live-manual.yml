@@ -234,7 +234,7 @@ jobs:
       - if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
         uses: pnpm/action-setup@v6.0.10
         with:
-          version: 11.13.0
+          version: 11.22.0
 
       - if: ${{ needs.resolve-signers.outputs.python_live_backend_count != '0' }}
         uses: actions/setup-python@v6
