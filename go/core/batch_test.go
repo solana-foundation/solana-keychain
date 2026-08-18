@@ -34,6 +34,49 @@ func (c *countingSigner) SignTransaction(context.Context, *solana.Transaction) (
 
 func (c *countingSigner) IsAvailable(context.Context) bool { return true }
 
+// broadcastingSigner marks itself as a server-side broadcaster with a
+// configurable answer, mirroring mode-dependent backends (Fordefi native vs
+// black box).
+type broadcastingSigner struct {
+	countingSigner
+	broadcasts bool
+}
+
+func (b *broadcastingSigner) BroadcastsTransactions() bool { return b.broadcasts }
+
+func (b *broadcastingSigner) SignTransaction(context.Context, *solana.Transaction) (SignedTransaction, error) {
+	b.calls.Add(1)
+	return SignedTransaction{}, nil
+}
+
+// TestSignTransactionsRejectsBroadcastingSigners guards the duplicate-spend
+// contract: SignTransactions collapses the batch into one nil, err result on
+// the first failure, hiding which transactions a broadcasting provider already
+// executed, so such signers must be rejected before any remote work starts.
+func TestSignTransactionsRejectsBroadcastingSigners(t *testing.T) {
+	s := &broadcastingSigner{broadcasts: true}
+	_, err := SignTransactions(context.Background(), s, []*solana.Transaction{{}}, BatchOptions{})
+	if code, ok := CodeOf(err); !ok || code != CodeConfigError {
+		t.Errorf("got code %q (ok=%v), want CodeConfigError", code, ok)
+	}
+	if got := s.calls.Load(); got != 0 {
+		t.Errorf("signer called %d times, want 0 (rejected before any remote work)", got)
+	}
+}
+
+// A signer that reports it does not broadcast in its current configuration
+// still batches normally.
+func TestSignTransactionsAcceptsNonBroadcastingConfiguration(t *testing.T) {
+	s := &broadcastingSigner{broadcasts: false}
+	out, err := SignTransactions(context.Background(), s, []*solana.Transaction{{}, {}}, BatchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 || s.calls.Load() != 2 {
+		t.Errorf("got %d results and %d calls, want 2 and 2", len(out), s.calls.Load())
+	}
+}
+
 func TestSignMessagesPreservesOrder(t *testing.T) {
 	s := &countingSigner{}
 	messages := [][]byte{{10}, {20}, {30}, {40}}

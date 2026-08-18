@@ -48,7 +48,10 @@ type Signer struct {
 }
 
 // Ensure Signer satisfies the core contract at compile time.
-var _ core.Signer = (*Signer)(nil)
+var (
+	_ core.Signer                 = (*Signer)(nil)
+	_ core.TransactionBroadcaster = (*Signer)(nil)
+)
 
 // New builds a Crossmint signer and resolves the wallet's public key, so the
 // returned signer is ready to use.
@@ -167,6 +170,11 @@ func (s *Signer) verificationCandidates() []solana.PublicKey {
 
 // Pubkey returns the Crossmint wallet's Solana public key.
 func (s *Signer) Pubkey() solana.PublicKey { return s.publicKey }
+
+// BroadcastsTransactions is always true: Crossmint executes every transaction
+// server-side, so core batch helpers must reject this signer (see
+// core.TransactionBroadcaster).
+func (s *Signer) BroadcastsTransactions() bool { return true }
 
 // String renders the signer without any secret material.
 func (s Signer) String() string {

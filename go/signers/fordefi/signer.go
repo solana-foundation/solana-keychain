@@ -43,7 +43,10 @@ type Signer struct {
 }
 
 // Ensure Signer satisfies the core contract at compile time.
-var _ core.Signer = (*Signer)(nil)
+var (
+	_ core.Signer                 = (*Signer)(nil)
+	_ core.TransactionBroadcaster = (*Signer)(nil)
+)
 
 // New builds a Fordefi signer and verifies that the configured PublicKey
 // actually belongs to the configured VaultID (without this check a
@@ -153,6 +156,11 @@ func (s *Signer) verifyVaultOwnership(ctx context.Context) error {
 
 // Pubkey returns the vault's Solana public key (verified during New).
 func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
+
+// BroadcastsTransactions reports whether SignTransaction auto-broadcasts:
+// native mode (Chain set) submits with push_mode "auto", so core batch helpers
+// must reject it (see core.TransactionBroadcaster).
+func (s *Signer) BroadcastsTransactions() bool { return s.chain != "" }
 
 // String renders the signer without any secret material.
 func (s Signer) String() string {
