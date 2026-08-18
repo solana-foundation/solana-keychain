@@ -103,6 +103,12 @@ describe('createMemorySigner', () => {
             assertIsSolanaSigner(signer);
         });
 
+        it.each([null, {}])('rejects %o as a keyPair with a config error', async invalid => {
+            await expect(createMemorySignerFromKeyPair(invalid as unknown as CryptoKeyPair)).rejects.toMatchObject({
+                code: 'SIGNER_CONFIG_ERROR',
+            });
+        });
+
         it('rejects a CryptoKeyPair whose public key does not match its private key', async () => {
             const pairA = await generateKeyPair();
             const pairB = await generateKeyPair();

@@ -130,28 +130,17 @@ async function resolveKeyPairSigner(config: MemorySignerConfig): Promise<KeyPair
  * `CryptoKeyPair` afterwards cannot re-point the signer's key.
  */
 async function keyPairSignerFromCryptoKeyPair(keyPair: CryptoKeyPair): Promise<KeyPairSigner> {
-    const { privateKey, publicKey } = keyPair;
-
-    let matches: boolean;
+    const probe = new Uint8Array(32); // fixed: the correspondence check needs no entropy
     try {
-        const probe = crypto.getRandomValues(new Uint8Array(32));
-        const probeSignature = await signBytes(privateKey, probe);
-        matches = await verifySignature(publicKey, probeSignature, probe);
-    } catch (error) {
-        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            cause: error,
-            message: 'Failed to create signer from keyPair — keyPair must be a valid Ed25519 CryptoKeyPair',
-        });
-    }
-    if (!matches) {
-        throwSignerError(SignerErrorCode.INVALID_PRIVATE_KEY, {
-            message: 'keyPair public key does not match its private key',
-        });
-    }
-
-    try {
+        const { privateKey, publicKey } = keyPair;
+        if (!(await verifySignature(publicKey, await signBytes(privateKey, probe), probe))) {
+            throwSignerError(SignerErrorCode.INVALID_PRIVATE_KEY, {
+                message: 'keyPair public key does not match its private key',
+            });
+        }
         return await createSignerFromKeyPair({ privateKey, publicKey });
     } catch (error) {
+        if (error instanceof SignerError) throw error;
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
             cause: error,
             message: 'Failed to create signer from keyPair — keyPair must be a valid Ed25519 CryptoKeyPair',
