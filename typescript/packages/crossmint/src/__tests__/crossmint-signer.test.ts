@@ -367,6 +367,39 @@ describe('CrossmintSigner', () => {
             expect(vi.mocked(fetch).mock.calls.length).toBeLessThan(6);
         });
 
+        /**
+         * `AbortSignal.any` requires Node.js >= 20.3 while the package supports
+         * >= 18, so the abort-plus-timeout composition must also work without it.
+         */
+        it('honors the abort signal on runtimes without AbortSignal.any', async () => {
+            const originalAny = AbortSignal.any;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (AbortSignal as any).any = undefined;
+            try {
+                const controller = new AbortController();
+                vi.mocked(fetch)
+                    .mockResolvedValueOnce(mockWalletResponse())
+                    .mockImplementation(async (_input, init) => {
+                        controller.abort();
+                        expect(init?.signal?.aborted).toBe(true);
+                        return new Response(JSON.stringify({ id: 'tx-abort', status: 'pending' }), { status: 201 });
+                    });
+
+                const signer = await createCrossmintSigner({
+                    ...mockConfig,
+                    maxPollAttempts: 50,
+                    pollIntervalMs: 1,
+                });
+
+                await expect(
+                    signer.signAndSendTransactions([createMockTransaction()], { abortSignal: controller.signal }),
+                ).rejects.toThrow();
+                expect(vi.mocked(fetch).mock.calls.length).toBeLessThan(6);
+            } finally {
+                AbortSignal.any = originalAny;
+            }
+        });
+
         it('exposes a TransactionSendingSigner so Kit routes it through send, not partial signing', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
             const signer = await createCrossmintSigner(mockConfig);

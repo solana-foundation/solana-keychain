@@ -47,7 +47,7 @@ const TEST_PEM = testPrivateKey.export({ type: 'sec1', format: 'pem' }) as strin
 const MOCK_SIGNATURE_BYTES = new Uint8Array(64).fill(0xab);
 const MOCK_SIGNATURE_BASE64 = Buffer.from(MOCK_SIGNATURE_BYTES).toString('base64');
 
-const mockConfig: FordefiSignerConfig = {
+const mockConfig: FordefiSignerConfig & { chain?: undefined } = {
     accessToken: 'test-token',
     apiBaseUrl: 'https://api.test.fordefi.com',
     privateKeyPem: TEST_PEM,
@@ -223,7 +223,7 @@ describe('FordefiSigner', () => {
 
     describe('custom requestSigner', () => {
         // Config using a custom request signer instead of a PEM key.
-        const customConfig: FordefiSignerConfig = {
+        const customConfig: FordefiSignerConfig & { chain?: undefined } = {
             accessToken: 'test-token',
             apiBaseUrl: 'https://api.test.fordefi.com',
             publicKey: MOCK_ADDRESS,

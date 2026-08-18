@@ -33,7 +33,12 @@ export function createKeychainSigner(
 export function createKeychainSigner(
     config: FordefiSignerConfig & { backend: 'fordefi'; chain: SolanaChainUniqueId },
 ): Promise<FordefiNativeSigner>;
-export function createKeychainSigner(config: KeychainSignerConfig): Promise<SolanaSigner>;
+export function createKeychainSigner(
+    config:
+        | Exclude<KeychainSignerConfig, { backend: 'crossmint' | 'fordefi' }>
+        | (FordefiSignerConfig & { backend: 'fordefi'; chain?: undefined }),
+): Promise<SolanaSigner>;
+export function createKeychainSigner(config: KeychainSignerConfig): Promise<SolanaSendingSigner | SolanaSigner>;
 export async function createKeychainSigner(config: KeychainSignerConfig): Promise<SolanaSendingSigner | SolanaSigner> {
     switch (config.backend) {
         case 'aws-kms': {

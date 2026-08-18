@@ -178,8 +178,11 @@ export async function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig & { chain: SolanaChainUniqueId },
 ): Promise<FordefiNativeSigner<TAddress>>;
 export async function createFordefiSigner<TAddress extends string = string>(
-    config: FordefiSignerConfig,
+    config: FordefiSignerConfig & { chain?: undefined },
 ): Promise<SolanaSigner<TAddress>>;
+export async function createFordefiSigner<TAddress extends string = string>(
+    config: FordefiSignerConfig,
+): Promise<FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>>;
 export async function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig,
 ): Promise<FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>> {
@@ -244,8 +247,11 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
         config: FordefiSignerConfig & { chain: SolanaChainUniqueId },
     ): Promise<FordefiNativeSigner<TAddress> & FordefiSigner<TAddress>>;
     static async create<TAddress extends string = string>(
-        config: FordefiSignerConfig,
+        config: FordefiSignerConfig & { chain?: undefined },
     ): Promise<FordefiSigner<TAddress> & SolanaSigner<TAddress>>;
+    static async create<TAddress extends string = string>(
+        config: FordefiSignerConfig,
+    ): Promise<FordefiSigner<TAddress> & (FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>)>;
     static async create<TAddress extends string = string>(
         config: FordefiSignerConfig,
     ): Promise<FordefiSigner<TAddress>> {
