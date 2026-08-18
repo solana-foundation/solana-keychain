@@ -1,7 +1,9 @@
 """Crossmint Wallets API signer integration."""
 
 import asyncio
+import hashlib
 import json
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
@@ -42,6 +44,17 @@ _ENCODE_URI_COMPONENT_SAFE = "-_.!~*'()"
 
 def _encode_uri_component(value: str) -> str:
     return quote(value, safe=_ENCODE_URI_COMPONENT_SAFE)
+
+
+def _idempotency_key_from_message(message_bytes: bytes) -> str:
+    """The x-idempotency-key for a create: a UUID built from the first 16 bytes
+    of SHA-256(message bytes), so retrying the same message reuses the same key
+    and Crossmint deduplicates the create instead of executing a second
+    transaction."""
+    digest = bytearray(hashlib.sha256(message_bytes).digest()[:16])
+    digest[6] = (digest[6] & 0x0F) | 0x40
+    digest[8] = (digest[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(digest)))
 
 
 @dataclass
@@ -164,10 +177,13 @@ class CrossmintSigner(SolanaSigner):
         required_field: str,
         context: str,
         json_body: Any | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         headers = {"X-API-KEY": self._api_key}
         if json_body is not None:
             headers["Content-Type"] = "application/json"
+        if extra_headers:
+            headers.update(extra_headers)
         response = await fetch_signer_json(
             url=url,
             provider_name="Crossmint",
@@ -227,7 +243,9 @@ class CrossmintSigner(SolanaSigner):
     def pubkey(self) -> Pubkey:
         return self._initialized_pubkey()
 
-    async def _create_transaction(self, transaction_b58: str) -> dict[str, Any]:
+    async def _create_transaction(
+        self, transaction_b58: str, idempotency_key: str
+    ) -> dict[str, Any]:
         params: dict[str, Any] = {"transaction": transaction_b58}
         if self._signer is not None:
             params["signer"] = self._signer
@@ -237,6 +255,7 @@ class CrossmintSigner(SolanaSigner):
             required_field="id",
             context="create_transaction",
             json_body={"params": params},
+            extra_headers={"x-idempotency-key": idempotency_key},
         )
 
     async def _get_transaction(self, transaction_id: str) -> dict[str, Any]:
@@ -541,12 +560,45 @@ class CrossmintSigner(SolanaSigner):
         the landed transaction's fee-payer signature, usable with RPC transaction
         lookups, and it does not cover the caller's message. Only when Crossmint
         signs the caller's exact bytes is the signature placed in ``transaction``.
+
+        Not retry-safe: any failure after the create is accepted raises
+        ``BROADCAST_UNCONFIRMED`` carrying ``provider_transaction_id``; check
+        that transaction with Crossmint before retrying. Each create carries an
+        ``x-idempotency-key`` derived from the message bytes, so retrying the
+        exact same bytes cannot create a second Crossmint transaction; a retry
+        built with a fresh blockhash is a new transaction.
         """
         public_key = self._initialized_pubkey()
         expected_message = transaction.message_data()
         transaction_b58 = base58.b58encode(bytes(transaction)).decode("ascii")
 
-        create_response = await self._create_transaction(transaction_b58)
+        create_response = await self._create_transaction(
+            transaction_b58, _idempotency_key_from_message(expected_message)
+        )
+        provider_transaction_id = str(create_response["id"])
+        # Once the create is accepted Crossmint may approve and execute the
+        # transaction server-side, so any later failure leaves an outcome this
+        # client cannot rule out. Report those as BROADCAST_UNCONFIRMED carrying
+        # the Crossmint transaction id instead of a generic error a caller might
+        # blindly retry into a duplicate spend.
+        try:
+            return await self._finish_managed_transaction(
+                create_response, transaction, expected_message, public_key
+            )
+        except SignerError as error:
+            raise SignerError(
+                SignerErrorCode.BROADCAST_UNCONFIRMED,
+                error._detail,
+                provider_transaction_id=provider_transaction_id,
+            ) from None
+
+    async def _finish_managed_transaction(
+        self,
+        create_response: dict[str, Any],
+        transaction: Transaction,
+        expected_message: bytes,
+        public_key: Pubkey,
+    ) -> SignedTransaction:
         final_response = await self._poll_transaction(create_response)
         signature, broadcast_transaction = self._extract_signature_from_response(
             final_response, expected_message

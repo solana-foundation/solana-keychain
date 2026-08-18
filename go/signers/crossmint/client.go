@@ -87,7 +87,7 @@ func (s *Signer) fetchWallet(ctx context.Context) (walletResponse, error) {
 	if err != nil {
 		return walletResponse{}, err
 	}
-	status, body, err := s.doRequest(ctx, http.MethodGet, u, nil)
+	status, body, err := s.doRequest(ctx, http.MethodGet, u, nil, "")
 	if err != nil {
 		return walletResponse{}, err
 	}
@@ -95,7 +95,7 @@ func (s *Signer) fetchWallet(ctx context.Context) (walletResponse, error) {
 }
 
 // createTransaction submits a base58-encoded transaction for signing.
-func (s *Signer) createTransaction(ctx context.Context, transaction string) (transactionResponse, error) {
+func (s *Signer) createTransaction(ctx context.Context, transaction, idempotencyKey string) (transactionResponse, error) {
 	u, err := s.buildWalletsAPIURL("transactions")
 	if err != nil {
 		return transactionResponse{}, err
@@ -104,7 +104,7 @@ func (s *Signer) createTransaction(ctx context.Context, transaction string) (tra
 		Transaction: transaction,
 		Signer:      s.signerLocator,
 	}}
-	status, body, err := s.doRequest(ctx, http.MethodPost, u, req)
+	status, body, err := s.doRequest(ctx, http.MethodPost, u, req, idempotencyKey)
 	if err != nil {
 		return transactionResponse{}, err
 	}
@@ -117,7 +117,7 @@ func (s *Signer) getTransaction(ctx context.Context, transactionID string) (tran
 	if err != nil {
 		return transactionResponse{}, err
 	}
-	status, body, err := s.doRequest(ctx, http.MethodGet, u, nil)
+	status, body, err := s.doRequest(ctx, http.MethodGet, u, nil, "")
 	if err != nil {
 		return transactionResponse{}, err
 	}
@@ -130,7 +130,7 @@ func (s *Signer) submitApprovalRequest(ctx context.Context, transactionID string
 	if err != nil {
 		return transactionResponse{}, err
 	}
-	status, body, err := s.doRequest(ctx, http.MethodPost, u, req)
+	status, body, err := s.doRequest(ctx, http.MethodPost, u, req, "")
 	if err != nil {
 		return transactionResponse{}, err
 	}
@@ -185,7 +185,7 @@ func encodeURIComponent(input string) string {
 // (size-capped) body. Transport failures map to CodeHTTPError, except that a
 // *core.SignerError raised inside the client (e.g. the HTTPS-only transport's
 // CodeConfigError) is surfaced as-is.
-func (s *Signer) doRequest(ctx context.Context, method, u string, body any) (int, []byte, error) {
+func (s *Signer) doRequest(ctx context.Context, method, u string, body any, idempotencyKey string) (int, []byte, error) {
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -202,6 +202,9 @@ func (s *Signer) doRequest(ctx context.Context, method, u string, body any) (int
 	req.Header.Set("X-API-KEY", s.apiKey)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if idempotencyKey != "" {
+		req.Header.Set("x-idempotency-key", idempotencyKey)
 	}
 
 	resp, err := s.client.Do(req)

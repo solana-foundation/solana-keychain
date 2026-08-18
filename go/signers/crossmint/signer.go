@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -183,6 +185,18 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 		"Crossmint sign_message is not supported for Solana wallets in this signer")
 }
 
+// idempotencyKeyFromMessage derives the x-idempotency-key for a create: a UUID
+// built from the first 16 bytes of SHA-256(message bytes), so retrying the same
+// message reuses the same key and Crossmint deduplicates the create instead of
+// executing a second transaction.
+func idempotencyKeyFromMessage(messageBytes []byte) string {
+	digest := sha256.Sum256(messageBytes)
+	key := digest[:16]
+	key[6] = (key[6] & 0x0f) | 0x40
+	key[8] = (key[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", key[0:4], key[4:6], key[6:8], key[8:10], key[10:16])
+}
+
 // SignTransaction submits tx to Crossmint, polls it to completion, and extracts
 // and verifies the wallet's signature.
 //
@@ -191,6 +205,13 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 // returned signature is the landed transaction's fee-payer identifier, usable
 // with RPC transaction lookups. The wallet's own signature is added to tx only
 // when Crossmint signed it as given.
+//
+// Not retry-safe: any failure after the create is accepted returns
+// CodeBroadcastUnconfirmed carrying the Crossmint transaction id; check that
+// transaction with Crossmint before retrying. Each create carries an
+// x-idempotency-key derived from the message bytes, so retrying the exact same
+// bytes cannot create a second Crossmint transaction; a retry built with a
+// fresh blockhash is a new transaction.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.publicKey.IsZero() {
 		return core.SignedTransaction{}, core.NewSignerError(core.CodeConfigError, "signer not initialized")
@@ -205,10 +226,30 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction", err)
 	}
 
-	createResponse, err := s.createTransaction(ctx, base58.Encode(serialized))
+	createResponse, err := s.createTransaction(ctx, base58.Encode(serialized), idempotencyKeyFromMessage(expectedMessage))
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}
+	// Once the create is accepted Crossmint may approve and execute the
+	// transaction server-side, so any later failure leaves an outcome this
+	// client cannot rule out. Report those as CodeBroadcastUnconfirmed carrying
+	// the Crossmint transaction id instead of a generic error a caller might
+	// blindly retry into a duplicate spend.
+	signed, err := s.finishManagedTransaction(ctx, tx, createResponse, expectedMessage)
+	if err != nil {
+		detail := err.Error()
+		var se *core.SignerError
+		if errors.As(err, &se) {
+			detail = se.Detail()
+		}
+		return core.SignedTransaction{}, core.NewBroadcastUnconfirmedError(createResponse.ID, detail)
+	}
+	return signed, nil
+}
+
+// finishManagedTransaction polls a created transaction to a terminal status and
+// shapes the signing result from it.
+func (s *Signer) finishManagedTransaction(ctx context.Context, tx *solana.Transaction, createResponse transactionResponse, expectedMessage []byte) (core.SignedTransaction, error) {
 	finalResponse, err := s.pollTransaction(ctx, createResponse)
 	if err != nil {
 		return core.SignedTransaction{}, err

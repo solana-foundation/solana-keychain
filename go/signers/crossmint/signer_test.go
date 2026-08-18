@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -397,6 +398,21 @@ func TestSignTransactionSuccess(t *testing.T) {
 		if req.Params.Transaction == "" {
 			t.Error("create request missing base58 transaction")
 		}
+		// The create carries a deterministic x-idempotency-key derived from
+		// the submitted message bytes, so a blind retry of the same bytes
+		// reuses the key and Crossmint deduplicates the create.
+		submittedMessage, marshalErr := localTx.Message.MarshalBinary()
+		if marshalErr != nil {
+			t.Errorf("serialize submitted message: %v", marshalErr)
+		}
+		digest := sha256.Sum256(submittedMessage)
+		key := digest[:16]
+		key[6] = (key[6] & 0x0f) | 0x40
+		key[8] = (key[8] & 0x3f) | 0x80
+		want := fmt.Sprintf("%x-%x-%x-%x-%x", key[0:4], key[4:6], key[6:8], key[8:10], key[10:16])
+		if got := r.Header.Get("x-idempotency-key"); got != want {
+			t.Errorf("x-idempotency-key = %q, want %q", got, want)
+		}
 		writeJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-123","status":"success","chainType":"solana","walletType":"smart","onChain":{"transaction":%q}}`,
 			onChainTransaction))
@@ -454,7 +470,7 @@ func TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes(t *tes
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertCode(t, err, core.CodeSigningFailed)
+	assertCode(t, err, core.CodeBroadcastUnconfirmed)
 	if detail := detailOf(t, err); !strings.Contains(detail, "unable to extract signature") {
 		t.Errorf("detail = %q, want it to contain %q", detail, "unable to extract signature")
 	}
@@ -729,8 +745,8 @@ func TestSignTransactionRejectsUnrelatedSignerKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), localTx)
-	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
-		t.Errorf("got %s, want SIGNING_FAILED", code)
+	if code, _ := core.CodeOf(err); code != core.CodeBroadcastUnconfirmed {
+		t.Errorf("got %s, want BROADCAST_UNCONFIRMED", code)
 	}
 }
 
@@ -825,7 +841,7 @@ func TestSignTransactionAwaitingApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertCode(t, err, core.CodeSigningFailed)
+	assertCode(t, err, core.CodeBroadcastUnconfirmed)
 	if detail := detailOf(t, err); !strings.Contains(detail, "awaiting approval") {
 		t.Errorf("detail = %q, want it to contain %q", detail, "awaiting approval")
 	}
@@ -891,7 +907,7 @@ func TestSignTransactionFailedStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertCode(t, err, core.CodeSigningFailed)
+	assertCode(t, err, core.CodeBroadcastUnconfirmed)
 	detail := detailOf(t, err)
 	if !strings.Contains(detail, "Crossmint transaction failed") || !strings.Contains(detail, "insufficient funds") {
 		t.Errorf("detail = %q, want it to contain the failed-status message and remote reason", detail)
@@ -917,9 +933,13 @@ func TestSignTransactionPollingTimesOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertCode(t, err, core.CodeRemoteAPIError)
+	assertCode(t, err, core.CodeBroadcastUnconfirmed)
 	if detail := detailOf(t, err); !strings.Contains(detail, "polling timed out after 2 attempts") {
 		t.Errorf("detail = %q, want it to contain %q", detail, "polling timed out after 2 attempts")
+	}
+	var se *core.SignerError
+	if !errors.As(err, &se) || se.ProviderTxID != "tx-123" {
+		t.Errorf("ProviderTxID = %v, want tx-123", se)
 	}
 }
 
@@ -1112,7 +1132,7 @@ func TestSignTransactionAwaitingApprovalNoPendingMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertCode(t, err, core.CodeSigningFailed)
+	assertCode(t, err, core.CodeBroadcastUnconfirmed)
 	if detail := detailOf(t, err); !strings.Contains(detail, "no pending message found") {
 		t.Errorf("detail = %q, want it to contain %q", detail, "no pending message found")
 	}

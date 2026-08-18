@@ -67,6 +67,13 @@ let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
  * identifier Solana RPC looks it up by, which is why this signer implements
  * {@link SolanaSendingSigner} instead of returning signature dictionaries
  * keyed to the caller's message.
+ *
+ * Not retry-safe: any failure after the create is accepted rejects with
+ * `BROADCAST_UNCONFIRMED` carrying `context.providerTransactionId`; check that
+ * transaction with Crossmint before retrying. Each create carries an
+ * `x-idempotency-key` derived from the message bytes, so retrying the exact
+ * same bytes cannot create a second Crossmint transaction; a retry built with
+ * a fresh blockhash is a new transaction.
  */
 class CrossmintSigner<TAddress extends string = string> implements CrossmintSendingSigner<TAddress> {
     // No signTransactions/signMessages: Kit classifies signers by duck-typed
@@ -248,7 +255,29 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
      * has already accepted, so an aborted transaction may still land server-side.
      */
     private async signTransactionManaged(transaction: Transaction, abortSignal?: AbortSignal): Promise<SignatureBytes> {
-        let response = await this.createTransaction(transaction, abortSignal);
+        const created = await this.createTransaction(transaction, abortSignal);
+        // Once the create is accepted Crossmint may approve and execute the
+        // transaction server-side, so any later failure leaves an outcome this
+        // client cannot rule out. Report those as BROADCAST_UNCONFIRMED carrying
+        // the Crossmint transaction id instead of a generic error a caller might
+        // blindly retry into a duplicate spend.
+        try {
+            return await this.driveTransactionToSignature(created, transaction, abortSignal);
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
+                cause: error,
+                message: `Crossmint may have executed the transaction, but the outcome could not be confirmed (provider transaction id: ${created.id})`,
+                providerTransactionId: created.id,
+            });
+        }
+    }
+
+    private async driveTransactionToSignature(
+        created: CrossmintTransactionResponse,
+        transaction: Transaction,
+        abortSignal?: AbortSignal,
+    ): Promise<SignatureBytes> {
+        let response = created;
         let approvalSubmitted = false;
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
@@ -379,7 +408,13 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
         };
 
         const path = `/${API_VERSION}/wallets/${encodeURIComponent(this.walletLocator)}/transactions`;
-        const response = await this.request(path, 'POST', body, abortSignal);
+        const response = await this.request(
+            path,
+            'POST',
+            body,
+            abortSignal,
+            await idempotencyKeyFromMessage(transaction.messageBytes),
+        );
         return parseTransactionResponse(response, 'create transaction');
     }
 
@@ -397,6 +432,7 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
         method: 'GET' | 'POST',
         body?: unknown,
         abortSignal?: AbortSignal,
+        idempotencyKey?: string,
     ): Promise<unknown> {
         const url = `${this.apiBaseUrl}${path}`;
         const headers: Record<string, string> = {
@@ -404,6 +440,9 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
         };
         if (method === 'POST' && body != null) {
             headers['Content-Type'] = 'application/json';
+        }
+        if (idempotencyKey !== undefined) {
+            headers['x-idempotency-key'] = idempotencyKey;
         }
 
         return await fetchSignerJson<unknown>({
@@ -621,6 +660,20 @@ async function fetchWallet(
     }
 
     return wallet as CrossmintWalletResponse;
+}
+
+/**
+ * The x-idempotency-key for a create: a UUID built from the first 16 bytes of
+ * SHA-256(message bytes), so retrying the same message reuses the same key and
+ * Crossmint deduplicates the create instead of executing a second transaction.
+ */
+async function idempotencyKeyFromMessage(messageBytes: Transaction['messageBytes']): Promise<string> {
+    const { createHash } = await import('node:crypto');
+    const digest = createHash('sha256').update(new Uint8Array(messageBytes)).digest().subarray(0, 16);
+    digest[6] = (digest[6]! & 0x0f) | 0x40;
+    digest[8] = (digest[8]! & 0x3f) | 0x80;
+    const hex = digest.toString('hex');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
 function parseTransactionResponse(payload: unknown, context: string): CrossmintTransactionResponse {

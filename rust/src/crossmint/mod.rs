@@ -219,9 +219,32 @@ impl CrossmintSigner {
         Self::parse_response_with_required_field(response, "address", "fetch_wallet").await
     }
 
+    /// Derives the `x-idempotency-key` for a create: a UUID built from the first
+    /// 16 bytes of SHA-256(message bytes), so retrying the same message reuses
+    /// the same key and Crossmint deduplicates the create instead of executing a
+    /// second transaction.
+    fn idempotency_key_from_message(message_bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(message_bytes);
+        let mut key = [0u8; 16];
+        key.copy_from_slice(&digest[..16]);
+        key[6] = (key[6] & 0x0f) | 0x40;
+        key[8] = (key[8] & 0x3f) | 0x80;
+        let hex: String = key.iter().map(|byte| format!("{byte:02x}")).collect();
+        format!(
+            "{}-{}-{}-{}-{}",
+            &hex[0..8],
+            &hex[8..12],
+            &hex[12..16],
+            &hex[16..20],
+            &hex[20..32]
+        )
+    }
+
     async fn create_transaction(
         &self,
         transaction: String,
+        idempotency_key: &str,
     ) -> Result<TransactionResponse, SignerError> {
         let url = self.build_wallets_api_url(&["transactions"])?;
 
@@ -237,6 +260,7 @@ impl CrossmintSigner {
             .post(url)
             .header("Content-Type", "application/json")
             .header("X-API-KEY", &self.api_key)
+            .header("x-idempotency-key", idempotency_key)
             .json(&request)
             .send()
             .await?;
@@ -759,6 +783,13 @@ impl CrossmintSigner {
     /// transaction is empty, and the returned signature is the landed transaction's
     /// fee-payer identifier, usable with RPC transaction lookups. The wallet's own
     /// signature is placed in `transaction` only when Crossmint signed it as given.
+    ///
+    /// Not retry-safe: any failure after the create is accepted returns
+    /// [`SignerError::BroadcastUnconfirmed`] carrying the Crossmint transaction id;
+    /// check that transaction with Crossmint before retrying. Each create carries
+    /// an `x-idempotency-key` derived from the message bytes, so retrying the
+    /// exact same bytes cannot create a second Crossmint transaction; a retry
+    /// built with a fresh blockhash is a new transaction.
     async fn sign_and_serialize(
         &self,
         transaction: &mut Transaction,
@@ -774,11 +805,24 @@ impl CrossmintSigner {
             SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
         })?;
         let transaction_b58 = bs58::encode(serialized).into_string();
+        let idempotency_key = Self::idempotency_key_from_message(&expected_message);
 
-        let create_response = self.create_transaction(transaction_b58).await?;
-        let final_response = self.poll_transaction(create_response).await?;
-        let (signature, broadcast) =
-            self.extract_signature_from_response(&final_response, &expected_message)?;
+        let create_response = self
+            .create_transaction(transaction_b58, &idempotency_key)
+            .await?;
+        let provider_tx_id = create_response.id.clone();
+        // Once the create is accepted Crossmint may approve and execute the
+        // transaction server-side, so any later failure leaves an outcome this
+        // client cannot rule out. Report those as BroadcastUnconfirmed carrying
+        // the Crossmint transaction id instead of a generic error a caller might
+        // blindly retry into a duplicate spend.
+        let (signature, broadcast) = self
+            .finish_managed_transaction(create_response, &expected_message)
+            .await
+            .map_err(|error| SignerError::BroadcastUnconfirmed {
+                provider_tx_id,
+                detail: error.detail_string(),
+            })?;
 
         if broadcast.is_some() {
             // Already landed, so complete regardless of the slots the returned copy
@@ -795,6 +839,15 @@ impl CrossmintSigner {
                 signature,
             ),
         ))
+    }
+
+    async fn finish_managed_transaction(
+        &self,
+        create_response: TransactionResponse,
+        expected_message: &[u8],
+    ) -> Result<(Signature, Option<VersionedTransaction>), SignerError> {
+        let final_response = self.poll_transaction(create_response).await?;
+        self.extract_signature_from_response(&final_response, expected_message)
     }
 
     async fn check_availability(&self) -> bool {
@@ -1102,9 +1155,18 @@ mod tests {
         let on_chain_transaction =
             bs58::encode(bincode::serialize(&signed_remote_tx).unwrap()).into_string();
 
+        // The create must carry a deterministic x-idempotency-key derived from
+        // the message bytes, so a blind retry of the same bytes reuses the key
+        // and Crossmint deduplicates the create.
+        let expected_idempotency_key =
+            CrossmintSigner::idempotency_key_from_message(&local_tx.message_data());
         Mock::given(method("POST"))
             .and(path("/2025-06-09/wallets/test-wallet/transactions"))
             .and(header("x-api-key", "test-api-key"))
+            .and(header(
+                "x-idempotency-key",
+                expected_idempotency_key.as_str(),
+            ))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "id": "tx-123",
                 "status": "success",
@@ -1247,7 +1309,10 @@ mod tests {
             .await;
 
         let result = signer.sign_transaction(&mut local_tx).await;
-        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            SignerError::BroadcastUnconfirmed { .. }
+        ));
     }
 
     /// Crossmint sponsors gas, so it is the fee payer and the message it signs
@@ -1418,13 +1483,17 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SignerError::SigningFailed(msg) => {
+            SignerError::BroadcastUnconfirmed {
+                provider_tx_id,
+                detail,
+            } => {
+                assert_eq!(provider_tx_id, "tx-approval");
                 assert!(
-                    msg.contains("Unable to extract signature"),
-                    "Unexpected error message: {msg}"
+                    detail.contains("Unable to extract signature"),
+                    "Unexpected error detail: {detail}"
                 );
             }
-            other => panic!("Expected SigningFailed error, got: {:?}", other),
+            other => panic!("Expected BroadcastUnconfirmed error, got: {:?}", other),
         }
     }
 
@@ -1564,13 +1633,13 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SignerError::SigningFailed(msg) => {
+            SignerError::BroadcastUnconfirmed { detail, .. } => {
                 assert!(
-                    msg.contains("awaiting approval"),
-                    "Unexpected error message: {msg}"
+                    detail.contains("awaiting approval"),
+                    "Unexpected error detail: {detail}"
                 );
             }
-            other => panic!("Expected SigningFailed error, got: {:?}", other),
+            other => panic!("Expected BroadcastUnconfirmed error, got: {:?}", other),
         }
     }
 
