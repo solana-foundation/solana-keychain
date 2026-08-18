@@ -86,12 +86,9 @@ impl FireblocksSigner {
     /// Create a new FireblocksSigner from a configuration object.
     pub fn from_config(config: FireblocksSignerConfig) -> Self {
         let http_client_config = config.http_client_config.unwrap_or_default();
-        let builder = reqwest::Client::builder();
-        let builder = builder
-            .timeout(http_client_config.resolved_request_timeout())
-            .connect_timeout(http_client_config.resolved_connect_timeout())
-            .https_only(true);
-        let client = builder.build().expect("Failed to build HTTP client");
+        let client = http_client_config
+            .build_client()
+            .expect("Failed to build HTTP client");
         let signing_key = jwt::parse_encoding_key(&config.private_key_pem)
             .ok()
             .map(Arc::new);

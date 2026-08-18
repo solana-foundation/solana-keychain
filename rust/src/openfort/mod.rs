@@ -252,11 +252,9 @@ impl OpenfortSigner {
         }
         let api_host = extract_host(&base_url)?;
         let http_client_config = config.http_client_config.unwrap_or_default();
-        let client = reqwest::Client::builder()
+        let client = http_client_config
+            .client_builder()
             .use_rustls_tls()
-            .timeout(http_client_config.resolved_request_timeout())
-            .connect_timeout(http_client_config.resolved_connect_timeout())
-            .https_only(true)
             .build()
             .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
 

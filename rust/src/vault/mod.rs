@@ -89,14 +89,7 @@ impl VaultSigner {
     /// Creates a new Vault signer from a configuration object.
     pub fn from_config(config: VaultSignerConfig) -> Result<Self, SignerError> {
         let http_client_config = config.http_client_config.unwrap_or_default();
-        let builder = Client::builder();
-        let builder = builder
-            .timeout(http_client_config.resolved_request_timeout())
-            .connect_timeout(http_client_config.resolved_connect_timeout())
-            .https_only(true);
-        let client = builder
-            .build()
-            .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
+        let client = http_client_config.build_client()?;
 
         Self::with_client(
             client,
@@ -116,8 +109,10 @@ impl VaultSigner {
     /// development Vault instance.
     ///
     /// The caller is responsible for whatever security posture the
-    /// supplied client carries (HTTPS-only, cert pinning, etc.); this
-    /// constructor does not enforce `https_only`.
+    /// supplied client carries (HTTPS-only, cert pinning, redirect policy,
+    /// etc.); this constructor does not enforce `https_only` and does not
+    /// replace the client's redirect policy. Requests carry `X-Vault-Token`,
+    /// so a client that follows redirects replays it to the redirect target.
     ///
     /// To avoid pulling `reqwest` into your own dependency tree at a
     /// version that may diverge from `solana-keychain`'s, prefer
@@ -531,6 +526,41 @@ mod tests {
 
         let result = signer.sign_message(b"hello").await;
         assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SignerError::RemoteApiError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_sign_message_refuses_redirects() {
+        let target = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&target)
+            .await;
+
+        let origin = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/transit/sign/test-key"))
+            .respond_with(ResponseTemplate::new(307).insert_header(
+                "Location",
+                format!("{}/v1/transit/sign/test-key", target.uri()).as_str(),
+            ))
+            .expect(1)
+            .mount(&origin)
+            .await;
+
+        let mut signer = create_test_signer_with_pubkey(&origin.uri(), TEST_PUBKEY.to_string());
+        signer.client = Arc::new(
+            Client::builder()
+                .redirect(crate::http_client_config::no_redirect_policy())
+                .build()
+                .unwrap(),
+        );
+
+        let result = signer.sign_message(b"hello").await;
         assert!(matches!(
             result.unwrap_err(),
             SignerError::RemoteApiError(_)

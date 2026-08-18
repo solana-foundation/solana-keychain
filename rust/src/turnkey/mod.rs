@@ -79,14 +79,7 @@ impl TurnkeySigner {
         let http_client_config = config.http_client_config.unwrap_or_default();
         let pubkey = Pubkey::from_str(&config.public_key)
             .map_err(|e| SignerError::InvalidPublicKey(format!("Invalid public key: {e}")))?;
-        let builder = reqwest::Client::builder();
-        let builder = builder
-            .timeout(http_client_config.resolved_request_timeout())
-            .connect_timeout(http_client_config.resolved_connect_timeout())
-            .https_only(true);
-        let client = builder
-            .build()
-            .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
+        let client = http_client_config.build_client()?;
 
         Ok(Self {
             api_public_key: config.api_public_key,

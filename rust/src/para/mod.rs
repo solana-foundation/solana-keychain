@@ -5,7 +5,7 @@ mod types;
 use crate::sdk_adapter::{Pubkey, Signature, Transaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
-use crate::{error::SignerError, traits::SolanaSigner};
+use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use std::str::FromStr;
 use types::{SignRawRequest, SignRawResponse, WalletResponse};
 
@@ -90,12 +90,11 @@ impl ParaSigner {
             }
         }
 
-        let builder = reqwest::Client::builder()
-            .timeout(CLIENT_TIMEOUT)
-            .https_only(true);
-        let client = builder
-            .build()
-            .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
+        let client = HttpClientConfig {
+            request_timeout: Some(CLIENT_TIMEOUT),
+            connect_timeout: None,
+        }
+        .build_client()?;
 
         Ok(Self {
             api_key: config.api_key,

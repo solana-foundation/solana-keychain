@@ -136,14 +136,7 @@ impl CdpSigner {
             .unwrap_or_else(|| format!("https://{CDP_API_HOST}"));
         let api_host = extract_host(&base_url)?;
         let http_client_config = config.http_client_config.unwrap_or_default();
-        let builder = reqwest::Client::builder();
-        let builder = builder
-            .timeout(http_client_config.resolved_request_timeout())
-            .connect_timeout(http_client_config.resolved_connect_timeout())
-            .https_only(true);
-        let client = builder
-            .build()
-            .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
+        let client = http_client_config.build_client()?;
 
         Ok(Self {
             api_key_id: config.api_key_id,

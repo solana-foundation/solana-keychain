@@ -116,14 +116,7 @@ impl UtilaSigner {
         })?;
 
         let http_client_config = config.http_client_config.unwrap_or_default();
-        let builder = reqwest::Client::builder()
-            .timeout(http_client_config.resolved_request_timeout())
-            .connect_timeout(http_client_config.resolved_connect_timeout());
-        #[cfg(not(test))]
-        let builder = builder.https_only(true);
-        let client = builder
-            .build()
-            .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
+        let client = http_client_config.build_client()?;
 
         let designated_signers = config
             .designated_signers

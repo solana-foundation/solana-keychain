@@ -5,7 +5,7 @@ mod types;
 use crate::sdk_adapter::{Pubkey, Signature, Transaction, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
-use crate::{error::SignerError, traits::SolanaSigner};
+use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use std::str::FromStr;
 use types::{
     CreateTransactionParams, CreateTransactionRequest, TransactionResponse, WalletResponse,
@@ -102,10 +102,11 @@ impl CrossmintSigner {
             ));
         }
 
-        let client = reqwest::Client::builder()
-            .timeout(CLIENT_TIMEOUT)
-            .build()
-            .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
+        let client = HttpClientConfig {
+            request_timeout: Some(CLIENT_TIMEOUT),
+            connect_timeout: None,
+        }
+        .build_client()?;
 
         let (signing_key, signer) = if let Some(secret) = &config.signer_secret {
             let key = Self::derive_signing_key(secret, &config.api_key)?;

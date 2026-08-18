@@ -200,16 +200,7 @@ impl FordefiSigner {
             .map_err(|_| SignerError::InvalidPublicKey("Invalid Solana public key".to_string()))?;
 
         let http = config.http_client_config.unwrap_or_default();
-        let builder = reqwest::Client::builder()
-            .timeout(http.resolved_request_timeout())
-            .connect_timeout(http.resolved_connect_timeout());
-
-        #[cfg(not(test))]
-        let builder = builder.https_only(true);
-
-        let client = builder
-            .build()
-            .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
+        let client = http.build_client()?;
 
         Ok(Self {
             access_token: config.access_token,
@@ -784,6 +775,21 @@ mod tests {
         FordefiSigner::build(config)
     }
 
+    /// `from_config` against a plain-HTTP wiremock server: the production
+    /// client is HTTPS-only, so the vault round-trip needs a test client
+    /// (which keeps the no-redirect policy).
+    async fn from_config_with_test_client(
+        config: FordefiSignerConfig,
+    ) -> Result<FordefiSigner, SignerError> {
+        let mut signer = FordefiSigner::build(config)?;
+        signer.client = reqwest::Client::builder()
+            .redirect(crate::http_client_config::no_redirect_policy())
+            .build()
+            .expect("Failed to build test HTTP client");
+        signer.verify_vault_address_with_timeout().await?;
+        Ok(signer)
+    }
+
     fn base_test_config() -> FordefiSignerConfig {
         FordefiSignerConfig {
             access_token: "test-token".to_string(),
@@ -1009,7 +1015,7 @@ mod tests {
             .await;
 
         let signer =
-            FordefiSigner::from_config(verified_test_config(&mock_server.uri(), public_key))
+            from_config_with_test_client(verified_test_config(&mock_server.uri(), public_key))
                 .await
                 .unwrap();
 
@@ -1034,7 +1040,7 @@ mod tests {
             .await;
 
         let signer =
-            FordefiSigner::from_config(verified_test_config(&mock_server.uri(), public_key))
+            from_config_with_test_client(verified_test_config(&mock_server.uri(), public_key))
                 .await
                 .unwrap();
 
@@ -1057,7 +1063,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let result = FordefiSigner::from_config(verified_test_config(
+        let result = from_config_with_test_client(verified_test_config(
             &mock_server.uri(),
             configured_public_key,
         ))
@@ -1082,7 +1088,8 @@ mod tests {
             .await;
 
         let result =
-            FordefiSigner::from_config(verified_test_config(&mock_server.uri(), public_key)).await;
+            from_config_with_test_client(verified_test_config(&mock_server.uri(), public_key))
+                .await;
 
         assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
     }
@@ -1104,7 +1111,8 @@ mod tests {
             .await;
 
         let result =
-            FordefiSigner::from_config(verified_test_config(&mock_server.uri(), public_key)).await;
+            from_config_with_test_client(verified_test_config(&mock_server.uri(), public_key))
+                .await;
 
         assert!(matches!(
             result.unwrap_err(),
@@ -1129,7 +1137,8 @@ mod tests {
             .await;
 
         let result =
-            FordefiSigner::from_config(verified_test_config(&mock_server.uri(), public_key)).await;
+            from_config_with_test_client(verified_test_config(&mock_server.uri(), public_key))
+                .await;
 
         assert!(matches!(
             result.unwrap_err(),
@@ -1150,7 +1159,8 @@ mod tests {
             .await;
 
         let result =
-            FordefiSigner::from_config(verified_test_config(&mock_server.uri(), public_key)).await;
+            from_config_with_test_client(verified_test_config(&mock_server.uri(), public_key))
+                .await;
 
         assert!(matches!(
             result.unwrap_err(),
@@ -1954,7 +1964,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let signer = FordefiSigner::from_config(config).await.unwrap();
+        let signer = from_config_with_test_client(config).await.unwrap();
         assert_eq!(
             signer
                 .sign_request("/api/v1/vaults", 123, "")
