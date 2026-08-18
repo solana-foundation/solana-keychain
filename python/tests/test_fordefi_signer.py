@@ -1,5 +1,7 @@
 import base64
+import hashlib
 import json
+import uuid
 from typing import Any
 
 import httpx
@@ -236,6 +238,9 @@ async def test_sign_message_black_box_success_with_stamped_request() -> None:
     create_request = respx.calls[0].request
     assert create_request.headers["Authorization"] == f"Bearer {ACCESS_TOKEN}"
     assert_valid_request_signature(create_request)
+    # Black box never broadcasts, so a duplicate create is harmless and carries
+    # no idempotence id.
+    assert "x-idempotence-id" not in create_request.headers
     body = json.loads(create_request.content)
     assert body == {
         "vault_id": VAULT_ID,
@@ -419,6 +424,13 @@ async def test_sign_transaction_native_success() -> None:
     assert body["details"]["push_mode"] == "auto"
     assert body["details"]["fee"] == {"type": "priority", "priority_level": "high"}
     assert body["details"]["data"] == base64.b64encode(transaction.message_data()).decode("ascii")
+    # The native create carries a deterministic x-idempotence-id derived from
+    # the message bytes, so a blind retry of the same bytes reuses the id and
+    # Fordefi deduplicates the create.
+    digest = bytearray(hashlib.sha256(transaction.message_data()).digest()[:16])
+    digest[6] = (digest[6] & 0x0F) | 0x40
+    digest[8] = (digest[8] & 0x3F) | 0x80
+    assert respx.calls[0].request.headers["x-idempotence-id"] == str(uuid.UUID(bytes=bytes(digest)))
 
 
 @respx.mock

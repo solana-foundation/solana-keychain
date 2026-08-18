@@ -7,8 +7,10 @@ signature in the ``x-signature`` header.
 
 import asyncio
 import base64
+import hashlib
 import json
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
@@ -61,6 +63,17 @@ _TERMINAL_FAILURE_STATES = frozenset(
 
 def _timestamp_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _idempotence_id_from_message(message_bytes: bytes) -> str:
+    """The x-idempotence-id for a native create: a UUID built from the first 16
+    bytes of SHA-256(message bytes), so retrying the same message reuses the
+    same id and Fordefi deduplicates the create instead of broadcasting a
+    second transaction."""
+    digest = bytearray(hashlib.sha256(message_bytes).digest()[:16])
+    digest[6] = (digest[6] & 0x0F) | 0x40
+    digest[8] = (digest[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(digest)))
 
 
 @dataclass
@@ -197,21 +210,26 @@ class FordefiSigner(SolanaSigner):
             client=self._http_client,
         )
 
-    async def _post_transaction(self, request: dict[str, Any]) -> str:
+    async def _post_transaction(
+        self, request: dict[str, Any], idempotence_id: str | None = None
+    ) -> str:
         path = "/api/v1/transactions"
         body = json.dumps(request, separators=(",", ":"))
         timestamp = _timestamp_ms()
         signature = await self._sign_request(path, timestamp, body)
+        headers = {
+            "Authorization": f"Bearer {self._access_token}",
+            "Content-Type": "application/json",
+            "x-signature": signature,
+            "x-timestamp": str(timestamp),
+        }
+        if idempotence_id is not None:
+            headers["x-idempotence-id"] = idempotence_id
         response = await fetch_signer_json(
             url=f"{self._api_base_url}{path}",
             provider_name="Fordefi",
             method="POST",
-            headers={
-                "Authorization": f"Bearer {self._access_token}",
-                "Content-Type": "application/json",
-                "x-signature": signature,
-                "x-timestamp": str(timestamp),
-            },
+            headers=headers,
             content=body.encode(),
             client=self._http_client,
         )
@@ -340,7 +358,10 @@ class FordefiSigner(SolanaSigner):
         Native mode is not retry-safe: any failure after Fordefi accepts the
         submission raises ``BROADCAST_UNCONFIRMED`` carrying
         ``provider_transaction_id``; check that transaction with Fordefi
-        before retrying.
+        before retrying. Each native create carries an ``x-idempotence-id``
+        derived from the message bytes, so retrying the exact same bytes
+        cannot create a second Fordefi transaction; a retry built with a
+        fresh blockhash is a new transaction.
         """
         if self._chain is not None:
             return await self._sign_transaction_native(transaction)
@@ -365,8 +386,10 @@ class FordefiSigner(SolanaSigner):
 
     async def _sign_transaction_native(self, transaction: Transaction) -> SignedTransaction:
         self._require_sole_required_signer(transaction)
+        message_data = transaction.message_data()
         transaction_id = await self._post_transaction(
-            self._solana_transaction_request(transaction.message_data())
+            self._solana_transaction_request(message_data),
+            idempotence_id=_idempotence_id_from_message(message_data),
         )
         try:
             return await self._finish_native_broadcast(transaction_id)

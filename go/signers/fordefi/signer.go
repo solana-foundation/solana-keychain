@@ -2,8 +2,10 @@ package fordefi
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -199,7 +201,10 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 //
 // Native mode is not retry-safe: any failure after Fordefi accepts the
 // submission returns CodeBroadcastUnconfirmed carrying the Fordefi transaction
-// id; check that transaction with Fordefi before retrying.
+// id; check that transaction with Fordefi before retrying. Each native create
+// carries an x-idempotence-id derived from the message bytes, so retrying the
+// exact same bytes cannot create a second Fordefi transaction; a retry built
+// with a fresh blockhash is a new transaction.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.chain != "" {
 		return s.signTransactionNative(ctx, tx)
@@ -250,7 +255,7 @@ func (s *Signer) signBlackBox(ctx context.Context, data []byte) (solana.Signatur
 			Format:     "hash_binary",
 			HashBinary: base64.StdEncoding.EncodeToString(data),
 		},
-	})
+	}, "")
 	if err != nil {
 		return solana.Signature{}, err
 	}
@@ -273,7 +278,7 @@ func (s *Signer) signSolanaMessage(ctx context.Context, message []byte) (solana.
 			Chain:   s.chain,
 			RawData: base64.StdEncoding.EncodeToString(message),
 		},
-	})
+	}, "")
 	if err != nil {
 		return solana.Signature{}, err
 	}
@@ -294,6 +299,18 @@ func (s *Signer) requireSoleRequiredSigner(tx *solana.Transaction) error {
 			"Fordefi native auto-broadcast currently supports only transactions whose sole required signer is the configured vault")
 	}
 	return nil
+}
+
+// idempotenceIDFromMessage derives the x-idempotence-id for a native create:
+// a UUID built from the first 16 bytes of SHA-256(message bytes), so retrying
+// the same message reuses the same id and Fordefi deduplicates the create
+// instead of broadcasting a second transaction.
+func idempotenceIDFromMessage(messageBytes []byte) string {
+	digest := sha256.Sum256(messageBytes)
+	id := digest[:16]
+	id[6] = (id[6] & 0x0f) | 0x40
+	id[8] = (id[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", id[0:4], id[4:6], id[6:8], id[8:10], id[10:16])
 }
 
 // signTransactionNative signs tx via the native solana_transaction path.
@@ -320,7 +337,7 @@ func (s *Signer) signTransactionNative(ctx context.Context, tx *solana.Transacti
 			PushMode: "auto",
 			Fee:      s.fee,
 		},
-	})
+	}, idempotenceIDFromMessage(messageBytes))
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}

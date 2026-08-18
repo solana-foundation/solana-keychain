@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -301,6 +301,9 @@ describe('FordefiSigner', () => {
             expect(postOpts.headers).toHaveProperty('Authorization', 'Bearer test-token');
             expect(postOpts.headers).toHaveProperty('x-signature');
             expect(postOpts.headers).toHaveProperty('x-timestamp');
+            // Black box never broadcasts, so a duplicate create is harmless and
+            // carries no idempotence id.
+            expect(postOpts.headers).not.toHaveProperty('x-idempotence-id');
         });
 
         it('should return the raw Fordefi signature directly without wire-tx round-trip', async () => {
@@ -497,6 +500,35 @@ describe('FordefiSigner', () => {
             expect(body.details.push_mode).toBe('auto');
             expect(body.details).toHaveProperty('data');
             expect(body.details).not.toHaveProperty('signatures');
+        });
+
+        /**
+         * The native create must carry a deterministic x-idempotence-id derived
+         * from the message bytes: a blind retry of the same bytes reuses the id,
+         * so Fordefi deduplicates the create instead of broadcasting a second
+         * transfer.
+         */
+        it('sends a deterministic x-idempotence-id on the native create', async () => {
+            const messageBytes = new Uint8Array(32).fill(0xab);
+            const digest = createHash('sha256').update(messageBytes).digest().subarray(0, 16);
+            digest[6] = (digest[6]! & 0x0f) | 0x40;
+            digest[8] = (digest[8]! & 0x3f) | 0x80;
+            const hex = digest.toString('hex');
+            const expectedId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+
+            const returnedMessage = new Uint8Array(32).fill(0xcd);
+            const wireTx = mockWireTransaction(returnedMessage);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse())
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-native'))
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
+
+            const signer = await FordefiSigner.create(nativeConfig);
+            const mockTx = { messageBytes, signatures: { [MOCK_ADDRESS]: null } } as never;
+            await signer.signAndSendTransactions([mockTx]);
+
+            const postOpts = vi.mocked(fetch).mock.calls[1]![1] as RequestInit;
+            expect(postOpts.headers).toHaveProperty('x-idempotence-id', expectedId);
         });
 
         it('should reject partial-signer usage before submitting native remote work', async () => {

@@ -146,7 +146,7 @@ func (s *Signer) signRequest(ctx context.Context, path string, timestamp int64, 
 
 // submitTransaction POSTs a signing request to /api/v1/transactions with
 // request-level P-256 signing and returns the Fordefi transaction ID.
-func (s *Signer) submitTransaction(ctx context.Context, request transactionRequest) (string, error) {
+func (s *Signer) submitTransaction(ctx context.Context, request transactionRequest, idempotenceID string) (string, error) {
 	body, err := json.Marshal(request)
 	if err != nil {
 		return "", core.WrapSignerError(core.CodeSerializationError, "failed to serialize fordefi request", err)
@@ -165,6 +165,9 @@ func (s *Signer) submitTransaction(ctx context.Context, request transactionReque
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-signature", signature)
 	req.Header.Set("x-timestamp", strconv.FormatInt(timestamp, 10))
+	if idempotenceID != "" {
+		req.Header.Set("x-idempotence-id", idempotenceID)
+	}
 
 	status, respBody, err := s.send(req)
 	if err != nil {

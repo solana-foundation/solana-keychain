@@ -1,4 +1,4 @@
-import { createPrivateKey, createSign, type KeyObject } from 'node:crypto';
+import { createHash, createPrivateKey, createSign, type KeyObject } from 'node:crypto';
 
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase58Decoder } from '@solana/codecs-strings';
@@ -44,6 +44,20 @@ const DEFAULT_BASE_URL = 'https://api.fordefi.com';
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 50;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * The x-idempotence-id for a native create: a UUID built from the first 16
+ * bytes of SHA-256(message bytes), so retrying the same message reuses the
+ * same id and Fordefi deduplicates the create instead of broadcasting a
+ * second transaction.
+ */
+function idempotenceIdFromMessage(messageBytes: Uint8Array): string {
+    const digest = createHash('sha256').update(messageBytes).digest().subarray(0, 16);
+    digest[6] = (digest[6]! & 0x0f) | 0x40;
+    digest[8] = (digest[8]! & 0x3f) | 0x80;
+    const hex = digest.toString('hex');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
 
 /** Terminal success states for pushable transactions (solana_transaction with push_mode auto). */
 const PUSHABLE_SUCCESS_STATES = new Set(['completed']);
@@ -145,7 +159,10 @@ export interface FordefiSignerConfig {
  * Native mode is not retry-safe: any failure after Fordefi accepts the
  * submission rejects with `BROADCAST_UNCONFIRMED` carrying
  * `context.providerTransactionId`; check that transaction with Fordefi before
- * retrying.
+ * retrying. Each native create carries an `x-idempotence-id` derived from the
+ * message bytes, so retrying the exact same bytes cannot create a second
+ * Fordefi transaction; a retry built with a fresh blockhash is a new
+ * transaction.
  */
 export interface FordefiNativeSigner<TAddress extends string = string>
     extends SolanaSigner<TAddress>, TransactionSendingSigner<TAddress> {}
@@ -575,12 +592,15 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
      */
     private async submitTransaction(
         requestBody: FordefiBlackBoxSignatureRequest | FordefiSolanaMessageRequest | FordefiSolanaTransactionRequest,
+        idempotenceId?: string,
     ): Promise<string> {
         const apiPath = '/api/v1/transactions';
         const createResponse = await this.request<FordefiCreateTransactionResponse>(
             'POST',
             apiPath,
             JSON.stringify(requestBody),
+            this.requestTimeoutMs,
+            idempotenceId,
         );
         return createResponse.id;
     }
@@ -619,7 +639,7 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
             type: 'solana_transaction',
             vault_id: this.vaultId,
         };
-        return await this.submitTransaction(requestBody);
+        return await this.submitTransaction(requestBody, idempotenceIdFromMessage(Buffer.from(base64Data, 'base64')));
     }
 
     /**
@@ -738,6 +758,7 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
         apiPath: string,
         body?: string,
         timeoutMs = this.requestTimeoutMs,
+        idempotenceId?: string,
     ): Promise<T> {
         const headers: Record<string, string> = {
             Authorization: `Bearer ${this.accessToken}`,
@@ -747,6 +768,9 @@ export class FordefiSigner<TAddress extends string = string> implements SolanaSi
             headers['Content-Type'] = 'application/json';
             headers['x-signature'] = await this.signRequest(apiPath, timestamp, body);
             headers['x-timestamp'] = timestamp.toString();
+        }
+        if (idempotenceId !== undefined) {
+            headers['x-idempotence-id'] = idempotenceId;
         }
 
         return await fetchSignerJson<T>({

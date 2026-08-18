@@ -8,6 +8,7 @@ mod request_signer;
 mod types;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
+use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -233,11 +234,33 @@ impl FordefiSigner {
     // Submit helpers
     // -----------------------------------------------------------------------
 
+    /// Derives the `x-idempotence-id` for a native create: a UUID built from the
+    /// first 16 bytes of SHA-256(message bytes), so retrying the same message
+    /// reuses the same id and Fordefi deduplicates the create instead of
+    /// broadcasting a second transaction.
+    fn idempotence_id_from_message(message_bytes: &[u8]) -> String {
+        let digest = Sha256::digest(message_bytes);
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&digest[..16]);
+        id[6] = (id[6] & 0x0f) | 0x40;
+        id[8] = (id[8] & 0x3f) | 0x80;
+        let hex: String = id.iter().map(|byte| format!("{byte:02x}")).collect();
+        format!(
+            "{}-{}-{}-{}-{}",
+            &hex[0..8],
+            &hex[8..12],
+            &hex[12..16],
+            &hex[16..20],
+            &hex[20..32]
+        )
+    }
+
     /// POST a serialized request body to `/api/v1/transactions` with P-256
     /// request signing. Returns the Fordefi transaction ID.
     async fn submit_request<T: serde::Serialize>(
         &self,
         request: &T,
+        idempotence_id: Option<&str>,
     ) -> Result<String, SignerError> {
         let path = "/api/v1/transactions";
         let body = serde_json::to_string(request)?;
@@ -248,16 +271,17 @@ impl FordefiSigner {
         let signature = self.sign_request(path, timestamp, &body).await?;
 
         let url = format!("{}{}", self.api_base_url, path);
-        let response = self
+        let mut builder = self
             .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.access_token))
             .header("x-signature", &signature)
             .header("x-timestamp", timestamp.to_string())
-            .header("Content-Type", "application/json")
-            .body(body)
-            .send()
-            .await?;
+            .header("Content-Type", "application/json");
+        if let Some(id) = idempotence_id {
+            builder = builder.header("x-idempotence-id", id);
+        }
+        let response = builder.body(body).send().await?;
 
         if !response.status().is_success() {
             return Err(Self::extract_api_error(response, "submit_request").await);
@@ -282,7 +306,7 @@ impl FordefiSigner {
             },
         };
 
-        self.submit_request(&request).await
+        self.submit_request(&request, None).await
     }
 
     /// Submit a native Solana transaction request.
@@ -306,7 +330,11 @@ impl FordefiSigner {
             },
         };
 
-        self.submit_request(&request).await
+        self.submit_request(
+            &request,
+            Some(&Self::idempotence_id_from_message(data_bytes)),
+        )
+        .await
     }
 
     /// Submit a native Solana message request.
@@ -328,7 +356,7 @@ impl FordefiSigner {
             },
         };
 
-        self.submit_request(&request).await
+        self.submit_request(&request, None).await
     }
 
     // -----------------------------------------------------------------------
@@ -482,6 +510,10 @@ impl FordefiSigner {
     /// superfluous, so the returned serialized-transaction string is intentionally
     /// empty — only the signature is returned. Callers that need the exact
     /// broadcast bytes can serialize the (now Fordefi-signed) `transaction`.
+    ///
+    /// Each native create carries an `x-idempotence-id` derived from the message
+    /// bytes, so retrying the exact same bytes cannot create a second Fordefi
+    /// transaction; a retry built with a fresh blockhash is a new transaction.
     ///
     /// Only legacy transactions are supported: a versioned (v0) transaction
     /// returned by Fordefi fails to deserialize with a [`SignerError::SerializationError`].
@@ -1663,9 +1695,14 @@ mod tests {
         let wire_bytes = build_mock_wire_transaction(&keypair, &message_data);
         let wire_b64 = STANDARD.encode(&wire_bytes);
 
+        // The native create must carry a deterministic x-idempotence-id derived
+        // from the message bytes, so a blind retry of the same bytes reuses the
+        // id and Fordefi deduplicates the create.
+        let expected_idempotence_id = FordefiSigner::idempotence_id_from_message(&message_data);
         Mock::given(method("POST"))
             .and(path("/api/v1/transactions"))
             .and(header("Authorization", "Bearer test-token"))
+            .and(header("x-idempotence-id", expected_idempotence_id.as_str()))
             .and(wiremock::matchers::body_partial_json(serde_json::json!({
                 "type": "solana_transaction",
                 "details": {

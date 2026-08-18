@@ -46,7 +46,7 @@ openfort = [
     "dep:hex",
 ]
 utila = ["dep:reqwest", "dep:jsonwebtoken", "dep:chrono", "dep:tokio"]
-fordefi = ["dep:reqwest", "dep:p256", "dep:tokio"]
+fordefi = ["dep:reqwest", "dep:p256", "dep:sha2", "dep:tokio"]
 all = [
     "memory",
     "vault",
