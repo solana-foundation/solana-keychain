@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
 )
 from solders.keypair import Keypair
+from solders.signature import Signature
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.fordefi import (
@@ -454,6 +455,9 @@ async def test_sign_transaction_native_success() -> None:
     assert result.signature == signature
     assert result.encoded_transaction == ""
     assert result.is_complete
+    assert all(sig == Signature.default() for sig in transaction.signatures), (
+        "the caller's transaction must be left untouched by provider-chosen bytes"
+    )
     body = json.loads(respx.calls[0].request.content)
     assert body["type"] == "solana_transaction"
     assert body["details"]["type"] == "solana_serialized_transaction_message"

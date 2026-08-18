@@ -649,8 +649,10 @@ func TestSignTransactionNativeSuccess(t *testing.T) {
 	if !res.IsComplete() {
 		t.Error("returned transaction is fully signed, want Complete")
 	}
-	if len(tx.Signatures) == 0 || tx.Signatures[0] != signature {
-		t.Error("caller's transaction must be replaced with the Fordefi-signed one")
+	for _, sig := range tx.Signatures {
+		if !sig.IsZero() {
+			t.Error("the caller's transaction must be left untouched by provider-chosen bytes")
+		}
 	}
 }
 

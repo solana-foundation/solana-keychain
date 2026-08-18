@@ -200,10 +200,11 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 //
 // Native mode (Chain set) submits the message with push_mode "auto": Fordefi
 // may replace the blockhash (and optionally fees), signs, and broadcasts the
-// transaction itself. tx is replaced with the Fordefi-signed transaction and
-// the returned EncodedTransaction is empty — the transaction is already
-// on-chain, so there is nothing for the caller to send. Only transactions
-// whose sole required signer is the configured vault are supported.
+// transaction itself. tx is left untouched and the returned EncodedTransaction
+// is empty — the transaction is already on-chain, so there is nothing for the
+// caller to send; the returned signature is the on-chain identifier. Only
+// transactions whose sole required signer is the configured vault are
+// supported.
 //
 // Native mode is not retry-safe: any failure after Fordefi accepts the
 // submission returns CodeBroadcastUnconfirmed carrying the Fordefi transaction
@@ -308,8 +309,8 @@ func (s *Signer) requireSoleRequiredSigner(tx *solana.Transaction) error {
 
 // signTransactionNative signs tx via the native solana_transaction path.
 // Fordefi may modify the transaction (at minimum the blockhash), so the
-// signature is verified against the returned message bytes and tx is replaced
-// with the returned transaction.
+// signature is verified against the returned message bytes; tx is left
+// untouched.
 func (s *Signer) signTransactionNative(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if err := s.requireSoleRequiredSigner(tx); err != nil {
 		return core.SignedTransaction{}, err
@@ -339,7 +340,7 @@ func (s *Signer) signTransactionNative(ctx context.Context, tx *solana.Transacti
 	// cannot rule out. Report those as CodeBroadcastUnconfirmed carrying the
 	// Fordefi transaction id instead of a generic error a caller might blindly
 	// retry into a duplicate spend.
-	signed, err := s.finishNativeBroadcast(ctx, tx, txID)
+	signed, err := s.finishNativeBroadcast(ctx, txID)
 	if err != nil {
 		detail := err.Error()
 		var se *core.SignerError
@@ -353,7 +354,7 @@ func (s *Signer) signTransactionNative(ctx context.Context, tx *solana.Transacti
 
 // finishNativeBroadcast polls a submitted native transaction to completion and
 // extracts and verifies the vault's signature from the returned wire bytes.
-func (s *Signer) finishNativeBroadcast(ctx context.Context, tx *solana.Transaction, txID string) (core.SignedTransaction, error) {
+func (s *Signer) finishNativeBroadcast(ctx context.Context, txID string) (core.SignedTransaction, error) {
 	result, err := s.pollForResult(ctx, txID, true)
 	if err != nil {
 		return core.SignedTransaction{}, err
@@ -394,6 +395,7 @@ func (s *Signer) finishNativeBroadcast(ctx context.Context, tx *solana.Transacti
 			"signature verification failed against Fordefi-returned message")
 	}
 
-	*tx = *returned
-	return core.Classify(tx, "", signature), nil
+	// The caller's tx is left untouched: the provider chose these bytes, so they
+	// are classified on their own and never installed into the caller's object.
+	return core.Classify(returned, "", signature), nil
 }

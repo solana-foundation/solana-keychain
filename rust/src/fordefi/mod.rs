@@ -71,8 +71,8 @@ pub struct FordefiSignerConfig {
 ///   API types. Fordefi will modify the transaction (at minimum updating the blockhash,
 ///   and optionally adding priority fees) and **auto-broadcasts** it on-chain
 ///   (`push_mode: "auto"`). Because the transaction is already submitted, the returned
-///   serialized transaction is **empty** — only the signature is returned. The caller's
-///   `&mut Transaction` is updated to the Fordefi-signed transaction.
+///   serialized transaction is **empty** — only the signature, the on-chain
+///   identifier, is returned. The caller's `&mut Transaction` is left untouched.
 pub struct FordefiSigner {
     access_token: String,
     vault_id: String,
@@ -483,13 +483,14 @@ impl FordefiSigner {
     /// Fordefi will modify the transaction (at minimum updating the blockhash, and
     /// optionally adding priority fees), so we verify the signature against the
     /// returned message bytes, not the original. The caller's `transaction` is
-    /// replaced with the Fordefi-returned transaction.
+    /// left untouched: the provider chose the broadcast bytes, so they are never
+    /// installed into it.
     ///
     /// Because native mode uses `push_mode: "auto"`, Fordefi has already broadcast
     /// the transaction on-chain by the time this returns. Re-sending it would be
     /// superfluous, so the returned serialized-transaction string is intentionally
-    /// empty — only the signature is returned. Callers that need the exact
-    /// broadcast bytes can serialize the (now Fordefi-signed) `transaction`.
+    /// empty — only the signature, usable with RPC transaction lookups, is
+    /// returned.
     ///
     /// Each native create carries an `x-idempotence-id` derived from the message
     /// bytes, so retrying the exact same bytes cannot create a second transaction.
@@ -508,19 +509,15 @@ impl FordefiSigner {
         // this client cannot rule out. Report those as BroadcastUnconfirmed
         // carrying the Fordefi transaction id instead of a generic error a
         // caller might blindly retry into a duplicate spend.
-        self.finish_native_broadcast(transaction, &tx_id)
-            .await
-            .map_err(|error| SignerError::BroadcastUnconfirmed {
+        self.finish_native_broadcast(&tx_id).await.map_err(|error| {
+            SignerError::BroadcastUnconfirmed {
                 provider_tx_id: tx_id,
                 detail: error.detail_string(),
-            })
+            }
+        })
     }
 
-    async fn finish_native_broadcast(
-        &self,
-        transaction: &mut Transaction,
-        tx_id: &str,
-    ) -> Result<SignedTransaction, SignerError> {
+    async fn finish_native_broadcast(&self, tx_id: &str) -> Result<SignedTransaction, SignerError> {
         let result = self.poll_for_result(tx_id, true).await?;
 
         let raw_tx_b64 = result.raw_transaction.as_ref().ok_or_else(|| {
@@ -559,12 +556,11 @@ impl FordefiSigner {
             ));
         }
 
-        // Replace the caller's transaction with the Fordefi-signed one
-        *transaction = returned_tx;
-
         // Native mode auto-broadcasts (push_mode: "auto"), so there is nothing for
-        // the caller to send. Return an empty serialized transaction rather than
-        // re-broadcastable bytes; the signature is still returned.
+        // the caller to send, and the caller's transaction is left untouched: the
+        // provider chose these bytes, so they are never installed into it. Return
+        // an empty serialized transaction; the signature is the on-chain
+        // identifier.
         Ok((String::new(), signature))
     }
 
@@ -1718,6 +1714,10 @@ mod tests {
             "native mode should return an empty serialized transaction"
         );
         assert!(sig.verify(&pubkey.to_bytes(), &message_data));
+        assert!(
+            tx.signatures.iter().all(|s| *s == Signature::default()),
+            "the caller's transaction must be left untouched by provider-chosen bytes"
+        );
     }
 
     #[tokio::test]
