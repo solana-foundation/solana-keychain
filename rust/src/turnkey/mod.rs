@@ -12,7 +12,10 @@ use crate::{
 use base64::Engine;
 use p256::ecdsa::signature::Signer as P256Signer;
 use std::str::FromStr;
-use types::{ActivityResponse, SignParameters, SignRequest, WhoAmIRequest};
+use types::{
+    ActivityResponse, SignParameters, SignRequest, SignTransactionParameters,
+    SignTransactionRequest, WhoAmIRequest,
+};
 
 /// Turnkey-based signer using Turnkey's API
 #[derive(Clone)]
@@ -101,26 +104,17 @@ impl TurnkeySigner {
         })
     }
 
-    /// Sign message bytes using Turnkey API and return just the signature
-    async fn sign_bytes(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        let hex_message = hex::encode(message);
-
-        let request = SignRequest {
-            activity_type: "ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2".to_string(),
-            timestamp_ms: chrono::Utc::now().timestamp_millis().to_string(),
-            organization_id: self.organization_id.clone(),
-            parameters: SignParameters {
-                sign_with: self.private_key_id.clone(),
-                payload: hex_message,
-                encoding: "PAYLOAD_ENCODING_HEXADECIMAL".to_string(),
-                hash_function: "HASH_FUNCTION_NOT_APPLICABLE".to_string(),
-            },
-        };
-
-        let body = serde_json::to_string(&request)?;
+    /// POST a stamped activity request and return the parsed response.
+    /// Turnkey populates `result` only under ACTIVITY_STATUS_COMPLETED;
+    /// anything else (e.g. CONSENSUS_NEEDED) carries no signature.
+    async fn post_activity(
+        &self,
+        path: &str,
+        body: String,
+    ) -> Result<ActivityResponse, SignerError> {
         let stamp = self.create_stamp(&body)?;
 
-        let url = format!("{}/public/v1/submit/sign_raw_payload", self.api_base_url);
+        let url = format!("{}{}", self.api_base_url, path);
         let response = self
             .client
             .post(&url)
@@ -149,15 +143,35 @@ impl TurnkeySigner {
         let response_text = response.text().await?;
         let response: ActivityResponse = serde_json::from_str(&response_text)?;
 
-        // Turnkey executes activities optimistically and populates `result` only
-        // once the activity reaches ACTIVITY_STATUS_COMPLETED; anything else
-        // (e.g. CONSENSUS_NEEDED under a quorum policy) carries no signature.
         let status = response.activity.status.as_deref().unwrap_or("<missing>");
         if status != "ACTIVITY_STATUS_COMPLETED" {
             return Err(SignerError::SigningFailed(format!(
                 "Turnkey activity is not completed (status: {status})"
             )));
         }
+
+        Ok(response)
+    }
+
+    /// Sign message bytes using Turnkey API and return just the signature
+    async fn sign_bytes(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        let hex_message = hex::encode(message);
+
+        let request = SignRequest {
+            activity_type: "ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2".to_string(),
+            timestamp_ms: chrono::Utc::now().timestamp_millis().to_string(),
+            organization_id: self.organization_id.clone(),
+            parameters: SignParameters {
+                sign_with: self.private_key_id.clone(),
+                payload: hex_message,
+                encoding: "PAYLOAD_ENCODING_HEXADECIMAL".to_string(),
+                hash_function: "HASH_FUNCTION_NOT_APPLICABLE".to_string(),
+            },
+        };
+        let body = serde_json::to_string(&request)?;
+        let response = self
+            .post_activity("/public/v1/submit/sign_raw_payload", body)
+            .await?;
 
         if let Some(result) = response.activity.result {
             if let Some(sign_result) = result.sign_raw_payload_result {
@@ -210,11 +224,64 @@ impl TurnkeySigner {
         ))
     }
 
+    /// Sign via the `sign_transaction` activity, submitting the full wire
+    /// transaction so Turnkey's policy engine can evaluate `solana.tx`
+    /// conditions. Policies must allow `ACTIVITY_TYPE_SIGN_TRANSACTION_V2`.
     async fn sign_and_serialize(
         &self,
         transaction: &mut Transaction,
     ) -> Result<SignedTransaction, SignerError> {
-        let signature = self.sign_bytes(&transaction.message_data()).await?;
+        let unsigned_wire = bincode::serialize(transaction).map_err(|e| {
+            SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
+        })?;
+
+        let request = SignTransactionRequest {
+            activity_type: "ACTIVITY_TYPE_SIGN_TRANSACTION_V2".to_string(),
+            timestamp_ms: chrono::Utc::now().timestamp_millis().to_string(),
+            organization_id: self.organization_id.clone(),
+            parameters: SignTransactionParameters {
+                sign_with: self.private_key_id.clone(),
+                transaction_type: "TRANSACTION_TYPE_SOLANA".to_string(),
+                unsigned_transaction: hex::encode(&unsigned_wire),
+            },
+        };
+        let body = serde_json::to_string(&request)?;
+        let response = self
+            .post_activity("/public/v1/submit/sign_transaction", body)
+            .await?;
+
+        let signed_hex = response
+            .activity
+            .result
+            .and_then(|result| result.sign_transaction_result)
+            .map(|result| result.signed_transaction)
+            .ok_or_else(|| {
+                SignerError::SigningFailed("Invalid response from Turnkey API".to_string())
+            })?;
+
+        let signed_wire = hex::decode(&signed_hex).map_err(|e| {
+            SignerError::SerializationError(format!(
+                "Failed to decode signed transaction returned by Turnkey: {e}"
+            ))
+        })?;
+        let returned: Transaction = bincode::deserialize(&signed_wire).map_err(|e| {
+            SignerError::SerializationError(format!(
+                "Failed to deserialize signed transaction returned by Turnkey: {e}"
+            ))
+        })?;
+
+        let position = TransactionUtil::get_signing_keypair_position(&returned, &self.public_key)?;
+        let signature = returned.signatures.get(position).copied().ok_or_else(|| {
+            SignerError::SigningFailed(
+                "Turnkey signature slot missing from returned transaction".to_string(),
+            )
+        })?;
+
+        if !signature.verify(&self.public_key.to_bytes(), &transaction.message_data()) {
+            return Err(SignerError::SigningFailed(
+                "Signature verification failed — the returned signature does not match the public key".to_string(),
+            ));
+        }
 
         TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
 
@@ -497,24 +564,19 @@ mod tests {
 
         let mut tx = create_test_transaction(&keypair_pubkey(&keypair));
 
-        // The signature that Turnkey API will return (signing the message_data)
         let signature = keypair.sign_message(&tx.message_data());
-        let sig_bytes = signature.as_ref();
+        let mut signed_tx = tx.clone();
+        signed_tx.signatures = vec![signature];
+        let signed_hex = hex::encode(bincode::serialize(&signed_tx).unwrap());
 
-        // Split into r and s
-        let r_hex = hex::encode(&sig_bytes[0..32]);
-        let s_hex = hex::encode(&sig_bytes[32..64]);
-
-        // Mock the sign endpoint
         Mock::given(method("POST"))
-            .and(path("/public/v1/submit/sign_raw_payload"))
+            .and(path("/public/v1/submit/sign_transaction"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "activity": {
                     "status": "ACTIVITY_STATUS_COMPLETED",
                     "result": {
-                        "signRawPayloadResult": {
-                            "r": r_hex,
-                            "s": s_hex
+                        "signTransactionResult": {
+                            "signedTransaction": signed_hex
                         }
                     }
                 }
@@ -543,6 +605,94 @@ mod tests {
 
         // Verify the transaction is properly serialized
         assert!(!serialized_tx.is_empty());
+        assert_eq!(tx.signatures, vec![signature]);
+    }
+
+    #[tokio::test]
+    async fn test_turnkey_sign_transaction_rejects_signature_over_different_bytes() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let (api_public_key, api_private_key) = create_test_api_keys();
+
+        let mut tx = create_test_transaction(&keypair_pubkey(&keypair));
+        let mut other_tx = create_test_transaction(&keypair_pubkey(&keypair));
+        other_tx.signatures = vec![keypair.sign_message(&other_tx.message_data())];
+        let signed_hex = hex::encode(bincode::serialize(&other_tx).unwrap());
+
+        Mock::given(method("POST"))
+            .and(path("/public/v1/submit/sign_transaction"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "activity": {
+                    "status": "ACTIVITY_STATUS_COMPLETED",
+                    "result": {
+                        "signTransactionResult": {
+                            "signedTransaction": signed_hex
+                        }
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let mut signer = TurnkeySigner::new(
+            api_public_key,
+            api_private_key,
+            "test-org-id".to_string(),
+            "test-key-id".to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .unwrap();
+        signer.client = reqwest::Client::new();
+        signer.api_base_url = mock_server.uri();
+
+        let result = signer.sign_transaction(&mut tx).await;
+        match result.unwrap_err() {
+            SignerError::SigningFailed(message) => {
+                assert!(
+                    message.contains("verification failed"),
+                    "expected a verification failure, got: {message}"
+                );
+            }
+            other => panic!("Expected SigningFailed, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_turnkey_sign_transaction_rejects_non_completed_activity() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let (api_public_key, api_private_key) = create_test_api_keys();
+
+        let mut tx = create_test_transaction(&keypair_pubkey(&keypair));
+
+        Mock::given(method("POST"))
+            .and(path("/public/v1/submit/sign_transaction"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "activity": { "status": "ACTIVITY_STATUS_CONSENSUS_NEEDED" }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let mut signer = TurnkeySigner::new(
+            api_public_key,
+            api_private_key,
+            "test-org-id".to_string(),
+            "test-key-id".to_string(),
+            keypair.pubkey().to_string(),
+        )
+        .unwrap();
+        signer.client = reqwest::Client::new();
+        signer.api_base_url = mock_server.uri();
+
+        let result = signer.sign_transaction(&mut tx).await;
+        match result.unwrap_err() {
+            SignerError::SigningFailed(message) => {
+                assert!(message.contains("ACTIVITY_STATUS_CONSENSUS_NEEDED"));
+            }
+            other => panic!("Expected SigningFailed, got: {other:?}"),
+        }
     }
 
     #[tokio::test]

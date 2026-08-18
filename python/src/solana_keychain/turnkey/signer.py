@@ -25,6 +25,7 @@ from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
+    get_signing_keypair_position,
     serialize_transaction,
 )
 
@@ -174,14 +175,7 @@ class TurnkeySigner(SolanaSigner):
         }
         response = await self._post_stamped("/public/v1/submit/sign_raw_payload", request)
 
-        activity = response.get("activity") if isinstance(response, dict) else None
-        status = activity.get("status") if isinstance(activity, dict) else None
-        if status != "ACTIVITY_STATUS_COMPLETED":
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                f"Turnkey activity is not completed (status: {status or '<missing>'})",
-            )
-        result = activity.get("result") if isinstance(activity, dict) else None
+        result = self._completed_activity_result(response)
         sign_result = result.get("signRawPayloadResult") if isinstance(result, dict) else None
         if (
             not isinstance(sign_result, dict)
@@ -201,8 +195,60 @@ class TurnkeySigner(SolanaSigner):
             )
         return signature
 
+    @staticmethod
+    def _completed_activity_result(response: Any) -> Any:
+        activity = response.get("activity") if isinstance(response, dict) else None
+        status = activity.get("status") if isinstance(activity, dict) else None
+        if status != "ACTIVITY_STATUS_COMPLETED":
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                f"Turnkey activity is not completed (status: {status or '<missing>'})",
+            )
+        return activity.get("result") if isinstance(activity, dict) else None
+
     async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
-        signature = await self._sign_bytes(transaction.message_data())
+        """Sign via the ``sign_transaction`` activity, submitting the full wire
+        transaction so Turnkey's policy engine can evaluate ``solana.tx``
+        conditions. Policies must allow ``ACTIVITY_TYPE_SIGN_TRANSACTION_V2``."""
+        request = {
+            "type": "ACTIVITY_TYPE_SIGN_TRANSACTION_V2",
+            "timestampMs": str(int(time.time() * 1000)),
+            "organizationId": self._organization_id,
+            "parameters": {
+                "signWith": self._private_key_id,
+                "type": "TRANSACTION_TYPE_SOLANA",
+                "unsignedTransaction": bytes(transaction).hex(),
+            },
+        }
+        response = await self._post_stamped("/public/v1/submit/sign_transaction", request)
+
+        result = self._completed_activity_result(response)
+        sign_result = result.get("signTransactionResult") if isinstance(result, dict) else None
+        signed_hex = sign_result.get("signedTransaction") if isinstance(sign_result, dict) else None
+        if not isinstance(signed_hex, str):
+            raise SignerError(SignerErrorCode.SIGNING_FAILED, "Invalid response from Turnkey API")
+        try:
+            signed = Transaction.from_bytes(bytes.fromhex(signed_hex))
+        except Exception:
+            raise SignerError(
+                SignerErrorCode.SERIALIZATION_ERROR,
+                "Failed to decode signed transaction returned by Turnkey",
+            ) from None
+
+        position = get_signing_keypair_position(signed, self._pubkey)
+        signatures = signed.signatures
+        if position >= len(signatures):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Turnkey signature slot missing from returned transaction",
+            )
+        signature = signatures[position]
+        if not signature.verify(self._pubkey, transaction.message_data()):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Signature verification failed — the returned signature does not match "
+                "the public key",
+            )
         add_signature_to_transaction(transaction, self._pubkey, signature)
         return classify_signed_transaction(
             transaction, serialize_transaction(transaction), signature

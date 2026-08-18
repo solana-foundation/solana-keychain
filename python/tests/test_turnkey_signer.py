@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from solders.keypair import Keypair
+from solders.transaction import Transaction
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.turnkey import TurnkeySigner, TurnkeySignerConfig, create_turnkey_signer
@@ -16,6 +17,7 @@ from tests.util import create_test_transaction
 
 API_BASE_URL = "https://turnkey.example.com"
 SIGN_URL = f"{API_BASE_URL}/public/v1/submit/sign_raw_payload"
+SIGN_TRANSACTION_URL = f"{API_BASE_URL}/public/v1/submit/sign_transaction"
 WHOAMI_URL = f"{API_BASE_URL}/public/v1/query/whoami"
 ORGANIZATION_ID = "test-org-id"
 PRIVATE_KEY_ID = "test-key-id"
@@ -46,6 +48,31 @@ def make_signer(
             api_base_url=API_BASE_URL,
         )
     )
+
+
+def mock_sign_transaction_response(signed_transaction_hex: str) -> None:
+    respx.post(SIGN_TRANSACTION_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "activity": {
+                    "status": "ACTIVITY_STATUS_COMPLETED",
+                    "result": {
+                        "signTransactionResult": {"signedTransaction": signed_transaction_hex}
+                    },
+                }
+            },
+        )
+    )
+
+
+def signed_transaction_hex(keypair: Keypair, transaction: Any) -> str:
+    signed = Transaction(
+        from_keypairs=[keypair],
+        message=transaction.message,
+        recent_blockhash=transaction.message.recent_blockhash,
+    )
+    return bytes(signed).hex()
 
 
 def mock_sign_response(r_hex: str, s_hex: str) -> None:
@@ -274,8 +301,8 @@ async def test_sign_transaction_success() -> None:
     keypair = Keypair()
     transaction = create_test_transaction(keypair.pubkey())
     signature = keypair.sign_message(transaction.message_data())
-    sig_bytes = bytes(signature)
-    mock_sign_response(sig_bytes[:32].hex(), sig_bytes[32:].hex())
+    unsigned_hex = bytes(transaction).hex()
+    mock_sign_transaction_response(signed_transaction_hex(keypair, transaction))
 
     signer = make_signer(str(keypair.pubkey()))
     result = await signer.sign_transaction(transaction)
@@ -283,6 +310,53 @@ async def test_sign_transaction_success() -> None:
     assert result.is_complete
     assert result.signature == signature
     assert list(transaction.signatures) == [signature]
+
+    parsed: dict[str, Any] = json.loads(respx.calls.last.request.content)
+    assert parsed["type"] == "ACTIVITY_TYPE_SIGN_TRANSACTION_V2"
+    assert parsed["parameters"]["type"] == "TRANSACTION_TYPE_SOLANA"
+    assert parsed["parameters"]["unsignedTransaction"] == unsigned_hex
+
+
+@respx.mock
+async def test_sign_transaction_rejects_signature_over_different_bytes() -> None:
+    keypair = Keypair()
+    transaction = create_test_transaction(keypair.pubkey())
+    other_transaction = create_test_transaction(keypair.pubkey())
+    mock_sign_transaction_response(signed_transaction_hex(keypair, other_transaction))
+
+    signer = make_signer(str(keypair.pubkey()))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+
+
+@respx.mock
+async def test_sign_transaction_rejects_undecodable_signed_transaction() -> None:
+    keypair = Keypair()
+    transaction = create_test_transaction(keypair.pubkey())
+    mock_sign_transaction_response("not-hex")
+
+    signer = make_signer(str(keypair.pubkey()))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SERIALIZATION_ERROR
+
+
+@respx.mock
+async def test_sign_transaction_rejects_non_completed_activity() -> None:
+    keypair = Keypair()
+    transaction = create_test_transaction(keypair.pubkey())
+    respx.post(SIGN_TRANSACTION_URL).mock(
+        return_value=httpx.Response(
+            200, json={"activity": {"status": "ACTIVITY_STATUS_CONSENSUS_NEEDED"}}
+        )
+    )
+
+    signer = make_signer(str(keypair.pubkey()))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert "ACTIVITY_STATUS_CONSENSUS_NEEDED" in excinfo.value._detail
 
 
 @respx.mock

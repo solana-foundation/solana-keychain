@@ -19,8 +19,9 @@ import (
 
 // Turnkey API paths.
 const (
-	signRawPayloadPath = "/public/v1/submit/sign_raw_payload"
-	whoAmIPath         = "/public/v1/query/whoami"
+	signRawPayloadPath  = "/public/v1/submit/sign_raw_payload"
+	signTransactionPath = "/public/v1/submit/sign_transaction"
+	whoAmIPath          = "/public/v1/query/whoami"
 )
 
 // Signer signs with an Ed25519 private key held by Turnkey, authenticating each
@@ -84,18 +85,67 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 	return s.signBytes(ctx, message)
 }
 
-// SignTransaction signs the transaction's message bytes remotely, inserts the
-// signature at this signer's required-signer position, and returns the encoded
-// transaction with its completeness.
+// SignTransaction signs tx via the sign_transaction activity, submitting the
+// full wire transaction so Turnkey's policy engine can evaluate solana.tx
+// conditions. Policies must allow ACTIVITY_TYPE_SIGN_TRANSACTION_V2.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	msg, err := tx.Message.MarshalBinary()
 	if err != nil {
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction message", err)
 	}
-	sig, err := s.signBytes(ctx, msg)
+	unsignedWire, err := tx.MarshalBinary()
+	if err != nil {
+		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction", err)
+	}
+
+	req := signTransactionRequest{
+		Type:           "ACTIVITY_TYPE_SIGN_TRANSACTION_V2",
+		TimestampMs:    strconv.FormatInt(time.Now().UnixMilli(), 10),
+		OrganizationID: s.organizationID,
+		Parameters: signTransactionParameters{
+			SignWith:            s.privateKeyID,
+			Type:                "TRANSACTION_TYPE_SOLANA",
+			UnsignedTransaction: hex.EncodeToString(unsignedWire),
+		},
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize sign request", err)
+	}
+
+	result, err := s.postActivity(ctx, signTransactionPath, body)
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}
+	if result == nil || result.SignTransactionResult == nil {
+		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed, "invalid response from Turnkey API")
+	}
+
+	signedWire, err := hex.DecodeString(result.SignTransactionResult.SignedTransaction)
+	if err != nil {
+		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,
+			"failed to decode signed transaction returned by Turnkey", err)
+	}
+	returned, err := solana.TransactionFromBytes(signedWire)
+	if err != nil {
+		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,
+			"failed to deserialize signed transaction returned by Turnkey", err)
+	}
+
+	position, err := core.SigningPosition(returned, s.publicKey)
+	if err != nil {
+		return core.SignedTransaction{}, err
+	}
+	if position >= len(returned.Signatures) {
+		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
+			"Turnkey signature slot missing from returned transaction")
+	}
+	sig := returned.Signatures[position]
+	if !core.VerifyEd25519(s.publicKey, msg, sig) {
+		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
+			"signature verification failed — the returned signature does not match the public key")
+	}
+
 	if err := core.AddSignature(tx, s.publicKey, sig); err != nil {
 		return core.SignedTransaction{}, err
 	}
@@ -104,6 +154,30 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, err
 	}
 	return core.Classify(tx, encoded, sig), nil
+}
+
+// postActivity sends a stamped activity request and returns the result.
+// Turnkey populates result only under ACTIVITY_STATUS_COMPLETED; anything
+// else (e.g. CONSENSUS_NEEDED under a quorum policy) carries no signature.
+func (s *Signer) postActivity(ctx context.Context, path string, body []byte) (*activityResult, error) {
+	respBody, err := s.post(ctx, path, body)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp activityResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, core.WrapSignerError(core.CodeSerializationError, "failed to parse sign response", err)
+	}
+	if resp.Activity.Status != "ACTIVITY_STATUS_COMPLETED" {
+		status := resp.Activity.Status
+		if status == "" {
+			status = "<missing>"
+		}
+		return nil, core.NewSignerError(core.CodeSigningFailed,
+			"Turnkey activity is not completed (status: "+status+")")
+	}
+	return resp.Activity.Result, nil
 }
 
 // IsAvailable reports whether the Turnkey API is reachable and the API
@@ -138,27 +212,10 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize sign request", err)
 	}
 
-	respBody, err := s.post(ctx, signRawPayloadPath, body)
+	result, err := s.postActivity(ctx, signRawPayloadPath, body)
 	if err != nil {
 		return solana.Signature{}, err
 	}
-
-	var resp activityResponse
-	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse sign response", err)
-	}
-	// Turnkey executes activities optimistically and populates result only once
-	// the activity reaches ACTIVITY_STATUS_COMPLETED; anything else (e.g.
-	// CONSENSUS_NEEDED under a quorum policy) carries no signature.
-	if resp.Activity.Status != "ACTIVITY_STATUS_COMPLETED" {
-		status := resp.Activity.Status
-		if status == "" {
-			status = "<missing>"
-		}
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"Turnkey activity is not completed (status: "+status+")")
-	}
-	result := resp.Activity.Result
 	if result == nil || result.SignRawPayloadResult == nil {
 		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "invalid response from Turnkey API")
 	}

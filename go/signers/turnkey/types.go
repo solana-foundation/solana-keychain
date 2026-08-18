@@ -1,7 +1,7 @@
 // Package turnkey provides a SolanaSigner backed by the Turnkey API. Every
 // request body is authenticated by stamping it with the P-256 ECDSA API
-// private key (X-Stamp header); Ed25519 signatures are produced remotely by
-// Turnkey via the sign_raw_payload activity.
+// private key (X-Stamp header). Transactions are signed remotely via the
+// sign_transaction activity (policy-aware); messages via sign_raw_payload.
 package turnkey
 
 import (
@@ -66,6 +66,21 @@ type signParameters struct {
 	HashFunction string `json:"hashFunction"`
 }
 
+// signTransactionRequest is the ACTIVITY_TYPE_SIGN_TRANSACTION_V2 request body.
+type signTransactionRequest struct {
+	Type           string                    `json:"type"`
+	TimestampMs    string                    `json:"timestampMs"`
+	OrganizationID string                    `json:"organizationId"`
+	Parameters     signTransactionParameters `json:"parameters"`
+}
+
+// signTransactionParameters are the sign_transaction activity parameters.
+type signTransactionParameters struct {
+	SignWith            string `json:"signWith"`
+	Type                string `json:"type"`
+	UnsignedTransaction string `json:"unsignedTransaction"`
+}
+
 // activityResponse is the envelope returned by the submit endpoints.
 type activityResponse struct {
 	Activity activity `json:"activity"`
@@ -77,9 +92,15 @@ type activity struct {
 	Result *activityResult `json:"result"`
 }
 
-// activityResult carries the (optional) raw-payload sign result.
+// activityResult carries the (optional) sign results.
 type activityResult struct {
-	SignRawPayloadResult *signResult `json:"signRawPayloadResult"`
+	SignRawPayloadResult  *signResult            `json:"signRawPayloadResult"`
+	SignTransactionResult *signTransactionResult `json:"signTransactionResult"`
+}
+
+// signTransactionResult holds the hex-encoded signed wire transaction.
+type signTransactionResult struct {
+	SignedTransaction string `json:"signedTransaction"`
 }
 
 // signResult holds the hex-encoded r and s signature components.

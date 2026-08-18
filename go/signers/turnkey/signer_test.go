@@ -71,13 +71,20 @@ func signResultBody(sig []byte) string {
 // body, counting calls and checking method/path/headers.
 func signServer(t *testing.T, status int, body string, calls *int32) *httptest.Server {
 	t.Helper()
+	return signServerAt(t, signRawPayloadPath, status, body, calls)
+}
+
+// signServerAt serves a fixed activity response at wantPath, counting calls
+// and checking method/path/headers.
+func signServerAt(t *testing.T, wantPath string, status int, body string, calls *int32) *httptest.Server {
+	t.Helper()
 	return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(calls, 1)
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", r.Method)
 		}
-		if r.URL.Path != signRawPayloadPath {
-			t.Errorf("path = %s, want %s", r.URL.Path, signRawPayloadPath)
+		if r.URL.Path != wantPath {
+			t.Errorf("path = %s, want %s", r.URL.Path, wantPath)
 		}
 		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
 			t.Errorf("Content-Type = %q, want application/json", ct)
@@ -257,8 +264,19 @@ func TestSignTransaction(t *testing.T) {
 	}
 	sig := ed25519.Sign(priv, msg)
 
+	signedTx := *tx
+	var sigVal solana.Signature
+	copy(sigVal[:], sig)
+	signedTx.Signatures = []solana.Signature{sigVal}
+	signedWire, err := signedTx.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"activity":{"status":"ACTIVITY_STATUS_COMPLETED","result":{"signTransactionResult":{"signedTransaction":"` +
+		hex.EncodeToString(signedWire) + `"}}}}`
+
 	var calls int32
-	srv := signServer(t, http.StatusOK, signResultBody(sig), &calls)
+	srv := signServerAt(t, signTransactionPath, http.StatusOK, body, &calls)
 	defer srv.Close()
 
 	s, err := New(testConfig(t, pub.String(), srv))
@@ -347,6 +365,75 @@ func TestSignInvalidHex(t *testing.T) {
 	}
 	if code, _ := core.CodeOf(err); code != core.CodeSerializationError {
 		t.Errorf("got %s, want SERIALIZATION_ERROR", code)
+	}
+}
+
+func TestSignTransactionRejectsSignatureOverDifferentBytes(t *testing.T) {
+	priv := testutils.TestPrivateKey()
+	pub := testutils.TestPublicKey()
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTx.Message.RecentBlockhash = solana.Hash{1}
+	otherMsg, err := otherTx.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sigVal solana.Signature
+	copy(sigVal[:], ed25519.Sign(priv, otherMsg))
+	otherTx.Signatures = []solana.Signature{sigVal}
+	signedWire, err := otherTx.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"activity":{"status":"ACTIVITY_STATUS_COMPLETED","result":{"signTransactionResult":{"signedTransaction":"` +
+		hex.EncodeToString(signedWire) + `"}}}}`
+
+	var calls int32
+	srv := signServerAt(t, signTransactionPath, http.StatusOK, body, &calls)
+	defer srv.Close()
+
+	s, err := New(testConfig(t, pub.String(), srv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	if err == nil {
+		t.Fatal("expected a signature over different bytes to be rejected")
+	}
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Errorf("got %s, want SIGNING_FAILED", code)
+	}
+}
+
+func TestSignTransactionRejectsNonCompletedActivity(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var calls int32
+	srv := signServerAt(t, signTransactionPath, http.StatusOK,
+		`{"activity":{"status":"ACTIVITY_STATUS_CONSENSUS_NEEDED"}}`, &calls)
+	defer srv.Close()
+
+	s, err := New(testConfig(t, pub.String(), srv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	if err == nil {
+		t.Fatal("expected error for non-completed activity")
+	}
+	var se *core.SignerError
+	if !errors.As(err, &se) || !strings.Contains(se.Detail(), "ACTIVITY_STATUS_CONSENSUS_NEEDED") {
+		t.Errorf("error must name the received status, got %v", err)
 	}
 }
 

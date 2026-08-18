@@ -34,10 +34,36 @@ pub struct Activity {
     pub result: Option<ActivityResult>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignTransactionRequest {
+    #[serde(rename = "type")]
+    pub activity_type: String,
+    pub timestamp_ms: String,
+    pub organization_id: String,
+    pub parameters: SignTransactionParameters,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignTransactionParameters {
+    pub sign_with: String,
+    #[serde(rename = "type")]
+    pub transaction_type: String,
+    pub unsigned_transaction: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityResult {
     pub sign_raw_payload_result: Option<SignResult>,
+    pub sign_transaction_result: Option<SignTransactionResult>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignTransactionResult {
+    pub signed_transaction: String,
 }
 
 #[derive(Deserialize)]
