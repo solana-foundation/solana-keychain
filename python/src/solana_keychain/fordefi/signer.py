@@ -393,6 +393,14 @@ class FordefiSigner(SolanaSigner):
         )
         try:
             return await self._finish_native_broadcast(transaction_id)
+        except asyncio.CancelledError as error:
+            # Cancellation must stay a CancelledError for asyncio's task
+            # machinery, but the caller still needs the provider transaction id
+            # to reconcile before retrying, so re-raise with it in the message.
+            raise asyncio.CancelledError(
+                "Fordefi may have executed the transaction, but the outcome could "
+                f"not be confirmed (provider transaction id: {transaction_id})"
+            ) from error
         except SignerError as error:
             raise SignerError(
                 SignerErrorCode.BROADCAST_UNCONFIRMED,

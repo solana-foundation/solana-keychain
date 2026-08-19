@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import json
@@ -354,6 +355,31 @@ async def test_sign_transaction_native_polling_timeout_is_broadcast_unconfirmed(
         await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id == "tx-1"
+
+
+@respx.mock
+async def test_sign_transaction_native_cancellation_carries_the_transaction_id() -> None:
+    """Cancellation must stay a CancelledError for asyncio's task machinery, but
+    the caller still needs the provider transaction id to reconcile with Fordefi
+    before retrying, so the re-raised error carries it in its message."""
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    polling = asyncio.Event()
+
+    async def hang(_request: httpx.Request) -> httpx.Response:
+        polling.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"id": "tx-1"}))
+    respx.get(f"{TRANSACTIONS_URL}/tx-1").mock(side_effect=hang)
+
+    task = asyncio.create_task(signer.sign_transaction(create_test_transaction(keypair.pubkey())))
+    await polling.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError) as excinfo:
+        await task
+    assert "tx-1" in str(excinfo.value)
 
 
 @respx.mock
