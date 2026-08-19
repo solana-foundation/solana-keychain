@@ -725,6 +725,11 @@ impl SolanaSigner for FordefiSigner {
         tx: &mut Transaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
+        if self.chain.is_some() {
+            // Native mode has already broadcast the transaction, so it is
+            // complete regardless of the caller's untouched signature slots.
+            return Ok(SignTransactionResult::Complete(signed_transaction));
+        }
         Ok(TransactionUtil::classify_signed_transaction(
             tx,
             signed_transaction,
@@ -1707,7 +1712,13 @@ mod tests {
             "native sign_transaction failed: {:?}",
             result.err()
         );
-        let (serialized_tx, sig) = result.unwrap().into_signed_transaction();
+        let result = result.unwrap();
+        assert!(
+            matches!(result, SignTransactionResult::Complete(_)),
+            "a broadcast native transaction is complete even though the caller's \
+             signature slots stay untouched"
+        );
+        let (serialized_tx, sig) = result.into_signed_transaction();
         // Native mode auto-broadcasts, so no re-sendable wire tx is returned.
         assert!(
             serialized_tx.is_empty(),
