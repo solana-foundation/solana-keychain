@@ -1,6 +1,8 @@
 """Transaction serialization and signature-placement utilities."""
 
 import base64
+import hashlib
+import uuid
 
 from solders.message import Message, MessageV0
 from solders.pubkey import Pubkey
@@ -12,6 +14,15 @@ from solana_keychain.core.signer import SignedTransaction
 
 MESSAGE_VERSION_PREFIX = b"\x80"
 ED25519_SIGNATURE_LENGTH = 64
+
+
+def idempotency_key_from_message(message_bytes: bytes) -> str:
+    """A UUID derived from SHA-256(message bytes), so a retry of the same bytes
+    reuses the key and the provider deduplicates the create."""
+    digest = bytearray(hashlib.sha256(message_bytes).digest()[:16])
+    digest[6] = (digest[6] & 0x0F) | 0x40
+    digest[8] = (digest[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(digest)))
 
 
 def serialize_transaction(transaction: Transaction) -> str:

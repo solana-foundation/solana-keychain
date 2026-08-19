@@ -1,4 +1,4 @@
-import { createHash, createPrivateKey, createSign, type KeyObject } from 'node:crypto';
+import { createPrivateKey, createSign, type KeyObject } from 'node:crypto';
 
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase58Decoder } from '@solana/codecs-strings';
@@ -8,6 +8,7 @@ import {
     createSignatureDictionary,
     extractSignatureFromWireTransaction,
     fetchSignerJson,
+    idempotencyKeyFromMessage,
     normalizeBaseUrl,
     signBatchStaggered,
     SignerErrorCode,
@@ -47,18 +48,6 @@ const DEFAULT_BASE_URL = 'https://api.fordefi.com';
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 50;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-
-/**
- * A UUID derived from SHA-256(message bytes), so a retry of the same bytes
- * reuses the id and Fordefi deduplicates the create.
- */
-function idempotenceIdFromMessage(messageBytes: Uint8Array): string {
-    const digest = createHash('sha256').update(messageBytes).digest().subarray(0, 16);
-    digest[6] = (digest[6]! & 0x0f) | 0x40;
-    digest[8] = (digest[8]! & 0x3f) | 0x80;
-    const hex = digest.toString('hex');
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
-}
 
 /** Terminal success states for pushable transactions (solana_transaction with push_mode auto). */
 const PUSHABLE_SUCCESS_STATES = new Set(['completed']);
@@ -652,7 +641,10 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
             type: 'solana_transaction',
             vault_id: this.vaultId,
         };
-        return await this.submitTransaction(requestBody, idempotenceIdFromMessage(Buffer.from(base64Data, 'base64')));
+        return await this.submitTransaction(
+            requestBody,
+            await idempotencyKeyFromMessage(Buffer.from(base64Data, 'base64')),
+        );
     }
 
     /**

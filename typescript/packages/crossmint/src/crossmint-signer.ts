@@ -6,6 +6,7 @@ import {
     DEFAULT_FETCH_TIMEOUT_MS,
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
+    idempotencyKeyFromMessage,
     normalizeBaseUrl,
     sanitizeRemoteErrorResponse,
     SignerError,
@@ -656,19 +657,6 @@ async function fetchWallet(
     }
 
     return wallet as CrossmintWalletResponse;
-}
-
-/**
- * A UUID derived from SHA-256(message bytes), so a retry of the same bytes
- * reuses the key and Crossmint deduplicates the create.
- */
-async function idempotencyKeyFromMessage(messageBytes: Transaction['messageBytes']): Promise<string> {
-    const { createHash } = await import('node:crypto');
-    const digest = createHash('sha256').update(new Uint8Array(messageBytes)).digest().subarray(0, 16);
-    digest[6] = (digest[6]! & 0x0f) | 0x40;
-    digest[8] = (digest[8]! & 0x3f) | 0x80;
-    const hex = digest.toString('hex');
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
 function parseTransactionResponse(payload: unknown, context: string): CrossmintTransactionResponse {

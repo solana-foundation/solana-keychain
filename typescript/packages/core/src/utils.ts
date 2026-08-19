@@ -13,6 +13,19 @@ import { Base64EncodedWireTransaction, getTransactionDecoder } from '@solana/tra
 import { SignerErrorCode, throwSignerError } from './errors.js';
 import { SolanaSendingSigner, SolanaSigner } from './types.js';
 
+/**
+ * A UUID derived from SHA-256(message bytes), so a retry of the same bytes
+ * reuses the key and the provider deduplicates the create.
+ */
+export async function idempotencyKeyFromMessage(messageBytes: ReadonlyUint8Array): Promise<string> {
+    const { createHash } = await import('node:crypto');
+    const digest = createHash('sha256').update(new Uint8Array(messageBytes)).digest().subarray(0, 16);
+    digest[6] = (digest[6]! & 0x0f) | 0x40;
+    digest[8] = (digest[8]! & 0x3f) | 0x80;
+    const hex = digest.toString('hex');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
 interface AssertSignatureValidOptions {
     data: ReadonlyUint8Array;
     signature: SignatureBytes;

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -185,16 +184,6 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 		"Crossmint sign_message is not supported for Solana wallets in this signer")
 }
 
-// idempotencyKeyFromMessage derives a UUID from SHA-256(message bytes), so a
-// retry of the same bytes reuses the key and Crossmint deduplicates the create.
-func idempotencyKeyFromMessage(messageBytes []byte) string {
-	digest := sha256.Sum256(messageBytes)
-	key := digest[:16]
-	key[6] = (key[6] & 0x0f) | 0x40
-	key[8] = (key[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", key[0:4], key[4:6], key[6:8], key[8:10], key[10:16])
-}
-
 // SignTransaction submits tx to Crossmint, polls it to completion, and extracts
 // and verifies the wallet's signature.
 //
@@ -223,7 +212,7 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction", err)
 	}
 
-	createResponse, err := s.createTransaction(ctx, base58.Encode(serialized), idempotencyKeyFromMessage(expectedMessage))
+	createResponse, err := s.createTransaction(ctx, base58.Encode(serialized), core.IdempotencyKeyFromMessage(expectedMessage))
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}

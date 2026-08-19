@@ -7,11 +7,9 @@ signature in the ``x-signature`` header.
 
 import asyncio
 import base64
-import hashlib
 import json
 import logging
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
@@ -34,6 +32,7 @@ from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
     get_signing_keypair_position,
+    idempotency_key_from_message,
     serialize_transaction,
 )
 from solana_keychain.fordefi.request_signer import FordefiRequestSigner, PemRequestSigner
@@ -66,15 +65,6 @@ _TERMINAL_FAILURE_STATES = frozenset(
 
 def _timestamp_ms() -> int:
     return int(time.time() * 1000)
-
-
-def _idempotence_id_from_message(message_bytes: bytes) -> str:
-    """A UUID derived from SHA-256(message bytes), so a retry of the same bytes
-    reuses the id and Fordefi deduplicates the create."""
-    digest = bytearray(hashlib.sha256(message_bytes).digest()[:16])
-    digest[6] = (digest[6] & 0x0F) | 0x40
-    digest[8] = (digest[8] & 0x3F) | 0x80
-    return str(uuid.UUID(bytes=bytes(digest)))
 
 
 @dataclass
@@ -389,7 +379,7 @@ class FordefiSigner(SolanaSigner):
         message_data = transaction.message_data()
         transaction_id = await self._post_transaction(
             self._solana_transaction_request(message_data),
-            idempotence_id=_idempotence_id_from_message(message_data),
+            idempotence_id=idempotency_key_from_message(message_data),
         )
         try:
             return await self._finish_native_broadcast(transaction_id)

@@ -3,6 +3,27 @@ use crate::sdk_adapter::{Pubkey, Signature, Transaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use base64::{engine::general_purpose::STANDARD, Engine};
 
+/// A UUID derived from SHA-256(message bytes), so a retry of the same bytes
+/// reuses the key and the provider deduplicates the create.
+#[cfg(any(feature = "crossmint", feature = "fordefi"))]
+pub(crate) fn idempotency_key_from_message(message_bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(message_bytes);
+    let mut key = [0u8; 16];
+    key.copy_from_slice(&digest[..16]);
+    key[6] = (key[6] & 0x0f) | 0x40;
+    key[8] = (key[8] & 0x3f) | 0x80;
+    let hex: String = key.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
+}
+
 pub struct TransactionUtil;
 
 impl TransactionUtil {

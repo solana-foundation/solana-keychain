@@ -219,26 +219,6 @@ impl CrossmintSigner {
         Self::parse_response_with_required_field(response, "address", "fetch_wallet").await
     }
 
-    /// A UUID derived from SHA-256(message bytes), so a retry of the same bytes
-    /// reuses the key and Crossmint deduplicates the create.
-    fn idempotency_key_from_message(message_bytes: &[u8]) -> String {
-        use sha2::{Digest, Sha256};
-        let digest = Sha256::digest(message_bytes);
-        let mut key = [0u8; 16];
-        key.copy_from_slice(&digest[..16]);
-        key[6] = (key[6] & 0x0f) | 0x40;
-        key[8] = (key[8] & 0x3f) | 0x80;
-        let hex: String = key.iter().map(|byte| format!("{byte:02x}")).collect();
-        format!(
-            "{}-{}-{}-{}-{}",
-            &hex[0..8],
-            &hex[8..12],
-            &hex[12..16],
-            &hex[16..20],
-            &hex[20..32]
-        )
-    }
-
     async fn create_transaction(
         &self,
         transaction: String,
@@ -802,7 +782,8 @@ impl CrossmintSigner {
             SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
         })?;
         let transaction_b58 = bs58::encode(serialized).into_string();
-        let idempotency_key = Self::idempotency_key_from_message(&expected_message);
+        let idempotency_key =
+            crate::transaction_util::idempotency_key_from_message(&expected_message);
 
         let create_response = self
             .create_transaction(transaction_b58, &idempotency_key)
@@ -1150,7 +1131,7 @@ mod tests {
             bs58::encode(bincode::serialize(&signed_remote_tx).unwrap()).into_string();
 
         let expected_idempotency_key =
-            CrossmintSigner::idempotency_key_from_message(&local_tx.message_data());
+            crate::transaction_util::idempotency_key_from_message(&local_tx.message_data());
         Mock::given(method("POST"))
             .and(path("/2025-06-09/wallets/test-wallet/transactions"))
             .and(header("x-api-key", "test-api-key"))

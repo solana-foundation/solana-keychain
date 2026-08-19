@@ -1,9 +1,7 @@
 """Crossmint Wallets API signer integration."""
 
 import asyncio
-import hashlib
 import json
-import uuid
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
@@ -23,6 +21,7 @@ from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
     classify_signed_transaction,
+    idempotency_key_from_message,
     serialize_transaction,
     signed_message_bytes,
 )
@@ -44,15 +43,6 @@ _ENCODE_URI_COMPONENT_SAFE = "-_.!~*'()"
 
 def _encode_uri_component(value: str) -> str:
     return quote(value, safe=_ENCODE_URI_COMPONENT_SAFE)
-
-
-def _idempotency_key_from_message(message_bytes: bytes) -> str:
-    """A UUID derived from SHA-256(message bytes), so a retry of the same bytes
-    reuses the key and Crossmint deduplicates the create."""
-    digest = bytearray(hashlib.sha256(message_bytes).digest()[:16])
-    digest[6] = (digest[6] & 0x0F) | 0x40
-    digest[8] = (digest[8] & 0x3F) | 0x80
-    return str(uuid.UUID(bytes=bytes(digest)))
 
 
 @dataclass
@@ -570,7 +560,7 @@ class CrossmintSigner(SolanaSigner):
         transaction_b58 = base58.b58encode(bytes(transaction)).decode("ascii")
 
         create_response = await self._create_transaction(
-            transaction_b58, _idempotency_key_from_message(expected_message)
+            transaction_b58, idempotency_key_from_message(expected_message)
         )
         provider_transaction_id = str(create_response["id"])
         # Post-create failures leave an outcome Crossmint may still execute, so

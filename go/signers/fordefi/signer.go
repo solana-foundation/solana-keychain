@@ -2,10 +2,8 @@ package fordefi
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -300,16 +298,6 @@ func (s *Signer) requireSoleRequiredSigner(tx *solana.Transaction) error {
 	return nil
 }
 
-// idempotenceIDFromMessage derives a UUID from SHA-256(message bytes), so a
-// retry of the same bytes reuses the id and Fordefi deduplicates the create.
-func idempotenceIDFromMessage(messageBytes []byte) string {
-	digest := sha256.Sum256(messageBytes)
-	id := digest[:16]
-	id[6] = (id[6] & 0x0f) | 0x40
-	id[8] = (id[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", id[0:4], id[4:6], id[6:8], id[8:10], id[10:16])
-}
-
 // signTransactionNative signs tx via the native solana_transaction path.
 // Fordefi may modify the transaction (at minimum the blockhash), so the
 // signature is verified against the returned message bytes and tx is replaced
@@ -334,7 +322,7 @@ func (s *Signer) signTransactionNative(ctx context.Context, tx *solana.Transacti
 			PushMode: "auto",
 			Fee:      s.fee,
 		},
-	}, idempotenceIDFromMessage(messageBytes))
+	}, core.IdempotencyKeyFromMessage(messageBytes))
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}

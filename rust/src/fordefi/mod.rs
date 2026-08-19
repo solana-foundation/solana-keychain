@@ -8,7 +8,6 @@ mod request_signer;
 mod types;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -234,25 +233,6 @@ impl FordefiSigner {
     // Submit helpers
     // -----------------------------------------------------------------------
 
-    /// A UUID derived from SHA-256(message bytes), so a retry of the same bytes
-    /// reuses the id and Fordefi deduplicates the create.
-    fn idempotence_id_from_message(message_bytes: &[u8]) -> String {
-        let digest = Sha256::digest(message_bytes);
-        let mut id = [0u8; 16];
-        id.copy_from_slice(&digest[..16]);
-        id[6] = (id[6] & 0x0f) | 0x40;
-        id[8] = (id[8] & 0x3f) | 0x80;
-        let hex: String = id.iter().map(|byte| format!("{byte:02x}")).collect();
-        format!(
-            "{}-{}-{}-{}-{}",
-            &hex[0..8],
-            &hex[8..12],
-            &hex[12..16],
-            &hex[16..20],
-            &hex[20..32]
-        )
-    }
-
     /// POST a serialized request body to `/api/v1/transactions` with P-256
     /// request signing. Returns the Fordefi transaction ID.
     async fn submit_request<T: serde::Serialize>(
@@ -330,7 +310,9 @@ impl FordefiSigner {
 
         self.submit_request(
             &request,
-            Some(&Self::idempotence_id_from_message(data_bytes)),
+            Some(&crate::transaction_util::idempotency_key_from_message(
+                data_bytes,
+            )),
         )
         .await
     }
@@ -1692,7 +1674,8 @@ mod tests {
         let wire_bytes = build_mock_wire_transaction(&keypair, &message_data);
         let wire_b64 = STANDARD.encode(&wire_bytes);
 
-        let expected_idempotence_id = FordefiSigner::idempotence_id_from_message(&message_data);
+        let expected_idempotence_id =
+            crate::transaction_util::idempotency_key_from_message(&message_data);
         Mock::given(method("POST"))
             .and(path("/api/v1/transactions"))
             .and(header("Authorization", "Bearer test-token"))
