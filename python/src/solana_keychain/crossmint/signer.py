@@ -12,7 +12,7 @@ from solders.keypair import Keypair
 from solders.message import Message, MessageV0
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction, VersionedTransaction
+from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
@@ -543,7 +543,7 @@ class CrossmintSigner(SolanaSigner):
             "Unable to extract signature from Crossmint transaction response",
         )
 
-    async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
+    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         """Sign ``transaction`` through Crossmint's managed wallet flow.
 
         Crossmint may rewrite the transaction (it sponsors gas, so it becomes the
@@ -560,7 +560,7 @@ class CrossmintSigner(SolanaSigner):
         exact same bytes cannot create a second transaction.
         """
         public_key = self._initialized_pubkey()
-        expected_message = transaction.message_data()
+        expected_message = signed_message_bytes(transaction.message)
         transaction_b58 = base58.b58encode(bytes(transaction)).decode("ascii")
 
         create_response = await self._create_transaction(
@@ -583,7 +583,7 @@ class CrossmintSigner(SolanaSigner):
     async def _finish_managed_transaction(
         self,
         create_response: dict[str, Any],
-        transaction: Transaction,
+        transaction: VersionedTransaction,
         expected_message: bytes,
         public_key: Pubkey,
     ) -> SignedTransaction:

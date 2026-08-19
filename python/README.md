@@ -77,7 +77,7 @@ async def main() -> None:
     signature = await signer.sign_message(b"Hello Solana!")
     print("signature:", signature)
 
-    # Sign a transaction (tx is a solders.transaction.Transaction):
+    # Sign a transaction (tx is a solders.transaction.VersionedTransaction):
     #   result = await signer.sign_transaction(tx)
     #   result.encoded_transaction  # base64 wire transaction
     #   result.signature            # this signer's signature
@@ -119,7 +119,7 @@ class SolanaSigner(ABC):
     @property
     def pubkey(self) -> Pubkey: ...
 
-    async def sign_transaction(self, transaction: Transaction) -> SignedTransaction: ...
+    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction: ...
 
     async def sign_message(self, message: bytes) -> Signature: ...
 
@@ -128,7 +128,8 @@ class SolanaSigner(ABC):
 
 `sign_transaction` signs the transaction in place and returns a
 `SignedTransaction(encoded_transaction, signature, is_complete)`; `is_complete`
-reports whether every required signature is present.
+reports whether every required signature is present. Legacy, v0 and v1
+transactions are all accepted.
 
 Errors are always `SignerError` with a stable `code`
 (`SIGNER_INVALID_PRIVATE_KEY`, `SIGNER_SIGNING_FAILED`, …).

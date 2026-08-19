@@ -17,7 +17,7 @@ except ImportError as error:  # pragma: no cover
 import httpx
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction
+from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
@@ -27,6 +27,7 @@ from solana_keychain.core.transaction_util import (
     classify_signed_transaction,
     get_signing_keypair_position,
     serialize_transaction,
+    signed_message_bytes,
 )
 
 DEFAULT_API_BASE_URL = "https://api.turnkey.com"
@@ -206,7 +207,7 @@ class TurnkeySigner(SolanaSigner):
             )
         return activity.get("result") if isinstance(activity, dict) else None
 
-    async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
+    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         """Sign via the ``sign_transaction`` activity, submitting the full wire
         transaction so Turnkey's policy engine can evaluate ``solana.tx``
         conditions. Policies must allow ``ACTIVITY_TYPE_SIGN_TRANSACTION_V2``."""
@@ -228,7 +229,7 @@ class TurnkeySigner(SolanaSigner):
         if not isinstance(signed_hex, str):
             raise SignerError(SignerErrorCode.SIGNING_FAILED, "Invalid response from Turnkey API")
         try:
-            signed = Transaction.from_bytes(bytes.fromhex(signed_hex))
+            signed = VersionedTransaction.from_bytes(bytes.fromhex(signed_hex))
         except Exception:
             raise SignerError(
                 SignerErrorCode.SERIALIZATION_ERROR,
@@ -243,7 +244,7 @@ class TurnkeySigner(SolanaSigner):
                 "Turnkey signature slot missing from returned transaction",
             )
         signature = signatures[position]
-        if not signature.verify(self._pubkey, transaction.message_data()):
+        if not signature.verify(self._pubkey, signed_message_bytes(transaction.message)):
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED,
                 "Signature verification failed — the returned signature does not match "

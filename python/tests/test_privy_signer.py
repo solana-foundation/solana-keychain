@@ -9,9 +9,11 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from solders.keypair import Keypair
-from solders.transaction import Transaction
+from solders.signature import Signature
+from solders.transaction import VersionedTransaction
 
 from solana_keychain import SignerError, SignerErrorCode
+from solana_keychain.core import signed_message_bytes
 from solana_keychain.privy import (
     PrivyAuthorizationContext,
     PrivySigner,
@@ -21,7 +23,7 @@ from solana_keychain.privy import (
     generate_authorization_signatures,
 )
 from solana_keychain.privy.authorization import _parse_p256_private_key
-from tests.util import create_test_transaction
+from tests.util import create_test_transaction, create_test_v1_transaction
 
 API_BASE_URL = "https://privy.example.com/v1"
 APP_ID = "test-app-id"
@@ -81,11 +83,11 @@ def mock_sign_transaction_response(signed_transaction_b64: str) -> None:
 
 
 def signed_transaction_b64(keypair: Keypair, transaction: Any) -> str:
-    signed = Transaction(
-        from_keypairs=[keypair],
-        message=transaction.message,
-        recent_blockhash=transaction.message.recent_blockhash,
-    )
+    """Sign over whatever bytes the message version covers, for any version."""
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
+    slots = [Signature.default()] * transaction.message.header.num_required_signatures
+    slots[0] = signature
+    signed = VersionedTransaction.populate(transaction.message, slots)
     return base64.b64encode(bytes(signed)).decode("ascii")
 
 
@@ -356,7 +358,7 @@ async def test_sign_transaction_success() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
-    signature = keypair.sign_message(transaction.message_data())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
     unsigned_b64 = base64.b64encode(bytes(transaction)).decode("ascii")
     mock_sign_transaction_response(signed_transaction_b64(keypair, transaction))
 
@@ -468,3 +470,19 @@ def test_non_https_base_url_rejected() -> None:
             )
         )
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
+
+
+@respx.mock
+async def test_sign_transaction_accepts_a_v1_transaction() -> None:
+    """Privy round-trips the whole wire transaction, so a v1 response has tail signatures."""
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    transaction = create_test_v1_transaction(keypair.pubkey())
+    expected = keypair.sign_message(signed_message_bytes(transaction.message))
+    mock_sign_transaction_response(signed_transaction_b64(keypair, transaction))
+
+    result = await signer.sign_transaction(transaction)
+
+    assert result.is_complete
+    assert result.signature == expected
+    assert base64.b64decode(result.encoded_transaction)[0] == 0x81

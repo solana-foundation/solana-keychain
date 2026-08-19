@@ -14,7 +14,7 @@ except ImportError as error:  # pragma: no cover
 import httpx
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction
+from solders.transaction import Transaction, VersionedTransaction
 
 from solana_keychain.cdp.jwt import create_auth_jwt, create_wallet_jwt, extract_host
 from solana_keychain.core.errors import SignerError, SignerErrorCode
@@ -26,6 +26,7 @@ from solana_keychain.core.transaction_util import (
     classify_signed_transaction,
     get_signing_keypair_position,
     serialize_transaction,
+    signed_message_bytes,
 )
 
 DEFAULT_API_BASE_URL = "https://api.cdp.coinbase.com"
@@ -142,8 +143,8 @@ class CdpSigner(SolanaSigner):
             )
         return signature
 
-    async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
-        message_data = transaction.message_data()
+    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
+        message_data = signed_message_bytes(transaction.message)
         position = get_signing_keypair_position(transaction, self._pubkey)
 
         path = f"{BASE_PATH}/{self._pubkey}/sign/transaction"

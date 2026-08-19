@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from solders.keypair import Keypair
 
 from solana_keychain import SignerError, SignerErrorCode
+from solana_keychain.core import signed_message_bytes
 from solana_keychain.dfns import DfnsSigner, DfnsSignerConfig, create_dfns_signer
 from solana_keychain.dfns.auth import format_client_data, sign_challenge
 from tests.util import create_test_transaction
@@ -338,7 +339,7 @@ async def test_sign_transaction_success() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
-    signature = keypair.sign_message(transaction.message_data())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
     mock_user_action_flow()
     mock_signature_response(bytes(signature))
 

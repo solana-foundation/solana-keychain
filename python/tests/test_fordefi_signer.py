@@ -20,6 +20,7 @@ from solders.keypair import Keypair
 from solders.signature import Signature
 
 from solana_keychain import SignerError, SignerErrorCode
+from solana_keychain.core import signed_message_bytes
 from solana_keychain.fordefi import (
     FordefiRequestSigner,
     FordefiSigner,
@@ -405,7 +406,7 @@ async def test_sign_transaction_black_box_success() -> None:
     keypair = Keypair()
     signer = make_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
-    signature = keypair.sign_message(transaction.message_data())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
     mock_sign_flow(status_response("signed", signatures=[{"data": signature_b64(signature)}]))
 
     result = await signer.sign_transaction(transaction)
@@ -438,7 +439,7 @@ async def test_sign_message_native_mode_uses_solana_message() -> None:
 
 def make_signed_wire_transaction(keypair: Keypair) -> tuple[str, Any]:
     transaction = create_test_transaction(keypair.pubkey())
-    signature = keypair.sign_message(transaction.message_data())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
     transaction.signatures = [signature]
     return base64.b64encode(bytes(transaction)).decode("ascii"), signature
 
@@ -470,8 +471,10 @@ async def test_sign_transaction_native_success() -> None:
     assert body["details"]["chain"] == "solana_mainnet"
     assert body["details"]["push_mode"] == "auto"
     assert body["details"]["fee"] == {"type": "priority", "priority_level": "high"}
-    assert body["details"]["data"] == base64.b64encode(transaction.message_data()).decode("ascii")
-    digest = bytearray(hashlib.sha256(transaction.message_data()).digest()[:16])
+    assert body["details"]["data"] == base64.b64encode(
+        signed_message_bytes(transaction.message)
+    ).decode("ascii")
+    digest = bytearray(hashlib.sha256(signed_message_bytes(transaction.message)).digest()[:16])
     digest[6] = (digest[6] & 0x0F) | 0x40
     digest[8] = (digest[8] & 0x3F) | 0x80
     assert respx.calls[0].request.headers["x-idempotence-id"] == str(uuid.UUID(bytes=bytes(digest)))
@@ -494,7 +497,7 @@ async def test_sign_transaction_native_verifies_against_returned_message() -> No
     signer = make_signer(keypair, chain="solana_devnet")
     transaction = create_test_transaction(keypair.pubkey())
     returned = create_test_transaction(keypair.pubkey())
-    returned.signatures = [keypair.sign_message(transaction.message_data())]
+    returned.signatures = [keypair.sign_message(signed_message_bytes(transaction.message))]
     raw_transaction = base64.b64encode(bytes(returned)).decode("ascii")
     mock_sign_flow(status_response("completed", raw_transaction=raw_transaction))
     with pytest.raises(SignerError) as excinfo:

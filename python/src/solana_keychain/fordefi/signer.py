@@ -17,7 +17,7 @@ from urllib.parse import quote
 import httpx
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction
+from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import (
@@ -34,6 +34,7 @@ from solana_keychain.core.transaction_util import (
     get_signing_keypair_position,
     idempotency_key_from_message,
     serialize_transaction,
+    signed_message_bytes,
 )
 from solana_keychain.fordefi.request_signer import FordefiRequestSigner, PemRequestSigner
 
@@ -335,7 +336,7 @@ class FordefiSigner(SolanaSigner):
                 "the public key",
             )
 
-    async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
+    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         """Sign ``transaction`` via Fordefi MPC.
 
         Black-box mode signs the exact message bytes, places the signature in
@@ -359,7 +360,7 @@ class FordefiSigner(SolanaSigner):
         """
         if self._chain is not None:
             return await self._sign_transaction_native(transaction)
-        message_data = transaction.message_data()
+        message_data = signed_message_bytes(transaction.message)
         signature = await self._sign_black_box(message_data)
         self._verify_signature(signature, message_data)
         add_signature_to_transaction(transaction, self._public_key, signature)
@@ -367,7 +368,7 @@ class FordefiSigner(SolanaSigner):
             transaction, serialize_transaction(transaction), signature
         )
 
-    def _require_sole_required_signer(self, transaction: Transaction) -> None:
+    def _require_sole_required_signer(self, transaction: VersionedTransaction) -> None:
         account_keys = transaction.message.account_keys
         if transaction.message.header.num_required_signatures != 1 or (
             not account_keys or account_keys[0] != self._public_key
@@ -378,9 +379,11 @@ class FordefiSigner(SolanaSigner):
                 "whose sole required signer is the configured vault",
             )
 
-    async def _sign_transaction_native(self, transaction: Transaction) -> SignedTransaction:
+    async def _sign_transaction_native(
+        self, transaction: VersionedTransaction
+    ) -> SignedTransaction:
         self._require_sole_required_signer(transaction)
-        message_data = transaction.message_data()
+        message_data = signed_message_bytes(transaction.message)
         transaction_id = await self._post_transaction(
             self._solana_transaction_request(message_data),
             idempotence_id=idempotency_key_from_message(message_data),
@@ -420,12 +423,11 @@ class FordefiSigner(SolanaSigner):
                 SignerErrorCode.SERIALIZATION_ERROR, "Failed to decode raw_transaction base64"
             ) from None
         try:
-            returned = Transaction.from_bytes(wire_bytes)
+            returned = VersionedTransaction.from_bytes(wire_bytes)
         except Exception:
             raise SignerError(
                 SignerErrorCode.SERIALIZATION_ERROR,
-                "Failed to deserialize Fordefi wire transaction "
-                "(versioned/v0 transactions are not supported, only legacy)",
+                "Failed to deserialize Fordefi wire transaction",
             ) from None
         position = get_signing_keypair_position(returned, self._public_key)
         signatures = returned.signatures
@@ -435,7 +437,7 @@ class FordefiSigner(SolanaSigner):
                 "Fordefi signature slot missing from returned transaction",
             )
         signature = signatures[position]
-        self._verify_signature(signature, returned.message_data())
+        self._verify_signature(signature, signed_message_bytes(returned.message))
         return classify_signed_transaction(returned, "", signature)
 
     async def sign_message(self, message: bytes) -> Signature:

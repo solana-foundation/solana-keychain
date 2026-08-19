@@ -14,9 +14,10 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
 )
 from solders.keypair import Keypair
-from solders.transaction import Transaction
+from solders.transaction import Transaction, VersionedTransaction
 
 from solana_keychain import SignerError, SignerErrorCode
+from solana_keychain.core import signed_message_bytes
 from solana_keychain.utila import UtilaSigner, UtilaSignerConfig, create_utila_signer
 from tests.util import create_test_transaction
 
@@ -68,9 +69,9 @@ def utila_transaction(state: str, raw_transaction: str | None = None) -> dict[st
     return transaction
 
 
-def signed_raw_transaction(keypair: Keypair, transaction: Transaction) -> str:
+def signed_raw_transaction(keypair: Keypair, transaction: VersionedTransaction) -> str:
     signed = Transaction.from_bytes(bytes(transaction))
-    signed.signatures = [keypair.sign_message(transaction.message_data())]
+    signed.signatures = [keypair.sign_message(signed_message_bytes(transaction.message))]
     return base64.b64encode(bytes(signed)).decode()
 
 
@@ -182,7 +183,7 @@ async def test_sign_transaction_success_with_polling() -> None:
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
     unsigned_b64 = base64.b64encode(bytes(transaction)).decode()
-    expected_signature = keypair.sign_message(transaction.message_data())
+    expected_signature = keypair.sign_message(signed_message_bytes(transaction.message))
 
     respx.post(INITIATE_URL).mock(
         return_value=httpx.Response(
@@ -293,7 +294,7 @@ async def test_rewritten_message_bytes_are_rejected() -> None:
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
     rewritten = create_test_transaction(keypair.pubkey())
-    assert rewritten.message_data() != transaction.message_data()
+    assert signed_message_bytes(rewritten.message) != signed_message_bytes(transaction.message)
 
     respx.post(INITIATE_URL).mock(
         return_value=httpx.Response(

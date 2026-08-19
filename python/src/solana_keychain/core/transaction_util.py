@@ -4,15 +4,14 @@ import base64
 import hashlib
 import uuid
 
-from solders.message import Message, MessageV0
+from solders.message import VersionedMessage, to_bytes_versioned
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction
+from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.signer import SignedTransaction
 
-MESSAGE_VERSION_PREFIX = b"\x80"
 ED25519_SIGNATURE_LENGTH = 64
 
 
@@ -25,7 +24,7 @@ def idempotency_key_from_message(message_bytes: bytes) -> str:
     return str(uuid.UUID(bytes=bytes(digest)))
 
 
-def serialize_transaction(transaction: Transaction) -> str:
+def serialize_transaction(transaction: VersionedTransaction) -> str:
     """Encode a transaction to base64(bincode(tx))."""
     try:
         raw = bytes(transaction)
@@ -36,19 +35,16 @@ def serialize_transaction(transaction: Transaction) -> str:
     return base64.b64encode(raw).decode("ascii")
 
 
-def signed_message_bytes(message: Message | MessageV0) -> bytes:
+def signed_message_bytes(message: VersionedMessage) -> bytes:
     """The bytes a signature over ``message`` actually covers.
 
-    A v0 message is signed with a ``0x80`` version prefix that its serialization
-    omits; a legacy message is signed as-is.
+    A versioned message is signed with the version prefix its own serialization
+    omits (``0x80`` for v0, ``0x81`` for v1); a legacy message is signed as-is.
     """
-    serialized = bytes(message)
-    if isinstance(message, MessageV0):
-        return MESSAGE_VERSION_PREFIX + serialized
-    return serialized
+    return to_bytes_versioned(message)
 
 
-def get_signing_keypair_position(transaction: Transaction, pubkey: Pubkey) -> int:
+def get_signing_keypair_position(transaction: VersionedTransaction, pubkey: Pubkey) -> int:
     """Index of ``pubkey`` within the transaction's required-signer slots."""
     num_required = transaction.message.header.num_required_signatures
     account_keys = transaction.message.account_keys
@@ -65,7 +61,7 @@ def get_signing_keypair_position(transaction: Transaction, pubkey: Pubkey) -> in
 
 
 def add_signature_to_transaction(
-    transaction: Transaction, pubkey: Pubkey, signature: Signature
+    transaction: VersionedTransaction, pubkey: Pubkey, signature: Signature
 ) -> None:
     """Place ``signature`` at ``pubkey``'s required-signer position, in place."""
     position = get_signing_keypair_position(transaction, pubkey)
@@ -77,7 +73,7 @@ def add_signature_to_transaction(
     transaction.signatures = signatures
 
 
-def has_all_required_signatures(transaction: Transaction) -> bool:
+def has_all_required_signatures(transaction: VersionedTransaction) -> bool:
     """True when every required signature slot holds a non-default signature."""
     num_required = transaction.message.header.num_required_signatures
     signatures = transaction.signatures
@@ -88,7 +84,7 @@ def has_all_required_signatures(transaction: Transaction) -> bool:
 
 
 def classify_signed_transaction(
-    transaction: Transaction, encoded_transaction: str, signature: Signature
+    transaction: VersionedTransaction, encoded_transaction: str, signature: Signature
 ) -> SignedTransaction:
     """Build a SignedTransaction marked complete or partial."""
     return SignedTransaction(

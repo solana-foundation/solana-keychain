@@ -7,6 +7,7 @@ from solders.keypair import Keypair
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.aws_kms import AwsKmsSigner, AwsKmsSignerConfig, create_aws_kms_signer
+from solana_keychain.core import signed_message_bytes
 from tests.util import create_test_transaction
 
 TEST_KEY_ID = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
@@ -119,12 +120,12 @@ async def test_sign_message_signature_verification_failure() -> None:
 async def test_sign_transaction_success() -> None:
     keypair = Keypair()
     transaction = create_test_transaction(keypair.pubkey())
-    signature = keypair.sign_message(transaction.message_data())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
     signer, stubber = make_stubbed_signer(str(keypair.pubkey()))
     stubber.add_response(
         "sign",
         sign_response(bytes(signature)),
-        expected_sign_params(transaction.message_data()),
+        expected_sign_params(signed_message_bytes(transaction.message)),
     )
 
     with stubber:

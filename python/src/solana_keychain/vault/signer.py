@@ -7,7 +7,7 @@ from urllib.parse import quote
 import httpx
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction
+from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
@@ -16,6 +16,7 @@ from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
     serialize_transaction,
+    signed_message_bytes,
 )
 
 
@@ -103,8 +104,8 @@ class VaultSigner(SolanaSigner):
             )
         return signature
 
-    async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
-        signature = await self._sign_bytes(transaction.message_data())
+    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
+        signature = await self._sign_bytes(signed_message_bytes(transaction.message))
         add_signature_to_transaction(transaction, self._pubkey, signature)
         return classify_signed_transaction(
             transaction, serialize_transaction(transaction), signature
