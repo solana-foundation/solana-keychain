@@ -44,10 +44,10 @@
         "@solana/keychain": "workspace:*"
     },
     "peerDependencies": {
-        "@solana/kit": ">=6.8.0"
+        "@solana/kit": ">=8.0.0-canary-20260819144513"
     },
     "devDependencies": {
-        "@solana/kit": "^7.0.0"
+        "@solana/kit": "8.0.0-canary-20260819144513"
     },
     "publishConfig": {
         "access": "public"

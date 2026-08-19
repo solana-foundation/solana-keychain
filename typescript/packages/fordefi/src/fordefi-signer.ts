@@ -1,12 +1,11 @@
 import { createPrivateKey, createSign, type KeyObject } from 'node:crypto';
 
 import { Address, assertIsAddress } from '@solana/addresses';
-import { getBase58Decoder } from '@solana/codecs-strings';
+import { getBase58Decoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
     assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
-    extractSignatureFromWireTransaction,
     fetchSignerJson,
     idempotencyKeyFromMessage,
     normalizeBaseUrl,
@@ -28,6 +27,7 @@ import {
 } from '@solana/signers';
 import {
     Base64EncodedWireTransaction,
+    getTransactionDecoder,
     Transaction,
     TransactionWithinSizeLimit,
     TransactionWithLifetime,
@@ -550,11 +550,9 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
         }
 
         const signedWireTx = result.raw_transaction as Base64EncodedWireTransaction;
-        const sigDict = extractSignatureFromWireTransaction({
-            base64WireTransaction: signedWireTx,
-            signerAddress: this.address,
-        });
-        const signerSignature = sigDict[this.address];
+        const { messageBytes, signatures } = getTransactionDecoder().decode(getBase64Encoder().encode(signedWireTx));
+
+        const signerSignature = signatures[this.address];
         if (!signerSignature) {
             return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                 address: this.address,
@@ -562,7 +560,15 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
             });
         }
 
-        const { messageBytes, transactionSignature } = FordefiSigner.extractWireTransactionParts(signedWireTx);
+        // The fee payer occupies the first signature slot, and its signature is the
+        // id the network knows the broadcast transaction by.
+        const transactionSignature = Object.values(signatures)[0];
+        if (!transactionSignature) {
+            return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message: 'Fordefi wire transaction carries no fee-payer signature to identify the broadcast by',
+            });
+        }
+
         await assertSignatureValid({
             data: messageBytes,
             signature: signerSignature,
@@ -805,62 +811,5 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
                 message: 'requestTimeoutMs must be a positive finite number',
             });
         }
-    }
-
-    /**
-     * Extract the message bytes portion from a base64-encoded wire transaction.
-     * Wire format: [compact-u16 sig_count][sig_count * 64 bytes][message bytes]
-     */
-    private static extractWireTransactionParts(base64WireTx: Base64EncodedWireTransaction): {
-        messageBytes: Uint8Array;
-        transactionSignature: SignatureBytes;
-    } {
-        const wireBytes = new Uint8Array(Buffer.from(base64WireTx, 'base64'));
-        let signatureCount = 0;
-        let signatureCountSize = 0;
-        let shift = 0;
-        let terminated = false;
-
-        while (signatureCountSize < 3) {
-            const byte = wireBytes[signatureCountSize];
-            if (byte === undefined) {
-                return throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                    message: 'Fordefi wire transaction is missing its signature count',
-                });
-            }
-            signatureCount |= (byte & 0x7f) << shift;
-            signatureCountSize++;
-            if ((byte & 0x80) === 0) {
-                terminated = true;
-                break;
-            }
-            shift += 7;
-        }
-
-        if (!terminated) {
-            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                message: 'Fordefi wire transaction has an invalid signature count',
-            });
-        }
-
-        if (signatureCount < 1) {
-            return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                message: 'Fordefi wire transaction has no signatures',
-            });
-        }
-
-        const messageStart = signatureCountSize + signatureCount * 64;
-        if (wireBytes.length <= messageStart) {
-            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                message: 'Fordefi wire transaction is truncated',
-            });
-        }
-
-        return {
-            messageBytes: wireBytes.subarray(messageStart),
-            transactionSignature: new Uint8Array(
-                wireBytes.subarray(signatureCountSize, signatureCountSize + 64),
-            ) as SignatureBytes,
-        };
     }
 }

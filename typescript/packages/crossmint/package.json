@@ -42,21 +42,21 @@
         "@solana/keychain-core": "workspace:*"
     },
     "peerDependencies": {
-        "@solana/addresses": ">=6.0.1",
-        "@solana/codecs-strings": ">=6.0.1",
-        "@solana/keys": ">=6.0.1",
-        "@solana/signers": ">=6.0.1",
-        "@solana/transactions": ">=6.0.1"
+        "@solana/addresses": ">=8.0.0-canary-20260819144513",
+        "@solana/codecs-strings": ">=8.0.0-canary-20260819144513",
+        "@solana/keys": ">=8.0.0-canary-20260819144513",
+        "@solana/signers": ">=8.0.0-canary-20260819144513",
+        "@solana/transactions": ">=8.0.0-canary-20260819144513"
     },
     "devDependencies": {
-        "@solana/addresses": "^7.0.0",
-        "@solana/codecs-strings": "^7.0.0",
+        "@solana/addresses": "8.0.0-canary-20260819144513",
+        "@solana/codecs-strings": "8.0.0-canary-20260819144513",
         "@solana/keychain-test-utils": "workspace:*",
-        "@solana/keys": "^7.0.0",
-        "@solana/signers": "^7.0.0",
-        "@solana/transactions": "^7.0.0",
+        "@solana/keys": "8.0.0-canary-20260819144513",
+        "@solana/signers": "8.0.0-canary-20260819144513",
+        "@solana/transactions": "8.0.0-canary-20260819144513",
         "@solana-program/memo": "^0.12.0",
-        "@solana/kit": "^7.0.0",
+        "@solana/kit": "8.0.0-canary-20260819144513",
         "dotenv": "^17.4.2"
     },
     "publishConfig": {

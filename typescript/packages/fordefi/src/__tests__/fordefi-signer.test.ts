@@ -5,10 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     assertIsSolanaSigner,
     assertSignatureValid,
-    extractSignatureFromWireTransaction,
     isSolanaSendingSigner,
     isSolanaSigner,
 } from '@solana/keychain-core';
+import { createSignedWireTransaction } from '@solana/keychain-test-utils';
 import { isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
@@ -16,12 +16,6 @@ vi.mock('@solana/keychain-core', async importOriginal => {
     return {
         ...mod,
         assertSignatureValid: vi.fn(),
-        // Stub extraction so we don't need to craft a byte-exact Solana
-        // wire transaction for the happy-path tests. The real extraction
-        // logic lives in @solana/keychain-core and is covered there.
-        extractSignatureFromWireTransaction: vi.fn(({ signerAddress }: { signerAddress: string }) =>
-            Object.freeze({ [signerAddress]: new Uint8Array(64).fill(0xab) }),
-        ),
         sanitizeRemoteErrorResponse:
             mod.sanitizeRemoteErrorResponse ??
             ((text: string) =>
@@ -75,13 +69,20 @@ function mockPollResponse(state: string, sigBase64?: string, rawTransaction?: st
     return new Response(JSON.stringify(body), { status: 200 });
 }
 
-/** Build a fake base64 wire transaction (1-byte sig count + 64-byte sig + message). */
-function mockWireTransaction(messageBytes = new Uint8Array(32)): string {
-    const wire = new Uint8Array(1 + 64 + messageBytes.length);
-    wire[0] = 1;
-    wire.set(new Uint8Array(64).fill(0xab), 1);
-    wire.set(messageBytes, 65);
-    return Buffer.from(wire).toString('base64');
+/**
+ * Native mode reads the signature and message bytes back out of a real wire
+ * transaction, so these fixtures must be genuinely encoded: a v1 envelope puts its
+ * version byte at offset zero and its signatures at the tail, and a hand-built
+ * legacy layout cannot stand in for one.
+ */
+async function setupNativeBroadcast(version: 0 | 1) {
+    const fixture = await createSignedWireTransaction(version);
+    const config = {
+        ...mockConfig,
+        chain: 'solana_mainnet',
+        publicKey: fixture.feePayer,
+    } satisfies FordefiSignerConfig;
+    return { config, fixture };
 }
 
 function mockVaultResponse(address: string = MOCK_ADDRESS) {
@@ -325,7 +326,8 @@ describe('FordefiSigner', () => {
 
             const results = await signer.signTransactions([mockTx]);
 
-            expect(vi.mocked(extractSignatureFromWireTransaction)).not.toHaveBeenCalled();
+            // Black box mode signs the message bytes, so the signature comes straight
+            // from the response rather than out of a returned wire transaction.
             expect(results[0]).toHaveProperty(MOCK_ADDRESS);
             expect(Object.values(results[0]!)[0]).toEqual(MOCK_SIGNATURE_BYTES);
         });
@@ -465,46 +467,53 @@ describe('FordefiSigner', () => {
     });
 
     describe('signAndSendTransactions (native solana mode)', () => {
-        it('should expose a TransactionSendingSigner and return the broadcast transaction signature', async () => {
-            const returnedMessage = new Uint8Array(32).fill(0xcd);
-            const wireTx = mockWireTransaction(returnedMessage);
-            vi.mocked(fetch)
-                .mockResolvedValueOnce(mockVaultResponse())
-                .mockResolvedValueOnce(mockCreateTxResponse('tx-native'))
-                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
+        it.each([0, 1] as const)(
+            'should expose a TransactionSendingSigner and return the broadcast signature from a v%i envelope',
+            async version => {
+                const { config, fixture } = await setupNativeBroadcast(version);
+                vi.mocked(fetch)
+                    .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                    .mockResolvedValueOnce(mockCreateTxResponse('tx-native'))
+                    .mockResolvedValueOnce(
+                        mockPollResponse('completed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction),
+                    );
 
-            const signer = await FordefiSigner.create(nativeConfig);
-            expect(
-                isTransactionSendingSigner(
-                    signer as unknown as { [key: string]: unknown; address: typeof signer.address },
-                ),
-            ).toBe(true);
+                const signer = await FordefiSigner.create(config);
+                expect(
+                    isTransactionSendingSigner(
+                        signer as unknown as { [key: string]: unknown; address: typeof signer.address },
+                    ),
+                ).toBe(true);
 
-            const mockTx = {
-                messageBytes: new Uint8Array(32),
-                signatures: { [MOCK_ADDRESS]: null },
-            } as never;
-            const results = await signer.signAndSendTransactions([mockTx]);
-            expect(results).toHaveLength(1);
-            expect(results[0]).toEqual(MOCK_SIGNATURE_BYTES);
-            expect(assertSignatureValid).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    data: returnedMessage,
-                    signerAddress: MOCK_ADDRESS,
-                }),
-            );
+                const mockTx = {
+                    messageBytes: new Uint8Array(32),
+                    signatures: { [fixture.feePayer]: null },
+                } as never;
+                const results = await signer.signAndSendTransactions([mockTx]);
+                expect(results).toHaveLength(1);
 
-            // Verify POST body uses solana_transaction type
-            const call = vi.mocked(fetch).mock.calls[1]!;
-            const postOpts = call[1] as RequestInit;
-            const body = JSON.parse(postOpts.body as string);
-            expect(body.type).toBe('solana_transaction');
-            expect(body.details.type).toBe('solana_serialized_transaction_message');
-            expect(body.details.chain).toBe('solana_mainnet');
-            expect(body.details.push_mode).toBe('auto');
-            expect(body.details).toHaveProperty('data');
-            expect(body.details).not.toHaveProperty('signatures');
-        });
+                // The fee payer's signature is the id the network knows the broadcast by,
+                // wherever the envelope happens to place it.
+                expect(results[0]).toStrictEqual(fixture.signature);
+                expect(assertSignatureValid).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        data: fixture.messageBytes,
+                        signerAddress: fixture.feePayer,
+                    }),
+                );
+
+                // Verify POST body uses solana_transaction type
+                const call = vi.mocked(fetch).mock.calls[1]!;
+                const postOpts = call[1] as RequestInit;
+                const body = JSON.parse(postOpts.body as string);
+                expect(body.type).toBe('solana_transaction');
+                expect(body.details.type).toBe('solana_serialized_transaction_message');
+                expect(body.details.chain).toBe('solana_mainnet');
+                expect(body.details.push_mode).toBe('auto');
+                expect(body.details).toHaveProperty('data');
+                expect(body.details).not.toHaveProperty('signatures');
+            },
+        );
 
         it('sends a deterministic x-idempotence-id on the native create', async () => {
             const messageBytes = new Uint8Array(32).fill(0xab);
@@ -514,15 +523,14 @@ describe('FordefiSigner', () => {
             const hex = digest.toString('hex');
             const expectedId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 
-            const returnedMessage = new Uint8Array(32).fill(0xcd);
-            const wireTx = mockWireTransaction(returnedMessage);
+            const { config, fixture } = await setupNativeBroadcast(1);
             vi.mocked(fetch)
-                .mockResolvedValueOnce(mockVaultResponse())
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-native'))
-                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
 
-            const signer = await FordefiSigner.create(nativeConfig);
-            const mockTx = { messageBytes, signatures: { [MOCK_ADDRESS]: null } } as never;
+            const signer = await FordefiSigner.create(config);
+            const mockTx = { messageBytes, signatures: { [fixture.feePayer]: null } } as never;
             await signer.signAndSendTransactions([mockTx]);
 
             const postOpts = vi.mocked(fetch).mock.calls[1]![1] as RequestInit;
@@ -574,18 +582,18 @@ describe('FordefiSigner', () => {
         });
 
         it('should poll through intermediate pushable states', async () => {
-            const wireTx = mockWireTransaction();
+            const { config, fixture } = await setupNativeBroadcast(1);
             vi.mocked(fetch)
-                .mockResolvedValueOnce(mockVaultResponse())
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-push'))
                 .mockResolvedValueOnce(mockPollResponse('pushing'))
                 .mockResolvedValueOnce(mockPollResponse('confirming'))
-                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, wireTx));
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
 
-            const signer = await FordefiSigner.create({ ...nativeConfig, pollIntervalMs: 1 });
+            const signer = await FordefiSigner.create({ ...config, pollIntervalMs: 1 });
             const mockTx = {
                 messageBytes: new Uint8Array(32),
-                signatures: { [MOCK_ADDRESS]: null },
+                signatures: { [fixture.feePayer]: null },
             } as never;
             const results = await signer.signAndSendTransactions([mockTx]);
             expect(results).toHaveLength(1);
