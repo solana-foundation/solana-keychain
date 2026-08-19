@@ -219,10 +219,8 @@ impl CrossmintSigner {
         Self::parse_response_with_required_field(response, "address", "fetch_wallet").await
     }
 
-    /// Derives the `x-idempotency-key` for a create: a UUID built from the first
-    /// 16 bytes of SHA-256(message bytes), so retrying the same message reuses
-    /// the same key and Crossmint deduplicates the create instead of executing a
-    /// second transaction.
+    /// A UUID derived from SHA-256(message bytes), so a retry of the same bytes
+    /// reuses the key and Crossmint deduplicates the create.
     fn idempotency_key_from_message(message_bytes: &[u8]) -> String {
         use sha2::{Digest, Sha256};
         let digest = Sha256::digest(message_bytes);
@@ -788,8 +786,7 @@ impl CrossmintSigner {
     /// [`SignerError::BroadcastUnconfirmed`] carrying the Crossmint transaction id;
     /// check that transaction with Crossmint before retrying. Each create carries
     /// an `x-idempotency-key` derived from the message bytes, so retrying the
-    /// exact same bytes cannot create a second Crossmint transaction; a retry
-    /// built with a fresh blockhash is a new transaction.
+    /// exact same bytes cannot create a second transaction.
     async fn sign_and_serialize(
         &self,
         transaction: &mut Transaction,
@@ -811,11 +808,8 @@ impl CrossmintSigner {
             .create_transaction(transaction_b58, &idempotency_key)
             .await?;
         let provider_tx_id = create_response.id.clone();
-        // Once the create is accepted Crossmint may approve and execute the
-        // transaction server-side, so any later failure leaves an outcome this
-        // client cannot rule out. Report those as BroadcastUnconfirmed carrying
-        // the Crossmint transaction id instead of a generic error a caller might
-        // blindly retry into a duplicate spend.
+        // Post-create failures leave an outcome Crossmint may still execute, so
+        // they surface as BroadcastUnconfirmed with the transaction id.
         let (signature, broadcast) = self
             .finish_managed_transaction(create_response, &expected_message)
             .await
@@ -1155,9 +1149,6 @@ mod tests {
         let on_chain_transaction =
             bs58::encode(bincode::serialize(&signed_remote_tx).unwrap()).into_string();
 
-        // The create must carry a deterministic x-idempotency-key derived from
-        // the message bytes, so a blind retry of the same bytes reuses the key
-        // and Crossmint deduplicates the create.
         let expected_idempotency_key =
             CrossmintSigner::idempotency_key_from_message(&local_tx.message_data());
         Mock::given(method("POST"))

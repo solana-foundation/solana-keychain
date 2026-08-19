@@ -398,9 +398,6 @@ func TestSignTransactionSuccess(t *testing.T) {
 		if req.Params.Transaction == "" {
 			t.Error("create request missing base58 transaction")
 		}
-		// The create carries a deterministic x-idempotency-key derived from
-		// the submitted message bytes, so a blind retry of the same bytes
-		// reuses the key and Crossmint deduplicates the create.
 		submittedMessage, marshalErr := localTx.Message.MarshalBinary()
 		if marshalErr != nil {
 			t.Errorf("serialize submitted message: %v", marshalErr)

@@ -47,10 +47,8 @@ def _encode_uri_component(value: str) -> str:
 
 
 def _idempotency_key_from_message(message_bytes: bytes) -> str:
-    """The x-idempotency-key for a create: a UUID built from the first 16 bytes
-    of SHA-256(message bytes), so retrying the same message reuses the same key
-    and Crossmint deduplicates the create instead of executing a second
-    transaction."""
+    """A UUID derived from SHA-256(message bytes), so a retry of the same bytes
+    reuses the key and Crossmint deduplicates the create."""
     digest = bytearray(hashlib.sha256(message_bytes).digest()[:16])
     digest[6] = (digest[6] & 0x0F) | 0x40
     digest[8] = (digest[8] & 0x3F) | 0x80
@@ -565,8 +563,7 @@ class CrossmintSigner(SolanaSigner):
         ``BROADCAST_UNCONFIRMED`` carrying ``provider_transaction_id``; check
         that transaction with Crossmint before retrying. Each create carries an
         ``x-idempotency-key`` derived from the message bytes, so retrying the
-        exact same bytes cannot create a second Crossmint transaction; a retry
-        built with a fresh blockhash is a new transaction.
+        exact same bytes cannot create a second transaction.
         """
         public_key = self._initialized_pubkey()
         expected_message = transaction.message_data()
@@ -576,11 +573,8 @@ class CrossmintSigner(SolanaSigner):
             transaction_b58, _idempotency_key_from_message(expected_message)
         )
         provider_transaction_id = str(create_response["id"])
-        # Once the create is accepted Crossmint may approve and execute the
-        # transaction server-side, so any later failure leaves an outcome this
-        # client cannot rule out. Report those as BROADCAST_UNCONFIRMED carrying
-        # the Crossmint transaction id instead of a generic error a caller might
-        # blindly retry into a duplicate spend.
+        # Post-create failures leave an outcome Crossmint may still execute, so
+        # they surface as BROADCAST_UNCONFIRMED with the transaction id.
         try:
             return await self._finish_managed_transaction(
                 create_response, transaction, expected_message, public_key

@@ -72,8 +72,7 @@ let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
  * `BROADCAST_UNCONFIRMED` carrying `context.providerTransactionId`; check that
  * transaction with Crossmint before retrying. Each create carries an
  * `x-idempotency-key` derived from the message bytes, so retrying the exact
- * same bytes cannot create a second Crossmint transaction; a retry built with
- * a fresh blockhash is a new transaction.
+ * same bytes cannot create a second transaction.
  */
 class CrossmintSigner<TAddress extends string = string> implements CrossmintSendingSigner<TAddress> {
     // No signTransactions/signMessages: Kit classifies signers by duck-typed
@@ -256,11 +255,8 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
      */
     private async signTransactionManaged(transaction: Transaction, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         const created = await this.createTransaction(transaction, abortSignal);
-        // Once the create is accepted Crossmint may approve and execute the
-        // transaction server-side, so any later failure leaves an outcome this
-        // client cannot rule out. Report those as BROADCAST_UNCONFIRMED carrying
-        // the Crossmint transaction id instead of a generic error a caller might
-        // blindly retry into a duplicate spend.
+        // Post-create failures leave an outcome Crossmint may still execute, so
+        // they surface as BROADCAST_UNCONFIRMED with the transaction id.
         try {
             return await this.driveTransactionToSignature(created, transaction, abortSignal);
         } catch (error) {
@@ -663,9 +659,8 @@ async function fetchWallet(
 }
 
 /**
- * The x-idempotency-key for a create: a UUID built from the first 16 bytes of
- * SHA-256(message bytes), so retrying the same message reuses the same key and
- * Crossmint deduplicates the create instead of executing a second transaction.
+ * A UUID derived from SHA-256(message bytes), so a retry of the same bytes
+ * reuses the key and Crossmint deduplicates the create.
  */
 async function idempotencyKeyFromMessage(messageBytes: Transaction['messageBytes']): Promise<string> {
     const { createHash } = await import('node:crypto');

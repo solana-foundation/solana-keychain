@@ -185,10 +185,8 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 		"Crossmint sign_message is not supported for Solana wallets in this signer")
 }
 
-// idempotencyKeyFromMessage derives the x-idempotency-key for a create: a UUID
-// built from the first 16 bytes of SHA-256(message bytes), so retrying the same
-// message reuses the same key and Crossmint deduplicates the create instead of
-// executing a second transaction.
+// idempotencyKeyFromMessage derives a UUID from SHA-256(message bytes), so a
+// retry of the same bytes reuses the key and Crossmint deduplicates the create.
 func idempotencyKeyFromMessage(messageBytes []byte) string {
 	digest := sha256.Sum256(messageBytes)
 	key := digest[:16]
@@ -209,9 +207,8 @@ func idempotencyKeyFromMessage(messageBytes []byte) string {
 // Not retry-safe: any failure after the create is accepted returns
 // CodeBroadcastUnconfirmed carrying the Crossmint transaction id; check that
 // transaction with Crossmint before retrying. Each create carries an
-// x-idempotency-key derived from the message bytes, so retrying the exact same
-// bytes cannot create a second Crossmint transaction; a retry built with a
-// fresh blockhash is a new transaction.
+// x-idempotency-key derived from the message bytes, so retrying the exact
+// same bytes cannot create a second transaction.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.publicKey.IsZero() {
 		return core.SignedTransaction{}, core.NewSignerError(core.CodeConfigError, "signer not initialized")
@@ -230,11 +227,8 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}
-	// Once the create is accepted Crossmint may approve and execute the
-	// transaction server-side, so any later failure leaves an outcome this
-	// client cannot rule out. Report those as CodeBroadcastUnconfirmed carrying
-	// the Crossmint transaction id instead of a generic error a caller might
-	// blindly retry into a duplicate spend.
+	// Post-create failures leave an outcome Crossmint may still execute, so
+	// they surface as CodeBroadcastUnconfirmed with the transaction id.
 	signed, err := s.finishManagedTransaction(ctx, tx, createResponse, expectedMessage)
 	if err != nil {
 		detail := err.Error()

@@ -982,12 +982,6 @@ describe('CrossmintSigner', () => {
             expect(body.params.signer).toBe('my-signer-id');
         });
 
-        /**
-         * The create must carry a deterministic x-idempotency-key derived from
-         * the message bytes: a blind retry of the same bytes reuses the key, so
-         * Crossmint deduplicates the create instead of executing a second
-         * transfer.
-         */
         it('sends a deterministic x-idempotency-key on the create', async () => {
             const digest = createHash('sha256').update(MOCK_MESSAGE_BYTES).digest().subarray(0, 16);
             digest[6] = (digest[6]! & 0x0f) | 0x40;

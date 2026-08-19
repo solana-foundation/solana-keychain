@@ -200,9 +200,6 @@ async def test_sign_transaction_success_from_embedded_transaction() -> None:
     create_body = json.loads(respx.calls[1].request.content)
     assert "signer" not in create_body["params"]
     assert base58.b58decode(create_body["params"]["transaction"]) == unsigned_bytes
-    # The create carries a deterministic x-idempotency-key derived from the
-    # message bytes, so a blind retry of the same bytes reuses the key and
-    # Crossmint deduplicates the create.
     digest = bytearray(hashlib.sha256(transaction.message_data()).digest()[:16])
     digest[6] = (digest[6] & 0x0F) | 0x40
     digest[8] = (digest[8] & 0x3F) | 0x80
