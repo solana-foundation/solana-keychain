@@ -9,6 +9,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -36,6 +37,8 @@ from solana_keychain.core.transaction_util import (
     serialize_transaction,
 )
 from solana_keychain.fordefi.request_signer import FordefiRequestSigner, PemRequestSigner
+
+_logger = logging.getLogger("solana_keychain")
 
 DEFAULT_API_BASE_URL = "https://api.fordefi.com"
 DEFAULT_POLL_INTERVAL_MS = 2000
@@ -391,7 +394,12 @@ class FordefiSigner(SolanaSigner):
         try:
             return await self._finish_native_broadcast(transaction_id)
         except asyncio.CancelledError as error:
-            # Must stay a CancelledError for asyncio; carry the id in the message.
+            # Awaiting a cancelled task strips the raised instance, so the id is
+            # also logged; the re-raise must stay a CancelledError for asyncio.
+            _logger.warning(
+                "Fordefi may have executed cancelled transaction %s; check it before retrying",
+                transaction_id,
+            )
             raise asyncio.CancelledError(
                 "Fordefi may have executed the transaction, but the outcome could "
                 f"not be confirmed (provider transaction id: {transaction_id})"

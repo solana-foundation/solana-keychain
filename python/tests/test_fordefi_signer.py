@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -356,10 +357,11 @@ async def test_sign_transaction_native_polling_timeout_is_broadcast_unconfirmed(
 
 
 @respx.mock
-async def test_sign_transaction_native_cancellation_carries_the_transaction_id() -> None:
-    """The re-raised CancelledError must carry the provider transaction id.
-
-    Observed inside the cancelled task: awaiting the task itself yields a fresh
+async def test_sign_transaction_native_cancellation_carries_the_transaction_id(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The re-raised CancelledError must carry the provider transaction id, and
+    the id must also be logged: awaiting the cancelled task yields a fresh
     CancelledError from the task machinery, without the message."""
     keypair = Keypair()
     signer = make_signer(keypair, chain="solana_devnet")
@@ -384,9 +386,11 @@ async def test_sign_transaction_native_cancellation_carries_the_transaction_id()
     task = asyncio.create_task(run())
     await polling.wait()
     task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    with caplog.at_level(logging.WARNING, logger="solana_keychain"):
+        with pytest.raises(asyncio.CancelledError):
+            await task
     assert observed and "tx-1" in observed[0]
+    assert "tx-1" in caplog.text
 
 
 @respx.mock
