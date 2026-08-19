@@ -442,6 +442,46 @@ impl SolanaSigner for Signer {
         }
     }
 
+    fn broadcasts_transactions(&self) -> bool {
+        match self {
+            #[cfg(feature = "memory")]
+            Signer::Memory(s) => s.broadcasts_transactions(),
+
+            #[cfg(feature = "vault")]
+            Signer::Vault(s) => s.broadcasts_transactions(),
+
+            #[cfg(feature = "privy")]
+            Signer::Privy(s) => s.broadcasts_transactions(),
+
+            #[cfg(feature = "turnkey")]
+            Signer::Turnkey(s) => s.broadcasts_transactions(),
+
+            #[cfg(feature = "aws_kms")]
+            Signer::AwsKms(s) => s.broadcasts_transactions(),
+
+            #[cfg(feature = "fireblocks")]
+            Signer::Fireblocks(s) => s.broadcasts_transactions(),
+
+            #[cfg(feature = "gcp_kms")]
+            Signer::GcpKms(s) => s.broadcasts_transactions(),
+
+            #[cfg(feature = "cdp")]
+            Signer::Cdp(s) => s.broadcasts_transactions(),
+            #[cfg(feature = "dfns")]
+            Signer::Dfns(s) => s.broadcasts_transactions(),
+            #[cfg(feature = "openfort")]
+            Signer::Openfort(s) => s.broadcasts_transactions(),
+            #[cfg(feature = "para")]
+            Signer::Para(s) => s.broadcasts_transactions(),
+            #[cfg(feature = "crossmint")]
+            Signer::Crossmint(s) => s.broadcasts_transactions(),
+            #[cfg(feature = "utila")]
+            Signer::Utila(s) => s.broadcasts_transactions(),
+            #[cfg(feature = "fordefi")]
+            Signer::Fordefi(s) => s.broadcasts_transactions(),
+        }
+    }
+
     async fn sign_transaction(
         &self,
         tx: &mut sdk_adapter::Transaction,
@@ -563,5 +603,28 @@ impl SolanaSigner for Signer {
             #[cfg(feature = "fordefi")]
             Signer::Fordefi(s) => s.is_available().await,
         }
+    }
+}
+
+#[cfg(all(test, feature = "crossmint"))]
+mod signer_tests {
+    use super::*;
+
+    #[test]
+    fn unified_signer_surfaces_broadcast_capability() {
+        let signer = Signer::Crossmint(
+            CrossmintSigner::new(CrossmintSignerConfig {
+                api_key: "test-api-key".to_string(),
+                wallet_locator: "test-wallet".to_string(),
+                signer_secret: None,
+                signer: None,
+                api_base_url: Some("https://example.com".to_string()),
+                poll_interval_ms: None,
+                max_poll_attempts: None,
+            })
+            .unwrap(),
+        );
+
+        assert!(signer.broadcasts_transactions());
     }
 }

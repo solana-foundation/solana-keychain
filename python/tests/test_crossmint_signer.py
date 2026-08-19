@@ -73,6 +73,10 @@ def test_parse_api_key() -> None:
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
+def test_broadcasts_transactions() -> None:
+    assert make_signer().broadcasts_transactions
+
+
 def test_derive_signing_key_is_deterministic_and_env_scoped() -> None:
     key_one = derive_signing_key(SIGNER_SECRET, API_KEY)
     key_two = derive_signing_key(SIGNER_SECRET, API_KEY)

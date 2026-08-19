@@ -837,6 +837,10 @@ impl SolanaSigner for CrossmintSigner {
         self.public_key
     }
 
+    fn broadcasts_transactions(&self) -> bool {
+        true
+    }
+
     async fn sign_transaction(
         &self,
         tx: &mut Transaction,
@@ -905,6 +909,12 @@ mod tests {
         );
         signer.wallet_locator = wallet_locator.to_string();
         signer
+    }
+
+    #[test]
+    fn test_broadcasts_transactions() {
+        let signer = create_test_signer("https://example.com", 1, 1);
+        assert!(signer.broadcasts_transactions());
     }
 
     fn build_url_and_path(wallet_locator: &str, segments: &[&str]) -> (String, String) {

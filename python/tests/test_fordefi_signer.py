@@ -83,6 +83,12 @@ class StaticRequestSigner(FordefiRequestSigner):
         return "static-signature"
 
 
+def test_broadcasts_transactions_by_mode() -> None:
+    keypair = Keypair()
+    assert not make_signer(keypair).broadcasts_transactions
+    assert make_signer(keypair, chain="solana_mainnet").broadcasts_transactions
+
+
 @pytest.mark.parametrize("field", ["access_token", "vault_id", "public_key"])
 def test_config_rejects_empty_required_field(field: str) -> None:
     with pytest.raises(SignerError) as excinfo:

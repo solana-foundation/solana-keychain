@@ -21,6 +21,10 @@ def test_create_from_u8_array() -> None:
     assert str(create_test_signer().pubkey) == TEST_PUBKEY
 
 
+def test_does_not_broadcast_transactions() -> None:
+    assert not create_test_signer().broadcasts_transactions
+
+
 def test_create_from_config() -> None:
     keypair = Keypair.from_base58_string(TEST_KEYPAIR_BASE58)
     signer = MemorySigner.from_config(MemorySignerConfig(keypair=keypair))

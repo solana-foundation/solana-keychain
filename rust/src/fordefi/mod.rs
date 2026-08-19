@@ -716,6 +716,10 @@ impl SolanaSigner for FordefiSigner {
         self.public_key
     }
 
+    fn broadcasts_transactions(&self) -> bool {
+        self.chain.is_some()
+    }
+
     async fn sign_transaction(
         &self,
         tx: &mut Transaction,
@@ -876,6 +880,13 @@ mod tests {
             test_request_signer(),
             Some(SolanaChainUniqueId::SolanaMainnet),
         )
+    }
+
+    #[test]
+    fn test_broadcasts_transactions_by_mode() {
+        let pubkey = Pubkey::new_unique();
+        assert!(!create_test_signer("https://example.com", pubkey).broadcasts_transactions());
+        assert!(create_native_test_signer("https://example.com", pubkey).broadcasts_transactions());
     }
 
     /// Build a mock wire transaction: [1 byte sig_count][64-byte signature][message bytes]

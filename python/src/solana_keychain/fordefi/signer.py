@@ -187,6 +187,10 @@ class FordefiSigner(SolanaSigner):
     def pubkey(self) -> Pubkey:
         return self._public_key
 
+    @property
+    def broadcasts_transactions(self) -> bool:
+        return self._chain is not None
+
     async def _sign_request(self, path: str, timestamp: int, body: str) -> str:
         return await self._request_signer.sign_request(f"{path}|{timestamp}|{body}".encode())
 

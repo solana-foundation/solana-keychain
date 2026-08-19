@@ -29,6 +29,11 @@ pub trait SolanaSigner: Send + Sync {
     /// Get the public key of this signer
     fn pubkey(&self) -> Pubkey;
 
+    /// Returns `true` when the provider may execute the transaction server-side, requiring reconciliation by provider transaction ID before retrying.
+    fn broadcasts_transactions(&self) -> bool {
+        false
+    }
+
     /// Sign a Solana transaction
     ///
     /// # Arguments

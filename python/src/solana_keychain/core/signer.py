@@ -30,6 +30,12 @@ class SolanaSigner(ABC):
     def pubkey(self) -> Pubkey:
         """The public key of this signer."""
 
+    @property
+    def broadcasts_transactions(self) -> bool:
+        """Whether the provider may execute transactions server-side, requiring
+        reconciliation by provider transaction ID before retrying."""
+        return False
+
     @abstractmethod
     async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
         """Sign ``transaction`` (modified in place) and return the encoded result."""

@@ -231,6 +231,10 @@ class CrossmintSigner(SolanaSigner):
     def pubkey(self) -> Pubkey:
         return self._initialized_pubkey()
 
+    @property
+    def broadcasts_transactions(self) -> bool:
+        return True
+
     async def _create_transaction(
         self, transaction_b58: str, idempotency_key: str
     ) -> dict[str, Any]:
