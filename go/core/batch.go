@@ -48,13 +48,9 @@ func SignMessages(ctx context.Context, s Signer, messages [][]byte, opts BatchOp
 }
 
 // SignTransactions signs each transaction with s concurrently, preserving order.
-// See SignMessages for error and concurrency semantics.
-//
-// Signers that broadcast server-side (see TransactionBroadcaster) are rejected:
-// this helper collapses the batch into a single nil, err result on the first
-// failure, which would hide which transactions a provider already executed and
-// invite a whole-batch retry into duplicate spends. Call SignTransaction per
-// transaction instead and track each provider transaction id.
+// See SignMessages for error and concurrency semantics. Broadcasting signers
+// (see TransactionBroadcaster) are rejected: the single nil, err result would
+// hide which transactions the provider already executed.
 func SignTransactions(ctx context.Context, s Signer, txs []*solana.Transaction, opts BatchOptions) ([]SignedTransaction, error) {
 	if b, ok := s.(TransactionBroadcaster); ok && b.BroadcastsTransactions() {
 		return nil, NewSignerError(CodeConfigError,

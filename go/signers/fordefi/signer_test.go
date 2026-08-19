@@ -555,8 +555,7 @@ func nativeConfig(t *testing.T) Config {
 	return cfg
 }
 
-// Native mode broadcasts server-side, so core batch helpers must reject it;
-// black box only signs, so it may batch.
+// Native mode broadcasts, so batch helpers must reject it; black box may batch.
 func TestBroadcastsTransactionsFollowsMode(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	native := newTestSigner(t, nativeConfig(t), pub.String(), func(*http.ServeMux) {})

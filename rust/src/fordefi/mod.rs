@@ -483,8 +483,7 @@ impl FordefiSigner {
     /// Fordefi will modify the transaction (at minimum updating the blockhash, and
     /// optionally adding priority fees), so we verify the signature against the
     /// returned message bytes, not the original. The caller's `transaction` is
-    /// left untouched: the provider chose the broadcast bytes, so they are never
-    /// installed into it.
+    /// left untouched.
     ///
     /// Because native mode uses `push_mode: "auto"`, Fordefi has already broadcast
     /// the transaction on-chain by the time this returns. Re-sending it would be
@@ -556,11 +555,8 @@ impl FordefiSigner {
             ));
         }
 
-        // Native mode auto-broadcasts (push_mode: "auto"), so there is nothing for
-        // the caller to send, and the caller's transaction is left untouched: the
-        // provider chose these bytes, so they are never installed into it. Return
-        // an empty serialized transaction; the signature is the on-chain
-        // identifier.
+        // Auto-broadcast leaves nothing to send; the signature is the on-chain
+        // identifier and the caller's transaction stays untouched.
         Ok((String::new(), signature))
     }
 

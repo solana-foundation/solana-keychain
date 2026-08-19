@@ -171,9 +171,8 @@ func (s *Signer) verificationCandidates() []solana.PublicKey {
 // Pubkey returns the Crossmint wallet's Solana public key.
 func (s *Signer) Pubkey() solana.PublicKey { return s.publicKey }
 
-// BroadcastsTransactions is always true: Crossmint executes every transaction
-// server-side, so core batch helpers must reject this signer (see
-// core.TransactionBroadcaster).
+// BroadcastsTransactions is always true: Crossmint executes every
+// transaction server-side.
 func (s *Signer) BroadcastsTransactions() bool { return true }
 
 // String renders the signer without any secret material.

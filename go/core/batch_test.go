@@ -34,9 +34,8 @@ func (c *countingSigner) SignTransaction(context.Context, *solana.Transaction) (
 
 func (c *countingSigner) IsAvailable(context.Context) bool { return true }
 
-// broadcastingSigner marks itself as a server-side broadcaster with a
-// configurable answer, mirroring mode-dependent backends (Fordefi native vs
-// black box).
+// broadcastingSigner reports broadcasting with a configurable answer,
+// mirroring mode-dependent backends.
 type broadcastingSigner struct {
 	countingSigner
 	broadcasts bool
@@ -49,10 +48,8 @@ func (b *broadcastingSigner) SignTransaction(context.Context, *solana.Transactio
 	return SignedTransaction{}, nil
 }
 
-// TestSignTransactionsRejectsBroadcastingSigners guards the duplicate-spend
-// contract: SignTransactions collapses the batch into one nil, err result on
-// the first failure, hiding which transactions a broadcasting provider already
-// executed, so such signers must be rejected before any remote work starts.
+// Broadcasting signers must be rejected before any remote work: the single
+// nil, err batch result hides which transactions already executed.
 func TestSignTransactionsRejectsBroadcastingSigners(t *testing.T) {
 	s := &broadcastingSigner{broadcasts: true}
 	_, err := SignTransactions(context.Background(), s, []*solana.Transaction{{}}, BatchOptions{})
@@ -64,8 +61,6 @@ func TestSignTransactionsRejectsBroadcastingSigners(t *testing.T) {
 	}
 }
 
-// A signer that reports it does not broadcast in its current configuration
-// still batches normally.
 func TestSignTransactionsAcceptsNonBroadcastingConfiguration(t *testing.T) {
 	s := &broadcastingSigner{broadcasts: false}
 	out, err := SignTransactions(context.Background(), s, []*solana.Transaction{{}, {}}, BatchOptions{})

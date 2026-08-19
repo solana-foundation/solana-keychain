@@ -62,15 +62,13 @@ type Signer interface {
 	IsAvailable(ctx context.Context) bool
 }
 
-// TransactionBroadcaster marks signers whose SignTransaction submits and
-// broadcasts the transaction server-side (a managed send) rather than only
-// signing. For such signers a failure does not mean nothing happened: the
-// provider may have already executed the transaction, so callers must
-// reconcile by provider transaction id before retrying. SignTransactions
-// rejects signers reporting true.
+// TransactionBroadcaster marks signers whose SignTransaction broadcasts
+// server-side, where a failure does not mean nothing happened; callers must
+// reconcile by provider transaction id before retrying, and SignTransactions
+// rejects them.
 type TransactionBroadcaster interface {
-	// BroadcastsTransactions reports whether SignTransaction broadcasts
-	// server-side in this signer's current configuration.
+	// BroadcastsTransactions reports whether SignTransaction broadcasts in
+	// this signer's current configuration.
 	BroadcastsTransactions() bool
 }
 

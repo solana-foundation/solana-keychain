@@ -157,9 +157,8 @@ func (s *Signer) verifyVaultOwnership(ctx context.Context) error {
 // Pubkey returns the vault's Solana public key (verified during New).
 func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
-// BroadcastsTransactions reports whether SignTransaction auto-broadcasts:
-// native mode (Chain set) submits with push_mode "auto", so core batch helpers
-// must reject it (see core.TransactionBroadcaster).
+// BroadcastsTransactions reports whether SignTransaction auto-broadcasts
+// (native mode).
 func (s *Signer) BroadcastsTransactions() bool { return s.chain != "" }
 
 // String renders the signer without any secret material.
@@ -395,7 +394,5 @@ func (s *Signer) finishNativeBroadcast(ctx context.Context, txID string) (core.S
 			"signature verification failed against Fordefi-returned message")
 	}
 
-	// The caller's tx is left untouched: the provider chose these bytes, so they
-	// are classified on their own and never installed into the caller's object.
 	return core.Classify(returned, "", signature), nil
 }
