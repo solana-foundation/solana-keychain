@@ -357,10 +357,14 @@ async def test_sign_transaction_native_polling_timeout_is_broadcast_unconfirmed(
 
 @respx.mock
 async def test_sign_transaction_native_cancellation_carries_the_transaction_id() -> None:
-    """The re-raised CancelledError must carry the provider transaction id."""
+    """The re-raised CancelledError must carry the provider transaction id.
+
+    Observed inside the cancelled task: awaiting the task itself yields a fresh
+    CancelledError from the task machinery, without the message."""
     keypair = Keypair()
     signer = make_signer(keypair, chain="solana_devnet")
     polling = asyncio.Event()
+    observed: list[str] = []
 
     async def hang(_request: httpx.Request) -> httpx.Response:
         polling.set()
@@ -370,12 +374,19 @@ async def test_sign_transaction_native_cancellation_carries_the_transaction_id()
     respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"id": "tx-1"}))
     respx.get(f"{TRANSACTIONS_URL}/tx-1").mock(side_effect=hang)
 
-    task = asyncio.create_task(signer.sign_transaction(create_test_transaction(keypair.pubkey())))
+    async def run() -> None:
+        try:
+            await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        except asyncio.CancelledError as error:
+            observed.append(str(error))
+            raise
+
+    task = asyncio.create_task(run())
     await polling.wait()
     task.cancel()
-    with pytest.raises(asyncio.CancelledError) as excinfo:
+    with pytest.raises(asyncio.CancelledError):
         await task
-    assert "tx-1" in str(excinfo.value)
+    assert observed and "tx-1" in observed[0]
 
 
 @respx.mock
