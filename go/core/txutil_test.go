@@ -1,6 +1,8 @@
 package core
 
 import (
+	"bytes"
+	"crypto/ed25519"
 	"testing"
 
 	"github.com/gagliardetto/solana-go"
@@ -106,5 +108,84 @@ func TestClassifyPartialWhenMultiSig(t *testing.T) {
 	encoded, _ := Serialize(tx)
 	if res := Classify(tx, encoded, sig); res.IsComplete() {
 		t.Error("Classify should report Partial")
+	}
+}
+
+// A v1 envelope opens with 0x81 and puts its signatures at the tail, where legacy
+// and v0 lead with a compact-u16 signature count.
+func TestV1EnvelopePlacesMessageFirstAndSignaturesLast(t *testing.T) {
+	payer := testPublicKey()
+	tx, err := createTestV1Transaction(payer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv := testPrivateKey()
+	messageBytes, err := tx.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageBytes[0] != 0x81 {
+		t.Fatalf("v1 message should open with 0x81, got 0x%02x", messageBytes[0])
+	}
+	if err := AddSignature(tx, payer, solana.Signature(ed25519.Sign(priv, messageBytes))); err != nil {
+		t.Fatal(err)
+	}
+
+	wire, err := tx.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(wire[:len(messageBytes)], messageBytes) {
+		t.Error("v1 envelope should lead with the message bytes")
+	}
+	if len(wire) != len(messageBytes)+SignatureLength {
+		t.Errorf("v1 envelope should be message + one signature, got %d want %d",
+			len(wire), len(messageBytes)+SignatureLength)
+	}
+}
+
+func TestV1TransactionRoundTripsAndClassifies(t *testing.T) {
+	payer := testPublicKey()
+	tx, err := createTestV1Transaction(payer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageBytes, err := tx.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature := solana.Signature(ed25519.Sign(testPrivateKey(), messageBytes))
+
+	// The slot helpers are version-agnostic: a v1 message shares those fields.
+	position, err := SigningPosition(tx, payer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if position != 0 {
+		t.Errorf("fee payer should occupy slot 0, got %d", position)
+	}
+	if err := AddSignature(tx, payer, signature); err != nil {
+		t.Fatal(err)
+	}
+	if !HasAllRequiredSignatures(tx) {
+		t.Error("v1 transaction should be fully signed")
+	}
+
+	encoded, err := Serialize(tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := solana.TransactionFromBase64(encoded)
+	if err != nil {
+		t.Fatalf("v1 transaction should decode: %v", err)
+	}
+	if got := decoded.Message.GetVersion(); got != solana.MessageVersionV1 {
+		t.Errorf("decoded version = %v, want v1", got)
+	}
+	if decoded.Signatures[0] != signature {
+		t.Error("v1 signature should survive the round trip")
+	}
+	if c := Classify(tx, encoded, signature).Completeness; c != Complete {
+		t.Errorf("Classify = %v, want Complete", c)
 	}
 }
