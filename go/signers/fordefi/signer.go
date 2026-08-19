@@ -203,8 +203,7 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 // submission returns CodeBroadcastUnconfirmed carrying the Fordefi transaction
 // id; check that transaction with Fordefi before retrying. Each native create
 // carries an x-idempotence-id derived from the message bytes, so retrying the
-// exact same bytes cannot create a second Fordefi transaction; a retry built
-// with a fresh blockhash is a new transaction.
+// exact same bytes cannot create a second Fordefi transaction.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.chain != "" {
 		return s.signTransactionNative(ctx, tx)
@@ -301,10 +300,8 @@ func (s *Signer) requireSoleRequiredSigner(tx *solana.Transaction) error {
 	return nil
 }
 
-// idempotenceIDFromMessage derives the x-idempotence-id for a native create:
-// a UUID built from the first 16 bytes of SHA-256(message bytes), so retrying
-// the same message reuses the same id and Fordefi deduplicates the create
-// instead of broadcasting a second transaction.
+// idempotenceIDFromMessage derives a UUID from SHA-256(message bytes), so a
+// retry of the same bytes reuses the id and Fordefi deduplicates the create.
 func idempotenceIDFromMessage(messageBytes []byte) string {
 	digest := sha256.Sum256(messageBytes)
 	id := digest[:16]

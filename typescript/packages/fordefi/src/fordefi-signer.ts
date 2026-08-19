@@ -46,10 +46,8 @@ const DEFAULT_MAX_POLL_ATTEMPTS = 50;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
- * The x-idempotence-id for a native create: a UUID built from the first 16
- * bytes of SHA-256(message bytes), so retrying the same message reuses the
- * same id and Fordefi deduplicates the create instead of broadcasting a
- * second transaction.
+ * A UUID derived from SHA-256(message bytes), so a retry of the same bytes
+ * reuses the id and Fordefi deduplicates the create.
  */
 function idempotenceIdFromMessage(messageBytes: Uint8Array): string {
     const digest = createHash('sha256').update(messageBytes).digest().subarray(0, 16);
@@ -161,7 +159,6 @@ export interface FordefiSignerConfig {
  * `context.providerTransactionId`; check that transaction with Fordefi before
  * retrying. Each native create carries an `x-idempotence-id` derived from the
  * message bytes, so retrying the exact same bytes cannot create a second
- * Fordefi transaction; a retry built with a fresh blockhash is a new
  * transaction.
  */
 export interface FordefiNativeSigner<TAddress extends string = string>

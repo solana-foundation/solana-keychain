@@ -301,8 +301,6 @@ describe('FordefiSigner', () => {
             expect(postOpts.headers).toHaveProperty('Authorization', 'Bearer test-token');
             expect(postOpts.headers).toHaveProperty('x-signature');
             expect(postOpts.headers).toHaveProperty('x-timestamp');
-            // Black box never broadcasts, so a duplicate create is harmless and
-            // carries no idempotence id.
             expect(postOpts.headers).not.toHaveProperty('x-idempotence-id');
         });
 
@@ -502,12 +500,6 @@ describe('FordefiSigner', () => {
             expect(body.details).not.toHaveProperty('signatures');
         });
 
-        /**
-         * The native create must carry a deterministic x-idempotence-id derived
-         * from the message bytes: a blind retry of the same bytes reuses the id,
-         * so Fordefi deduplicates the create instead of broadcasting a second
-         * transfer.
-         */
         it('sends a deterministic x-idempotence-id on the native create', async () => {
             const messageBytes = new Uint8Array(32).fill(0xab);
             const digest = createHash('sha256').update(messageBytes).digest().subarray(0, 16);

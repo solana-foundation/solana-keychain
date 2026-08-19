@@ -66,10 +66,8 @@ def _timestamp_ms() -> int:
 
 
 def _idempotence_id_from_message(message_bytes: bytes) -> str:
-    """The x-idempotence-id for a native create: a UUID built from the first 16
-    bytes of SHA-256(message bytes), so retrying the same message reuses the
-    same id and Fordefi deduplicates the create instead of broadcasting a
-    second transaction."""
+    """A UUID derived from SHA-256(message bytes), so a retry of the same bytes
+    reuses the id and Fordefi deduplicates the create."""
     digest = bytearray(hashlib.sha256(message_bytes).digest()[:16])
     digest[6] = (digest[6] & 0x0F) | 0x40
     digest[8] = (digest[8] & 0x3F) | 0x80
@@ -360,8 +358,7 @@ class FordefiSigner(SolanaSigner):
         ``provider_transaction_id``; check that transaction with Fordefi
         before retrying. Each native create carries an ``x-idempotence-id``
         derived from the message bytes, so retrying the exact same bytes
-        cannot create a second Fordefi transaction; a retry built with a
-        fresh blockhash is a new transaction.
+        cannot create a second transaction.
         """
         if self._chain is not None:
             return await self._sign_transaction_native(transaction)
@@ -394,9 +391,7 @@ class FordefiSigner(SolanaSigner):
         try:
             return await self._finish_native_broadcast(transaction_id)
         except asyncio.CancelledError as error:
-            # Cancellation must stay a CancelledError for asyncio's task
-            # machinery, but the caller still needs the provider transaction id
-            # to reconcile before retrying, so re-raise with it in the message.
+            # Must stay a CancelledError for asyncio; carry the id in the message.
             raise asyncio.CancelledError(
                 "Fordefi may have executed the transaction, but the outcome could "
                 f"not be confirmed (provider transaction id: {transaction_id})"

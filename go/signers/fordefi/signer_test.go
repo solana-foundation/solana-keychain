@@ -383,8 +383,6 @@ func TestSignMessageBlackBoxSuccess(t *testing.T) {
 				details["hash_binary"] != base64.StdEncoding.EncodeToString(message) {
 				t.Errorf("unexpected black box details: %v", details)
 			}
-			// Black box never broadcasts, so a duplicate create is harmless and
-			// carries no idempotence id.
 			if got := r.Header.Get("x-idempotence-id"); got != "" {
 				t.Errorf("x-idempotence-id = %q, want none on the black-box path", got)
 			}
@@ -597,9 +595,6 @@ func TestSignTransactionNativeSuccess(t *testing.T) {
 			if fee["type"] != FeeTypePriority || fee["priority_level"] != string(PriorityMedium) {
 				t.Errorf("unexpected fee: %v", fee)
 			}
-			// The native create carries a deterministic x-idempotence-id derived
-			// from the submitted message bytes, so a blind retry of the same
-			// bytes reuses the id and Fordefi deduplicates the create.
 			encodedData, _ := details["data"].(string)
 			submittedMessage, decodeErr := base64.StdEncoding.DecodeString(encodedData)
 			if decodeErr != nil {

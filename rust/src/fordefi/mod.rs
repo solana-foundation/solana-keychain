@@ -234,10 +234,8 @@ impl FordefiSigner {
     // Submit helpers
     // -----------------------------------------------------------------------
 
-    /// Derives the `x-idempotence-id` for a native create: a UUID built from the
-    /// first 16 bytes of SHA-256(message bytes), so retrying the same message
-    /// reuses the same id and Fordefi deduplicates the create instead of
-    /// broadcasting a second transaction.
+    /// A UUID derived from SHA-256(message bytes), so a retry of the same bytes
+    /// reuses the id and Fordefi deduplicates the create.
     fn idempotence_id_from_message(message_bytes: &[u8]) -> String {
         let digest = Sha256::digest(message_bytes);
         let mut id = [0u8; 16];
@@ -512,8 +510,7 @@ impl FordefiSigner {
     /// broadcast bytes can serialize the (now Fordefi-signed) `transaction`.
     ///
     /// Each native create carries an `x-idempotence-id` derived from the message
-    /// bytes, so retrying the exact same bytes cannot create a second Fordefi
-    /// transaction; a retry built with a fresh blockhash is a new transaction.
+    /// bytes, so retrying the exact same bytes cannot create a second transaction.
     ///
     /// Only legacy transactions are supported: a versioned (v0) transaction
     /// returned by Fordefi fails to deserialize with a [`SignerError::SerializationError`].
@@ -1695,9 +1692,6 @@ mod tests {
         let wire_bytes = build_mock_wire_transaction(&keypair, &message_data);
         let wire_b64 = STANDARD.encode(&wire_bytes);
 
-        // The native create must carry a deterministic x-idempotence-id derived
-        // from the message bytes, so a blind retry of the same bytes reuses the
-        // id and Fordefi deduplicates the create.
         let expected_idempotence_id = FordefiSigner::idempotence_id_from_message(&message_data);
         Mock::given(method("POST"))
             .and(path("/api/v1/transactions"))
