@@ -14,7 +14,7 @@ except ImportError as error:  # pragma: no cover
 import httpx
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction, VersionedTransaction
+from solders.transaction import VersionedTransaction
 
 from solana_keychain.cdp.jwt import create_auth_jwt, create_wallet_jwt, extract_host
 from solana_keychain.core.errors import SignerError, SignerErrorCode
@@ -165,7 +165,7 @@ class CdpSigner(SolanaSigner):
                 "Failed to decode base64 signed transaction from CDP",
             ) from None
         try:
-            signed_transaction = Transaction.from_bytes(signed_bytes)
+            signed_transaction = VersionedTransaction.from_bytes(signed_bytes)
         except Exception:
             raise SignerError(
                 SignerErrorCode.SERIALIZATION_ERROR,
