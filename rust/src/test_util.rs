@@ -1,9 +1,13 @@
 use std::str::FromStr;
 
+#[cfg(feature = "sdk-v4")]
+use crate::sdk_adapter::Signature;
 use crate::sdk_adapter::{
     AccountMeta, Hash, Instruction, Message, Pubkey, Transaction, VersionedMessage,
     VersionedTransaction,
 };
+#[cfg(feature = "sdk-v4")]
+use solana_sdk_v4::message::v1::{Message as V1Message, TransactionConfig};
 
 fn create_transfer_instruction(from: &Pubkey, to: &Pubkey, lamports: u64) -> Instruction {
     Instruction {
@@ -43,8 +47,6 @@ pub fn add_required_signer(transaction: &mut VersionedTransaction, pubkey: Pubke
 /// an unset resource limit as zero rather than a default.
 #[cfg(feature = "sdk-v4")]
 pub fn create_test_v1_transaction(from: &Pubkey) -> VersionedTransaction {
-    use solana_sdk_v4::message::v1::{Message as V1Message, TransactionConfig};
-
     let to = Pubkey::new_unique();
     let instruction = create_transfer_instruction(from, &to, 1_000_000);
     let config = TransactionConfig::empty()
@@ -54,10 +56,7 @@ pub fn create_test_v1_transaction(from: &Pubkey) -> VersionedTransaction {
         .expect("v1 test message should compile");
 
     VersionedTransaction {
-        signatures: vec![
-            crate::sdk_adapter::Signature::default();
-            usize::from(message.header.num_required_signatures)
-        ],
+        signatures: vec![Signature::default(); usize::from(message.header.num_required_signatures)],
         message: VersionedMessage::V1(message),
     }
 }

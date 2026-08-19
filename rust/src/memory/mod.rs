@@ -107,6 +107,8 @@ impl SolanaSigner for MemorySigner {
 #[cfg(test)]
 mod tests {
     use crate::test_util::create_test_transaction;
+    #[cfg(feature = "sdk-v4")]
+    use crate::test_util::create_test_v1_transaction;
 
     use super::*;
 
@@ -201,8 +203,6 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn test_sign_v1_transaction() {
-        use crate::test_util::create_test_v1_transaction;
-
         let signer = create_test_signer();
         let pubkey = keypair_pubkey(&signer.keypair);
         let mut tx = create_test_v1_transaction(&pubkey);

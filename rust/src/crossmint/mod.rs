@@ -4,7 +4,10 @@ mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::SignTransactionResult;
-use crate::transaction_util::TransactionUtil;
+use crate::transaction_util::{
+    deserialize_wire_transaction, idempotency_key_from_message, serialize_wire_transaction,
+    TransactionUtil,
+};
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use std::str::FromStr;
 use types::{
@@ -609,7 +612,7 @@ impl CrossmintSigner {
             })?;
 
         let transaction: VersionedTransaction =
-            crate::transaction_util::deserialize_wire_transaction(&bytes).map_err(|e| {
+            deserialize_wire_transaction(&bytes).map_err(|e| {
                 SignerError::SerializationError(format!(
                     "Failed to deserialize Crossmint onChain.transaction: {e}"
                 ))
@@ -665,7 +668,7 @@ impl CrossmintSigner {
             return None;
         }
         let bytes = bs58::decode(serialized_transaction).into_vec().ok()?;
-        let transaction = crate::transaction_util::deserialize_wire_transaction(&bytes).ok()?;
+        let transaction = deserialize_wire_transaction(&bytes).ok()?;
         let executed_message = transaction.message.serialize();
         let candidates = self.verification_candidates();
         for entry in submitted {
@@ -779,10 +782,9 @@ impl CrossmintSigner {
         }
 
         let expected_message = transaction.message.serialize();
-        let serialized = crate::transaction_util::serialize_wire_transaction(transaction)?;
+        let serialized = serialize_wire_transaction(transaction)?;
         let transaction_b58 = bs58::encode(serialized).into_string();
-        let idempotency_key =
-            crate::transaction_util::idempotency_key_from_message(&expected_message);
+        let idempotency_key = idempotency_key_from_message(&expected_message);
 
         let create_response = self
             .create_transaction(transaction_b58, &idempotency_key)
@@ -1140,8 +1142,7 @@ mod tests {
         let on_chain_transaction =
             bs58::encode(bincode::serialize(&signed_remote_tx).unwrap()).into_string();
 
-        let expected_idempotency_key =
-            crate::transaction_util::idempotency_key_from_message(&local_tx.message.serialize());
+        let expected_idempotency_key = idempotency_key_from_message(&local_tx.message.serialize());
         Mock::given(method("POST"))
             .and(path("/2025-06-09/wallets/test-wallet/transactions"))
             .and(header("x-api-key", "test-api-key"))

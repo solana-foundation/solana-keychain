@@ -14,7 +14,7 @@ mod tests {
     use std::env;
 
     use super::*;
-    use crate::sdk_adapter::{Message, Transaction};
+    use crate::sdk_adapter::{Message, Transaction, VersionedTransaction};
     use crate::tests::rpc_util::get_rpc_blockhash;
     use crate::traits::SolanaSigner;
     use crate::utila::{UtilaSigner, UtilaSignerConfig};
@@ -74,9 +74,9 @@ mod tests {
             .await
             .expect("Failed to fetch latest RPC blockhash");
 
-        let message = Message::new(&[], Some(&signer.pubkey()));
-        let mut transaction = Transaction::new_unsigned(message);
-        transaction.message.recent_blockhash = latest_blockhash;
+        let mut message = Message::new(&[], Some(&signer.pubkey()));
+        message.recent_blockhash = latest_blockhash;
+        let mut transaction: VersionedTransaction = Transaction::new_unsigned(message).into();
 
         let (_base64_txn, signature) = signer
             .sign_transaction(&mut transaction)

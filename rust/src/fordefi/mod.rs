@@ -16,7 +16,9 @@ use crate::error::SignerError;
 use crate::http_client_config::HttpClientConfig;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
-use crate::transaction_util::TransactionUtil;
+use crate::transaction_util::{
+    deserialize_wire_transaction, idempotency_key_from_message, TransactionUtil,
+};
 pub use request_signer::{FordefiRequestSigner, PemRequestSigner};
 use types::{
     BlackBoxDetails, BlackBoxSignatureRequest, CreateTransactionResponse, SolanaMessageDetails,
@@ -308,13 +310,8 @@ impl FordefiSigner {
             },
         };
 
-        self.submit_request(
-            &request,
-            Some(&crate::transaction_util::idempotency_key_from_message(
-                data_bytes,
-            )),
-        )
-        .await
+        self.submit_request(&request, Some(&idempotency_key_from_message(data_bytes)))
+            .await
     }
 
     /// Submit a native Solana message request.
@@ -493,9 +490,6 @@ impl FordefiSigner {
     ///
     /// Each native create carries an `x-idempotence-id` derived from the message
     /// bytes, so retrying the exact same bytes cannot create a second transaction.
-    ///
-    /// Only legacy transactions are supported: a versioned (v0) transaction
-    /// returned by Fordefi fails to deserialize with a [`SignerError::SerializationError`].
     async fn sign_and_serialize_native(
         &self,
         transaction: &mut VersionedTransaction,
@@ -529,20 +523,10 @@ impl FordefiSigner {
             SignerError::SerializationError(format!("Failed to decode raw_transaction base64: {e}"))
         })?;
 
-        // Deserialize the Fordefi-returned wire transaction with the Solana SDK
-        // (bincode of a Transaction is exactly the Solana wire format).
-        //
-        // NOTE: only *legacy* transactions are supported. A versioned (v0) wire
-        // transaction is prefixed with a version byte (high bit set on the first
-        // byte) that the legacy `Transaction` layout cannot represent, so if Fordefi
-        // ever returns a v0 transaction this deserialization fails rather than
-        // silently mis-parsing. Supporting v0 would mean decoding into
-        // `VersionedTransaction` and threading that type through the signer API.
         let returned_tx: VersionedTransaction =
-            crate::transaction_util::deserialize_wire_transaction(&wire_bytes).map_err(|e| {
+            deserialize_wire_transaction(&wire_bytes).map_err(|e| {
                 SignerError::SerializationError(format!(
-                    "Failed to deserialize Fordefi wire transaction (versioned/v0 \
-                 transactions are not supported, only legacy): {e}"
+                    "Failed to deserialize Fordefi wire transaction: {e}"
                 ))
             })?;
 
@@ -776,7 +760,7 @@ impl SolanaSigner for FordefiSigner {
 mod tests {
     use super::*;
     use crate::sdk_adapter::{keypair_pubkey, Keypair, Signer as SdkSigner};
-    use crate::test_util::create_test_transaction;
+    use crate::test_util::{add_required_signer, create_test_transaction};
     use p256::ecdsa::SigningKey;
     use wiremock::{
         matchers::{header, method, path, path_regex},
@@ -1646,7 +1630,7 @@ mod tests {
         let signer = create_native_test_signer("https://test.com", fordefi_pubkey);
 
         let mut returned_tx = create_test_transaction(&keypair_pubkey(&fee_payer));
-        crate::test_util::add_required_signer(&mut returned_tx, fordefi_pubkey);
+        add_required_signer(&mut returned_tx, fordefi_pubkey);
         let returned_message = returned_tx.message.serialize();
         let fee_payer_signature = fee_payer.sign_message(&returned_message);
         let fordefi_signature = fordefi_keypair.sign_message(&returned_message);
@@ -1665,7 +1649,7 @@ mod tests {
         let signer = create_native_test_signer("https://test.com", fordefi_pubkey);
 
         let mut tx = create_test_transaction(&keypair_pubkey(&fee_payer));
-        crate::test_util::add_required_signer(&mut tx, fordefi_pubkey);
+        add_required_signer(&mut tx, fordefi_pubkey);
 
         let result = signer.validate_native_auto_transaction(&tx);
         assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
@@ -1684,8 +1668,7 @@ mod tests {
         let wire_bytes = build_mock_wire_transaction(&keypair, &message_data);
         let wire_b64 = STANDARD.encode(&wire_bytes);
 
-        let expected_idempotence_id =
-            crate::transaction_util::idempotency_key_from_message(&message_data);
+        let expected_idempotence_id = idempotency_key_from_message(&message_data);
         Mock::given(method("POST"))
             .and(path("/api/v1/transactions"))
             .and(header("Authorization", "Bearer test-token"))

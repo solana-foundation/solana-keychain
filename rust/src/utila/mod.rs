@@ -4,7 +4,9 @@ mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
-use crate::transaction_util::TransactionUtil;
+use crate::transaction_util::{
+    deserialize_wire_transaction, serialize_wire_transaction, TransactionUtil,
+};
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{Duration, Utc};
@@ -323,7 +325,7 @@ impl UtilaSigner {
         })?;
 
         let transaction: VersionedTransaction =
-            crate::transaction_util::deserialize_wire_transaction(&bytes).map_err(|_e| {
+            deserialize_wire_transaction(&bytes).map_err(|_e| {
                 SignerError::SerializationError(
                     "Failed to deserialize Utila rawTransaction".to_string(),
                 )
@@ -363,9 +365,7 @@ impl UtilaSigner {
     ) -> Result<SignedTransaction, SignerError> {
         let public_key = self.initialized_pubkey()?;
         let expected_message = transaction.message.serialize();
-        let raw_transaction = STANDARD.encode(crate::transaction_util::serialize_wire_transaction(
-            transaction,
-        )?);
+        let raw_transaction = STANDARD.encode(serialize_wire_transaction(transaction)?);
 
         let initiated = self.initiate_transaction(raw_transaction).await?;
         let signed = self.poll_signed_transaction(initiated).await?;

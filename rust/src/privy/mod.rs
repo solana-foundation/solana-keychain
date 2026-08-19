@@ -5,7 +5,9 @@ mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
-use crate::transaction_util::TransactionUtil;
+use crate::transaction_util::{
+    deserialize_wire_transaction, serialize_wire_transaction, TransactionUtil,
+};
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use authorization::prepare_privy_authorization_headers;
 pub use authorization::{
@@ -282,7 +284,7 @@ impl PrivySigner {
     ) -> Result<SignedTransaction, SignerError> {
         let public_key = self.initialized_pubkey()?;
 
-        let unsigned_wire = crate::transaction_util::serialize_wire_transaction(transaction)?;
+        let unsigned_wire = serialize_wire_transaction(transaction)?;
         let request = SignTransactionRequest {
             method: "signTransaction",
             chain_type: "solana",
@@ -303,7 +305,7 @@ impl PrivySigner {
                 )
             })?;
         let returned: VersionedTransaction =
-            crate::transaction_util::deserialize_wire_transaction(&signed_wire).map_err(|e| {
+            deserialize_wire_transaction(&signed_wire).map_err(|e| {
                 SignerError::SerializationError(format!(
                     "Failed to deserialize signed transaction returned by Privy: {e}"
                 ))

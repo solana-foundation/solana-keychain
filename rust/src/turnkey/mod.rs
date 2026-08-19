@@ -5,10 +5,10 @@ mod types;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::SignTransactionResult;
 pub use crate::traits::SignedTransaction;
-use crate::{
-    error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner,
-    transaction_util::TransactionUtil,
+use crate::transaction_util::{
+    deserialize_wire_transaction, serialize_wire_transaction, TransactionUtil,
 };
+use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::Engine;
 use p256::ecdsa::signature::Signer as P256Signer;
 use std::str::FromStr;
@@ -224,7 +224,7 @@ impl TurnkeySigner {
         &self,
         transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
-        let unsigned_wire = crate::transaction_util::serialize_wire_transaction(transaction)?;
+        let unsigned_wire = serialize_wire_transaction(transaction)?;
 
         let request = SignTransactionRequest {
             activity_type: "ACTIVITY_TYPE_SIGN_TRANSACTION_V2".to_string(),
@@ -256,7 +256,7 @@ impl TurnkeySigner {
             ))
         })?;
         let returned: VersionedTransaction =
-            crate::transaction_util::deserialize_wire_transaction(&signed_wire).map_err(|e| {
+            deserialize_wire_transaction(&signed_wire).map_err(|e| {
                 SignerError::SerializationError(format!(
                     "Failed to deserialize signed transaction returned by Turnkey: {e}"
                 ))

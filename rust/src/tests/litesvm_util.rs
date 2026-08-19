@@ -1,4 +1,5 @@
-use crate::sdk_adapter::{Hash, Pubkey, Transaction};
+use crate::sdk_adapter::{Hash, Pubkey, VersionedTransaction};
+use crate::transaction_util::serialize_wire_transaction;
 use std::error::Error;
 
 #[cfg(feature = "sdk-v2")]
@@ -12,11 +13,11 @@ use litesvm_v4::LiteSVM;
 // solana-transaction 3.x, while solana-sdk 4.x uses solana-transaction 4.x.
 // The bincode wire format is identical across both, so v4 transactions are
 // round-tripped through the litesvm-compatible 3.x type. For v2/v3 the
-// adapter's own Transaction type already matches the bundled litesvm.
+// adapter's own transaction type already matches the bundled litesvm.
 #[cfg(not(feature = "sdk-v4"))]
-use crate::sdk_adapter::Transaction as LiteSvmTransaction;
+use crate::sdk_adapter::VersionedTransaction as LiteSvmTransaction;
 #[cfg(feature = "sdk-v4")]
-use solana_transaction_litesvm_v4::Transaction as LiteSvmTransaction;
+use solana_transaction_litesvm_v4::versioned::VersionedTransaction as LiteSvmTransaction;
 
 pub async fn start_litesvm(payer: &Pubkey) -> Result<LiteSVM, Box<dyn Error>> {
     let mut svm = LiteSVM::new()
@@ -35,9 +36,10 @@ pub async fn get_latest_blockhash(litesvm: &LiteSVM) -> Result<Hash, Box<dyn Err
 
 pub async fn simulate_transaction(
     litesvm: &LiteSVM,
-    transaction: &Transaction,
+    transaction: &VersionedTransaction,
 ) -> Result<(), Box<dyn Error>> {
-    let tx_bytes = bincode::serialize(transaction).expect("Failed to serialize transaction");
+    let tx_bytes =
+        serialize_wire_transaction(transaction).expect("Failed to serialize transaction");
 
     let tx_for_litesvm: LiteSvmTransaction =
         bincode::deserialize(&tx_bytes).expect("Failed to deserialize transaction");

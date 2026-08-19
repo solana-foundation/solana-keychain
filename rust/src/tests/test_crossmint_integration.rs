@@ -12,7 +12,7 @@ mod tests {
 
     use super::*;
     use crate::crossmint::{CrossmintSigner, CrossmintSignerConfig};
-    use crate::sdk_adapter::{Message, Transaction};
+    use crate::sdk_adapter::{Message, Transaction, VersionedTransaction};
     use crate::tests::rpc_util::get_rpc_blockhash;
     use crate::traits::SolanaSigner;
 
@@ -77,9 +77,9 @@ mod tests {
 
         // Keep this integration test focused on remote signing behavior rather than
         // account balance/program execution checks by signing a minimal transaction.
-        let message = Message::new(&[], Some(&signer.pubkey()));
-        let mut transaction = Transaction::new_unsigned(message);
-        transaction.message.recent_blockhash = latest_blockhash;
+        let mut message = Message::new(&[], Some(&signer.pubkey()));
+        message.recent_blockhash = latest_blockhash;
+        let mut transaction: VersionedTransaction = Transaction::new_unsigned(message).into();
 
         let (base64_txn, signature) = signer
             .sign_transaction(&mut transaction)

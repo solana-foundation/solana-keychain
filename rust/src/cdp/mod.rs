@@ -5,7 +5,9 @@ mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
-use crate::transaction_util::TransactionUtil;
+use crate::transaction_util::{
+    deserialize_wire_transaction, serialize_wire_transaction, TransactionUtil,
+};
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::Value;
@@ -353,7 +355,7 @@ impl CdpSigner {
             TransactionUtil::get_signing_keypair_position(transaction, &self.public_key)?;
 
         // Serialize the full transaction to bytes (Solana wire format)
-        let serialized = crate::transaction_util::serialize_wire_transaction(transaction)?;
+        let serialized = serialize_wire_transaction(transaction)?;
         let base64_tx = STANDARD.encode(&serialized);
 
         let response = self.call_sign_transaction(&base64_tx).await?;
@@ -370,7 +372,7 @@ impl CdpSigner {
             })?;
 
         let signed_tx: VersionedTransaction =
-            crate::transaction_util::deserialize_wire_transaction(&signed_bytes).map_err(|_e| {
+            deserialize_wire_transaction(&signed_bytes).map_err(|_e| {
                 #[cfg(feature = "unsafe-debug")]
                 log::error!("Failed to deserialize signed transaction: {_e}");
                 SignerError::SerializationError(

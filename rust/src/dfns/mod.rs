@@ -4,10 +4,10 @@ mod types;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::SignTransactionResult;
 pub use crate::traits::SignedTransaction;
+use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{
     error::SignerError, http_client_config::HttpClientConfig,
     signature_util::EXPECTED_SIGNATURE_LENGTH, traits::SolanaSigner,
-    transaction_util::TransactionUtil,
 };
 use types::{GenerateSignatureRequest, GenerateSignatureResponse, GetWalletResponse};
 
@@ -243,7 +243,7 @@ impl DfnsSigner {
         &self,
         transaction: &VersionedTransaction,
     ) -> Result<Signature, SignerError> {
-        let tx_bytes = crate::transaction_util::serialize_wire_transaction(transaction)?;
+        let tx_bytes = serialize_wire_transaction(transaction)?;
         let request = GenerateSignatureRequest::Transaction {
             transaction: format!("0x{}", hex::encode(&tx_bytes)),
             blockchain_kind: "Solana".to_string(),

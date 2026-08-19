@@ -17,11 +17,18 @@ mod tests {
 
     use super::*;
     use crate::fordefi::{FordefiSigner, FordefiSignerConfig, SolanaChainUniqueId};
+    #[cfg(feature = "integration-tests")]
+    use crate::sdk_adapter::{AccountMeta, Instruction, Message, VersionedTransaction};
+    use crate::sdk_adapter::{Pubkey, Transaction};
     use crate::test_util::create_test_transaction;
     #[cfg(feature = "integration-tests")]
     use crate::tests::litesvm_util::{get_latest_blockhash, simulate_transaction, start_litesvm};
+    #[cfg(feature = "integration-tests")]
+    use crate::tests::rpc_util::{confirm_transaction, get_rpc_blockhash, send_raw_transaction};
     use crate::traits::SolanaSigner;
+    use crate::transaction_util::deserialize_wire_transaction;
     use std::env;
+    use std::str::FromStr;
 
     /// Build a `FordefiSigner` for the given vault, sharing the access token and
     /// request-signing key from the environment. `chain` selects black box mode
@@ -108,11 +115,13 @@ mod tests {
             .expect("Failed to start LiteSVM");
 
         let mut transaction = create_test_transaction(&signer.pubkey());
-        transaction.message.recent_blockhash = get_latest_blockhash(&lite_svm)
-            .await
-            .expect("Failed to get latest blockhash");
+        transaction.message.set_recent_blockhash(
+            get_latest_blockhash(&lite_svm)
+                .await
+                .expect("Failed to get latest blockhash"),
+        );
 
-        let original_message = transaction.message_data();
+        let original_message = transaction.message.serialize();
 
         let (base64_txn, signature) = signer
             .sign_transaction(&mut transaction)
@@ -122,7 +131,10 @@ mod tests {
 
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
         assert!(
-            signature.verify(&signer.pubkey().to_bytes(), &transaction.message_data()),
+            signature.verify(
+                &signer.pubkey().to_bytes(),
+                &transaction.message.serialize()
+            ),
             "Signature should be valid"
         );
 
@@ -130,11 +142,11 @@ mod tests {
             .decode(&base64_txn)
             .expect("Failed to decode base64 transaction");
 
-        let decoded_transaction: crate::sdk_adapter::Transaction =
-            bincode::deserialize(&decoded_bytes).expect("Failed to deserialize transaction");
+        let decoded_transaction = deserialize_wire_transaction(&decoded_bytes)
+            .expect("Failed to deserialize transaction");
 
         assert_eq!(
-            decoded_transaction.message_data(),
+            decoded_transaction.message.serialize(),
             original_message,
             "Decoded transaction should have the same message"
         );
@@ -155,12 +167,6 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
     async fn test_fordefi_devnet_transfer() {
-        use crate::sdk_adapter::{AccountMeta, Instruction, Message, Pubkey, Transaction};
-        use crate::tests::rpc_util::{
-            confirm_transaction, get_rpc_blockhash, send_raw_transaction,
-        };
-        use std::str::FromStr;
-
         let signer = get_signer().await;
         let from = signer.pubkey();
 
@@ -190,9 +196,9 @@ mod tests {
             .await
             .expect("Failed to get devnet blockhash");
 
-        let message = Message::new(&[transfer_ix], Some(&from));
-        let mut transaction = Transaction::new_unsigned(message);
-        transaction.message.recent_blockhash = blockhash;
+        let mut message = Message::new(&[transfer_ix], Some(&from));
+        message.recent_blockhash = blockhash;
+        let mut transaction: VersionedTransaction = Transaction::new_unsigned(message).into();
 
         let (base64_tx, signature) = signer
             .sign_transaction(&mut transaction)
@@ -202,7 +208,7 @@ mod tests {
 
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
         assert!(
-            signature.verify(&from.to_bytes(), &transaction.message_data()),
+            signature.verify(&from.to_bytes(), &transaction.message.serialize()),
             "Signature should verify locally"
         );
 
@@ -244,10 +250,6 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
     async fn test_fordefi_native_sign_transaction() {
-        use crate::sdk_adapter::{AccountMeta, Instruction, Message, Pubkey, Transaction};
-        use crate::tests::rpc_util::{confirm_transaction, get_rpc_blockhash};
-        use std::str::FromStr;
-
         let signer = get_native_signer().await;
         let from = signer.pubkey();
 
@@ -275,9 +277,9 @@ mod tests {
             .await
             .expect("Failed to get devnet blockhash");
 
-        let message = Message::new(&[transfer_ix], Some(&from));
-        let mut transaction = Transaction::new_unsigned(message);
-        transaction.message.recent_blockhash = blockhash;
+        let mut message = Message::new(&[transfer_ix], Some(&from));
+        message.recent_blockhash = blockhash;
+        let mut transaction: VersionedTransaction = Transaction::new_unsigned(message).into();
 
         let (serialized_tx, signature) = signer
             .sign_transaction(&mut transaction)
