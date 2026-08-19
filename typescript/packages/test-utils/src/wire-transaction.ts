@@ -1,6 +1,8 @@
 import type { Address, Base64EncodedWireTransaction, ReadonlyUint8Array, SignatureBytes } from '@solana/kit';
 import {
+    AccountRole,
     appendTransactionMessageInstruction,
+    blockhash,
     compileTransaction,
     createTransactionMessage,
     generateKeyPairSigner,
@@ -12,15 +14,11 @@ import {
     setTransactionMessageLifetimeUsingBlockhash,
     setTransactionMessageLoadedAccountsDataSizeLimit,
 } from '@solana/kit';
+import { SYSTEM_PROGRAM_ADDRESS } from '@solana-program/system';
 
-const SYSTEM_PROGRAM = '11111111111111111111111111111111' as Address;
-const ZERO_BLOCKHASH = '11111111111111111111111111111111';
+const ZERO_BLOCKHASH = blockhash('11111111111111111111111111111111');
 
-/**
- * A v1 message must carry explicit resource limits: unlike legacy and v0, an
- * unset compute unit limit or loaded accounts data size means zero, not a
- * default, and the transaction cannot execute.
- */
+// v1 treats an unset limit as zero, not a default.
 const V1_COMPUTE_UNIT_LIMIT = 30_000;
 const V1_LOADED_ACCOUNTS_DATA_SIZE_LIMIT = 65_536;
 
@@ -31,29 +29,20 @@ export interface SignedWireTransaction {
     wireTransaction: Base64EncodedWireTransaction;
 }
 
-/**
- * Build a real, fully signed wire transaction of the requested version.
- *
- * Version 1 puts `0x80 | 1` at offset zero and moves its signatures to the tail,
- * so a fixture built by hand from the legacy layout cannot stand in for one.
- */
-export async function createSignedWireTransaction(version: 0 | 1): Promise<SignedWireTransaction> {
-    const feePayerSigner = await generateKeyPairSigner();
-
-    const message = pipe(
+function buildMessage(version: 0 | 1, feePayer: Address, cosigner?: Address) {
+    return pipe(
         createTransactionMessage({ version }),
-        tx => setTransactionMessageFeePayer(feePayerSigner.address, tx),
+        tx => setTransactionMessageFeePayer(feePayer, tx),
         tx =>
-            setTransactionMessageLifetimeUsingBlockhash(
+            setTransactionMessageLifetimeUsingBlockhash({ blockhash: ZERO_BLOCKHASH, lastValidBlockHeight: 100n }, tx),
+        tx =>
+            appendTransactionMessageInstruction(
                 {
-                    blockhash: ZERO_BLOCKHASH as Parameters<
-                        typeof setTransactionMessageLifetimeUsingBlockhash
-                    >[0]['blockhash'],
-                    lastValidBlockHeight: 100n,
+                    programAddress: SYSTEM_PROGRAM_ADDRESS,
+                    ...(cosigner ? { accounts: [{ address: cosigner, role: AccountRole.READONLY_SIGNER }] } : {}),
                 },
                 tx,
             ),
-        tx => appendTransactionMessageInstruction({ programAddress: SYSTEM_PROGRAM }, tx),
         tx =>
             version === 1
                 ? setTransactionMessageLoadedAccountsDataSizeLimit(
@@ -62,17 +51,50 @@ export async function createSignedWireTransaction(version: 0 | 1): Promise<Signe
                   )
                 : tx,
     );
+}
+
+/** A fully signed wire transaction of the requested version. */
+export async function createSignedWireTransaction(version: 0 | 1): Promise<SignedWireTransaction> {
+    const feePayerSigner = await generateKeyPairSigner();
+    const message = buildMessage(version, feePayerSigner.address);
 
     const signed = await partiallySignTransaction([feePayerSigner.keyPair], compileTransaction(message));
     const signature = signed.signatures[feePayerSigner.address];
     if (!signature) {
-        throw new Error(`fixture transaction was not signed by its fee payer ${feePayerSigner.address}`);
+        throw new Error(`fixture was not signed by its fee payer ${feePayerSigner.address}`);
     }
 
     return {
         feePayer: feePayerSigner.address,
         messageBytes: signed.messageBytes,
         signature,
+        wireTransaction: getBase64EncodedWireTransaction(signed),
+    };
+}
+
+export interface CosignedWireTransaction {
+    cosigner: Address;
+    feePayer: Address;
+    wireTransaction: Base64EncodedWireTransaction;
+}
+
+/** A wire transaction whose cosigner signed but whose fee-payer slot is empty. */
+export async function createCosignedWireTransaction(version: 0 | 1): Promise<CosignedWireTransaction> {
+    const feePayerSigner = await generateKeyPairSigner();
+    const cosigner = await generateKeyPairSigner();
+    const message = buildMessage(version, feePayerSigner.address, cosigner.address);
+
+    const signed = await partiallySignTransaction([cosigner.keyPair], compileTransaction(message));
+    if (!signed.signatures[cosigner.address]) {
+        throw new Error(`fixture was not signed by its cosigner ${cosigner.address}`);
+    }
+    if (signed.signatures[feePayerSigner.address]) {
+        throw new Error('fixture should leave the fee-payer slot unsigned');
+    }
+
+    return {
+        cosigner: cosigner.address,
+        feePayer: feePayerSigner.address,
         wireTransaction: getBase64EncodedWireTransaction(signed),
     };
 }

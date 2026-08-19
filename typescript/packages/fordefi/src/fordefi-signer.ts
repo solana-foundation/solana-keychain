@@ -1,7 +1,7 @@
 import { createPrivateKey, createSign, type KeyObject } from 'node:crypto';
 
 import { Address, assertIsAddress } from '@solana/addresses';
-import { getBase58Decoder, getBase64Encoder } from '@solana/codecs-strings';
+import { getBase58Decoder, getBase58Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
     assertHttpsUrl,
     assertSignatureValid,
@@ -27,6 +27,7 @@ import {
 } from '@solana/signers';
 import {
     Base64EncodedWireTransaction,
+    getSignatureFromTransaction,
     getTransactionDecoder,
     Transaction,
     TransactionWithinSizeLimit,
@@ -550,9 +551,9 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
         }
 
         const signedWireTx = result.raw_transaction as Base64EncodedWireTransaction;
-        const { messageBytes, signatures } = getTransactionDecoder().decode(getBase64Encoder().encode(signedWireTx));
+        const decodedTransaction = getTransactionDecoder().decode(getBase64Encoder().encode(signedWireTx));
 
-        const signerSignature = signatures[this.address];
+        const signerSignature = decodedTransaction.signatures[this.address];
         if (!signerSignature) {
             return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                 address: this.address,
@@ -560,17 +561,21 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
             });
         }
 
-        // The fee payer occupies the first signature slot, and its signature is the
-        // id the network knows the broadcast transaction by.
-        const transactionSignature = Object.values(signatures)[0];
-        if (!transactionSignature) {
+        // Kit resolves the fee payer's signature, whichever slot the version puts it in.
+        let transactionSignature: SignatureBytes;
+        try {
+            transactionSignature = getBase58Encoder().encode(
+                getSignatureFromTransaction(decodedTransaction),
+            ) as SignatureBytes;
+        } catch (error) {
             return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                cause: error,
                 message: 'Fordefi wire transaction carries no fee-payer signature to identify the broadcast by',
             });
         }
 
         await assertSignatureValid({
-            data: messageBytes,
+            data: decodedTransaction.messageBytes,
             signature: signerSignature,
             signerAddress: this.address,
         });

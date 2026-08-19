@@ -7,8 +7,9 @@ import {
     assertSignatureValid,
     isSolanaSendingSigner,
     isSolanaSigner,
+    type SignerError,
 } from '@solana/keychain-core';
-import { createSignedWireTransaction } from '@solana/keychain-test-utils';
+import { createCosignedWireTransaction, createSignedWireTransaction } from '@solana/keychain-test-utils';
 import { isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
@@ -69,12 +70,7 @@ function mockPollResponse(state: string, sigBase64?: string, rawTransaction?: st
     return new Response(JSON.stringify(body), { status: 200 });
 }
 
-/**
- * Native mode reads the signature and message bytes back out of a real wire
- * transaction, so these fixtures must be genuinely encoded: a v1 envelope puts its
- * version byte at offset zero and its signatures at the tail, and a hand-built
- * legacy layout cannot stand in for one.
- */
+// Native mode parses real wire bytes, and a v1 envelope cannot be faked by hand.
 async function setupNativeBroadcast(version: 0 | 1) {
     const fixture = await createSignedWireTransaction(version);
     const config = {
@@ -326,8 +322,6 @@ describe('FordefiSigner', () => {
 
             const results = await signer.signTransactions([mockTx]);
 
-            // Black box mode signs the message bytes, so the signature comes straight
-            // from the response rather than out of a returned wire transaction.
             expect(results[0]).toHaveProperty(MOCK_ADDRESS);
             expect(Object.values(results[0]!)[0]).toEqual(MOCK_SIGNATURE_BYTES);
         });
@@ -492,8 +486,6 @@ describe('FordefiSigner', () => {
                 const results = await signer.signAndSendTransactions([mockTx]);
                 expect(results).toHaveLength(1);
 
-                // The fee payer's signature is the id the network knows the broadcast by,
-                // wherever the envelope happens to place it.
                 expect(results[0]).toStrictEqual(fixture.signature);
                 expect(assertSignatureValid).toHaveBeenCalledWith(
                     expect.objectContaining({
@@ -598,6 +590,40 @@ describe('FordefiSigner', () => {
             const results = await signer.signAndSendTransactions([mockTx]);
             expect(results).toHaveLength(1);
             expect(fetch).toHaveBeenCalledTimes(5);
+        });
+
+        it('rejects a returned transaction whose fee-payer slot is unsigned', async () => {
+            // Fordefi rewrites what it broadcasts, so the returned fee payer need not
+            // be the vault, and without its signature there is no broadcast id.
+            const fixture = await createCosignedWireTransaction(1);
+            const config = {
+                ...mockConfig,
+                chain: 'solana_mainnet',
+                publicKey: fixture.cosigner,
+            } satisfies FordefiSignerConfig;
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.cosigner))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-unsigned-payer'))
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
+
+            const signer = await FordefiSigner.create(config);
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [fixture.cosigner]: null },
+            } as never;
+
+            const error = await signer.signAndSendTransactions([mockTx]).then(
+                () => {
+                    throw new Error('expected the unsigned fee payer to be rejected');
+                },
+                (thrown: SignerError) => thrown,
+            );
+            expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
+
+            // Our own error, not a raw kit SolanaError leaking through.
+            const cause = error.context?.cause as SignerError;
+            expect(cause.code).toBe('SIGNER_SIGNING_FAILED');
+            expect(cause.context?.message).toContain('no fee-payer signature');
         });
 
         it('should throw when raw_transaction is missing from response', async () => {
