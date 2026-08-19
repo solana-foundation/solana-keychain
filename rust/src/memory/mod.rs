@@ -10,7 +10,7 @@ use crate::{
 };
 
 use crate::sdk_adapter::{
-    keypair_pubkey, keypair_sign_message, Keypair, Pubkey, Signature, Transaction,
+    keypair_pubkey, keypair_sign_message, Keypair, Pubkey, Signature, VersionedTransaction,
 };
 use keypair_util::KeypairUtil;
 
@@ -82,9 +82,9 @@ impl SolanaSigner for MemorySigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
-        let signature = self.sign_bytes(&tx.message_data()).await?;
+        let signature = self.sign_bytes(&tx.message.serialize()).await?;
         TransactionUtil::add_signature_to_transaction(tx, &self.pubkey(), signature)?;
 
         let signed_transaction = (TransactionUtil::serialize_transaction(tx)?, signature);
@@ -195,5 +195,36 @@ mod tests {
         // Verify the transaction has the signature
         assert_eq!(tx.signatures.len(), 1);
         assert_eq!(tx.signatures[0], signature);
+    }
+
+    #[cfg(feature = "sdk-v4")]
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn test_sign_v1_transaction() {
+        use crate::test_util::create_test_v1_transaction;
+
+        let signer = create_test_signer();
+        let pubkey = keypair_pubkey(&signer.keypair);
+        let mut tx = create_test_v1_transaction(&pubkey);
+
+        // A verifying signature proves the 0x81 prefix was covered.
+        let message_bytes = tx.message.serialize();
+        assert_eq!(message_bytes[0], 0x81);
+
+        let result = signer
+            .sign_transaction(&mut tx)
+            .await
+            .expect("v1 transaction should sign");
+        let (serialized_tx, signature) = result.into_signed_transaction();
+
+        assert!(signature.verify(&pubkey.to_bytes(), &message_bytes));
+        assert_eq!(tx.signatures[0], signature);
+
+        use base64::Engine;
+        let wire = base64::engine::general_purpose::STANDARD
+            .decode(&serialized_tx)
+            .expect("serialized transaction should be base64");
+        assert_eq!(wire[..message_bytes.len()], message_bytes[..]);
+        assert_eq!(wire.len(), message_bytes.len() + 64);
     }
 }

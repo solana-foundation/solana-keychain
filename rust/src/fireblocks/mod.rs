@@ -3,7 +3,7 @@
 mod jwt;
 mod types;
 
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::SignTransactionResult;
 pub use crate::traits::SignedTransaction;
 use crate::{
@@ -427,10 +427,10 @@ impl FireblocksSigner {
 
     async fn sign_and_serialize(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
         let public_key = self.initialized_pubkey()?;
-        let message_bytes = transaction.message_data();
+        let message_bytes = transaction.message.serialize();
         let signature = self.sign_raw_bytes(&message_bytes).await?;
 
         TransactionUtil::add_signature_to_transaction(transaction, &public_key, signature)?;
@@ -477,7 +477,7 @@ impl SolanaSigner for FireblocksSigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
         Ok(TransactionUtil::classify_signed_transaction(

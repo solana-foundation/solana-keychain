@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::SignerError;
 use crate::http_client_config::HttpClientConfig;
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
 use crate::transaction_util::TransactionUtil;
 pub use request_signer::{FordefiRequestSigner, PemRequestSigner};
@@ -459,9 +459,9 @@ impl FordefiSigner {
     /// Sign a transaction via the black box path: submit → poll → apply signature.
     async fn sign_and_serialize_black_box(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
-        let message_data = transaction.message_data();
+        let message_data = transaction.message.serialize();
         let signature = self.sign_black_box(&message_data).await?;
 
         if !signature.verify(&self.public_key.to_bytes(), &message_data) {
@@ -498,10 +498,10 @@ impl FordefiSigner {
     /// returned by Fordefi fails to deserialize with a [`SignerError::SerializationError`].
     async fn sign_and_serialize_native(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
         self.validate_native_auto_transaction(transaction)?;
-        let message_data = transaction.message_data();
+        let message_data = transaction.message.serialize();
         let tx_id = self.submit_solana_transaction(&message_data).await?;
         // Once the submit is accepted Fordefi is already broadcasting
         // (push_mode: "auto"), so any later failure leaves an on-chain outcome
@@ -538,17 +538,18 @@ impl FordefiSigner {
         // ever returns a v0 transaction this deserialization fails rather than
         // silently mis-parsing. Supporting v0 would mean decoding into
         // `VersionedTransaction` and threading that type through the signer API.
-        let returned_tx: Transaction = bincode::deserialize(&wire_bytes).map_err(|e| {
-            SignerError::SerializationError(format!(
-                "Failed to deserialize Fordefi wire transaction (versioned/v0 \
+        let returned_tx: VersionedTransaction =
+            crate::transaction_util::deserialize_wire_transaction(&wire_bytes).map_err(|e| {
+                SignerError::SerializationError(format!(
+                    "Failed to deserialize Fordefi wire transaction (versioned/v0 \
                  transactions are not supported, only legacy): {e}"
-            ))
-        })?;
+                ))
+            })?;
 
         let signature = self.extract_vault_signature(&returned_tx)?;
 
         // Verify against the *returned* message (Fordefi modifies the tx, e.g. blockhash)
-        let returned_message = returned_tx.message_data();
+        let returned_message = returned_tx.message.serialize();
         if !signature.verify(&self.public_key.to_bytes(), &returned_message) {
             return Err(SignerError::SigningFailed(
                 "Signature verification failed against Fordefi-returned message".to_string(),
@@ -565,11 +566,11 @@ impl FordefiSigner {
     /// forwarded through Fordefi's `details.signatures` request field.
     fn validate_native_auto_transaction(
         &self,
-        transaction: &Transaction,
+        transaction: &VersionedTransaction,
     ) -> Result<(), SignerError> {
-        let required_signatures = transaction.message.header.num_required_signatures as usize;
+        let required_signatures = transaction.message.header().num_required_signatures as usize;
         if required_signatures != 1
-            || transaction.message.account_keys.first() != Some(&self.public_key)
+            || transaction.message.static_account_keys().first() != Some(&self.public_key)
         {
             return Err(SignerError::SigningFailed(
                 "Fordefi native auto-broadcast currently supports only transactions whose sole required signer is the configured vault"
@@ -581,7 +582,10 @@ impl FordefiSigner {
 
     /// Locate the configured vault's signature by its required-signer account
     /// position rather than assuming it occupies slot zero.
-    fn extract_vault_signature(&self, returned_tx: &Transaction) -> Result<Signature, SignerError> {
+    fn extract_vault_signature(
+        &self,
+        returned_tx: &VersionedTransaction,
+    ) -> Result<Signature, SignerError> {
         let signer_index =
             TransactionUtil::get_signing_keypair_position(returned_tx, &self.public_key)?;
         returned_tx
@@ -598,7 +602,7 @@ impl FordefiSigner {
     /// Sign a transaction end-to-end, dispatching to black box or native path.
     async fn sign_and_serialize(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
         if self.chain.is_some() {
             self.sign_and_serialize_native(transaction).await
@@ -722,7 +726,7 @@ impl SolanaSigner for FordefiSigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
         if self.chain.is_some() {
@@ -1352,7 +1356,7 @@ mod tests {
         let signer = create_test_signer(&mock_server.uri(), pubkey);
 
         let tx = create_test_transaction(&pubkey);
-        let message_data = tx.message_data();
+        let message_data = tx.message.serialize();
         let real_signature = keypair.sign_message(&message_data);
         let sig_b64 = STANDARD.encode(real_signature.as_ref());
 
@@ -1642,9 +1646,8 @@ mod tests {
         let signer = create_native_test_signer("https://test.com", fordefi_pubkey);
 
         let mut returned_tx = create_test_transaction(&keypair_pubkey(&fee_payer));
-        returned_tx.message.account_keys.insert(1, fordefi_pubkey);
-        returned_tx.message.header.num_required_signatures = 2;
-        let returned_message = returned_tx.message_data();
+        crate::test_util::add_required_signer(&mut returned_tx, fordefi_pubkey);
+        let returned_message = returned_tx.message.serialize();
         let fee_payer_signature = fee_payer.sign_message(&returned_message);
         let fordefi_signature = fordefi_keypair.sign_message(&returned_message);
         returned_tx.signatures = vec![fee_payer_signature, fordefi_signature];
@@ -1662,8 +1665,7 @@ mod tests {
         let signer = create_native_test_signer("https://test.com", fordefi_pubkey);
 
         let mut tx = create_test_transaction(&keypair_pubkey(&fee_payer));
-        tx.message.account_keys.insert(1, fordefi_pubkey);
-        tx.message.header.num_required_signatures = 2;
+        crate::test_util::add_required_signer(&mut tx, fordefi_pubkey);
 
         let result = signer.validate_native_auto_transaction(&tx);
         assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
@@ -1677,7 +1679,7 @@ mod tests {
         let signer = create_native_test_signer(&mock_server.uri(), pubkey);
 
         let tx = create_test_transaction(&pubkey);
-        let message_data = tx.message_data();
+        let message_data = tx.message.serialize();
 
         let wire_bytes = build_mock_wire_transaction(&keypair, &message_data);
         let wire_b64 = STANDARD.encode(&wire_bytes);

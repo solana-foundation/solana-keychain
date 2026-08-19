@@ -3,7 +3,7 @@
 mod jwt;
 mod types;
 
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
@@ -346,16 +346,14 @@ impl CdpSigner {
     /// Sign and serialize a Solana transaction via CDP.
     async fn sign_and_serialize(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
-        let message_data = transaction.message_data();
+        let message_data = transaction.message.serialize();
         let signer_position =
             TransactionUtil::get_signing_keypair_position(transaction, &self.public_key)?;
 
         // Serialize the full transaction to bytes (Solana wire format)
-        let serialized = bincode::serialize(transaction).map_err(|e| {
-            SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
-        })?;
+        let serialized = crate::transaction_util::serialize_wire_transaction(transaction)?;
         let base64_tx = STANDARD.encode(&serialized);
 
         let response = self.call_sign_transaction(&base64_tx).await?;
@@ -371,13 +369,14 @@ impl CdpSigner {
                 )
             })?;
 
-        let signed_tx: Transaction = bincode::deserialize(&signed_bytes).map_err(|_e| {
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Failed to deserialize signed transaction: {_e}");
-            SignerError::SerializationError(
-                "Failed to deserialize signed transaction from CDP".to_string(),
-            )
-        })?;
+        let signed_tx: VersionedTransaction =
+            crate::transaction_util::deserialize_wire_transaction(&signed_bytes).map_err(|_e| {
+                #[cfg(feature = "unsafe-debug")]
+                log::error!("Failed to deserialize signed transaction: {_e}");
+                SignerError::SerializationError(
+                    "Failed to deserialize signed transaction from CDP".to_string(),
+                )
+            })?;
 
         // Extract only our signature from the response and apply it to the original transaction.
         let signature = *signed_tx.signatures.get(signer_position).ok_or_else(|| {
@@ -427,7 +426,7 @@ impl SolanaSigner for CdpSigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
         Ok(TransactionUtil::classify_signed_transaction(
@@ -745,7 +744,7 @@ mod tests {
         let pubkey = keypair_pubkey(&keypair);
 
         let mut tx = create_test_transaction(&pubkey);
-        let signature = keypair_sign_message(&keypair, &tx.message_data());
+        let signature = keypair_sign_message(&keypair, &tx.message.serialize());
 
         let mut signed_tx = tx.clone();
         signed_tx.signatures = vec![signature];
@@ -794,7 +793,7 @@ mod tests {
         // Simulate a compromised API returning a signature over a different transaction.
         let tampered_recipient = Pubkey::new_unique();
         let mut tampered_tx = create_test_transaction_with_recipient(&pubkey, &tampered_recipient);
-        let tampered_signature = keypair_sign_message(&keypair, &tampered_tx.message_data());
+        let tampered_signature = keypair_sign_message(&keypair, &tampered_tx.message.serialize());
         tampered_tx.signatures = vec![tampered_signature];
 
         let serialized = bincode::serialize(&tampered_tx).unwrap();

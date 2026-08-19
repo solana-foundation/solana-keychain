@@ -2,7 +2,7 @@
 
 mod types;
 
-use crate::sdk_adapter::{Pubkey, Signature, Transaction, VersionedTransaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::SignTransactionResult;
 use crate::transaction_util::TransactionUtil;
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
@@ -608,11 +608,12 @@ impl CrossmintSigner {
                 ))
             })?;
 
-        let transaction: VersionedTransaction = bincode::deserialize(&bytes).map_err(|e| {
-            SignerError::SerializationError(format!(
-                "Failed to deserialize Crossmint onChain.transaction: {e}"
-            ))
-        })?;
+        let transaction: VersionedTransaction =
+            crate::transaction_util::deserialize_wire_transaction(&bytes).map_err(|e| {
+                SignerError::SerializationError(format!(
+                    "Failed to deserialize Crossmint onChain.transaction: {e}"
+                ))
+            })?;
 
         let required_signers = usize::from(transaction.message.header().num_required_signatures);
         let signer_keys = transaction.message.static_account_keys();
@@ -664,7 +665,7 @@ impl CrossmintSigner {
             return None;
         }
         let bytes = bs58::decode(serialized_transaction).into_vec().ok()?;
-        let transaction: VersionedTransaction = bincode::deserialize(&bytes).ok()?;
+        let transaction = crate::transaction_util::deserialize_wire_transaction(&bytes).ok()?;
         let executed_message = transaction.message.serialize();
         let candidates = self.verification_candidates();
         for entry in submitted {
@@ -769,7 +770,7 @@ impl CrossmintSigner {
     /// exact same bytes cannot create a second transaction.
     async fn sign_and_serialize(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         if self.public_key == Pubkey::default() {
             return Err(SignerError::ConfigError(
@@ -777,10 +778,8 @@ impl CrossmintSigner {
             ));
         }
 
-        let expected_message = transaction.message_data();
-        let serialized = bincode::serialize(transaction).map_err(|e| {
-            SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
-        })?;
+        let expected_message = transaction.message.serialize();
+        let serialized = crate::transaction_util::serialize_wire_transaction(transaction)?;
         let transaction_b58 = bs58::encode(serialized).into_string();
         let idempotency_key =
             crate::transaction_util::idempotency_key_from_message(&expected_message);
@@ -843,7 +842,7 @@ impl SolanaSigner for CrossmintSigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         self.sign_and_serialize(tx).await
     }
@@ -1129,7 +1128,8 @@ mod tests {
 
         let mut local_tx = create_test_transaction(&signer_pubkey);
         let mut signed_remote_tx = local_tx.clone();
-        let expected_signature = keypair_sign_message(&keypair, &signed_remote_tx.message_data());
+        let expected_signature =
+            keypair_sign_message(&keypair, &signed_remote_tx.message.serialize());
         TransactionUtil::add_signature_to_transaction(
             &mut signed_remote_tx,
             &signer_pubkey,
@@ -1141,7 +1141,7 @@ mod tests {
             bs58::encode(bincode::serialize(&signed_remote_tx).unwrap()).into_string();
 
         let expected_idempotency_key =
-            crate::transaction_util::idempotency_key_from_message(&local_tx.message_data());
+            crate::transaction_util::idempotency_key_from_message(&local_tx.message.serialize());
         Mock::given(method("POST"))
             .and(path("/2025-06-09/wallets/test-wallet/transactions"))
             .and(header("x-api-key", "test-api-key"))
@@ -1194,7 +1194,7 @@ mod tests {
         let mut local_tx = create_test_transaction(&wallet_pubkey);
         let mut rewritten_tx = create_test_transaction(&delegated_pubkey);
         let expected_signature =
-            keypair_sign_message(&delegated_keypair, &rewritten_tx.message_data());
+            keypair_sign_message(&delegated_keypair, &rewritten_tx.message.serialize());
         TransactionUtil::add_signature_to_transaction(
             &mut rewritten_tx,
             &delegated_pubkey,
@@ -1269,7 +1269,7 @@ mod tests {
 
         let mut local_tx = create_test_transaction(&wallet_pubkey);
         let mut rewritten_tx = create_test_transaction(&stranger_pubkey);
-        let signature = keypair_sign_message(&stranger, &rewritten_tx.message_data());
+        let signature = keypair_sign_message(&stranger, &rewritten_tx.message.serialize());
         TransactionUtil::add_signature_to_transaction(
             &mut rewritten_tx,
             &stranger_pubkey,
@@ -1318,8 +1318,11 @@ mod tests {
 
         let mut local_tx = create_test_transaction(&signer_pubkey);
         let mut rewritten_tx = create_test_transaction(&signer_pubkey);
-        assert_ne!(rewritten_tx.message_data(), local_tx.message_data());
-        let expected_signature = keypair_sign_message(&keypair, &rewritten_tx.message_data());
+        assert_ne!(
+            rewritten_tx.message.serialize(),
+            local_tx.message.serialize()
+        );
+        let expected_signature = keypair_sign_message(&keypair, &rewritten_tx.message.serialize());
         TransactionUtil::add_signature_to_transaction(
             &mut rewritten_tx,
             &signer_pubkey,
@@ -1377,14 +1380,16 @@ mod tests {
             .await;
 
         let mut executed_tx = create_test_transaction(&sponsor_pubkey);
-        let sponsor_signature = keypair_sign_message(&sponsor_keypair, &executed_tx.message_data());
+        let sponsor_signature =
+            keypair_sign_message(&sponsor_keypair, &executed_tx.message.serialize());
         TransactionUtil::add_signature_to_transaction(
             &mut executed_tx,
             &sponsor_pubkey,
             sponsor_signature,
         )
         .unwrap();
-        let approval_signature = keypair_sign_message(&wallet_keypair, &executed_tx.message_data());
+        let approval_signature =
+            keypair_sign_message(&wallet_keypair, &executed_tx.message.serialize());
 
         Mock::given(method("POST"))
             .and(path("/2025-06-09/wallets/test-wallet/transactions"))
@@ -1495,7 +1500,8 @@ mod tests {
 
         let recipient = Pubkey::new_unique();
         let mut remote_tx = create_test_transaction_with_recipient(&signer_pubkey, &recipient);
-        let remote_signature = keypair_sign_message(&wallet_keypair, &remote_tx.message_data());
+        let remote_signature =
+            keypair_sign_message(&wallet_keypair, &remote_tx.message.serialize());
         TransactionUtil::add_signature_to_transaction(
             &mut remote_tx,
             &signer_pubkey,
@@ -1547,7 +1553,7 @@ mod tests {
         // onChain.transaction with different message bytes (different recipient)
         let recipient = Pubkey::new_unique();
         let mut remote_tx = create_test_transaction_with_recipient(&signer_pubkey, &recipient);
-        let remote_sig = keypair_sign_message(&keypair, &remote_tx.message_data());
+        let remote_sig = keypair_sign_message(&keypair, &remote_tx.message.serialize());
         TransactionUtil::add_signature_to_transaction(&mut remote_tx, &signer_pubkey, remote_sig)
             .unwrap();
         let remote_on_chain_transaction =
@@ -1684,7 +1690,7 @@ mod tests {
         signer.init().await.unwrap();
 
         let mut tx = create_test_transaction(&signer_pubkey);
-        let expected_signature = keypair_sign_message(&keypair, &tx.message_data());
+        let expected_signature = keypair_sign_message(&keypair, &tx.message.serialize());
         let tx_id = bs58::encode(expected_signature.as_ref()).into_string();
 
         Mock::given(method("GET"))
@@ -1747,7 +1753,7 @@ mod tests {
         signer.init().await.unwrap();
 
         let mut tx = create_test_transaction(&signer_pubkey);
-        let expected_tx_signature = keypair_sign_message(&keypair, &tx.message_data());
+        let expected_tx_signature = keypair_sign_message(&keypair, &tx.message.serialize());
         let tx_id = bs58::encode(expected_tx_signature.as_ref()).into_string();
 
         // Only an approval whose signature covers OUR challenge bytes (and
@@ -1805,7 +1811,7 @@ mod tests {
             .await;
 
         let mut tx = create_test_transaction(&signer_pubkey);
-        let expected_signature = keypair_sign_message(&keypair, &tx.message_data());
+        let expected_signature = keypair_sign_message(&keypair, &tx.message.serialize());
         let tx_id = bs58::encode(expected_signature.as_ref()).into_string();
 
         Mock::given(method("GET"))

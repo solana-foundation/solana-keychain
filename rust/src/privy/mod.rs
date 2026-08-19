@@ -3,7 +3,7 @@
 mod authorization;
 mod types;
 
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
@@ -278,13 +278,11 @@ impl PrivySigner {
     /// Policies must allow the `signTransaction` method.
     async fn sign_and_serialize(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
         let public_key = self.initialized_pubkey()?;
 
-        let unsigned_wire = bincode::serialize(transaction).map_err(|e| {
-            SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
-        })?;
+        let unsigned_wire = crate::transaction_util::serialize_wire_transaction(transaction)?;
         let request = SignTransactionRequest {
             method: "signTransaction",
             chain_type: "solana",
@@ -304,11 +302,12 @@ impl PrivySigner {
                     "Failed to decode signed transaction returned by Privy".to_string(),
                 )
             })?;
-        let returned: Transaction = bincode::deserialize(&signed_wire).map_err(|e| {
-            SignerError::SerializationError(format!(
-                "Failed to deserialize signed transaction returned by Privy: {e}"
-            ))
-        })?;
+        let returned: VersionedTransaction =
+            crate::transaction_util::deserialize_wire_transaction(&signed_wire).map_err(|e| {
+                SignerError::SerializationError(format!(
+                    "Failed to deserialize signed transaction returned by Privy: {e}"
+                ))
+            })?;
 
         let position = TransactionUtil::get_signing_keypair_position(&returned, &public_key)?;
         let signature = returned.signatures.get(position).copied().ok_or_else(|| {
@@ -317,7 +316,7 @@ impl PrivySigner {
             )
         })?;
 
-        if !signature.verify(&public_key.to_bytes(), &transaction.message_data()) {
+        if !signature.verify(&public_key.to_bytes(), &transaction.message.serialize()) {
             return Err(SignerError::SigningFailed(
                 "Signature verification failed — the returned signature does not match the public key".to_string(),
             ));
@@ -340,7 +339,7 @@ impl SolanaSigner for PrivySigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
         Ok(TransactionUtil::classify_signed_transaction(
@@ -437,7 +436,7 @@ mod tests {
 
         // Create a signed transaction
         let tx = create_test_transaction(&keypair_pubkey(&keypair));
-        let signature = keypair.sign_message(&tx.message_data());
+        let signature = keypair.sign_message(&tx.message.serialize());
 
         let mut signed_tx = tx.clone();
         signed_tx.signatures = vec![signature];
@@ -465,7 +464,7 @@ mod tests {
         signer.api_base_url = mock_server.uri();
         signer.public_key = Some(keypair.pubkey());
 
-        let result = signer.sign_message(&tx.message_data()).await;
+        let result = signer.sign_message(&tx.message.serialize()).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), signature);
     }
@@ -588,7 +587,7 @@ mod tests {
         signer.api_base_url = mock_server.uri();
         signer.public_key = Some(keypair.pubkey());
 
-        let result = signer.sign_message(&tx.message_data()).await;
+        let result = signer.sign_message(&tx.message.serialize()).await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -617,7 +616,7 @@ mod tests {
         let mut tx = create_test_transaction(&keypair_pubkey(&keypair));
 
         // The signature that Privy API will return (signing the message_data)
-        let signature = keypair.sign_message(&tx.message_data());
+        let signature = keypair.sign_message(&tx.message.serialize());
 
         // Create a signed transaction to return from the mock
         let mut signed_tx = tx.clone();
@@ -665,7 +664,7 @@ mod tests {
 
         let mut tx = create_test_transaction(&keypair_pubkey(&keypair));
         let mut other_tx = create_test_transaction(&keypair_pubkey(&keypair));
-        other_tx.signatures = vec![keypair.sign_message(&other_tx.message_data())];
+        other_tx.signatures = vec![keypair.sign_message(&other_tx.message.serialize())];
 
         Mock::given(method("POST"))
             .and(path("/wallets/test-wallet-id/rpc"))

@@ -306,8 +306,12 @@ pub trait SolanaSigner: Send + Sync {
     /// Get the public key of this signer
     fn pubkey(&self) -> Pubkey;
 
-    /// Sign a Solana transaction (modifies transaction in place)
-    async fn sign_transaction(&self, tx: &mut Transaction) -> Result<Signature, SignerError>;
+    /// Sign a Solana transaction (modifies transaction in place).
+    /// Accepts legacy, v0 and v1; v1 requires the `sdk-v4` feature.
+    async fn sign_transaction(
+        &self,
+        tx: &mut VersionedTransaction,
+    ) -> Result<Signature, SignerError>;
 
     /// Sign arbitrary message bytes
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError>;
@@ -322,7 +326,7 @@ pub trait SolanaSigner: Send + Sync {
 Fordefi supports two signing modes, which differ in whether Fordefi broadcasts the transaction and in what `sign_transaction` returns:
 
 - **Black box mode** : Signs raw bytes via EdDSA; the wire transaction is assembled locally. Fordefi does **not** broadcast — `sign_transaction` returns the signed serialized transaction, and **you** submit it to an RPC. Use with a Fordefi black box vault.
-- **Native Solana mode** (recommended): Uses Solana-specific API types. Fordefi modifies the transaction (at minimum updating the blockhash, and optionally adding priority fees) and **auto-broadcasts** it on-chain (`push_mode: "auto"`). Because the transaction is already submitted, `sign_transaction` returns an **empty** serialized transaction (only the signature is meaningful) and updates your `&mut Transaction` to the Fordefi-signed one — do not re-send it. The current auto-broadcast request supports only transactions whose sole required signer is the configured Fordefi vault; additional required signers are rejected before submission. Use with a regular Fordefi Solana vault.
+- **Native Solana mode** (recommended): Uses Solana-specific API types. Fordefi modifies the transaction (at minimum updating the blockhash, and optionally adding priority fees) and **auto-broadcasts** it on-chain (`push_mode: "auto"`). Because the transaction is already submitted, `sign_transaction` returns an **empty** serialized transaction (only the signature is meaningful) and updates your `&mut VersionedTransaction` to the Fordefi-signed one — do not re-send it. The current auto-broadcast request supports only transactions whose sole required signer is the configured Fordefi vault; additional required signers are rejected before submission. Use with a regular Fordefi Solana vault.
 
 Construction is async because it fetches the Fordefi vault and verifies that its
 authoritative address matches the configured `public_key` before returning.
