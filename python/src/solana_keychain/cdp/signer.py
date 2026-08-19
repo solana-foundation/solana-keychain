@@ -23,6 +23,7 @@ from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
+    assert_unversioned_wire_transaction,
     classify_signed_transaction,
     get_signing_keypair_position,
     serialize_transaction,
@@ -163,6 +164,7 @@ class CdpSigner(SolanaSigner):
                 SignerErrorCode.SERIALIZATION_ERROR,
                 "Failed to decode base64 signed transaction from CDP",
             ) from None
+        assert_unversioned_wire_transaction("CDP", signed_bytes)
         try:
             signed_transaction = Transaction.from_bytes(signed_bytes)
         except Exception:

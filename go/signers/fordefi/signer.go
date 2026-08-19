@@ -368,6 +368,9 @@ func (s *Signer) finishNativeBroadcast(ctx context.Context, txID string) (core.S
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,
 			"failed to decode raw_transaction base64", err)
 	}
+	if err := core.AssertUnversionedWireTransaction("Fordefi", wireBytes); err != nil {
+		return core.SignedTransaction{}, err
+	}
 	returned, err := solana.TransactionFromBytes(wireBytes)
 	if err != nil {
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,

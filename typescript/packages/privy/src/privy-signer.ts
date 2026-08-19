@@ -303,6 +303,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
                 const signedTx = await this.signTransaction(wireTransaction);
                 const sigDict = extractSignatureFromWireTransaction({
                     base64WireTransaction: signedTx,
+                    providerName: 'Privy',
                     signerAddress: this.address,
                 });
                 await assertSignatureValid({

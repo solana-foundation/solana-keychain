@@ -27,6 +27,7 @@ from solana_keychain.core.http import assert_https_url, fetch_signer_json, norma
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
+    assert_unversioned_wire_transaction,
     classify_signed_transaction,
     serialize_transaction,
     signed_message_bytes,
@@ -304,6 +305,7 @@ class UtilaSigner(SolanaSigner):
                 SignerErrorCode.SERIALIZATION_ERROR,
                 "Failed to decode Utila rawTransaction as base64",
             ) from None
+        assert_unversioned_wire_transaction("Utila", transaction_bytes)
         try:
             transaction = VersionedTransaction.from_bytes(transaction_bytes)
         except Exception:

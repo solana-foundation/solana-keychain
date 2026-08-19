@@ -311,6 +311,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                 const hexToBytes = getBase16Encoder().encode;
                 const signedTxBytes = hexToBytes(signedTransactionHex);
                 const sigDict = extractSignatureFromTransactionBytes({
+                    providerName: 'Turnkey',
                     signerAddress: this.address,
                     transactionBytes: signedTxBytes,
                 });

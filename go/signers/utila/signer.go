@@ -243,13 +243,16 @@ func terminalStateError(state transactionState) error {
 // extractSignatureFromRawTransaction decodes the base64 wire transaction Utila
 // returned, requires its message bytes to equal the locally requested message,
 // locates this wallet's required-signer position, and verifies the signature
-// before surfacing it. solana-go's Transaction decodes legacy and versioned
-// messages alike, so both wire formats share this one path.
+// before surfacing it. solana-go's Transaction decodes legacy and v0 messages
+// alike, so those two wire formats share this one path.
 func (s *Signer) extractSignatureFromRawTransaction(rawTransaction string, expectedMessage []byte) (solana.Signature, error) {
 	raw, err := base64.StdEncoding.DecodeString(rawTransaction)
 	if err != nil {
 		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError,
 			"Failed to decode Utila rawTransaction as base64", err)
+	}
+	if err := core.AssertUnversionedWireTransaction("Utila", raw); err != nil {
+		return solana.Signature{}, err
 	}
 	tx, err := solana.TransactionFromBytes(raw)
 	if err != nil {

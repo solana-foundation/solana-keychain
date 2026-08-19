@@ -257,6 +257,7 @@ impl TurnkeySigner {
                 "Failed to decode signed transaction returned by Turnkey: {e}"
             ))
         })?;
+        TransactionUtil::reject_versioned_wire_transaction("Turnkey", &signed_wire)?;
         let returned: Transaction = bincode::deserialize(&signed_wire).map_err(|e| {
             SignerError::SerializationError(format!(
                 "Failed to deserialize signed transaction returned by Turnkey: {e}"

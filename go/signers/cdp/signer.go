@@ -185,6 +185,9 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,
 			"failed to decode base64 signed transaction from CDP", err)
 	}
+	if err := core.AssertUnversionedWireTransaction("CDP", signedBytes); err != nil {
+		return core.SignedTransaction{}, err
+	}
 	signedTx, err := solana.TransactionFromBytes(signedBytes)
 	if err != nil {
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,

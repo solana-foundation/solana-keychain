@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/base64"
+	"fmt"
 
 	"github.com/gagliardetto/solana-go"
 )
@@ -15,6 +16,21 @@ func Serialize(tx *solana.Transaction) (string, error) {
 		return "", WrapSignerError(CodeSerializationError, "failed to serialize transaction", err)
 	}
 	return base64.StdEncoding.EncodeToString(b), nil
+}
+
+// AssertUnversionedWireTransaction rejects a wire transaction whose envelope carries
+// a version prefix. Legacy and v0 envelopes both open with a compact-u16 signature
+// count, capped at 12 signatures, so the high bit of the first byte is never set. v1
+// moves its signatures to the tail and puts 0x80|version at offset zero, a layout the
+// signature-slot readers here cannot interpret.
+func AssertUnversionedWireTransaction(provider string, wireBytes []byte) error {
+	if len(wireBytes) == 0 || wireBytes[0]&0x80 == 0 {
+		return nil
+	}
+	return NewSignerError(CodeSerializationError, fmt.Sprintf(
+		"%s returned a v%d transaction envelope, which is not supported yet (only legacy and v0 transactions can be verified)",
+		provider, wireBytes[0]&0x7f,
+	))
 }
 
 // SigningPosition returns the index in the transaction's required-signer list where

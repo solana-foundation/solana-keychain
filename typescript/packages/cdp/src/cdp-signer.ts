@@ -442,6 +442,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
                 const signedWireTx = await this.callSignTransaction(wireTransaction);
                 const sigDict = extractSignatureFromWireTransaction({
                     base64WireTransaction: signedWireTx,
+                    providerName: 'CDP',
                     signerAddress: this.address,
                 });
                 await assertSignatureValid({

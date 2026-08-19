@@ -15,6 +15,7 @@ from solana_keychain.core.http import assert_https_url, fetch_signer_json, norma
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
+    assert_unversioned_wire_transaction,
     classify_signed_transaction,
     get_signing_keypair_position,
     serialize_transaction,
@@ -192,7 +193,15 @@ class PrivySigner(SolanaSigner):
                 SignerErrorCode.REMOTE_API_ERROR, "No signed_transaction in Privy response"
             )
         try:
-            signed = Transaction.from_bytes(base64.b64decode(signed_b64, validate=True))
+            signed_wire = base64.b64decode(signed_b64, validate=True)
+        except Exception:
+            raise SignerError(
+                SignerErrorCode.SERIALIZATION_ERROR,
+                "Failed to decode signed transaction returned by Privy",
+            ) from None
+        assert_unversioned_wire_transaction("Privy", signed_wire)
+        try:
+            signed = Transaction.from_bytes(signed_wire)
         except Exception:
             raise SignerError(
                 SignerErrorCode.SERIALIZATION_ERROR,

@@ -108,3 +108,35 @@ func TestClassifyPartialWhenMultiSig(t *testing.T) {
 		t.Error("Classify should report Partial")
 	}
 }
+
+func TestAssertUnversionedWireTransactionAcceptsLegacyEnvelope(t *testing.T) {
+	payer := testPublicKey()
+	tx, err := createTestTransaction(payer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := tx.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AssertUnversionedWireTransaction("Provider", wire); err != nil {
+		t.Fatalf("rejected a legacy envelope: %v", err)
+	}
+}
+
+func TestAssertUnversionedWireTransactionRejectsV1Envelope(t *testing.T) {
+	err := AssertUnversionedWireTransaction("Provider", []byte{0x81, 0x01})
+	if err == nil {
+		t.Fatal("a 0x81 prefix is a v1 envelope this module cannot verify")
+	}
+	code, ok := CodeOf(err)
+	if !ok || code != CodeSerializationError {
+		t.Errorf("want %s, got %s", CodeSerializationError, code)
+	}
+}
+
+func TestAssertUnversionedWireTransactionIgnoresEmptyBytes(t *testing.T) {
+	if err := AssertUnversionedWireTransaction("Provider", nil); err != nil {
+		t.Fatalf("empty bytes must defer to the decoder: %v", err)
+	}
+}

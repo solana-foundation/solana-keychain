@@ -5,6 +5,7 @@ import { getBase58Decoder } from '@solana/codecs-strings';
 import {
     assertHttpsUrl,
     assertSignatureValid,
+    assertUnversionedWireTransaction,
     createSignatureDictionary,
     extractSignatureFromWireTransaction,
     fetchSignerJson,
@@ -552,6 +553,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
         const signedWireTx = result.raw_transaction as Base64EncodedWireTransaction;
         const sigDict = extractSignatureFromWireTransaction({
             base64WireTransaction: signedWireTx,
+            providerName: 'Fordefi',
             signerAddress: this.address,
         });
         const signerSignature = sigDict[this.address];
@@ -816,6 +818,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
         transactionSignature: SignatureBytes;
     } {
         const wireBytes = new Uint8Array(Buffer.from(base64WireTx, 'base64'));
+        assertUnversionedWireTransaction({ providerName: 'Fordefi', transactionBytes: wireBytes });
         let signatureCount = 0;
         let signatureCountSize = 0;
         let shift = 0;

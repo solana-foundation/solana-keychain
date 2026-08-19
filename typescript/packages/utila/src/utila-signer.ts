@@ -260,6 +260,7 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
 
         const sigDict = extractSignatureFromWireTransaction({
             base64WireTransaction: rawSignedTransaction as Base64EncodedWireTransaction,
+            providerName: 'Utila',
             signerAddress: this.address,
         });
         await assertSignatureValid({

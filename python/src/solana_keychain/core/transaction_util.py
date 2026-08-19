@@ -25,6 +25,23 @@ def idempotency_key_from_message(message_bytes: bytes) -> str:
     return str(uuid.UUID(bytes=bytes(digest)))
 
 
+def assert_unversioned_wire_transaction(provider: str, wire_bytes: bytes) -> None:
+    """Reject a wire transaction whose envelope carries a version prefix.
+
+    Legacy and v0 envelopes both open with a compact-u16 signature count, capped
+    at 12 signatures, so the high bit of the first byte is never set. v1 moves its
+    signatures to the tail and puts ``0x80 | version`` at offset zero, a layout
+    the signature-slot readers here cannot interpret.
+    """
+    if not wire_bytes or not wire_bytes[0] & 0x80:
+        return
+    raise SignerError(
+        SignerErrorCode.SERIALIZATION_ERROR,
+        f"{provider} returned a v{wire_bytes[0] & 0x7F} transaction envelope, which is not "
+        "supported yet (only legacy and v0 transactions can be verified)",
+    )
+
+
 def serialize_transaction(transaction: Transaction) -> str:
     """Encode a transaction to base64(bincode(tx))."""
     try:

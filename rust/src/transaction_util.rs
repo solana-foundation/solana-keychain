@@ -27,6 +27,28 @@ pub(crate) fn idempotency_key_from_message(message_bytes: &[u8]) -> String {
 pub struct TransactionUtil;
 
 impl TransactionUtil {
+    /// Reject a wire transaction whose envelope carries a version prefix.
+    ///
+    /// Legacy and v0 envelopes both open with a compact-u16 signature count,
+    /// capped at 12 signatures, so the high bit of the first byte is never set.
+    /// v1 moves its signatures to the tail and puts `0x80 | version` at offset
+    /// zero, a layout none of the signature-slot readers here can interpret.
+    pub fn reject_versioned_wire_transaction(
+        provider: &str,
+        wire_bytes: &[u8],
+    ) -> Result<(), SignerError> {
+        let Some(first) = wire_bytes.first() else {
+            return Ok(());
+        };
+        if first & 0x80 == 0 {
+            return Ok(());
+        }
+        Err(SignerError::SerializationError(format!(
+            "{provider} returned a v{} transaction envelope, which is not supported yet (only legacy and v0 transactions can be verified)",
+            first & 0x7f
+        )))
+    }
+
     /// Encodes a Transaction to a base64 serialized String
     pub fn serialize_transaction(transaction: &Transaction) -> Result<String, SignerError> {
         Ok(
@@ -106,5 +128,39 @@ impl TransactionUtil {
         } else {
             SignTransactionResult::Partial(signed_transaction)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_util::create_test_transaction;
+
+    #[test]
+    fn accepts_a_real_legacy_wire_transaction() {
+        let transaction = create_test_transaction(&Pubkey::new_unique());
+        let wire_bytes = bincode::serialize(&transaction).expect("serialize test transaction");
+
+        assert!(
+            TransactionUtil::reject_versioned_wire_transaction("Provider", &wire_bytes).is_ok(),
+            "a legacy envelope opens with a signature count, never a version prefix"
+        );
+    }
+
+    #[test]
+    fn rejects_a_v1_envelope_naming_the_version() {
+        let error = TransactionUtil::reject_versioned_wire_transaction("Provider", &[0x81, 0x01])
+            .expect_err("a 0x81 prefix is a v1 envelope this crate cannot verify");
+
+        let SignerError::SerializationError(detail) = error else {
+            panic!("a version the crate cannot parse is a serialization failure");
+        };
+        assert!(detail.contains("Provider"), "{detail}");
+        assert!(detail.contains("v1"), "{detail}");
+    }
+
+    #[test]
+    fn ignores_empty_bytes_so_the_decoder_reports_the_real_problem() {
+        assert!(TransactionUtil::reject_versioned_wire_transaction("Provider", &[]).is_ok());
     }
 }

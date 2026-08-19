@@ -529,19 +529,11 @@ impl FordefiSigner {
             SignerError::SerializationError(format!("Failed to decode raw_transaction base64: {e}"))
         })?;
 
-        // Deserialize the Fordefi-returned wire transaction with the Solana SDK
-        // (bincode of a Transaction is exactly the Solana wire format).
-        //
-        // NOTE: only *legacy* transactions are supported. A versioned (v0) wire
-        // transaction is prefixed with a version byte (high bit set on the first
-        // byte) that the legacy `Transaction` layout cannot represent, so if Fordefi
-        // ever returns a v0 transaction this deserialization fails rather than
-        // silently mis-parsing. Supporting v0 would mean decoding into
-        // `VersionedTransaction` and threading that type through the signer API.
+        TransactionUtil::reject_versioned_wire_transaction("Fordefi", &wire_bytes)?;
         let returned_tx: Transaction = bincode::deserialize(&wire_bytes).map_err(|e| {
             SignerError::SerializationError(format!(
-                "Failed to deserialize Fordefi wire transaction (versioned/v0 \
-                 transactions are not supported, only legacy): {e}"
+                "Failed to deserialize Fordefi wire transaction (only legacy \
+                 transactions are supported): {e}"
             ))
         })?;
 

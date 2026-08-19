@@ -80,8 +80,20 @@ import { extractSignatureFromWireTransaction } from '@solana/keychain-core';
 const signedTx = await remoteApi.signTransaction(...);
 const sigDict = extractSignatureFromWireTransaction({
     base64WireTransaction: signedTx,
+    providerName: 'MyProvider',
     signerAddress: myAddress
 });
+```
+
+`providerName` names the provider in the error when the returned envelope cannot be read, including a versioned (v1) envelope, which these signature readers reject.
+
+**`assertUnversionedWireTransaction`** - Reject a wire transaction whose envelope carries a version prefix:
+
+```typescript
+import { assertUnversionedWireTransaction } from '@solana/keychain-core';
+
+// Call before decoding provider-returned wire bytes yourself.
+assertUnversionedWireTransaction({ providerName: 'MyProvider', transactionBytes });
 ```
 
 **`createSignatureDictionary`** - Create a signature dictionary from raw signature bytes:

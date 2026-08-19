@@ -20,6 +20,7 @@ from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
+    assert_unversioned_wire_transaction,
     classify_signed_transaction,
     idempotency_key_from_message,
     serialize_transaction,
@@ -364,6 +365,7 @@ class CrossmintSigner(SolanaSigner):
                 SignerErrorCode.SERIALIZATION_ERROR,
                 "Failed to decode Crossmint onChain.transaction as base58",
             ) from None
+        assert_unversioned_wire_transaction("Crossmint", transaction_bytes)
         try:
             transaction = VersionedTransaction.from_bytes(transaction_bytes)
         except Exception:
@@ -425,7 +427,9 @@ class CrossmintSigner(SolanaSigner):
         if not isinstance(submitted, list) or not submitted:
             return None
         try:
-            transaction = VersionedTransaction.from_bytes(base58.b58decode(serialized_transaction))
+            transaction_bytes = base58.b58decode(serialized_transaction)
+            assert_unversioned_wire_transaction("Crossmint", transaction_bytes)
+            transaction = VersionedTransaction.from_bytes(transaction_bytes)
         except Exception:
             return None
         try:

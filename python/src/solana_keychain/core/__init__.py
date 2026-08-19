@@ -10,6 +10,7 @@ from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
+    assert_unversioned_wire_transaction,
     classify_signed_transaction,
     get_signing_keypair_position,
     has_all_required_signatures,
@@ -26,6 +27,7 @@ __all__ = [
     "SolanaSigner",
     "add_signature_to_transaction",
     "assert_https_url",
+    "assert_unversioned_wire_transaction",
     "classify_signed_transaction",
     "fetch_signer_json",
     "get_signing_keypair_position",

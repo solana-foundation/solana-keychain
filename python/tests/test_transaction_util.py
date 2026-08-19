@@ -110,3 +110,27 @@ def test_signed_message_bytes_leaves_legacy_messages_unchanged() -> None:
     keypair = Keypair()
     transaction = create_test_transaction(keypair.pubkey())
     assert signed_message_bytes(transaction.message) == transaction.message_data()
+
+
+def test_assert_unversioned_accepts_a_real_legacy_wire_transaction() -> None:
+    from solana_keychain.core import assert_unversioned_wire_transaction
+
+    keypair = Keypair()
+    transaction = create_test_transaction(keypair.pubkey())
+    assert_unversioned_wire_transaction("Provider", bytes(transaction))
+
+
+def test_assert_unversioned_rejects_a_v1_envelope_naming_the_version() -> None:
+    from solana_keychain.core import assert_unversioned_wire_transaction
+
+    with pytest.raises(SignerError) as excinfo:
+        assert_unversioned_wire_transaction("Provider", b"\x81\x01")
+    assert excinfo.value.code == SignerErrorCode.SERIALIZATION_ERROR
+    assert "Provider" in excinfo.value._detail
+    assert "v1" in excinfo.value._detail
+
+
+def test_assert_unversioned_ignores_empty_bytes() -> None:
+    from solana_keychain.core import assert_unversioned_wire_transaction
+
+    assert_unversioned_wire_transaction("Provider", b"")

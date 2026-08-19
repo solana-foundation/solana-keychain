@@ -371,6 +371,7 @@ impl CdpSigner {
                 )
             })?;
 
+        TransactionUtil::reject_versioned_wire_transaction("CDP", &signed_bytes)?;
         let signed_tx: Transaction = bincode::deserialize(&signed_bytes).map_err(|_e| {
             #[cfg(feature = "unsafe-debug")]
             log::error!("Failed to deserialize signed transaction: {_e}");

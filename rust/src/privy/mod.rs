@@ -304,6 +304,7 @@ impl PrivySigner {
                     "Failed to decode signed transaction returned by Privy".to_string(),
                 )
             })?;
+        TransactionUtil::reject_versioned_wire_transaction("Privy", &signed_wire)?;
         let returned: Transaction = bincode::deserialize(&signed_wire).map_err(|e| {
             SignerError::SerializationError(format!(
                 "Failed to deserialize signed transaction returned by Privy: {e}"

@@ -3,6 +3,7 @@ import { getBase16Encoder, getBase58Decoder, getBase58Encoder, getBase64Encoder 
 import {
     assertHttpsUrl,
     assertSignatureValid,
+    assertUnversionedWireTransaction,
     DEFAULT_FETCH_TIMEOUT_MS,
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
@@ -467,9 +468,12 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
             let executedTransaction: Transaction | undefined;
             try {
                 base58Encoder ||= getBase58Encoder();
-                executedTransaction = getTransactionDecoder().decode(
-                    base58Encoder.encode(response.onChain.transaction),
-                );
+                const executedBytes = base58Encoder.encode(response.onChain.transaction);
+                assertUnversionedWireTransaction({
+                    providerName: 'Crossmint',
+                    transactionBytes: executedBytes,
+                });
+                executedTransaction = getTransactionDecoder().decode(executedBytes);
             } catch (error) {
                 embeddedError = error;
             }

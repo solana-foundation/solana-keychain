@@ -78,7 +78,38 @@ export async function assertSignatureValid({
     }
 }
 
+interface AssertUnversionedWireTransactionOptions {
+    providerName: string;
+    transactionBytes: ReadonlyUint8Array;
+}
+
+/**
+ * Rejects a wire transaction whose envelope carries a version prefix.
+ *
+ * Legacy and v0 envelopes both open with a compact-u16 signature count, capped
+ * at 12 signatures, so the high bit of the first byte is never set. v1 moves its
+ * signatures to the tail and puts `0x80 | version` at offset zero, a layout the
+ * signature readers here cannot interpret.
+ *
+ * @param providerName - The provider that returned the transaction
+ * @param transactionBytes - The serialized wire transaction
+ * @throws {SignerError} If the envelope is versioned
+ */
+export function assertUnversionedWireTransaction({
+    providerName,
+    transactionBytes,
+}: AssertUnversionedWireTransactionOptions): void {
+    const first = transactionBytes[0];
+    if (first === undefined || (first & 0x80) === 0) {
+        return;
+    }
+    throwSignerError(SignerErrorCode.SERIALIZATION_ERROR, {
+        message: `${providerName} returned a v${first & 0x7f} transaction envelope, which is not supported yet (only legacy and v0 transactions can be verified)`,
+    });
+}
+
 interface ExtractSignatureFromTransactionBytesOptions {
+    providerName: string;
     signerAddress: Address;
     transactionBytes: ReadonlyUint8Array;
 }
@@ -88,16 +119,19 @@ interface ExtractSignatureFromTransactionBytesOptions {
  * Useful for remote signers that return the signed transaction as raw bytes,
  * avoiding a base64 encode/decode round-trip.
  *
+ * @param providerName - The provider that returned the transaction
  * @param transactionBytes - The serialized wire transaction
  * @param signerAddress - The address of the signer whose signature to extract
  * @returns SignatureDictionary with only the specified signer's signature
  * @throws {SignerError} If no signature is found for the given address
  */
 export function extractSignatureFromTransactionBytes({
+    providerName,
     signerAddress,
     transactionBytes,
 }: ExtractSignatureFromTransactionBytesOptions): SignatureDictionary {
     assertIsAddress(signerAddress);
+    assertUnversionedWireTransaction({ providerName, transactionBytes });
     const { signatures } = getTransactionDecoder().decode(transactionBytes);
 
     const signature = signatures[signerAddress];
@@ -116,6 +150,7 @@ export function extractSignatureFromTransactionBytes({
 
 interface ExtractSignatureFromWireTransactionOptions {
     base64WireTransaction: Base64EncodedWireTransaction;
+    providerName: string;
     signerAddress: Address;
 }
 
@@ -124,6 +159,7 @@ interface ExtractSignatureFromWireTransactionOptions {
  * Useful for remote signers that return fully signed transactions from their APIs.
  *
  * @param base64WireTransaction - Base64 encoded transaction string
+ * @param providerName - The provider that returned the transaction
  * @param signerAddress - The address of the signer whose signature to extract
  * @returns SignatureDictionary with only the specified signer's signature
  * @throws {SignerError} If no signature is found for the given address
@@ -132,14 +168,20 @@ interface ExtractSignatureFromWireTransactionOptions {
  * ```typescript
  * // Privy API returns a signed transaction
  * const signedTx = await privyApi.signTransaction(...);
- * const sigDict = extractSignatureFromWireTransaction(signedTx, this.address);
+ * const sigDict = extractSignatureFromWireTransaction({
+ *     base64WireTransaction: signedTx,
+ *     providerName: 'Privy',
+ *     signerAddress: this.address,
+ * });
  * ```
  */
 export function extractSignatureFromWireTransaction({
     base64WireTransaction,
+    providerName,
     signerAddress,
 }: ExtractSignatureFromWireTransactionOptions): SignatureDictionary {
     return extractSignatureFromTransactionBytes({
+        providerName,
         signerAddress,
         transactionBytes: getBase64Encoder().encode(base64WireTransaction),
     });

@@ -392,6 +392,9 @@ func (s *Signer) signatureFromApprovals(response transactionResponse, serialized
 	if err != nil {
 		return solana.Signature{}, nil, false
 	}
+	if err := core.AssertUnversionedWireTransaction("Crossmint", raw); err != nil {
+		return solana.Signature{}, nil, false
+	}
 	tx, err := solana.TransactionFromBytes(raw)
 	if err != nil {
 		return solana.Signature{}, nil, false
@@ -529,6 +532,9 @@ func (s *Signer) extractSignatureFromSerializedTransaction(serializedTransaction
 	if err != nil {
 		return solana.Signature{}, nil, core.WrapSignerError(core.CodeSerializationError,
 			"failed to decode Crossmint onChain.transaction as base58", err)
+	}
+	if err := core.AssertUnversionedWireTransaction("Crossmint", raw); err != nil {
+		return solana.Signature{}, nil, err
 	}
 	tx, err := solana.TransactionFromBytes(raw)
 	if err != nil {

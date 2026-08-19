@@ -24,6 +24,7 @@ from solana_keychain.core.http import assert_https_url, fetch_signer_json, norma
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
+    assert_unversioned_wire_transaction,
     classify_signed_transaction,
     get_signing_keypair_position,
     serialize_transaction,
@@ -228,7 +229,15 @@ class TurnkeySigner(SolanaSigner):
         if not isinstance(signed_hex, str):
             raise SignerError(SignerErrorCode.SIGNING_FAILED, "Invalid response from Turnkey API")
         try:
-            signed = Transaction.from_bytes(bytes.fromhex(signed_hex))
+            signed_wire = bytes.fromhex(signed_hex)
+        except Exception:
+            raise SignerError(
+                SignerErrorCode.SERIALIZATION_ERROR,
+                "Failed to decode signed transaction returned by Turnkey",
+            ) from None
+        assert_unversioned_wire_transaction("Turnkey", signed_wire)
+        try:
+            signed = Transaction.from_bytes(signed_wire)
         except Exception:
             raise SignerError(
                 SignerErrorCode.SERIALIZATION_ERROR,

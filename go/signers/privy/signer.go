@@ -122,6 +122,9 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, core.NewSignerError(core.CodeSerializationError,
 			"failed to decode signed transaction returned by privy")
 	}
+	if err := core.AssertUnversionedWireTransaction("Privy", signedWire); err != nil {
+		return core.SignedTransaction{}, err
+	}
 	returned, err := solana.TransactionFromBytes(signedWire)
 	if err != nil {
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,

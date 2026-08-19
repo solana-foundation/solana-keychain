@@ -608,6 +608,7 @@ impl CrossmintSigner {
                 ))
             })?;
 
+        TransactionUtil::reject_versioned_wire_transaction("Crossmint", &bytes)?;
         let transaction: VersionedTransaction = bincode::deserialize(&bytes).map_err(|e| {
             SignerError::SerializationError(format!(
                 "Failed to deserialize Crossmint onChain.transaction: {e}"
@@ -664,6 +665,7 @@ impl CrossmintSigner {
             return None;
         }
         let bytes = bs58::decode(serialized_transaction).into_vec().ok()?;
+        TransactionUtil::reject_versioned_wire_transaction("Crossmint", &bytes).ok()?;
         let transaction: VersionedTransaction = bincode::deserialize(&bytes).ok()?;
         let executed_message = transaction.message.serialize();
         let candidates = self.verification_candidates();

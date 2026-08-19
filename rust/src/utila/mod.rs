@@ -322,6 +322,7 @@ impl UtilaSigner {
             )
         })?;
 
+        TransactionUtil::reject_versioned_wire_transaction("Utila", &bytes)?;
         let signature = match bincode::deserialize::<VersionedTransaction>(&bytes) {
             Ok(transaction) => {
                 let remote_message = transaction.message.serialize();
