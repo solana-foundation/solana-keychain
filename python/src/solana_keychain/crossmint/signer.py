@@ -441,9 +441,8 @@ class CrossmintSigner(SolanaSigner):
 
     @staticmethod
     def _broadcast_transaction_id(transaction: VersionedTransaction) -> Signature:
-        """Identifier of the transaction Crossmint landed: its fee-payer (slot 0)
-        signature, the value Solana RPC addresses transactions by. Under gas
-        sponsorship the fee payer is Crossmint's sponsor key, not this wallet."""
+        """The landed transaction's fee-payer (slot 0) signature, the value RPC
+        transaction lookups accept."""
         account_keys = list(transaction.message.account_keys)
         signatures = list(transaction.signatures)
         if not account_keys:
@@ -484,8 +483,7 @@ class CrossmintSigner(SolanaSigner):
                         serialized_transaction
                     )
                 except SignerError as transaction_error:
-                    # A rewritten transaction's approval in approvals.submitted
-                    # proves this wallet took part in what landed.
+                    # A rewritten transaction's approval lives in approvals.submitted.
                     approved = self._extract_signature_from_approvals(
                         response, serialized_transaction
                     )

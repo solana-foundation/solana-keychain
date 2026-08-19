@@ -603,11 +603,8 @@ describe('CrossmintSigner', () => {
         });
 
         /**
-         * When both paths fail, callers still get a stable SignerError code, with
-         * the embedded-transaction error as its cause: it names which check failed,
-         * where the txId error says only that a signature did not cover the caller's
-         * message, which is expected for a rewritten transaction and so explains
-         * nothing.
+         * When both paths fail, callers still get a stable SignerError code with
+         * the embedded-transaction error as its cause.
          */
         it('reports the embedded-transaction failure when txId validation also fails', async () => {
             vi.mocked(getTransactionDecoder).mockReturnValue({
@@ -645,10 +642,8 @@ describe('CrossmintSigner', () => {
         });
 
         /**
-         * Under gas sponsorship this wallet's signature is an approval over the
-         * rewritten message and never identifies the landed transaction. The
-         * returned value must be the sponsor fee-payer's slot-0 signature so that
-         * rpc.getTransaction(result) resolves.
+         * Under sponsorship the returned value must be the sponsor fee-payer's
+         * slot-0 signature, not the wallet's approval, so RPC lookups resolve.
          */
         it('returns the sponsor fee-payer signature as the transaction id for a sponsored transaction', async () => {
             const SPONSOR_ADDRESS = 'Sysvar1nstructions1111111111111111111111111';
@@ -698,11 +693,9 @@ describe('CrossmintSigner', () => {
             const results = await signer.signAndSendTransactions([createMockTransaction()]);
 
             expect(results[0]).toEqual(SPONSOR_SIGNATURE_BYTES);
-            // The approval gate verified our delegated signer over the executed bytes.
             expect(assertSignatureValid).toHaveBeenCalledWith(
                 expect.objectContaining({ data: rewrittenMessageBytes, signerAddress: DELEGATED_ADDRESS }),
             );
-            // The returned identifier is the fee payer's, verified over the same bytes.
             expect(assertSignatureValid).toHaveBeenCalledWith({
                 data: rewrittenMessageBytes,
                 signature: SPONSOR_SIGNATURE_BYTES,

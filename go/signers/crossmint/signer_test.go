@@ -571,10 +571,8 @@ func TestSignTransactionLocatesDelegatedSignerSignature(t *testing.T) {
 	}
 }
 
-// Under gas sponsorship this wallet's signature is an approval over the
-// rewritten message and never identifies the landed transaction. The returned
-// signature must be the sponsor fee-payer's slot-0 signature, the value RPC
-// transaction lookups accept.
+// Under sponsorship the returned signature must be the sponsor fee-payer's
+// slot-0 signature, not the wallet's approval, so RPC lookups resolve.
 func TestSignTransactionSponsoredReturnsFeePayerTransactionID(t *testing.T) {
 	secret := signerSecretPrefix + strings.Repeat("cd", 32)
 	derivableAPIKey := "sk_staging_" + base58.Encode([]byte("proj:sig"))

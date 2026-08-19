@@ -388,10 +388,8 @@ func (s *Signer) signatureFromApprovals(response transactionResponse, serialized
 	return solana.Signature{}, nil, false
 }
 
-// broadcastTransactionID returns the identifier of the transaction Crossmint
-// landed: its fee-payer (slot 0) signature, the value Solana RPC addresses
-// transactions by. Under gas sponsorship the fee payer is Crossmint's sponsor
-// key, not this wallet.
+// broadcastTransactionID returns the landed transaction's fee-payer (slot 0)
+// signature, the value RPC transaction lookups accept.
 func broadcastTransactionID(tx *solana.Transaction) (solana.Signature, error) {
 	if len(tx.Message.AccountKeys) == 0 {
 		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
@@ -441,8 +439,7 @@ func (s *Signer) extractSignatureFromResponse(response transactionResponse, expe
 				}
 				return txID, returned, nil
 			case true:
-				// A rewritten transaction's approval in approvals.submitted proves
-				// this wallet took part in what landed.
+				// A rewritten transaction's approval lives in approvals.submitted.
 				if _, returned, ok := s.signatureFromApprovals(response, *response.OnChain.Transaction); ok {
 					txID, idErr := broadcastTransactionID(returned)
 					if idErr != nil {

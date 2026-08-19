@@ -496,11 +496,8 @@ async def test_tx_id_signed_by_the_delegated_signer_is_accepted() -> None:
 
 @respx.mock
 async def test_rewritten_transaction_approval_yields_the_fee_payer_transaction_id() -> None:
-    """Crossmint rewrites the transaction and executes it, so the only filled
-    signature slot belongs to its own fee payer. This wallet's signature appears in
-    approvals.submitted, covering the rewritten message, but never identifies the
-    landed transaction: the returned signature must be the fee payer's, the value
-    RPC transaction lookups accept."""
+    """Under sponsorship the returned signature must be the fee payer's, not the
+    wallet's approval, so RPC lookups resolve."""
     wallet_keypair = Keypair()
     delegated = derive_signing_key(SIGNER_SECRET, API_KEY)
     fee_payer = Keypair()

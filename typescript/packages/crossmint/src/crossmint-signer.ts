@@ -475,14 +475,9 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
     }
 
     /**
-     * Identifier of the transaction Crossmint landed: its fee-payer (slot 0)
-     * signature, the value Solana RPC addresses transactions by, so the caller
-     * can pass the result to `getTransaction`/`confirmTransaction`. Under gas
-     * sponsorship the fee payer is Crossmint's sponsor key, not this wallet.
-     *
-     * Returned only after a configured signer's signature (in a slot or in
-     * `approvals.submitted`) verifies over the executed bytes, proving this
-     * wallet took part in what landed.
+     * The landed transaction's fee-payer (slot 0) signature, the value RPC
+     * lookups accept, returned only after a configured signer's signature
+     * verifies over the executed bytes.
      */
     private async transactionIdFromExecuted(
         response: CrossmintTransactionResponse,

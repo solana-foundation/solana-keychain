@@ -560,9 +560,8 @@ impl CrossmintSigner {
         Some(Signature::from(sig_bytes))
     }
 
-    /// Identifier of the transaction Crossmint landed: its fee-payer (slot 0)
-    /// signature, the value Solana RPC addresses transactions by. Under gas
-    /// sponsorship the fee payer is Crossmint's sponsor key, not this wallet.
+    /// The landed transaction's fee-payer (slot 0) signature, the value RPC
+    /// transaction lookups accept.
     fn broadcast_transaction_id(
         transaction: &VersionedTransaction,
     ) -> Result<Signature, SignerError> {
@@ -708,8 +707,7 @@ impl CrossmintSigner {
                         return Ok((transaction_id, Some(returned)));
                     }
                     Err(error) => {
-                        // A rewritten transaction's approval in approvals.submitted
-                        // proves this wallet took part in what landed.
+                        // A rewritten transaction's approval lives in approvals.submitted.
                         if let Some((_, returned)) =
                             self.signature_from_approvals(response, serialized_transaction)
                         {
@@ -1315,10 +1313,8 @@ mod tests {
         );
     }
 
-    /// Under gas sponsorship this wallet's signature is an approval over the
-    /// rewritten message and never identifies the landed transaction. The returned
-    /// signature must be the sponsor fee-payer's slot-0 signature, the value RPC
-    /// transaction lookups accept.
+    /// Under sponsorship the returned signature must be the sponsor fee-payer's
+    /// slot-0 signature, not the wallet's approval, so RPC lookups resolve.
     #[tokio::test]
     async fn test_sign_transaction_sponsored_returns_fee_payer_transaction_id() {
         let server = MockServer::start().await;
