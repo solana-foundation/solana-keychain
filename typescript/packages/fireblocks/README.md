@@ -60,9 +60,11 @@ const signature = await signMessage([signer], message);
 
 ### Signing Mode
 
-The signer always uses Fireblocks **RAW signing**: it signs the message bytes and returns the signature to you, and you broadcast the transaction yourself. This is the only mode compatible with the `SolanaSigner` contract.
+By default the signer uses Fireblocks **RAW signing**: it signs the message bytes and returns the signature to you, and you broadcast the transaction yourself.
 
-Fireblocks `PROGRAM_CALL` signing is **not supported**. It broadcasts the transaction on-chain and only returns a broadcast transaction id, not a reusable signer-bound signature, which would risk duplicate spends. Passing `useProgramCall: true` is rejected at construction with a `CONFIG_ERROR`.
+With `useProgramCall: true`, transactions are signed with the **PROGRAM_CALL** operation instead, sent with `signOnly: true` and `useDurableNonce: false` so Fireblocks signs the submitted transaction without broadcasting it and without rewriting the message. The returned signature is verified against the vault address over the local message bytes before it is used, and you still broadcast yourself. `signMessages()` always uses RAW, since PROGRAM_CALL only accepts serialized transactions.
+
+PROGRAM_CALL accepts legacy and v0 messages only, requires a hot wallet, and must be enabled for your workspace by Fireblocks. If Fireblocks broadcasts anyway (a workspace that ignores `signOnly`), signing rejects with `BROADCAST_UNCONFIRMED` carrying the provider transaction id rather than reporting a plain failure.
 
 ### With Devnet
 
@@ -89,18 +91,14 @@ const signer = await createFireblocksSigner({
 | `pollIntervalMs`  | `number`  | No       | `1000`                      | Polling interval in ms when waiting for transaction completion                                                                                                                                             |
 | `maxPollAttempts` | `number`  | No       | `60`                        | Maximum polling attempts before timeout                                                                                                                                                                    |
 | `requestDelayMs`  | `number`  | No       | `0`                         | Delay in ms between concurrent signing requests                                                                                                                                                            |
-| `useProgramCall`  | `boolean` | No       | `false`                     | **Deprecated, unsupported.** Setting `true` is rejected at construction with a `CONFIG_ERROR` (PROGRAM_CALL broadcasts on-chain without a reusable signature). Omit it; removal planned in a future major. |
+| `useProgramCall`  | `boolean` | No       | `false`                     | Sign transactions with PROGRAM_CALL (`signOnly`) instead of RAW — see [Signing Mode](#signing-mode)                                                                                                        |
 
 ## How It Works
 
 1. **Initialization**: Fetches the vault account's Solana address from Fireblocks API
 2. **JWT Authentication**: Signs API requests with RS256 JWT using your RSA private key
-3. **Transaction Creation**: Creates a RAW signing transaction in Fireblocks
+3. **Transaction Creation**: Creates a RAW signing transaction in Fireblocks, or a sign-only PROGRAM_CALL when `useProgramCall` is set
 4. **Signature Extraction**: Extracts the Ed25519 signature from the completed transaction/message
-
-### Signing Mode
-
-- **RAW** (only supported mode): Signs the message bytes only. You receive the signature and broadcast the transaction yourself. Fireblocks `PROGRAM_CALL` (broadcast) signing is not supported — see [Signing Mode](#signing-mode) above.
 
 ## Security Considerations
 

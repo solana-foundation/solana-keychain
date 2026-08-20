@@ -1,6 +1,18 @@
+import { getBase58Decoder } from '@solana/codecs-strings';
+import {
+    address,
+    appendTransactionMessageInstruction,
+    blockhash,
+    compileTransaction,
+    createTransactionMessage,
+    getBase64EncodedWireTransaction,
+    pipe,
+    setTransactionMessageFeePayer,
+    setTransactionMessageLifetimeUsingBlockhash,
+} from '@solana/kit';
 import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertIsSolanaSigner, assertSignatureValid } from '@solana/keychain-core';
 
 import { createFireblocksSigner, FireblocksSigner } from '../fireblocks-signer.js';
 import type { FireblocksSignerConfig } from '../types.js';
@@ -143,33 +155,15 @@ describe('FireblocksSigner', () => {
             expect(signer).toBeDefined();
         });
 
-        it('should reject useProgramCall:true with CONFIG_ERROR and never make a network call', () => {
-            expect(() => {
-                new FireblocksSigner({
-                    apiKey: TEST_API_KEY,
-                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                    useProgramCall: true,
-                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-                });
-            }).toThrow(/useProgramCall.*not supported/);
-
-            expect(mockFetch).not.toHaveBeenCalled();
-        });
-
-        it('should reject useProgramCall:true via createFireblocksSigner before any broadcast', async () => {
-            await expect(
-                createFireblocksSigner({
-                    apiKey: TEST_API_KEY,
-                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                    useProgramCall: true,
-                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-                }),
-            ).rejects.toMatchObject({
-                code: 'SIGNER_CONFIG_ERROR',
-                message: expect.stringContaining('useProgramCall'),
+        it('should allow useProgramCall:true', () => {
+            const signer = new FireblocksSigner({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                useProgramCall: true,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
 
-            expect(mockFetch).not.toHaveBeenCalled();
+            expect(signer).toBeDefined();
         });
 
         it('should allow useProgramCall:false', () => {
@@ -748,6 +742,135 @@ describe('FireblocksSigner', () => {
             await expect(signer.signTransactions([transaction])).rejects.toThrow(
                 'No signature found in response (no signedMessages)',
             );
+        });
+    });
+
+    describe('signTransactions with PROGRAM_CALL', () => {
+        async function createProgramCallSigner(): Promise<{
+            signer: Awaited<ReturnType<typeof createFireblocksSigner>>;
+            transaction: Parameters<FireblocksSigner['signTransactions']>[0][0];
+        }> {
+            const keyPair = await generateKeyPairSigner();
+
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ addresses: [{ address: keyPair.address }] }),
+            });
+
+            const signer = await createFireblocksSigner({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                useProgramCall: true,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+
+            const transaction = compileTransaction(
+                pipe(
+                    createTransactionMessage({ version: 0 }),
+                    tx => setTransactionMessageFeePayer(keyPair.address, tx),
+                    tx =>
+                        setTransactionMessageLifetimeUsingBlockhash(
+                            { blockhash: blockhash('11111111111111111111111111111111'), lastValidBlockHeight: 100n },
+                            tx,
+                        ),
+                    tx =>
+                        appendTransactionMessageInstruction(
+                            { programAddress: address('11111111111111111111111111111111') },
+                            tx,
+                        ),
+                ),
+            ) as Parameters<FireblocksSigner['signTransactions']>[0][0];
+
+            return { signer, transaction };
+        }
+
+        function mockCreateAndPoll(pollBody: Record<string, unknown>): void {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ id: 'tx-789', status: 'SUBMITTED' }),
+            });
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => pollBody,
+            });
+        }
+
+        it('requests sign-only PROGRAM_CALL for the serialized transaction and returns the signature', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            mockCreateAndPoll({
+                id: 'tx-789',
+                signedMessages: [{ signature: { fullSig: '42'.repeat(64) } }],
+                status: 'SIGNED',
+            });
+
+            const result = await signer.signTransactions([transaction]);
+
+            const createBody = JSON.parse(mockFetch.mock.calls[1]![1].body as string);
+            expect(createBody).toMatchObject({
+                extraParameters: {
+                    programCallData: getBase64EncodedWireTransaction(transaction),
+                    signOnly: true,
+                    useDurableNonce: false,
+                },
+                operation: 'PROGRAM_CALL',
+            });
+            expect(result[0]).toHaveProperty(signer.address);
+        });
+
+        it('accepts the signature carried as txHash', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            const signatureBytes = new Uint8Array(64).fill(7);
+            mockCreateAndPoll({
+                id: 'tx-789',
+                status: 'SIGNED',
+                txHash: getBase58Decoder().decode(signatureBytes),
+            });
+
+            const result = await signer.signTransactions([transaction]);
+
+            expect(result[0]![signer.address]).toEqual(signatureBytes);
+        });
+
+        it('verifies the returned signature against the local message bytes', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            const signatureBytes = new Uint8Array(64).fill(7);
+            mockCreateAndPoll({
+                id: 'tx-789',
+                status: 'SIGNED',
+                txHash: getBase58Decoder().decode(signatureBytes),
+            });
+
+            await signer.signTransactions([transaction]);
+
+            expect(assertSignatureValid).toHaveBeenCalledWith({
+                data: transaction.messageBytes,
+                signature: signatureBytes,
+                signerAddress: signer.address,
+            });
+        });
+
+        it('reports a broadcast made despite signOnly as BROADCAST_UNCONFIRMED', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            mockCreateAndPoll({
+                id: 'tx-789',
+                status: 'BROADCASTING',
+                txHash: getBase58Decoder().decode(new Uint8Array(64).fill(7)),
+            });
+
+            await expect(signer.signTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_BROADCAST_UNCONFIRMED',
+            });
+        });
+
+        it('rejects a v1 message before any PROGRAM_CALL is created', async () => {
+            const { signer } = await createProgramCallSigner();
+            const v1Transaction = {
+                messageBytes: new Uint8Array([0x81, 1, 2, 3]),
+                signatures: {},
+            } as unknown as Parameters<FireblocksSigner['signTransactions']>[0][0];
+
+            await expect(signer.signTransactions([v1Transaction])).rejects.toThrow(/legacy and v0 messages only/);
+            expect(mockFetch).toHaveBeenCalledTimes(1);
         });
     });
 

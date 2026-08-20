@@ -1,5 +1,5 @@
 import { Address, assertIsAddress } from '@solana/addresses';
-import { getBase16Decoder, getBase16Encoder } from '@solana/codecs-strings';
+import { getBase16Decoder, getBase16Encoder, getBase58Encoder } from '@solana/codecs-strings';
 import {
     assertHttpsUrl,
     assertSignatureValid,
@@ -14,7 +14,12 @@ import {
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import { SignableMessage, SignatureDictionary } from '@solana/signers';
-import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
+import {
+    getBase64EncodedWireTransaction,
+    Transaction,
+    TransactionWithinSizeLimit,
+    TransactionWithLifetime,
+} from '@solana/transactions';
 
 import { createJwt, importFireblocksPrivateKey } from './jwt.js';
 import type {
@@ -42,6 +47,13 @@ export async function createFireblocksSigner<TAddress extends string = string>(
 
 let base16Encoder: ReturnType<typeof getBase16Encoder> | undefined;
 let base16Decoder: ReturnType<typeof getBase16Decoder> | undefined;
+let base58Encoder: ReturnType<typeof getBase58Encoder> | undefined;
+
+/** The version prefix sets the high bit of the first message byte, low bits hold the version. */
+function isV1Message(messageBytes: Transaction['messageBytes']): boolean {
+    const prefix = messageBytes[0] ?? 0;
+    return (prefix & 0x80) !== 0 && (prefix & 0x7f) === 1;
+}
 
 const DEFAULT_API_BASE_URL = 'https://api.fireblocks.io';
 const DEFAULT_ASSET_ID = 'SOL';
@@ -51,7 +63,8 @@ const DEFAULT_MAX_POLL_ATTEMPTS = 60;
 /**
  * Fireblocks-based signer for Solana transactions
  *
- * Uses Fireblocks Raw Message Signing to sign Solana transactions and messages.
+ * Uses Fireblocks Raw Message Signing to sign Solana transactions and messages,
+ * or sign-only PROGRAM_CALL for transactions when `useProgramCall` is set.
  * Requires a Fireblocks account with a Solana vault account configured.
  *
  * @example
@@ -76,6 +89,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     private readonly pollIntervalMs: number;
     private readonly maxPollAttempts: number;
     private readonly requestDelayMs: number;
+    private readonly useProgramCall: boolean;
     private initialized = false;
 
     /**
@@ -112,13 +126,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
             });
         }
 
-        if (config.useProgramCall === true) {
-            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message:
-                    'useProgramCall (Fireblocks PROGRAM_CALL signing) is not supported: it broadcasts the transaction on-chain without producing a reusable signer-bound signature, which violates the SolanaSigner contract and risks duplicate spends. Use RAW signing (the default, omit useProgramCall) instead.',
-            });
-        }
-
+        this.useProgramCall = config.useProgramCall === true;
         this.apiKey = config.apiKey;
         this.privateKeyPem = config.privateKeyPem;
         this.vaultAccountId = config.vaultAccountId;
@@ -262,13 +270,48 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         };
 
         const createResponse = await this.request<CreateTransactionResponse>('POST', '/v1/transactions', request);
-        return await this.pollForSignature(createResponse.id);
+        return await this.pollForSignature(createResponse.id, 'RAW');
+    }
+
+    /**
+     * Sign a transaction with the PROGRAM_CALL operation in sign-only mode.
+     *
+     * Fireblocks returns the signature either in `signedMessages` or as the
+     * `txHash` of the signed transaction, so both carriers are accepted; the
+     * caller verifies the bytes against the vault address before use.
+     */
+    private async signProgramCall(
+        transaction: Transaction & TransactionWithinSizeLimit & TransactionWithLifetime,
+    ): Promise<SignatureBytes> {
+        if (isV1Message(transaction.messageBytes)) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message:
+                    'Fireblocks PROGRAM_CALL accepts legacy and v0 messages only; a v1 message cannot be signed in this mode',
+            });
+        }
+
+        const request: CreateTransactionRequest = {
+            assetId: this.assetId,
+            extraParameters: {
+                programCallData: getBase64EncodedWireTransaction(transaction),
+                signOnly: true,
+                useDurableNonce: false,
+            },
+            operation: 'PROGRAM_CALL',
+            source: {
+                id: this.vaultAccountId,
+                type: 'VAULT_ACCOUNT',
+            },
+        };
+
+        const createResponse = await this.request<CreateTransactionResponse>('POST', '/v1/transactions', request);
+        return await this.pollForSignature(createResponse.id, 'PROGRAM_CALL');
     }
 
     /**
      * Poll for transaction completion and extract a reusable signer-bound signature.
      */
-    private async pollForSignature(transactionId: string): Promise<SignatureBytes> {
+    private async pollForSignature(transactionId: string, operation: 'PROGRAM_CALL' | 'RAW'): Promise<SignatureBytes> {
         const uri = `/v1/transactions/${encodeURIComponent(transactionId)}`;
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
@@ -276,29 +319,19 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
 
             const status = txResponse.status as FireblocksTransactionStatus;
 
-            if (txResponse.status === 'COMPLETED') {
-                // RAW signing returns the signature in signedMessages (hex encoded)
-                const fullSig = txResponse.signedMessages?.[0]?.signature?.fullSig;
-                if (fullSig) {
-                    const cleanHex = fullSig.startsWith('0x') || fullSig.startsWith('0X') ? fullSig.slice(2) : fullSig;
-                    if (cleanHex.length % 2 !== 0) {
-                        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                            message: `Invalid hex signature: odd length (${cleanHex.length} chars)`,
-                        });
-                    }
-                    base16Encoder ||= getBase16Encoder();
-                    const sigBytes = new Uint8Array(base16Encoder.encode(cleanHex.toLowerCase()));
-                    if (sigBytes.length !== ED25519_SIGNATURE_LENGTH) {
-                        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                            message: `Invalid signature length: expected ${ED25519_SIGNATURE_LENGTH} bytes, got ${sigBytes.length}`,
-                        });
-                    }
-                    return sigBytes as SignatureBytes;
+            if (operation === 'PROGRAM_CALL') {
+                if (status === 'SIGNED') {
+                    return this.extractSignature(txResponse, true);
                 }
 
-                throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                    message: 'No signature found in response (no signedMessages)',
-                });
+                if (status === 'BROADCASTING' || status === 'CONFIRMING' || status === 'COMPLETED') {
+                    return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
+                        message: `Fireblocks broadcast the PROGRAM_CALL despite signOnly (status ${status}); the transaction may already be executing`,
+                        providerTransactionId: transactionId,
+                    });
+                }
+            } else if (status === 'COMPLETED') {
+                return this.extractSignature(txResponse, false);
             }
 
             // Check for terminal failure statuses
@@ -315,6 +348,47 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
             message: `Transaction did not complete within ${this.maxPollAttempts} attempts`,
         });
+    }
+
+    private extractSignature(txResponse: TransactionResponse, allowTxHashCarrier: boolean): SignatureBytes {
+        const fullSig = txResponse.signedMessages?.[0]?.signature?.fullSig;
+        if (fullSig) {
+            const cleanHex = fullSig.startsWith('0x') || fullSig.startsWith('0X') ? fullSig.slice(2) : fullSig;
+            if (cleanHex.length % 2 !== 0) {
+                throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                    message: `Invalid hex signature: odd length (${cleanHex.length} chars)`,
+                });
+            }
+            base16Encoder ||= getBase16Encoder();
+            return this.assertSignatureLength(new Uint8Array(base16Encoder.encode(cleanHex.toLowerCase())));
+        }
+
+        if (allowTxHashCarrier && txResponse.txHash) {
+            base58Encoder ||= getBase58Encoder();
+            let sigBytes: Uint8Array;
+            try {
+                sigBytes = new Uint8Array(base58Encoder.encode(txResponse.txHash));
+            } catch (error) {
+                return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                    cause: error,
+                    message: 'Failed to decode base58 signature',
+                });
+            }
+            return this.assertSignatureLength(sigBytes);
+        }
+
+        return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            message: 'No signature found in response (no signedMessages)',
+        });
+    }
+
+    private assertSignatureLength(sigBytes: Uint8Array): SignatureBytes {
+        if (sigBytes.length !== ED25519_SIGNATURE_LENGTH) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message: `Invalid signature length: expected ${ED25519_SIGNATURE_LENGTH} bytes, got ${sigBytes.length}`,
+            });
+        }
+        return sigBytes as SignatureBytes;
     }
 
     /**
@@ -356,7 +430,9 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         return await signBatchStaggered(
             transactions,
             async transaction => {
-                const signatureBytes = await this.signRawBytes(new Uint8Array(transaction.messageBytes));
+                const signatureBytes = this.useProgramCall
+                    ? await this.signProgramCall(transaction)
+                    : await this.signRawBytes(new Uint8Array(transaction.messageBytes));
                 await assertSignatureValid({
                     data: transaction.messageBytes,
                     signature: signatureBytes,

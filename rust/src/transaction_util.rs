@@ -40,6 +40,22 @@ pub(crate) fn unconfirmed_unless_rejected(status: Option<u16>, error: SignerErro
     }
 }
 
+#[cfg(feature = "fireblocks")]
+pub(crate) fn is_v1_message(transaction: &VersionedTransaction) -> bool {
+    #[cfg(feature = "sdk-v4")]
+    {
+        matches!(
+            transaction.message,
+            crate::sdk_adapter::VersionedMessage::V1(_)
+        )
+    }
+    #[cfg(not(feature = "sdk-v4"))]
+    {
+        let _ = transaction;
+        false
+    }
+}
+
 /// Serialize a transaction to canonical wire bytes.
 #[cfg(feature = "sdk-v4")]
 pub(crate) fn serialize_wire_transaction(

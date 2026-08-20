@@ -10,7 +10,14 @@ pub struct CreateTransactionRequest {
     pub operation: String,
     pub source: TransactionSource,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub extra_parameters: Option<RawExtraParameters>,
+    pub extra_parameters: Option<ExtraParameters>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum ExtraParameters {
+    Raw(RawExtraParameters),
+    ProgramCall(ProgramCallExtraParameters),
 }
 
 #[derive(Serialize)]
@@ -26,6 +33,19 @@ pub struct TransactionSource {
 #[serde(rename_all = "camelCase")]
 pub struct RawExtraParameters {
     pub raw_message_data: RawMessageData,
+}
+
+/// Extra parameters for PROGRAM_CALL signing.
+///
+/// `use_durable_nonce` defaults to `true` on the Fireblocks side, which prepends
+/// an `AdvanceNonce` instruction to the submitted message; the signature would
+/// then cover different bytes than the caller's transaction.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgramCallExtraParameters {
+    pub program_call_data: String,
+    pub sign_only: bool,
+    pub use_durable_nonce: bool,
 }
 
 #[derive(Serialize)]
@@ -61,6 +81,8 @@ pub struct TransactionResponse {
     pub sub_status: Option<String>,
     #[serde(default)]
     pub signed_messages: Vec<SignedMessage>,
+    #[serde(default)]
+    pub tx_hash: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

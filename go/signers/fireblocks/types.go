@@ -1,6 +1,7 @@
 // Package fireblocks provides a SolanaSigner backed by the Fireblocks API.
-// Signing requests are created as Fireblocks RAW transactions and polled to
-// completion, returning a signer-bound Ed25519 signature over the message bytes.
+// Signing requests are created as Fireblocks RAW transactions (or sign-only
+// PROGRAM_CALL transactions) and polled to completion, returning a signer-bound
+// Ed25519 signature over the message bytes.
 // Every request is authenticated with a per-request RS256 JWT signed by the RSA
 // API secret.
 package fireblocks
@@ -52,15 +53,16 @@ type Config struct {
 	// times out. Zero means DefaultMaxPollAttempts.
 	MaxPollAttempts int
 
-	// UseProgramCall is deprecated and unsupported: setting it to true causes New
-	// to fail with CodeConfigError before any network call.
+	// UseProgramCall signs transactions with the PROGRAM_CALL operation instead of
+	// RAW. It is sent with signOnly: true and useDurableNonce: false, so Fireblocks
+	// signs the submitted transaction without broadcasting it and without rewriting
+	// the message. The returned signature is verified against the vault public key
+	// over the local message bytes before it is used, and the caller broadcasts as
+	// in RAW mode. SignMessage always uses RAW, since PROGRAM_CALL only accepts
+	// serialized transactions.
 	//
-	// Fireblocks PROGRAM_CALL signing broadcasts the transaction on-chain and only
-	// returns a broadcast transaction id, not a reusable signer-bound signature
-	// over the local message bytes. That violates the SolanaSigner contract and
-	// risks duplicate spends, so the signer always uses RAW signing (signs message
-	// bytes only; the caller broadcasts). Retained so existing callers get a clear
-	// error instead of silently different behavior.
+	// PROGRAM_CALL accepts legacy and v0 messages only, requires a hot wallet, and
+	// must be enabled for the workspace by Fireblocks.
 	UseProgramCall bool
 
 	// HTTPClientConfig holds optional HTTP timeouts; the zero value uses the
