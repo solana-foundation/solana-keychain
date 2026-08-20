@@ -883,7 +883,6 @@ describe('CrossmintSigner', () => {
             });
         });
 
-        // A 4xx rules the transaction out, so it stays a plain failure a caller can safely retry.
         it('keeps a 4xx during transaction creation a plain failure', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()
@@ -905,7 +904,6 @@ describe('CrossmintSigner', () => {
             });
         });
 
-        // A request with no response may still have been read and acted on.
         it('reports a network error during transaction creation as unconfirmed with no transaction id', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()
@@ -952,7 +950,6 @@ describe('CrossmintSigner', () => {
             expect(error.context?.status).toBe(503);
         });
 
-        // A 2xx means the transaction was accepted; an unusable body only hides the id.
         it('reports an accepted create with no id as unconfirmed', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()

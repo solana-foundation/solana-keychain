@@ -17,10 +17,7 @@ export interface FetchSignerJsonOptions {
     url: string;
 }
 
-/**
- * The provider's own HTTP status when its response was the failure, and
- * `undefined` when no response arrived or its body was the problem.
- */
+/** The provider's HTTP status when its response was the failure. */
 export function providerStatus(error: unknown): number | undefined {
     const status = error instanceof SignerError ? error.context?.status : undefined;
     return typeof status === 'number' ? status : undefined;

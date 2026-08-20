@@ -71,11 +71,8 @@ type SignerError struct {
 	// the transaction's outcome before retrying, and contains no secret
 	// material.
 	ProviderTxID string
-	// ProviderStatus is the provider's own HTTP status for
-	// CodeBroadcastUnconfirmed errors when that response was the failure, and 0
-	// when no response arrived or its body was the problem. Exported for the same
-	// reason as ProviderTxID: it is non-secret and the caller's only view of what
-	// the provider answered.
+	// ProviderStatus is the provider's HTTP status when its response was the
+	// failure, and 0 otherwise. Exported for the same reason as ProviderTxID.
 	ProviderStatus int
 	detail         string
 	cause          error
@@ -124,16 +121,14 @@ func (e *SignerError) Detail() string { return e.detail }
 // NewBroadcastUnconfirmedError reports a failure after the provider has
 // accepted a transaction it broadcasts itself, carrying the provider-side
 // transaction id the caller must check before retrying. providerTxID is "" when
-// the create itself failed without a usable response: nothing to check, and the
-// only safe recovery is replaying the identical bytes.
+// the create failed before an id was known.
 func NewBroadcastUnconfirmedError(providerTxID, detail string) *SignerError {
 	return &SignerError{Code: CodeBroadcastUnconfirmed, ProviderTxID: providerTxID, detail: detail}
 }
 
 // UnconfirmedUnlessRejected reports a failed create as CodeBroadcastUnconfirmed
 // with no transaction id unless a 4xx rules the transaction out. status is 0 when
-// no response arrived, and is reported back to the caller only when the response
-// itself was the failure.
+// no response arrived, and is passed on only when the response was the failure.
 func UnconfirmedUnlessRejected(status int, err error) error {
 	if status >= 400 && status < 500 {
 		return err

@@ -689,7 +689,6 @@ func assertBroadcastUnconfirmed(t *testing.T, err error, wantTxID string) {
 	}
 }
 
-// A 5xx can follow a create the provider already accepted, and only an identical-bytes replay dedupes.
 func TestSignTransactionNativeSubmitServerErrorIsUnconfirmedWithoutID(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
@@ -709,7 +708,6 @@ func TestSignTransactionNativeSubmitServerErrorIsUnconfirmedWithoutID(t *testing
 	assertBroadcastUnconfirmedWithoutID(t, err, http.StatusBadGateway)
 }
 
-// A 2xx means the transaction was accepted; an unusable body only hides the id.
 func TestSignTransactionNativeSubmitWithoutIDIsUnconfirmed(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
@@ -729,7 +727,6 @@ func TestSignTransactionNativeSubmitWithoutIDIsUnconfirmed(t *testing.T) {
 	assertBroadcastUnconfirmedWithoutID(t, err, 0)
 }
 
-// A 4xx rules the transaction out, so it stays a plain failure a caller can safely retry.
 func TestSignTransactionNativeSubmitRejectionStaysPlainFailure(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {

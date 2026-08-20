@@ -642,7 +642,6 @@ describe('FordefiSigner', () => {
             expect(cause.context?.message).toContain('no fee-payer signature');
         });
 
-        // A 5xx can follow a create the provider already accepted, and only an identical-bytes replay dedupes.
         it('reports a 5xx on submit as unconfirmed with no transaction id', async () => {
             setupCreateVaultMock();
             const signer = await FordefiSigner.create(nativeConfig);
@@ -663,7 +662,6 @@ describe('FordefiSigner', () => {
             expect(error.context?.status).toBe(502);
         });
 
-        // A 2xx means the transaction was accepted; an unusable body only hides the id.
         it('reports an accepted submit with no id as unconfirmed', async () => {
             setupCreateVaultMock();
             const signer = await FordefiSigner.create(nativeConfig);
@@ -684,7 +682,6 @@ describe('FordefiSigner', () => {
             expect(error.context?.status).toBeUndefined();
         });
 
-        // A 4xx rules the transaction out, so it stays a plain failure a caller can safely retry.
         it('keeps a 4xx on submit a plain failure', async () => {
             setupCreateVaultMock();
             const signer = await FordefiSigner.create(nativeConfig);

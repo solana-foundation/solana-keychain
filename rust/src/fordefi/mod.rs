@@ -1788,7 +1788,6 @@ mod tests {
         }
     }
 
-    /// A 5xx can follow a create the provider already accepted, and only an identical-bytes replay dedupes.
     #[tokio::test]
     async fn test_native_submit_server_error_is_unconfirmed_without_a_transaction_id() {
         let mock_server = MockServer::start().await;
@@ -1815,7 +1814,6 @@ mod tests {
         }
     }
 
-    /// A 2xx means the transaction was accepted; an unusable body only hides the id.
     #[tokio::test]
     async fn test_native_submit_accepted_without_an_id_is_unconfirmed() {
         let mock_server = MockServer::start().await;
@@ -1839,7 +1837,6 @@ mod tests {
         }
     }
 
-    /// A 4xx rules the transaction out, so it stays a plain failure a caller can safely retry.
     #[tokio::test]
     async fn test_native_submit_rejected_by_fordefi_stays_a_plain_failure() {
         let mock_server = MockServer::start().await;

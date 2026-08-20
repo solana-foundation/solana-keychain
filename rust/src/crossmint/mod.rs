@@ -1495,7 +1495,6 @@ mod tests {
         }
     }
 
-    /// A 5xx can follow a create the provider already accepted, and only an identical-bytes replay dedupes.
     #[tokio::test]
     async fn test_create_server_error_is_unconfirmed_without_a_transaction_id() {
         let server = MockServer::start().await;
@@ -1532,7 +1531,6 @@ mod tests {
         }
     }
 
-    /// A 2xx means the transaction was accepted; an unusable body only hides the id.
     #[tokio::test]
     async fn test_create_accepted_without_an_id_is_unconfirmed() {
         let server = MockServer::start().await;
@@ -1570,7 +1568,6 @@ mod tests {
         }
     }
 
-    /// A 4xx rules the transaction out, so it stays a plain failure a caller can safely retry.
     #[tokio::test]
     async fn test_create_rejected_by_crossmint_stays_a_plain_failure() {
         let server = MockServer::start().await;

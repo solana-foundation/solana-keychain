@@ -467,7 +467,6 @@ func assertUnconfirmedWithoutID(t *testing.T, err error, wantStatus int) {
 	}
 }
 
-// A 5xx can follow a create the provider already accepted, and only an identical-bytes replay dedupes.
 func TestCreateServerErrorIsUnconfirmedWithoutID(t *testing.T) {
 	s := createStatusSigner(t, http.StatusServiceUnavailable, `{"message":"unavailable"}`)
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())
@@ -478,7 +477,6 @@ func TestCreateServerErrorIsUnconfirmedWithoutID(t *testing.T) {
 	assertUnconfirmedWithoutID(t, err, http.StatusServiceUnavailable)
 }
 
-// A 2xx means the transaction was accepted; an unusable body only hides the id.
 func TestCreateAcceptedWithoutIDIsUnconfirmed(t *testing.T) {
 	s := createStatusSigner(t, http.StatusCreated, `{"status":"pending"}`)
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())
@@ -489,7 +487,6 @@ func TestCreateAcceptedWithoutIDIsUnconfirmed(t *testing.T) {
 	assertUnconfirmedWithoutID(t, err, 0)
 }
 
-// A 4xx rules the transaction out, so it stays a plain failure a caller can safely retry.
 func TestCreateRejectionStaysPlainFailure(t *testing.T) {
 	s := createStatusSigner(t, http.StatusBadRequest, `{"message":"invalid transaction"}`)
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())

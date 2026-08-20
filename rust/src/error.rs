@@ -48,11 +48,9 @@ pub enum SignerError {
     /// transaction. Retrying blindly risks a duplicate spend; check the provider
     /// transaction id first.
     ///
-    /// `provider_tx_id` is `None` when the create itself failed without a usable
-    /// response: nothing to check, and the only safe recovery is replaying the
-    /// identical bytes. `provider_status` is the provider's own HTTP status when
-    /// that response was the failure, and `None` when no response arrived or its
-    /// body was the problem.
+    /// Both fields are `None` when the create failed without a usable response:
+    /// nothing to check, and the only safe recovery is replaying the identical
+    /// bytes.
     #[error("Broadcast unconfirmed; the provider may have executed the transaction (provider transaction id: {})", provider_tx_id.as_deref().unwrap_or("unknown"))]
     BroadcastUnconfirmed {
         provider_tx_id: Option<String>,
