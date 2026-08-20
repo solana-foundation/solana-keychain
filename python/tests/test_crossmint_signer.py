@@ -291,6 +291,7 @@ async def test_create_server_error_is_unconfirmed_without_a_transaction_id() -> 
         await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id is None
+    assert excinfo.value.status_code == 503
 
 
 @respx.mock
@@ -303,6 +304,7 @@ async def test_create_accepted_without_an_id_is_unconfirmed() -> None:
         await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id is None
+    assert excinfo.value.status_code is None
 
 
 @respx.mock

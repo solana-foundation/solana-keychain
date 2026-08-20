@@ -398,7 +398,11 @@ class FordefiSigner(SolanaSigner):
             if not provider_may_have_accepted(error.status_code):
                 raise
             # Fordefi may be broadcasting a transaction whose id never reached us.
-            raise SignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, error._detail) from None
+            raise SignerError(
+                SignerErrorCode.BROADCAST_UNCONFIRMED,
+                error._detail,
+                status_code=error.status_code,
+            ) from None
         try:
             return await self._finish_native_broadcast(transaction_id)
         except asyncio.CancelledError as error:

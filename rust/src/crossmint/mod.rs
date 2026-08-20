@@ -805,6 +805,7 @@ impl CrossmintSigner {
             .await
             .map_err(|error| SignerError::BroadcastUnconfirmed {
                 provider_tx_id: Some(provider_tx_id),
+                provider_status: None,
                 detail: error.detail_string(),
             })?;
 
@@ -1482,6 +1483,7 @@ mod tests {
             SignerError::BroadcastUnconfirmed {
                 provider_tx_id,
                 detail,
+                ..
             } => {
                 assert_eq!(provider_tx_id.as_deref(), Some("tx-approval"));
                 assert!(
@@ -1518,8 +1520,13 @@ mod tests {
         let mut tx = create_test_transaction(&signer.pubkey());
 
         match signer.sign_transaction(&mut tx).await.unwrap_err() {
-            SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
+            SignerError::BroadcastUnconfirmed {
+                provider_tx_id,
+                provider_status,
+                ..
+            } => {
                 assert_eq!(provider_tx_id, None);
+                assert_eq!(provider_status, Some(503));
             }
             other => panic!("Expected BroadcastUnconfirmed error, got: {:?}", other),
         }
@@ -1551,8 +1558,13 @@ mod tests {
         let mut tx = create_test_transaction(&signer.pubkey());
 
         match signer.sign_transaction(&mut tx).await.unwrap_err() {
-            SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
+            SignerError::BroadcastUnconfirmed {
+                provider_tx_id,
+                provider_status,
+                ..
+            } => {
                 assert_eq!(provider_tx_id, None);
+                assert_eq!(provider_status, None);
             }
             other => panic!("Expected BroadcastUnconfirmed error, got: {:?}", other),
         }

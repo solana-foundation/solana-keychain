@@ -10,6 +10,7 @@ import {
     idempotencyKeyFromMessage,
     normalizeBaseUrl,
     providerMayHaveAccepted,
+    providerStatus,
     signBatchStaggered,
     SignerErrorCode,
     SolanaSendingSigner,
@@ -526,9 +527,11 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
                         throw error;
                     }
                     // Fordefi may be broadcasting a transaction whose id never reached us.
+                    const status = providerStatus(error);
                     return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
                         cause: error,
                         message: 'Fordefi may have accepted the transaction, but no transaction id was returned',
+                        ...(status === undefined ? {} : { status }),
                     });
                 }
                 // Once the submit is accepted Fordefi is already broadcasting

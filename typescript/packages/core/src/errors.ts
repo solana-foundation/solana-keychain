@@ -6,7 +6,8 @@ export const SignerErrorCode = {
      * The provider may have executed the transaction, but the outcome could not
      * be confirmed. Raised by broadcast-managed signers for any failure after
      * the provider has accepted the transaction; `context.providerTransactionId`
-     * carries the provider-side id to check before retrying.
+     * carries the provider-side id to check before retrying, and `context.status`
+     * the provider's HTTP status when its response was the failure.
      */
     BROADCAST_UNCONFIRMED: 'SIGNER_BROADCAST_UNCONFIRMED',
     CONFIG_ERROR: 'SIGNER_CONFIG_ERROR',

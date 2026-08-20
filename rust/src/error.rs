@@ -50,10 +50,13 @@ pub enum SignerError {
     ///
     /// `provider_tx_id` is `None` when the create itself failed without a usable
     /// response: nothing to check, and the only safe recovery is replaying the
-    /// identical bytes.
+    /// identical bytes. `provider_status` is the provider's own HTTP status when
+    /// that response was the failure, and `None` when no response arrived or its
+    /// body was the problem.
     #[error("Broadcast unconfirmed; the provider may have executed the transaction (provider transaction id: {})", provider_tx_id.as_deref().unwrap_or("unknown"))]
     BroadcastUnconfirmed {
         provider_tx_id: Option<String>,
+        provider_status: Option<u16>,
         detail: String,
     },
 
@@ -164,6 +167,7 @@ mod tests {
             SignerError::Other(secret.to_string()),
             SignerError::BroadcastUnconfirmed {
                 provider_tx_id: Some("tx-id".to_string()),
+                provider_status: None,
                 detail: secret.to_string(),
             },
         ];
@@ -225,6 +229,7 @@ mod tests {
     fn test_broadcast_unconfirmed_surfaces_tx_id_but_not_detail() {
         let err = SignerError::BroadcastUnconfirmed {
             provider_tx_id: Some("provider-tx-123".to_string()),
+            provider_status: None,
             detail: "sensitive-detail".to_string(),
         };
         let display = format!("{err}");

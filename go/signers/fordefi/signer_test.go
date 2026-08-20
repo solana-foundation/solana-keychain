@@ -706,7 +706,7 @@ func TestSignTransactionNativeSubmitServerErrorIsUnconfirmedWithoutID(t *testing
 	if err == nil {
 		t.Fatal("expected a failed submit to be reported")
 	}
-	assertBroadcastUnconfirmedWithoutID(t, err)
+	assertBroadcastUnconfirmedWithoutID(t, err, http.StatusBadGateway)
 }
 
 // A 2xx means the transaction was accepted; an unusable body only hides the id.
@@ -726,7 +726,7 @@ func TestSignTransactionNativeSubmitWithoutIDIsUnconfirmed(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an accepted submit without an id to be reported")
 	}
-	assertBroadcastUnconfirmedWithoutID(t, err)
+	assertBroadcastUnconfirmedWithoutID(t, err, 0)
 }
 
 // A 4xx rules the transaction out, so it stays a plain failure a caller can safely retry.
@@ -767,8 +767,9 @@ func TestSignTransactionBlackBoxSubmitServerErrorIsNotUnconfirmed(t *testing.T) 
 	}
 }
 
-// assertBroadcastUnconfirmedWithoutID checks for an unconfirmed broadcast with no id.
-func assertBroadcastUnconfirmedWithoutID(t *testing.T, err error) {
+// assertBroadcastUnconfirmedWithoutID checks for an unconfirmed broadcast with no
+// id, carrying wantStatus (0 when the provider sent no failing status).
+func assertBroadcastUnconfirmedWithoutID(t *testing.T, err error, wantStatus int) {
 	t.Helper()
 	if code, _ := core.CodeOf(err); code != core.CodeBroadcastUnconfirmed {
 		t.Errorf("got %s, want BROADCAST_UNCONFIRMED", code)
@@ -776,6 +777,9 @@ func assertBroadcastUnconfirmedWithoutID(t *testing.T, err error) {
 	var se *core.SignerError
 	if !errors.As(err, &se) || se.ProviderTxID != "" {
 		t.Errorf("error must carry no provider transaction id, got %v", err)
+	}
+	if se != nil && se.ProviderStatus != wantStatus {
+		t.Errorf("provider status = %d, want %d", se.ProviderStatus, wantStatus)
 	}
 }
 

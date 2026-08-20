@@ -926,6 +926,7 @@ describe('CrossmintSigner', () => {
             expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
             expect(error.context?.cause).toMatchObject({ code: 'SIGNER_HTTP_ERROR' });
             expect(error.context?.providerTransactionId).toBeUndefined();
+            expect(error.context?.status).toBeUndefined();
         });
 
         it('reports a 5xx during transaction creation as unconfirmed with no transaction id', async () => {
@@ -948,6 +949,7 @@ describe('CrossmintSigner', () => {
             expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
             expect(error.context?.cause).toMatchObject({ code: 'SIGNER_REMOTE_API_ERROR' });
             expect(error.context?.providerTransactionId).toBeUndefined();
+            expect(error.context?.status).toBe(503);
         });
 
         // A 2xx means the transaction was accepted; an unusable body only hides the id.

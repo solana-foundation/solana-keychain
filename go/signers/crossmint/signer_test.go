@@ -453,13 +453,17 @@ func createStatusSigner(t *testing.T, status int, body string) *Signer {
 	return newTestSigner(t, cfg)
 }
 
-// assertUnconfirmedWithoutID checks for an unconfirmed broadcast with no id.
-func assertUnconfirmedWithoutID(t *testing.T, err error) {
+// assertUnconfirmedWithoutID checks for an unconfirmed broadcast with no id,
+// carrying wantStatus (0 when the provider sent no failing status).
+func assertUnconfirmedWithoutID(t *testing.T, err error, wantStatus int) {
 	t.Helper()
 	assertCode(t, err, core.CodeBroadcastUnconfirmed)
 	var se *core.SignerError
 	if !errors.As(err, &se) || se.ProviderTxID != "" {
 		t.Errorf("error must carry no provider transaction id, got %v", err)
+	}
+	if se != nil && se.ProviderStatus != wantStatus {
+		t.Errorf("provider status = %d, want %d", se.ProviderStatus, wantStatus)
 	}
 }
 
@@ -471,7 +475,7 @@ func TestCreateServerErrorIsUnconfirmedWithoutID(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertUnconfirmedWithoutID(t, err)
+	assertUnconfirmedWithoutID(t, err, http.StatusServiceUnavailable)
 }
 
 // A 2xx means the transaction was accepted; an unusable body only hides the id.
@@ -482,7 +486,7 @@ func TestCreateAcceptedWithoutIDIsUnconfirmed(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertUnconfirmedWithoutID(t, err)
+	assertUnconfirmedWithoutID(t, err, 0)
 }
 
 // A 4xx rules the transaction out, so it stays a plain failure a caller can safely retry.

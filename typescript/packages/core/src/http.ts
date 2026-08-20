@@ -18,12 +18,21 @@ export interface FetchSignerJsonOptions {
 }
 
 /**
+ * The provider's own HTTP status when its response was the failure, and
+ * `undefined` when no response arrived or its body was the problem.
+ */
+export function providerStatus(error: unknown): number | undefined {
+    const status = error instanceof SignerError ? error.context?.status : undefined;
+    return typeof status === 'number' ? status : undefined;
+}
+
+/**
  * A 4xx is the only create outcome that rules out a transaction; anything else
  * (no response, timeout, 5xx, unusable success body) may already be executing.
  */
 export function providerMayHaveAccepted(error: unknown): boolean {
-    const status = error instanceof SignerError ? error.context?.status : undefined;
-    return typeof status !== 'number' || status < 400 || status >= 500;
+    const status = providerStatus(error);
+    return status === undefined || status < 400 || status >= 500;
 }
 
 /**

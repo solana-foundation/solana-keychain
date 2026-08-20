@@ -262,7 +262,11 @@ class CrossmintSigner(SolanaSigner):
             if not provider_may_have_accepted(error.status_code):
                 raise
             # Crossmint may be executing a transaction whose id never reached us.
-            raise SignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, error._detail) from None
+            raise SignerError(
+                SignerErrorCode.BROADCAST_UNCONFIRMED,
+                error._detail,
+                status_code=error.status_code,
+            ) from None
 
     async def _get_transaction(self, transaction_id: str) -> dict[str, Any]:
         return await self._request_with_required_field(

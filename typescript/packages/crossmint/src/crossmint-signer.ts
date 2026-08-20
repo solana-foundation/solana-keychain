@@ -9,6 +9,7 @@ import {
     idempotencyKeyFromMessage,
     normalizeBaseUrl,
     providerMayHaveAccepted,
+    providerStatus,
     sanitizeRemoteErrorResponse,
     SignerError,
     SignerErrorCode,
@@ -268,9 +269,11 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
                 throw error;
             }
             // Crossmint may be executing a transaction whose id never reached us.
+            const status = providerStatus(error);
             return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
                 cause: error,
                 message: 'Crossmint may have created the transaction, but no transaction id was returned',
+                ...(status === undefined ? {} : { status }),
             });
         }
         // Post-create failures leave an outcome Crossmint may still execute, so

@@ -660,6 +660,7 @@ describe('FordefiSigner', () => {
             );
             expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
             expect(error.context?.providerTransactionId).toBeUndefined();
+            expect(error.context?.status).toBe(502);
         });
 
         // A 2xx means the transaction was accepted; an unusable body only hides the id.
@@ -680,6 +681,7 @@ describe('FordefiSigner', () => {
             );
             expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
             expect(error.context?.providerTransactionId).toBeUndefined();
+            expect(error.context?.status).toBeUndefined();
         });
 
         // A 4xx rules the transaction out, so it stays a plain failure a caller can safely retry.
