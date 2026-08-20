@@ -394,6 +394,16 @@ class FordefiSigner(SolanaSigner):
                 self._solana_transaction_request(message_data),
                 idempotence_id=idempotency_key_from_message(message_data),
             )
+        except asyncio.CancelledError as error:
+            # The re-raise must stay a CancelledError for asyncio, so the warning
+            # goes to the log.
+            _logger.warning(
+                "Fordefi may have accepted a cancelled transaction with no id "
+                "returned; check before retrying"
+            )
+            raise asyncio.CancelledError(
+                "Fordefi may have accepted the transaction, but no transaction id was returned"
+            ) from error
         except SignerError as error:
             if not provider_may_have_accepted(error.status_code):
                 raise

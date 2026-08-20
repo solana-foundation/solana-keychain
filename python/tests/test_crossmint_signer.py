@@ -280,8 +280,6 @@ async def test_sign_transaction_polling_timeout() -> None:
 
 @respx.mock
 async def test_create_server_error_is_unconfirmed_without_a_transaction_id() -> None:
-    """A 5xx can follow a create the provider already accepted, and only an
-    identical-bytes replay dedupes."""
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     respx.post(TRANSACTIONS_URL).mock(
@@ -296,7 +294,6 @@ async def test_create_server_error_is_unconfirmed_without_a_transaction_id() -> 
 
 @respx.mock
 async def test_create_accepted_without_an_id_is_unconfirmed() -> None:
-    """A 2xx means the transaction was accepted; an unusable body only hides the id."""
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"status": "pending"}))
@@ -309,7 +306,6 @@ async def test_create_accepted_without_an_id_is_unconfirmed() -> None:
 
 @respx.mock
 async def test_create_rejected_by_crossmint_stays_a_plain_failure() -> None:
-    """A 4xx rules the transaction out, so it stays a plain failure a caller can safely retry."""
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     respx.post(TRANSACTIONS_URL).mock(
@@ -318,6 +314,40 @@ async def test_create_rejected_by_crossmint_stays_a_plain_failure() -> None:
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
+
+
+@respx.mock
+async def test_cancellation_during_create_warns_without_a_transaction_id(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """No id exists yet, so the warning is all the caller gets."""
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    creating = asyncio.Event()
+    observed: list[str] = []
+
+    async def hang(_request: httpx.Request) -> httpx.Response:
+        creating.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    respx.post(TRANSACTIONS_URL).mock(side_effect=hang)
+
+    async def run() -> None:
+        try:
+            await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        except asyncio.CancelledError as error:
+            observed.append(str(error))
+            raise
+
+    task = asyncio.create_task(run())
+    await creating.wait()
+    task.cancel()
+    with caplog.at_level(logging.WARNING, logger="solana_keychain"):
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert observed and "may have created the transaction" in observed[0]
+    assert "check before retrying" in caplog.text
 
 
 @respx.mock

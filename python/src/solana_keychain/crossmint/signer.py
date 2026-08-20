@@ -258,6 +258,16 @@ class CrossmintSigner(SolanaSigner):
                 json_body={"params": params},
                 extra_headers={"x-idempotency-key": idempotency_key},
             )
+        except asyncio.CancelledError as error:
+            # The re-raise must stay a CancelledError for asyncio, so the warning
+            # goes to the log.
+            _logger.warning(
+                "Crossmint may have created a cancelled transaction with no id "
+                "returned; check before retrying"
+            )
+            raise asyncio.CancelledError(
+                "Crossmint may have created the transaction, but no transaction id was returned"
+            ) from error
         except SignerError as error:
             if not provider_may_have_accepted(error.status_code):
                 raise
