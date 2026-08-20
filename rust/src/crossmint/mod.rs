@@ -676,8 +676,12 @@ impl CrossmintSigner {
         let executed_message = transaction.message.serialize();
         let candidates = self.verification_candidates();
         for entry in submitted {
-            let address = entry.signer.as_ref()?.address.as_deref()?;
-            let encoded = entry.signature.as_deref()?;
+            let Some(address) = entry.signer.as_ref().and_then(|s| s.address.as_deref()) else {
+                continue;
+            };
+            let Some(encoded) = entry.signature.as_deref() else {
+                continue;
+            };
             let Ok(approver) = Pubkey::from_str(address) else {
                 continue;
             };
@@ -1437,6 +1441,70 @@ mod tests {
             .signatures
             .iter()
             .all(|s| *s == Signature::default()));
+    }
+
+    /// A quorum entry carrying neither a top-level address nor signature must not
+    /// end the scan: the wallet's approval can follow it.
+    #[tokio::test]
+    async fn test_sign_transaction_skips_submitted_approvals_without_an_address() {
+        let server = MockServer::start().await;
+        let wallet_keypair = Keypair::new();
+        let wallet_pubkey = keypair_pubkey(&wallet_keypair);
+        let sponsor_keypair = Keypair::new();
+        let sponsor_pubkey = keypair_pubkey(&sponsor_keypair);
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .respond_with(wallet_response(&wallet_pubkey.to_string()))
+            .mount(&server)
+            .await;
+
+        let mut executed_tx = create_test_transaction(&sponsor_pubkey);
+        let sponsor_signature =
+            keypair_sign_message(&sponsor_keypair, &executed_tx.message.serialize());
+        TransactionUtil::add_signature_to_transaction(
+            &mut executed_tx,
+            &sponsor_pubkey,
+            sponsor_signature,
+        )
+        .unwrap();
+        let approval_signature =
+            keypair_sign_message(&wallet_keypair, &executed_tx.message.serialize());
+
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "tx-quorum-first",
+                "status": "success",
+                "approvals": {
+                    "submitted": [
+                        { "signer": { "locator": format!("server:{wallet_pubkey}") } },
+                        {
+                            "signature": bs58::encode(approval_signature.as_ref()).into_string(),
+                            "signer": { "address": wallet_pubkey.to_string() }
+                        }
+                    ]
+                },
+                "onChain": {
+                    "transaction": bs58::encode(bincode::serialize(&executed_tx).unwrap())
+                        .into_string()
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 1);
+        signer.init().await.unwrap();
+
+        let mut local_tx = create_test_transaction(&wallet_pubkey);
+        let (serialized, signature) = signer
+            .sign_transaction(&mut local_tx)
+            .await
+            .unwrap()
+            .into_signed_transaction();
+
+        assert_eq!(signature, sponsor_signature);
+        assert!(serialized.is_empty());
     }
 
     #[tokio::test]
