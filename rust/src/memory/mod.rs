@@ -109,6 +109,8 @@ mod tests {
     use crate::test_util::create_test_transaction;
     #[cfg(feature = "sdk-v4")]
     use crate::test_util::create_test_v1_transaction;
+    #[cfg(feature = "sdk-v4")]
+    use base64::Engine;
 
     use super::*;
 
@@ -207,7 +209,6 @@ mod tests {
         let pubkey = keypair_pubkey(&signer.keypair);
         let mut tx = create_test_v1_transaction(&pubkey);
 
-        // A verifying signature proves the 0x81 prefix was covered.
         let message_bytes = tx.message.serialize();
         assert_eq!(message_bytes[0], 0x81);
 
@@ -220,7 +221,6 @@ mod tests {
         assert!(signature.verify(&pubkey.to_bytes(), &message_bytes));
         assert_eq!(tx.signatures[0], signature);
 
-        use base64::Engine;
         let wire = base64::engine::general_purpose::STANDARD
             .decode(&serialized_tx)
             .expect("serialized transaction should be base64");

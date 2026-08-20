@@ -25,9 +25,6 @@ pub(crate) fn idempotency_key_from_message(message_bytes: &[u8]) -> String {
 }
 
 /// Serialize a transaction to canonical wire bytes.
-///
-/// A v1 envelope appends its signatures with no length prefix, which serde cannot
-/// express, so `sdk-v4` uses wincode. The two codecs agree on legacy and v0.
 #[cfg(feature = "sdk-v4")]
 pub(crate) fn serialize_wire_transaction(
     transaction: &VersionedTransaction,
@@ -46,7 +43,7 @@ pub(crate) fn serialize_wire_transaction(
     })
 }
 
-/// Deserialize canonical wire bytes. See [`serialize_wire_transaction`] for the codec.
+/// Deserialize canonical wire bytes.
 #[cfg(feature = "sdk-v4")]
 pub(crate) fn deserialize_wire_transaction(
     bytes: &[u8],
@@ -153,10 +150,8 @@ mod tests {
     #[cfg(feature = "sdk-v4")]
     use super::*;
     #[cfg(feature = "sdk-v4")]
-    use crate::test_util::create_test_transaction;
+    use crate::test_util::{create_test_transaction, create_test_v1_transaction};
 
-    /// The wincode swap is only safe while the codecs agree on legacy, so every
-    /// already-signed transaction keeps its exact wire bytes.
     #[cfg(feature = "sdk-v4")]
     #[test]
     fn wincode_matches_bincode_for_a_legacy_transaction() {
@@ -171,8 +166,6 @@ mod tests {
     #[cfg(feature = "sdk-v4")]
     #[test]
     fn v1_envelope_places_the_message_first_and_signatures_last() {
-        use crate::test_util::create_test_v1_transaction;
-
         let transaction = create_test_v1_transaction(&Pubkey::new_unique());
         let message_bytes = transaction.message.serialize();
 
@@ -187,8 +180,6 @@ mod tests {
     #[cfg(feature = "sdk-v4")]
     #[test]
     fn v1_wire_transaction_round_trips() {
-        use crate::test_util::create_test_v1_transaction;
-
         let transaction = create_test_v1_transaction(&Pubkey::new_unique());
         let wire = serialize_wire_transaction(&transaction).expect("serialize");
 

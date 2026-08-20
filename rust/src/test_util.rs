@@ -43,8 +43,6 @@ pub fn add_required_signer(transaction: &mut VersionedTransaction, pubkey: Pubke
     message.header.num_required_signatures = 2;
 }
 
-/// A v1 test transaction. v1 messages exist only in solana-sdk 4.x, and v1 treats
-/// an unset resource limit as zero rather than a default.
 #[cfg(feature = "sdk-v4")]
 pub fn create_test_v1_transaction(from: &Pubkey) -> VersionedTransaction {
     let to = Pubkey::new_unique();

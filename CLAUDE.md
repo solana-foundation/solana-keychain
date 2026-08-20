@@ -81,7 +81,7 @@ One feature per backend (`memory` is default), `all` enables everything. At leas
 - **`sign_message` quirks:** `CrossmintSigner` returns `SigningFailed` (intentionally unsupported). `CdpSigner` only accepts UTF-8 payloads.
 - **Turnkey signature padding:** response `r,s` components must be left-padded to 32 bytes each before concatenation ([rust/src/turnkey/mod.rs](rust/src/turnkey/mod.rs)).
 - **GCP KMS:** PureEdDSA mode with `EC_SIGN_ED25519`.
-- **Transaction serialization:** go through `transaction_util::serialize_wire_transaction` / `deserialize_wire_transaction`, never `bincode` directly. A v1 envelope leads with the message and appends its signatures with no length prefix, which serde cannot express, so `sdk-v4` uses `wincode`; the two codecs agree byte-for-byte on legacy and v0.
+- **Transaction serialization:** go through `transaction_util::serialize_wire_transaction` / `deserialize_wire_transaction`, never `bincode` directly (`sdk-v4` needs `wincode` for v1).
 - **Transaction types:** `sign_transaction` takes a `VersionedTransaction` (legacy, v0 or v1). v1 messages exist only in the solana-sdk 4.x line, so v1 requires `sdk-v4` and is unrepresentable under `sdk-v2`/`sdk-v3`.
 - **Remote-signer tests** use `wiremock`; no live API calls in unit tests.
 
