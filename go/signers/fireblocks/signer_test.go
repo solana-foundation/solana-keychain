@@ -52,6 +52,12 @@ func writeJSON(w http.ResponseWriter, v any) {
 // initialized signer against it.
 func newTestSigner(t *testing.T, address string, configure func(mux *http.ServeMux)) *Signer {
 	t.Helper()
+	return newTestSignerWithProgramCall(t, address, false, configure)
+}
+
+// newTestSignerWithProgramCall is newTestSigner with the signing mode selectable.
+func newTestSignerWithProgramCall(t *testing.T, address string, useProgramCall bool, configure func(mux *http.ServeMux)) *Signer {
+	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc(addressesPath, func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"addresses": []map[string]string{{"address": address}}})
@@ -69,6 +75,7 @@ func newTestSigner(t *testing.T, address string, configure func(mux *http.ServeM
 		APIBaseURL:      srv.URL,
 		PollInterval:    time.Millisecond,
 		MaxPollAttempts: 3,
+		UseProgramCall:  useProgramCall,
 		HTTPClient:      srv.Client(),
 	})
 	if err != nil {
@@ -93,8 +100,6 @@ func TestNewDefaultsAndFetchesPubkey(t *testing.T) {
 	}
 }
 
-// The unsupported PROGRAM_CALL mode fails New with a config error and, failing
-// closed, no request may reach Fireblocks before the rejection.
 // newSignerWithAddresses serves the given addresses_paginated entries.
 func newSignerWithAddresses(t *testing.T, entries []map[string]string) (*Signer, error) {
 	t.Helper()
@@ -194,34 +199,208 @@ func TestNewAcceptsDuplicateAddressEntries(t *testing.T) {
 	}
 }
 
-func TestNewRejectsProgramCallBeforeAnyNetworkCall(t *testing.T) {
-	var requests atomic.Int64
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requests.Add(1)
-		writeJSON(w, map[string]any{"addresses": []map[string]string{{"address": testutils.TestPublicKey().String()}}})
-	}))
-	t.Cleanup(srv.Close)
-
-	_, err := New(context.Background(), Config{
-		APIKey:         testAPIKey,
-		PrivateKeyPEM:  testRSAKey,
-		VaultAccountID: testVaultID,
-		APIBaseURL:     srv.URL,
-		UseProgramCall: true,
-		HTTPClient:     srv.Client(),
+// programCallSigner serves a create plus a single poll response for a
+// PROGRAM_CALL signer, and records the create request body.
+func programCallSigner(t *testing.T, address string, poll map[string]any) (*Signer, *atomic.Pointer[map[string]any]) {
+	t.Helper()
+	created := &atomic.Pointer[map[string]any]{}
+	s := newTestSignerWithProgramCall(t, address, true, func(mux *http.ServeMux) {
+		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Error(err)
+			}
+			created.Store(&decoded)
+			writeJSON(w, map[string]any{"id": "tx-789", "status": "SUBMITTED"})
+		})
+		mux.HandleFunc("/v1/transactions/tx-789", func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, poll)
+		})
 	})
-	if err == nil {
-		t.Fatal("expected New to reject UseProgramCall")
+	return s, created
+}
+
+// A sign-only PROGRAM_CALL submits the serialized transaction and yields the
+// signature from signedMessages.
+func TestSignTransactionProgramCallSignOnly(t *testing.T) {
+	priv := testutils.TestPrivateKey()
+	pub := testutils.TestPublicKey()
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if code, _ := core.CodeOf(err); code != core.CodeConfigError {
-		t.Errorf("got %s, want CONFIG_ERROR", code)
+	msgBytes, err := tx.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := core.Serialize(tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature := solana.SignatureFromBytes(ed25519.Sign(priv, msgBytes))
+
+	s, created := programCallSigner(t, pub.String(), map[string]any{
+		"id":     "tx-789",
+		"status": "SIGNED",
+		"signedMessages": []map[string]any{
+			{"signature": map[string]string{"fullSig": hex.EncodeToString(signature[:])}},
+		},
+	})
+
+	res, err := s.SignTransaction(context.Background(), tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Signature != signature {
+		t.Errorf("signature = %s, want %s", res.Signature, signature)
+	}
+
+	request := created.Load()
+	if request == nil {
+		t.Fatal("no create request recorded")
+	}
+	if got := (*request)["operation"]; got != operationProgramCall {
+		t.Errorf("operation = %v, want %s", got, operationProgramCall)
+	}
+	extra, ok := (*request)["extraParameters"].(map[string]any)
+	if !ok {
+		t.Fatalf("extraParameters = %v, want an object", (*request)["extraParameters"])
+	}
+	if got := extra["programCallData"]; got != encoded {
+		t.Errorf("programCallData = %v, want the serialized transaction", got)
+	}
+	if extra["signOnly"] != true || extra["useDurableNonce"] != false {
+		t.Errorf("signOnly = %v, useDurableNonce = %v; want true, false", extra["signOnly"], extra["useDurableNonce"])
+	}
+}
+
+// The signature may arrive as the txHash of the signed transaction.
+func TestSignTransactionProgramCallTxHashCarrier(t *testing.T) {
+	priv := testutils.TestPrivateKey()
+	pub := testutils.TestPublicKey()
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgBytes, err := tx.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature := solana.SignatureFromBytes(ed25519.Sign(priv, msgBytes))
+
+	s, _ := programCallSigner(t, pub.String(), map[string]any{
+		"id":     "tx-789",
+		"status": "SIGNED",
+		"txHash": signature.String(),
+	})
+
+	res, err := s.SignTransaction(context.Background(), tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Signature != signature {
+		t.Errorf("signature = %s, want %s", res.Signature, signature)
+	}
+}
+
+// A txHash that is some other signer's signature fails verification and must not
+// reach the transaction.
+func TestSignTransactionProgramCallRejectsForeignTxHash(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	foreignPriv, _ := keyFromSeed(9)
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgBytes, err := tx.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := solana.SignatureFromBytes(ed25519.Sign(foreignPriv, msgBytes))
+
+	s, _ := programCallSigner(t, pub.String(), map[string]any{
+		"id":     "tx-789",
+		"status": "SIGNED",
+		"txHash": foreign.String(),
+	})
+
+	_, err = s.SignTransaction(context.Background(), tx)
+	if err == nil {
+		t.Fatal("expected an unverifiable signature to fail signing")
+	}
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Errorf("got %s, want SIGNING_FAILED", code)
+	}
+	for _, sig := range tx.Signatures {
+		if sig != (solana.Signature{}) {
+			t.Error("an unverified signature must not reach the transaction")
+		}
+	}
+}
+
+// A workspace that ignores signOnly and broadcasts is reported as unconfirmed,
+// not as a plain failure.
+func TestSignTransactionProgramCallBroadcastIsUnconfirmed(t *testing.T) {
+	priv := testutils.TestPrivateKey()
+	pub := testutils.TestPublicKey()
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgBytes, err := tx.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature := solana.SignatureFromBytes(ed25519.Sign(priv, msgBytes))
+
+	s, _ := programCallSigner(t, pub.String(), map[string]any{
+		"id":     "tx-789",
+		"status": "BROADCASTING",
+		"txHash": signature.String(),
+	})
+
+	_, err = s.SignTransaction(context.Background(), tx)
+	if code, _ := core.CodeOf(err); code != core.CodeBroadcastUnconfirmed {
+		t.Fatalf("got %s, want BROADCAST_UNCONFIRMED", code)
 	}
 	var se *core.SignerError
-	if errors.As(err, &se) && !strings.Contains(se.Detail(), "use_program_call") {
-		t.Errorf("detail = %q, want mention of use_program_call", se.Detail())
+	if errors.As(err, &se) && se.ProviderTxID != "tx-789" {
+		t.Errorf("ProviderTxID = %q, want tx-789", se.ProviderTxID)
+	}
+}
+
+// PROGRAM_CALL accepts legacy and v0 only, so a v1 message is rejected before
+// any transaction is created.
+func TestSignTransactionProgramCallRejectsV1(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	var requests atomic.Int64
+
+	s := newTestSignerWithProgramCall(t, pub.String(), true, func(mux *http.ServeMux) {
+		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
+			requests.Add(1)
+			writeJSON(w, map[string]any{"id": "tx-789", "status": "SUBMITTED"})
+		})
+	})
+
+	tx, err := testutils.CreateTestV1Transaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.SignTransaction(context.Background(), tx)
+	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
+		t.Fatalf("got %s, want SIGNING_FAILED", code)
 	}
 	if got := requests.Load(); got != 0 {
-		t.Errorf("New must reject use_program_call before any network call, server saw %d requests", got)
+		t.Errorf("a v1 message must be rejected before the PROGRAM_CALL is created, server saw %d requests", got)
 	}
 }
 

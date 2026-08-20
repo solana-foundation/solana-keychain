@@ -19,14 +19,18 @@ import (
 // Fireblocks protocol constants (operation name, source type, and the
 // transaction status values the polling loop reacts to).
 const (
-	operationRaw       = "RAW"
-	sourceVaultAccount = "VAULT_ACCOUNT"
+	operationRaw         = "RAW"
+	operationProgramCall = "PROGRAM_CALL"
+	sourceVaultAccount   = "VAULT_ACCOUNT"
 
-	statusCompleted = "COMPLETED"
-	statusFailed    = "FAILED"
-	statusCancelled = "CANCELLED"
-	statusRejected  = "REJECTED"
-	statusBlocked   = "BLOCKED"
+	statusCompleted    = "COMPLETED"
+	statusSigned       = "SIGNED"
+	statusBroadcasting = "BROADCASTING"
+	statusConfirming   = "CONFIRMING"
+	statusFailed       = "FAILED"
+	statusCancelled    = "CANCELLED"
+	statusRejected     = "REJECTED"
+	statusBlocked      = "BLOCKED"
 )
 
 // maxResponseBytes caps how much of a Fireblocks response body is read.
@@ -35,10 +39,10 @@ const maxResponseBytes = 1 << 20
 // Wire types for the Fireblocks REST API.
 
 type createTransactionRequest struct {
-	AssetID         string             `json:"assetId"`
-	Operation       string             `json:"operation"`
-	Source          transactionSource  `json:"source"`
-	ExtraParameters rawExtraParameters `json:"extraParameters"`
+	AssetID         string            `json:"assetId"`
+	Operation       string            `json:"operation"`
+	Source          transactionSource `json:"source"`
+	ExtraParameters any               `json:"extraParameters"`
 }
 
 type transactionSource struct {
@@ -58,6 +62,16 @@ type rawMessage struct {
 	Content string `json:"content"`
 }
 
+// programCallExtraParameters carries a serialized transaction for PROGRAM_CALL
+// signing. UseDurableNonce defaults to true on the Fireblocks side, which
+// prepends an AdvanceNonce instruction to the submitted message; the signature
+// would then cover different bytes than the caller's transaction.
+type programCallExtraParameters struct {
+	ProgramCallData string `json:"programCallData"`
+	SignOnly        bool   `json:"signOnly"`
+	UseDurableNonce bool   `json:"useDurableNonce"`
+}
+
 type createTransactionResponse struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
@@ -69,6 +83,7 @@ type transactionResponse struct {
 	Status         string          `json:"status"`
 	SubStatus      string          `json:"subStatus"`
 	SignedMessages []signedMessage `json:"signedMessages"`
+	TxHash         string          `json:"txHash"`
 }
 
 type signedMessage struct {
@@ -224,14 +239,27 @@ func (s *Signer) getTransaction(ctx context.Context, txID string) (transactionRe
 }
 
 // pollForSignature polls the transaction until it reaches a terminal state or the
-// attempt budget is exhausted. COMPLETED returns the response;
-// FAILED/CANCELLED/REJECTED/BLOCKED fail signing; anything else waits
-// pollInterval and retries. Cancellation of ctx aborts the wait.
-func (s *Signer) pollForSignature(ctx context.Context, txID string) (transactionResponse, error) {
+// attempt budget is exhausted. COMPLETED returns the response (SIGNED for a
+// sign-only PROGRAM_CALL); FAILED/CANCELLED/REJECTED/BLOCKED fail signing; a
+// PROGRAM_CALL that reached the network despite signOnly reports
+// CodeBroadcastUnconfirmed; anything else waits pollInterval and retries.
+// Cancellation of ctx aborts the wait.
+func (s *Signer) pollForSignature(ctx context.Context, txID string, programCall bool) (transactionResponse, error) {
 	for attempt := 0; attempt < s.maxPollAttempts; attempt++ {
 		response, err := s.getTransaction(ctx, txID)
 		if err != nil {
 			return transactionResponse{}, err
+		}
+
+		if programCall {
+			switch response.Status {
+			case statusSigned:
+				return response, nil
+			case statusBroadcasting, statusConfirming, statusCompleted:
+				return transactionResponse{}, core.NewBroadcastUnconfirmedError(txID,
+					"fireblocks broadcast the PROGRAM_CALL despite signOnly (status "+response.Status+
+						"); the transaction may already be executing")
+			}
 		}
 
 		switch response.Status {

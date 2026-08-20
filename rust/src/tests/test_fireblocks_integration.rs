@@ -25,6 +25,10 @@ mod tests {
     }
 
     async fn get_signer() -> FireblocksSigner {
+        get_signer_with_program_call(false).await
+    }
+
+    async fn get_signer_with_program_call(use_program_call: bool) -> FireblocksSigner {
         dotenv().ok();
 
         let api_key = required_env(FIREBLOCKS_API_KEY);
@@ -44,7 +48,7 @@ mod tests {
             ),
             poll_interval_ms: None,
             max_poll_attempts: None,
-            use_program_call: None,
+            use_program_call: Some(use_program_call),
             http_client_config: None,
         };
 
@@ -76,36 +80,21 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // Ignored because PROGRAM_CALL must be enabled for the workspace by Fireblocks
     #[cfg(feature = "integration-tests")]
     #[serial]
-    async fn test_fireblocks_rejects_program_call_before_broadcast() {
-        // PROGRAM_CALL is unsupported: init() must fail closed with ConfigError
-        // before any network call, so it can never broadcast on-chain. Uses dummy
-        // credentials because the rejection happens before any of them are used.
-        let config = FireblocksSignerConfig {
-            api_key: "test-api-key".to_string(),
-            private_key_pem: "test-private-key-pem".to_string(),
-            vault_account_id: "0".to_string(),
-            asset_id: Some("SOL_TEST".to_string()),
-            api_base_url: None,
-            poll_interval_ms: None,
-            max_poll_attempts: None,
-            use_program_call: Some(true),
-            http_client_config: None,
-        };
+    async fn test_fireblocks_program_call_signs_without_broadcasting() {
+        let signer = get_signer_with_program_call(true).await;
 
-        let mut signer = FireblocksSigner::new(config);
-        let error = signer
-            .init()
+        let mut transaction = create_test_transaction(&signer.pubkey());
+        let message = transaction.message.serialize();
+
+        signer
+            .sign_transaction(&mut transaction)
             .await
-            .expect_err("init() must reject use_program_call before any broadcast");
-        match error {
-            crate::error::SignerError::ConfigError(message) => assert!(
-                message.contains("use_program_call"),
-                "unexpected error message: {message}"
-            ),
-            other => panic!("expected ConfigError, got {other:?}"),
-        }
+            .expect("Failed to sign transaction with a Fireblocks PROGRAM_CALL");
+
+        assert!(transaction.signatures[0].verify(&signer.pubkey().to_bytes(), &message));
     }
 
     #[tokio::test]

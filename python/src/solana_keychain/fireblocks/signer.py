@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from solders.message import MessageV1
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
@@ -30,6 +31,7 @@ DEFAULT_MAX_POLL_ATTEMPTS = 300
 
 
 _TERMINAL_FAILURE_STATUSES = frozenset({"FAILED", "CANCELLED", "REJECTED", "BLOCKED"})
+_BROADCAST_STATUSES = frozenset({"BROADCASTING", "CONFIRMING", "COMPLETED"})
 
 
 @dataclass
@@ -38,12 +40,17 @@ class FireblocksSignerConfig:
 
     ``asset_id`` defaults to ``SOL`` (use ``SOL_TEST`` for devnet).
 
-    ``use_program_call`` is unsupported: PROGRAM_CALL signing broadcasts the
-    transaction on-chain and only returns a broadcast transaction id, not a
-    reusable signer-bound signature over the local message bytes — that violates
-    the signing contract and risks duplicate spends. Setting it to ``True`` makes
-    ``init()`` fail before any network call; the signer always uses RAW signing
-    (signs message bytes only; the caller broadcasts).
+    ``use_program_call`` signs transactions with the PROGRAM_CALL operation
+    instead of RAW. It is sent with ``signOnly: true`` and
+    ``useDurableNonce: false``, so Fireblocks signs the submitted transaction
+    without broadcasting it and without rewriting the message. The returned
+    signature is verified against the vault public key over the local message
+    bytes before it is used, and the caller broadcasts as in RAW mode.
+    ``sign_message()`` always uses RAW, since PROGRAM_CALL only accepts
+    serialized transactions.
+
+    PROGRAM_CALL accepts legacy and v0 messages only, requires a hot wallet, and
+    must be enabled for the workspace by Fireblocks.
     """
 
     api_key: str = field(repr=False)
@@ -58,7 +65,7 @@ class FireblocksSignerConfig:
 
 
 class FireblocksSigner(SolanaSigner):
-    """Signer backed by a Fireblocks vault account using RAW signing.
+    """Signer backed by a Fireblocks vault account using RAW or PROGRAM_CALL signing.
 
     ``init()`` must be awaited before use — it resolves the vault's public key.
     ``create_fireblocks_signer()`` does this for you.
@@ -90,19 +97,7 @@ class FireblocksSigner(SolanaSigner):
         )
 
     async def init(self) -> None:
-        """Resolve the vault's public key. Must be awaited before signing.
-
-        Fails fast when ``use_program_call`` is set — see the config docstring.
-        """
-        if self._use_program_call:
-            raise SignerError(
-                SignerErrorCode.CONFIG_ERROR,
-                "use_program_call (Fireblocks PROGRAM_CALL signing) is not supported: it "
-                "broadcasts the transaction on-chain without producing a reusable "
-                "signer-bound signature, which violates the signing contract and risks "
-                "duplicate spends. Use RAW signing (the default, omit use_program_call) "
-                "instead.",
-            )
+        """Resolve the vault's public key. Must be awaited before signing."""
         self._public_key = await self._fetch_public_key()
 
     def _initialized_pubkey(self) -> Pubkey:
@@ -178,14 +173,8 @@ class FireblocksSigner(SolanaSigner):
             f"{self._vault_account_id} asset {self._asset_id}; cannot choose a signing identity",
         )
 
-    async def _create_transaction(self, message: bytes) -> str:
+    async def _create_transaction(self, request: dict[str, Any]) -> str:
         uri = "/v1/transactions"
-        request = {
-            "assetId": self._asset_id,
-            "operation": "RAW",
-            "source": {"type": "VAULT_ACCOUNT", "id": self._vault_account_id},
-            "extraParameters": {"rawMessageData": {"messages": [{"content": message.hex()}]}},
-        }
         body = json.dumps(request, separators=(",", ":"))
         headers = self._auth_headers(uri, body)
         headers["Content-Type"] = "application/json"
@@ -202,13 +191,25 @@ class FireblocksSigner(SolanaSigner):
             raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
         return transaction_id
 
-    async def _poll_for_signature(self, transaction_id: str) -> dict[str, Any]:
+    async def _poll_for_signature(
+        self, transaction_id: str, *, program_call: bool = False
+    ) -> dict[str, Any]:
         for _ in range(self._max_poll_attempts):
             response = await self._get_json(f"/v1/transactions/{quote(transaction_id, safe='')}")
             if not isinstance(response, dict):
                 raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
             status = response.get("status")
-            if status == "COMPLETED":
+            if program_call:
+                if status == "SIGNED":
+                    return response
+                if status in _BROADCAST_STATUSES:
+                    raise SignerError(
+                        SignerErrorCode.BROADCAST_UNCONFIRMED,
+                        f"Fireblocks broadcast the PROGRAM_CALL despite signOnly "
+                        f"(status {status}); the transaction may already be executing",
+                        provider_transaction_id=transaction_id,
+                    )
+            elif status == "COMPLETED":
                 return response
             if status in _TERMINAL_FAILURE_STATUSES:
                 raise SignerError(
@@ -222,7 +223,9 @@ class FireblocksSigner(SolanaSigner):
         )
 
     @staticmethod
-    def _extract_signature(response: dict[str, Any]) -> Signature:
+    def _extract_signature(
+        response: dict[str, Any], *, allow_tx_hash_carrier: bool = False
+    ) -> Signature:
         signed_messages = response.get("signedMessages")
         first = (
             signed_messages[0] if isinstance(signed_messages, list) and signed_messages else None
@@ -230,6 +233,14 @@ class FireblocksSigner(SolanaSigner):
         signature_data = first.get("signature") if isinstance(first, dict) else None
         full_sig = signature_data.get("fullSig") if isinstance(signature_data, dict) else None
         if not isinstance(full_sig, str):
+            tx_hash = response.get("txHash") if allow_tx_hash_carrier else None
+            if isinstance(tx_hash, str) and tx_hash:
+                try:
+                    return Signature.from_string(tx_hash)
+                except Exception:
+                    raise SignerError(
+                        SignerErrorCode.SERIALIZATION_ERROR, "Failed to decode base58 signature"
+                    ) from None
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED,
                 "No reusable signature found in response (no signed_messages)",
@@ -249,19 +260,68 @@ class FireblocksSigner(SolanaSigner):
 
     async def _sign_bytes(self, message: bytes) -> Signature:
         public_key = self._initialized_pubkey()
-        transaction_id = await self._create_transaction(message)
+        transaction_id = await self._create_transaction(
+            {
+                "assetId": self._asset_id,
+                "operation": "RAW",
+                "source": {"type": "VAULT_ACCOUNT", "id": self._vault_account_id},
+                "extraParameters": {"rawMessageData": {"messages": [{"content": message.hex()}]}},
+            }
+        )
         response = await self._poll_for_signature(transaction_id)
         signature = self._extract_signature(response)
+        self._assert_signature_matches(signature, public_key, message)
+        return signature
+
+    async def _sign_program_call(
+        self, transaction: VersionedTransaction, message: bytes
+    ) -> Signature:
+        """Sign a transaction with the PROGRAM_CALL operation in sign-only mode.
+
+        Fireblocks returns the signature either in ``signedMessages`` or as the
+        ``txHash`` of the signed transaction, so both carriers are accepted and
+        the candidate bytes are verified before use.
+        """
+        public_key = self._initialized_pubkey()
+        if isinstance(transaction.message, MessageV1):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fireblocks PROGRAM_CALL accepts legacy and v0 messages only; a v1 message "
+                "cannot be signed in this mode",
+            )
+        transaction_id = await self._create_transaction(
+            {
+                "assetId": self._asset_id,
+                "operation": "PROGRAM_CALL",
+                "source": {"type": "VAULT_ACCOUNT", "id": self._vault_account_id},
+                "extraParameters": {
+                    "programCallData": serialize_transaction(transaction),
+                    "signOnly": True,
+                    "useDurableNonce": False,
+                },
+            }
+        )
+        response = await self._poll_for_signature(transaction_id, program_call=True)
+        signature = self._extract_signature(response, allow_tx_hash_carrier=True)
+        self._assert_signature_matches(signature, public_key, message)
+        return signature
+
+    @staticmethod
+    def _assert_signature_matches(signature: Signature, public_key: Pubkey, message: bytes) -> None:
         if not signature.verify(public_key, message):
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED,
                 "Signature verification failed — the returned signature does not match "
                 "the public key",
             )
-        return signature
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
-        signature = await self._sign_bytes(signed_message_bytes(transaction.message))
+        message = signed_message_bytes(transaction.message)
+        signature = (
+            await self._sign_program_call(transaction, message)
+            if self._use_program_call
+            else await self._sign_bytes(message)
+        )
         add_signature_to_transaction(transaction, self._initialized_pubkey(), signature)
         return classify_signed_transaction(
             transaction, serialize_transaction(transaction), signature

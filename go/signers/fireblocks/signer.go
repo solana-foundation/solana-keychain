@@ -26,20 +26,15 @@ type Signer struct {
 	client          *http.Client
 	pollInterval    time.Duration
 	maxPollAttempts int
+	useProgramCall  bool
 }
 
 // Ensure Signer satisfies the core contract at compile time.
 var _ core.Signer = (*Signer)(nil)
 
 // New builds a Fireblocks signer and initializes it by fetching the vault
-// account's Solana address. The returned signer is ready to use. The unsupported
-// Config.UseProgramCall is rejected with CodeConfigError before any network call.
+// account's Solana address. The returned signer is ready to use.
 func New(ctx context.Context, cfg Config) (*Signer, error) {
-	if cfg.UseProgramCall {
-		return nil, core.NewSignerError(core.CodeConfigError,
-			"use_program_call (Fireblocks PROGRAM_CALL signing) is not supported: it broadcasts the transaction on-chain without producing a reusable signer-bound signature, which violates the SolanaSigner contract and risks duplicate spends. Use RAW signing (the default, omit use_program_call) instead.")
-	}
-
 	signingKey, err := parseSigningKey(cfg.PrivateKeyPEM)
 	if err != nil {
 		return nil, err
@@ -79,6 +74,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		client:          client,
 		pollInterval:    pollInterval,
 		maxPollAttempts: maxPollAttempts,
+		useProgramCall:  cfg.UseProgramCall,
 	}
 
 	pubkey, err := s.fetchPublicKey(ctx)
@@ -109,7 +105,8 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 
 // SignTransaction signs tx and returns the encoded transaction, this signer's
 // signature, and its completeness. The transaction's message bytes are signed
-// remotely with a RAW operation, the signature is inserted at this signer's
+// remotely with a RAW operation (a sign-only PROGRAM_CALL when
+// Config.UseProgramCall is set), the signature is inserted at this signer's
 // required-signer position, and the transaction is serialized and classified
 // Complete/Partial.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
@@ -117,7 +114,12 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 	if err != nil {
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction message", err)
 	}
-	signature, err := s.signRawBytes(ctx, messageBytes)
+	var signature solana.Signature
+	if s.useProgramCall {
+		signature, err = s.signProgramCall(ctx, tx, messageBytes)
+	} else {
+		signature, err = s.signRawBytes(ctx, messageBytes)
+	}
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}
@@ -154,7 +156,7 @@ func (s *Signer) signRawBytes(ctx context.Context, message []byte) (solana.Signa
 		},
 	}
 
-	sig, err := s.requestAndPollSignature(ctx, request)
+	sig, err := s.requestAndPollSignature(ctx, request, false)
 	if err != nil {
 		return solana.Signature{}, err
 	}
@@ -166,23 +168,61 @@ func (s *Signer) signRawBytes(ctx context.Context, message []byte) (solana.Signa
 	return sig, nil
 }
 
-// requestAndPollSignature creates a RAW signing request and polls it to
-// completion.
-func (s *Signer) requestAndPollSignature(ctx context.Context, request createTransactionRequest) (solana.Signature, error) {
+// signProgramCall signs tx with a sign-only PROGRAM_CALL operation. Fireblocks
+// returns the signature either in signedMessages or as the txHash of the signed
+// transaction, so both carriers are accepted and the candidate bytes are
+// verified against the signer's pubkey over message before being surfaced.
+func (s *Signer) signProgramCall(ctx context.Context, tx *solana.Transaction, message []byte) (solana.Signature, error) {
+	if tx.Message.GetVersion() == solana.MessageVersionV1 {
+		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
+			"fireblocks PROGRAM_CALL accepts legacy and v0 messages only; a v1 message cannot be signed in this mode")
+	}
+
+	encoded, err := core.Serialize(tx)
+	if err != nil {
+		return solana.Signature{}, err
+	}
+
+	request := createTransactionRequest{
+		AssetID:   s.assetID,
+		Operation: operationProgramCall,
+		Source:    transactionSource{Type: sourceVaultAccount, ID: s.vaultAccountID},
+		ExtraParameters: programCallExtraParameters{
+			ProgramCallData: encoded,
+			SignOnly:        true,
+			UseDurableNonce: false,
+		},
+	}
+
+	sig, err := s.requestAndPollSignature(ctx, request, true)
+	if err != nil {
+		return solana.Signature{}, err
+	}
+
+	if !core.VerifyEd25519(s.pubkey, message, sig) {
+		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
+			"signature verification failed - the signature returned for the PROGRAM_CALL does not match the vault public key over the submitted message")
+	}
+	return sig, nil
+}
+
+// requestAndPollSignature creates a signing request and polls it to completion.
+func (s *Signer) requestAndPollSignature(ctx context.Context, request createTransactionRequest, programCall bool) (solana.Signature, error) {
 	created, err := s.createTransaction(ctx, request)
 	if err != nil {
 		return solana.Signature{}, err
 	}
-	response, err := s.pollForSignature(ctx, created.ID)
+	response, err := s.pollForSignature(ctx, created.ID, programCall)
 	if err != nil {
 		return solana.Signature{}, err
 	}
-	return extractSignature(response)
+	return extractSignature(response, programCall)
 }
 
-// extractSignature pulls the signer-bound signature (hex fullSig) out of a
-// completed RAW transaction response.
-func extractSignature(response transactionResponse) (solana.Signature, error) {
+// extractSignature pulls the signer-bound signature out of a completed
+// transaction response: the hex fullSig, or the base58 txHash when the response
+// carries no signedMessages for a sign-only PROGRAM_CALL.
+func extractSignature(response transactionResponse, allowTxHashCarrier bool) (solana.Signature, error) {
 	if len(response.SignedMessages) > 0 {
 		sigBytes, err := hex.DecodeString(response.SignedMessages[0].Signature.FullSig)
 		if err != nil {
@@ -193,6 +233,14 @@ func extractSignature(response transactionResponse) (solana.Signature, error) {
 				fmt.Sprintf("invalid signature length (expected %d bytes)", core.SignatureLength))
 		}
 		return solana.SignatureFromBytes(sigBytes), nil
+	}
+
+	if allowTxHashCarrier && response.TxHash != "" {
+		sig, err := solana.SignatureFromBase58(response.TxHash)
+		if err != nil {
+			return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode base58 signature", err)
+		}
+		return sig, nil
 	}
 
 	return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,

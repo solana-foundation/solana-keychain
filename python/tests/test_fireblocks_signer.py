@@ -13,9 +13,10 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
 )
 from solders.keypair import Keypair
+from solders.signature import Signature
 
 from solana_keychain import SignerError, SignerErrorCode
-from solana_keychain.core import signed_message_bytes
+from solana_keychain.core import serialize_transaction, signed_message_bytes
 from solana_keychain.fireblocks import (
     FireblocksSigner,
     FireblocksSignerConfig,
@@ -27,7 +28,7 @@ from solana_keychain.fireblocks.jwt import (
     create_jwt,
     parse_signing_key,
 )
-from tests.util import create_test_transaction
+from tests.util import create_test_transaction, create_test_v1_transaction
 
 API_BASE_URL = "https://fireblocks.example.com"
 API_KEY = "test-api-key"
@@ -114,13 +115,95 @@ def test_parse_signing_key_invalid() -> None:
     assert excinfo.value.code == SignerErrorCode.INVALID_PRIVATE_KEY
 
 
+def mock_program_call_flow(poll_body: dict[str, Any]) -> None:
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(200, json={"id": "tx-1", "status": "SUBMITTED"})
+    )
+    respx.get(f"{TRANSACTIONS_URL}/tx-1").mock(return_value=httpx.Response(200, json=poll_body))
+
+
 @respx.mock
-async def test_use_program_call_rejected_before_any_network_call() -> None:
-    signer = make_signer(use_program_call=True)
+async def test_program_call_requests_sign_only_and_uses_signed_messages() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True)
+    transaction = create_test_transaction(keypair.pubkey())
+    program_call_data = serialize_transaction(transaction)
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
+    mock_program_call_flow(
+        {
+            "id": "tx-1",
+            "status": "SIGNED",
+            "signedMessages": [{"signature": {"fullSig": bytes(signature).hex()}}],
+        }
+    )
+
+    result = await signer.sign_transaction(transaction)
+
+    assert result.signature == signature
+    request_body = json.loads(respx.calls[1].request.content)
+    assert request_body["operation"] == "PROGRAM_CALL"
+    assert request_body["extraParameters"] == {
+        "programCallData": program_call_data,
+        "signOnly": True,
+        "useDurableNonce": False,
+    }
+
+
+@respx.mock
+async def test_program_call_accepts_signature_carried_as_tx_hash() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True)
+    transaction = create_test_transaction(keypair.pubkey())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
+    mock_program_call_flow({"id": "tx-1", "status": "SIGNED", "txHash": str(signature)})
+
+    result = await signer.sign_transaction(transaction)
+
+    assert result.signature == signature
+    assert list(transaction.signatures) == [signature]
+
+
+@respx.mock
+async def test_program_call_rejects_tx_hash_that_is_not_the_vault_signature() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True)
+    transaction = create_test_transaction(keypair.pubkey())
+    foreign_signature = Keypair().sign_message(signed_message_bytes(transaction.message))
+    mock_program_call_flow({"id": "tx-1", "status": "SIGNED", "txHash": str(foreign_signature)})
+
     with pytest.raises(SignerError) as excinfo:
-        await signer.init()
-    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
-    assert not respx.calls
+        await signer.sign_transaction(transaction)
+
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert all(signature == Signature.default() for signature in transaction.signatures)
+
+
+@respx.mock
+async def test_program_call_broadcast_despite_sign_only_is_unconfirmed() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True)
+    transaction = create_test_transaction(keypair.pubkey())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
+    mock_program_call_flow({"id": "tx-1", "status": "BROADCASTING", "txHash": str(signature)})
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id == "tx-1"
+
+
+@respx.mock
+async def test_program_call_rejects_v1_message_before_creating_a_transaction() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True)
+    transaction = create_test_v1_transaction(keypair.pubkey())
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert len(respx.calls) == 1
 
 
 @respx.mock

@@ -1,14 +1,9 @@
 /**
  * Fireblocks integration tests.
  *
- * The signer only supports Fireblocks RAW signing. Fireblocks PROGRAM_CALL
- * signing is unsupported: it broadcasts the transaction on-chain and only
- * returns a broadcast transaction id, not a reusable signer-bound signature.
- * `useProgramCall: true` is therefore rejected at construction, before any
- * network call or broadcast can occur (fail closed).
- *
- * RAW mode returns a raw signature but is not available on the Fireblocks
- * sandbox/testnet environment used in CI, so it is not exercised here.
+ * Neither signing mode is exercised against the live API here: RAW signing is
+ * not available on the Fireblocks sandbox/testnet environment used in CI, and
+ * PROGRAM_CALL must be enabled for the workspace by Fireblocks.
  */
 import { config } from 'dotenv';
 import { describe, expect, it } from 'vitest';
@@ -24,23 +19,11 @@ function hasRequiredEnvVars(): boolean {
 }
 
 describe('FireblocksSigner Integration', () => {
-    it('fails closed for PROGRAM_CALL by rejecting at construction before any broadcast', async () => {
-        await expect(
-            createFireblocksSigner({
-                apiKey: 'test-api-key',
-                assetId: 'SOL_TEST',
-                privateKeyPem: 'test-private-key-pem',
-                useProgramCall: true,
-                vaultAccountId: '0',
-            }),
-        ).rejects.toMatchObject({
-            code: 'SIGNER_CONFIG_ERROR',
-            message: expect.stringContaining('useProgramCall'),
-        });
-    });
-
     // RAW signing not available on Fireblocks testnet/sandbox
     it.skip('signs messages with real API', () => {});
+
+    // PROGRAM_CALL must be enabled for the workspace by Fireblocks
+    it.skip('signs transactions with real API in PROGRAM_CALL sign-only mode', () => {});
 
     it.skipIf(!hasRequiredEnvVars())('checks availability', async () => {
         const signer = await createFireblocksSigner({

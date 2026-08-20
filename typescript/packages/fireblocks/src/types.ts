@@ -24,19 +24,17 @@ export interface FireblocksSignerConfig {
     requestDelayMs?: number;
 
     /**
-     * @deprecated Unsupported and slated for removal. Setting this to `true` is
-     * rejected at construction with a `CONFIG_ERROR`; omit it (RAW signing is
-     * always used).
+     * Sign transactions with the PROGRAM_CALL operation instead of RAW (default: `false`).
      *
-     * Fireblocks PROGRAM_CALL signing broadcasts the transaction on-chain and
-     * only returns a broadcast transaction id, not a reusable signer-bound
-     * signature over the local message bytes. That violates the `SolanaSigner`
-     * contract and risks duplicate spends, so the signer always uses RAW signing
-     * (signs message bytes only; the caller broadcasts).
+     * PROGRAM_CALL is sent with `signOnly: true` and `useDurableNonce: false`, so
+     * Fireblocks signs the submitted transaction without broadcasting it and
+     * without rewriting the message. The returned signature is verified against
+     * the vault address over the local message bytes before it is used, and the
+     * caller broadcasts as in RAW mode. `signMessages()` always uses RAW, since
+     * PROGRAM_CALL only accepts serialized transactions.
      *
-     * The field key is retained for now so existing callers passing `true` get a
-     * clear error instead of silently different behavior; it will be removed in a
-     * future major version.
+     * PROGRAM_CALL accepts legacy and v0 messages only, requires a hot wallet,
+     * and must be enabled for the workspace by Fireblocks.
      */
     useProgramCall?: boolean;
 
@@ -47,11 +45,33 @@ export interface FireblocksSignerConfig {
 /**
  * Request to create a signing transaction in Fireblocks
  */
-export interface CreateTransactionRequest {
+export type CreateTransactionRequest = CreateProgramCallTransactionRequest | CreateRawTransactionRequest;
+
+export interface CreateRawTransactionRequest {
     assetId: string;
     extraParameters: RawExtraParameters;
     operation: 'RAW';
     source: TransactionSource;
+}
+
+export interface CreateProgramCallTransactionRequest {
+    assetId: string;
+    extraParameters: ProgramCallExtraParameters;
+    operation: 'PROGRAM_CALL';
+    source: TransactionSource;
+}
+
+/**
+ * Extra parameters for PROGRAM_CALL signing.
+ *
+ * `useDurableNonce` defaults to `true` on the Fireblocks side, which prepends an
+ * `AdvanceNonce` instruction to the submitted message; the signature would then
+ * cover different bytes than the caller's transaction.
+ */
+export interface ProgramCallExtraParameters {
+    programCallData: string;
+    signOnly: boolean;
+    useDurableNonce: boolean;
 }
 
 export interface TransactionSource {
@@ -89,6 +109,7 @@ export interface TransactionResponse {
     id: string;
     signedMessages?: SignedMessage[];
     status: string;
+    txHash?: string;
 }
 
 export interface SignedMessage {
@@ -127,6 +148,7 @@ export const FireblocksTransactionStatus = {
     PENDING_SIGNATURE: 'PENDING_SIGNATURE',
     QUEUED: 'QUEUED',
     REJECTED: 'REJECTED',
+    SIGNED: 'SIGNED',
     SUBMITTED: 'SUBMITTED',
 } as const;
 export type FireblocksTransactionStatus =
