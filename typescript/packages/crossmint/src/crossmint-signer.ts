@@ -8,6 +8,7 @@ import {
     fetchSignerJson,
     idempotencyKeyFromMessage,
     normalizeBaseUrl,
+    providerMayHaveAccepted,
     sanitizeRemoteErrorResponse,
     SignerError,
     SignerErrorCode,
@@ -71,9 +72,13 @@ let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
  *
  * Not retry-safe: any failure after the create is accepted rejects with
  * `BROADCAST_UNCONFIRMED` carrying `context.providerTransactionId`; check that
- * transaction with Crossmint before retrying. Each create carries an
- * `x-idempotency-key` derived from the message bytes, so retrying the exact
- * same bytes cannot create a second transaction.
+ * transaction with Crossmint before retrying. A create that fails without a
+ * usable response rejects with `BROADCAST_UNCONFIRMED` and no
+ * `providerTransactionId`.
+ *
+ * Each create carries an `x-idempotency-key` derived from the message bytes, so
+ * replaying these exact bytes cannot create a second transaction; a rebuilt
+ * transaction derives a different key and executes as a new transfer.
  */
 class CrossmintSigner<TAddress extends string = string> implements CrossmintSendingSigner<TAddress> {
     // No signTransactions/signMessages: Kit classifies signers by duck-typed
@@ -255,7 +260,19 @@ class CrossmintSigner<TAddress extends string = string> implements CrossmintSend
      * has already accepted, so an aborted transaction may still land server-side.
      */
     private async signTransactionManaged(transaction: Transaction, abortSignal?: AbortSignal): Promise<SignatureBytes> {
-        const created = await this.createTransaction(transaction, abortSignal);
+        let created: CrossmintTransactionResponse;
+        try {
+            created = await this.createTransaction(transaction, abortSignal);
+        } catch (error) {
+            if (!providerMayHaveAccepted(error)) {
+                throw error;
+            }
+            // Crossmint may be executing a transaction whose id never reached us.
+            return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
+                cause: error,
+                message: 'Crossmint may have created the transaction, but no transaction id was returned',
+            });
+        }
         // Post-create failures leave an outcome Crossmint may still execute, so
         // they surface as BROADCAST_UNCONFIRMED with the transaction id.
         try {

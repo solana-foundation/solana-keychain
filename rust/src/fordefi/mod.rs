@@ -17,7 +17,8 @@ use crate::http_client_config::HttpClientConfig;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
 use crate::transaction_util::{
-    deserialize_wire_transaction, idempotency_key_from_message, TransactionUtil,
+    deserialize_wire_transaction, idempotency_key_from_message, unconfirmed_unless_rejected,
+    TransactionUtil,
 };
 pub use request_signer::{FordefiRequestSigner, PemRequestSigner};
 use types::{
@@ -237,10 +238,13 @@ impl FordefiSigner {
 
     /// POST a serialized request body to `/api/v1/transactions` with P-256
     /// request signing. Returns the Fordefi transaction ID.
+    /// `broadcast_managed` marks a submit whose acceptance means Fordefi is already
+    /// broadcasting, so an unresolved failure is reported as unconfirmed.
     async fn submit_request<T: serde::Serialize>(
         &self,
         request: &T,
         idempotence_id: Option<&str>,
+        broadcast_managed: bool,
     ) -> Result<String, SignerError> {
         let path = "/api/v1/transactions";
         let body = serde_json::to_string(request)?;
@@ -261,13 +265,30 @@ impl FordefiSigner {
         if let Some(id) = idempotence_id {
             builder = builder.header("x-idempotence-id", id);
         }
-        let response = builder.body(body).send().await?;
+        let classify = |status: Option<u16>, error: SignerError| {
+            if broadcast_managed {
+                unconfirmed_unless_rejected(status, error)
+            } else {
+                error
+            }
+        };
 
+        let response = builder
+            .body(body)
+            .send()
+            .await
+            .map_err(|error| classify(None, error.into()))?;
+
+        let status = response.status().as_u16();
         if !response.status().is_success() {
-            return Err(Self::extract_api_error(response, "submit_request").await);
+            let error = Self::extract_api_error(response, "submit_request").await;
+            return Err(classify(Some(status), error));
         }
 
-        let create_response: CreateTransactionResponse = response.json().await?;
+        let create_response: CreateTransactionResponse = response
+            .json()
+            .await
+            .map_err(|error| classify(Some(status), error.into()))?;
         Ok(create_response.id)
     }
 
@@ -286,7 +307,7 @@ impl FordefiSigner {
             },
         };
 
-        self.submit_request(&request, None).await
+        self.submit_request(&request, None, false).await
     }
 
     /// Submit a native Solana transaction request.
@@ -310,8 +331,12 @@ impl FordefiSigner {
             },
         };
 
-        self.submit_request(&request, Some(&idempotency_key_from_message(data_bytes)))
-            .await
+        self.submit_request(
+            &request,
+            Some(&idempotency_key_from_message(data_bytes)),
+            true,
+        )
+        .await
     }
 
     /// Submit a native Solana message request.
@@ -333,7 +358,7 @@ impl FordefiSigner {
             },
         };
 
-        self.submit_request(&request, None).await
+        self.submit_request(&request, None, false).await
     }
 
     // -----------------------------------------------------------------------
@@ -488,8 +513,12 @@ impl FordefiSigner {
     /// empty — only the signature, usable with RPC transaction lookups, is
     /// returned.
     ///
+    /// A submit that fails without a usable response returns
+    /// [`SignerError::BroadcastUnconfirmed`] with no transaction id.
+    ///
     /// Each native create carries an `x-idempotence-id` derived from the message
-    /// bytes, so retrying the exact same bytes cannot create a second transaction.
+    /// bytes, so replaying these exact bytes cannot create a second transaction; a
+    /// rebuilt transaction derives a different id and is broadcast again.
     async fn sign_and_serialize_native(
         &self,
         transaction: &mut VersionedTransaction,
@@ -504,7 +533,7 @@ impl FordefiSigner {
         // caller might blindly retry into a duplicate spend.
         self.finish_native_broadcast(&tx_id).await.map_err(|error| {
             SignerError::BroadcastUnconfirmed {
-                provider_tx_id: tx_id,
+                provider_tx_id: Some(tx_id),
                 detail: error.detail_string(),
             }
         })
@@ -1752,9 +1781,95 @@ mod tests {
         let result = signer.sign_transaction(&mut tx).await;
         match result.unwrap_err() {
             SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
-                assert_eq!(provider_tx_id, "native-tx-no-raw");
+                assert_eq!(provider_tx_id.as_deref(), Some("native-tx-no-raw"));
             }
             other => panic!("Expected BroadcastUnconfirmed, got: {other:?}"),
+        }
+    }
+
+    /// A 5xx can follow a create the provider already accepted, and only an identical-bytes replay dedupes.
+    #[tokio::test]
+    async fn test_native_submit_server_error_is_unconfirmed_without_a_transaction_id() {
+        let mock_server = MockServer::start().await;
+        let pubkey = keypair_pubkey(&create_test_keypair());
+        let signer = create_native_test_signer(&mock_server.uri(), pubkey);
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(ResponseTemplate::new(502))
+            .mount(&mock_server)
+            .await;
+
+        let mut tx = create_test_transaction(&pubkey);
+        match signer.sign_transaction(&mut tx).await.unwrap_err() {
+            SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
+                assert_eq!(provider_tx_id, None);
+            }
+            other => panic!("Expected BroadcastUnconfirmed, got: {other:?}"),
+        }
+    }
+
+    /// A 2xx means the transaction was accepted; an unusable body only hides the id.
+    #[tokio::test]
+    async fn test_native_submit_accepted_without_an_id_is_unconfirmed() {
+        let mock_server = MockServer::start().await;
+        let pubkey = keypair_pubkey(&create_test_keypair());
+        let signer = create_native_test_signer(&mock_server.uri(), pubkey);
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "state": "pending" })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let mut tx = create_test_transaction(&pubkey);
+        match signer.sign_transaction(&mut tx).await.unwrap_err() {
+            SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
+                assert_eq!(provider_tx_id, None);
+            }
+            other => panic!("Expected BroadcastUnconfirmed, got: {other:?}"),
+        }
+    }
+
+    /// A 4xx rules the transaction out, so it stays a plain failure a caller can safely retry.
+    #[tokio::test]
+    async fn test_native_submit_rejected_by_fordefi_stays_a_plain_failure() {
+        let mock_server = MockServer::start().await;
+        let pubkey = keypair_pubkey(&create_test_keypair());
+        let signer = create_native_test_signer(&mock_server.uri(), pubkey);
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+
+        let mut tx = create_test_transaction(&pubkey);
+        match signer.sign_transaction(&mut tx).await.unwrap_err() {
+            SignerError::RemoteApiError(_) => {}
+            other => panic!("Expected RemoteApiError, got: {other:?}"),
+        }
+    }
+
+    /// Black-box mode only signs, so a failed submit has no on-chain outcome to be unconfirmed about.
+    #[tokio::test]
+    async fn test_black_box_submit_server_error_is_not_reported_as_unconfirmed() {
+        let mock_server = MockServer::start().await;
+        let pubkey = keypair_pubkey(&create_test_keypair());
+        let signer = create_test_signer(&mock_server.uri(), pubkey);
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(ResponseTemplate::new(502))
+            .mount(&mock_server)
+            .await;
+
+        let mut tx = create_test_transaction(&pubkey);
+        match signer.sign_transaction(&mut tx).await.unwrap_err() {
+            SignerError::RemoteApiError(_) => {}
+            other => panic!("Expected RemoteApiError, got: {other:?}"),
         }
     }
 
@@ -1790,7 +1905,7 @@ mod tests {
                 provider_tx_id,
                 detail,
             } => {
-                assert_eq!(provider_tx_id, "native-tx-fail");
+                assert_eq!(provider_tx_id.as_deref(), Some("native-tx-fail"));
                 assert!(
                     detail.contains("aborted"),
                     "detail must carry the state, got: {detail}"
@@ -1904,7 +2019,7 @@ mod tests {
                 provider_tx_id,
                 detail,
             } => {
-                assert_eq!(provider_tx_id, "native-tx-pending");
+                assert_eq!(provider_tx_id.as_deref(), Some("native-tx-pending"));
                 assert!(
                     detail.contains("timeout"),
                     "detail must carry the cause, got: {detail}"
@@ -1949,7 +2064,7 @@ mod tests {
         let result = signer.sign_transaction(&mut tx).await;
         match result.unwrap_err() {
             SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
-                assert_eq!(provider_tx_id, "native-tx-malformed");
+                assert_eq!(provider_tx_id.as_deref(), Some("native-tx-malformed"));
             }
             other => panic!("Expected BroadcastUnconfirmed, got: {other:?}"),
         }

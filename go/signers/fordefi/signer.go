@@ -207,9 +207,13 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 //
 // Native mode is not retry-safe: any failure after Fordefi accepts the
 // submission returns CodeBroadcastUnconfirmed carrying the Fordefi transaction
-// id; check that transaction with Fordefi before retrying. Each native create
-// carries an x-idempotence-id derived from the message bytes, so retrying the
-// exact same bytes cannot create a second Fordefi transaction.
+// id; check that transaction with Fordefi before retrying. A submission that
+// fails without a usable response returns CodeBroadcastUnconfirmed with no
+// transaction id.
+//
+// Each native create carries an x-idempotence-id derived from the message bytes,
+// so replaying these exact bytes cannot create a second Fordefi transaction; a
+// rebuilt transaction derives a different id and is broadcast again.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.chain != "" {
 		return s.signTransactionNative(ctx, tx)
@@ -260,7 +264,7 @@ func (s *Signer) signBlackBox(ctx context.Context, data []byte) (solana.Signatur
 			Format:     "hash_binary",
 			HashBinary: base64.StdEncoding.EncodeToString(data),
 		},
-	}, "")
+	}, "", false)
 	if err != nil {
 		return solana.Signature{}, err
 	}
@@ -283,7 +287,7 @@ func (s *Signer) signSolanaMessage(ctx context.Context, message []byte) (solana.
 			Chain:   s.chain,
 			RawData: base64.StdEncoding.EncodeToString(message),
 		},
-	}, "")
+	}, "", false)
 	if err != nil {
 		return solana.Signature{}, err
 	}
@@ -330,7 +334,7 @@ func (s *Signer) signTransactionNative(ctx context.Context, tx *solana.Transacti
 			PushMode: "auto",
 			Fee:      s.fee,
 		},
-	}, core.IdempotencyKeyFromMessage(messageBytes))
+	}, core.IdempotencyKeyFromMessage(messageBytes), true)
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}

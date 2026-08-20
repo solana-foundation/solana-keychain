@@ -1,4 +1,4 @@
-import { sanitizeRemoteErrorResponse, SignerErrorCode, throwSignerError } from './errors.js';
+import { sanitizeRemoteErrorResponse, SignerError, SignerErrorCode, throwSignerError } from './errors.js';
 
 /** Default timeout applied to remote signer API requests. */
 export const DEFAULT_FETCH_TIMEOUT_MS = 60_000;
@@ -15,6 +15,15 @@ export interface FetchSignerJsonOptions {
     timeoutMs?: number;
     /** Fully-qualified request URL. */
     url: string;
+}
+
+/**
+ * A 4xx is the only create outcome that rules out a transaction; anything else
+ * (no response, timeout, 5xx, unusable success body) may already be executing.
+ */
+export function providerMayHaveAccepted(error: unknown): boolean {
+    const status = error instanceof SignerError ? error.context?.status : undefined;
+    return typeof status !== 'number' || status < 400 || status >= 500;
 }
 
 /**

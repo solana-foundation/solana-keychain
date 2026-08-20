@@ -9,6 +9,7 @@ import {
     fetchSignerJson,
     idempotencyKeyFromMessage,
     normalizeBaseUrl,
+    providerMayHaveAccepted,
     signBatchStaggered,
     SignerErrorCode,
     SolanaSendingSigner,
@@ -152,9 +153,12 @@ export interface FordefiSignerConfig {
  * Native mode is not retry-safe: any failure after Fordefi accepts the
  * submission rejects with `BROADCAST_UNCONFIRMED` carrying
  * `context.providerTransactionId`; check that transaction with Fordefi before
- * retrying. Each native create carries an `x-idempotence-id` derived from the
- * message bytes, so retrying the exact same bytes cannot create a second
- * transaction.
+ * retrying. A submission that fails without a usable response rejects with
+ * `BROADCAST_UNCONFIRMED` and no `providerTransactionId`.
+ *
+ * Each native create carries an `x-idempotence-id` derived from the message
+ * bytes, so replaying these exact bytes cannot create a second transaction; a
+ * rebuilt transaction derives a different id and is broadcast again.
  */
 export interface FordefiNativeSigner<TAddress extends string = string>
     extends SolanaSendingSigner<TAddress>, MessagePartialSigner<TAddress> {}
@@ -514,7 +518,19 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
                 this.assertNativeAutoTransactionSupported(transaction);
 
                 const base64Data = Buffer.from(transaction.messageBytes).toString('base64');
-                const txId = await this.submitSolanaTransaction(base64Data);
+                let txId: string;
+                try {
+                    txId = await this.submitSolanaTransaction(base64Data);
+                } catch (error) {
+                    if (!providerMayHaveAccepted(error)) {
+                        throw error;
+                    }
+                    // Fordefi may be broadcasting a transaction whose id never reached us.
+                    return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
+                        cause: error,
+                        message: 'Fordefi may have accepted the transaction, but no transaction id was returned',
+                    });
+                }
                 // Once the submit is accepted Fordefi is already broadcasting
                 // (push_mode 'auto'), so any later failure leaves an on-chain
                 // outcome this client cannot rule out. Report those as

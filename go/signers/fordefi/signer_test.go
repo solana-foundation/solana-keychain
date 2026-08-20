@@ -689,6 +689,96 @@ func assertBroadcastUnconfirmed(t *testing.T, err error, wantTxID string) {
 	}
 }
 
+// A 5xx can follow a create the provider already accepted, and only an identical-bytes replay dedupes.
+func TestSignTransactionNativeSubmitServerErrorIsUnconfirmedWithoutID(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	if err == nil {
+		t.Fatal("expected a failed submit to be reported")
+	}
+	assertBroadcastUnconfirmedWithoutID(t, err)
+}
+
+// A 2xx means the transaction was accepted; an unusable body only hides the id.
+func TestSignTransactionNativeSubmitWithoutIDIsUnconfirmed(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, map[string]any{"state": "pending"})
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	if err == nil {
+		t.Fatal("expected an accepted submit without an id to be reported")
+	}
+	assertBroadcastUnconfirmedWithoutID(t, err)
+}
+
+// A 4xx rules the transaction out, so it stays a plain failure a caller can safely retry.
+func TestSignTransactionNativeSubmitRejectionStaysPlainFailure(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	if code, _ := core.CodeOf(err); code != core.CodeRemoteAPIError {
+		t.Errorf("got %s, want REMOTE_API_ERROR", code)
+	}
+}
+
+// Black-box mode only signs, so a failed submit has no on-chain outcome to be unconfirmed about.
+func TestSignTransactionBlackBoxSubmitServerErrorIsNotUnconfirmed(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	s := newTestSigner(t, baseConfig(t), pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	if code, _ := core.CodeOf(err); code != core.CodeRemoteAPIError {
+		t.Errorf("got %s, want REMOTE_API_ERROR", code)
+	}
+}
+
+// assertBroadcastUnconfirmedWithoutID checks for an unconfirmed broadcast with no id.
+func assertBroadcastUnconfirmedWithoutID(t *testing.T, err error) {
+	t.Helper()
+	if code, _ := core.CodeOf(err); code != core.CodeBroadcastUnconfirmed {
+		t.Errorf("got %s, want BROADCAST_UNCONFIRMED", code)
+	}
+	var se *core.SignerError
+	if !errors.As(err, &se) || se.ProviderTxID != "" {
+		t.Errorf("error must carry no provider transaction id, got %v", err)
+	}
+}
+
 func TestSignTransactionNativeRejectsMultiSigner(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	var requests atomic.Int64

@@ -365,6 +365,60 @@ async def test_sign_transaction_native_polling_timeout_is_broadcast_unconfirmed(
 
 
 @respx.mock
+async def test_native_submit_server_error_is_unconfirmed_without_a_transaction_id() -> None:
+    """A 5xx can follow a create the provider already accepted, and only an
+    identical-bytes replay dedupes."""
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(502, json={"error": "bad gateway"})
+    )
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id is None
+
+
+@respx.mock
+async def test_native_submit_accepted_without_an_id_is_unconfirmed() -> None:
+    """A 2xx means the transaction was accepted; an unusable body only hides the id."""
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"state": "pending"}))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id is None
+
+
+@respx.mock
+async def test_native_submit_rejected_by_fordefi_stays_a_plain_failure() -> None:
+    """A 4xx rules the transaction out, so it stays a plain failure a caller can safely retry."""
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(401, json={"error": "unauthorized"})
+    )
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
+
+
+@respx.mock
+async def test_black_box_submit_server_error_is_not_reported_as_unconfirmed() -> None:
+    """Black-box mode only signs, so a failed submit has no on-chain outcome to be
+    unconfirmed about."""
+    keypair = Keypair()
+    signer = make_signer(keypair)
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(502, json={"error": "bad gateway"})
+    )
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
+
+
+@respx.mock
 async def test_sign_transaction_native_cancellation_carries_the_transaction_id(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

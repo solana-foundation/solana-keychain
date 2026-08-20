@@ -66,6 +66,13 @@ def sanitize_remote_error_response(
     return f"{normalized[:max_length]} [truncated]"
 
 
+def provider_may_have_accepted(status_code: int | None) -> bool:
+    """A 4xx is the only create outcome that rules out a transaction; anything else
+    (no response, timeout, 5xx, unusable success body) may already be executing.
+    """
+    return status_code is None or not 400 <= status_code < 500
+
+
 async def fetch_signer_json(
     *,
     url: str,
@@ -154,6 +161,7 @@ async def _request_json(
             SignerErrorCode.REMOTE_API_ERROR,
             f"{provider_name} API error: {response.status_code}: "
             f"{sanitize_remote_error_response(response.text)}",
+            status_code=response.status_code,
         )
     try:
         return response.json()

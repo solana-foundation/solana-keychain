@@ -47,9 +47,13 @@ pub enum SignerError {
     /// Crossmint) for any failure after the provider has accepted the
     /// transaction. Retrying blindly risks a duplicate spend; check the provider
     /// transaction id first.
-    #[error("Broadcast unconfirmed; the provider may have executed the transaction (provider transaction id: {provider_tx_id})")]
+    ///
+    /// `provider_tx_id` is `None` when the create itself failed without a usable
+    /// response: nothing to check, and the only safe recovery is replaying the
+    /// identical bytes.
+    #[error("Broadcast unconfirmed; the provider may have executed the transaction (provider transaction id: {})", provider_tx_id.as_deref().unwrap_or("unknown"))]
     BroadcastUnconfirmed {
-        provider_tx_id: String,
+        provider_tx_id: Option<String>,
         detail: String,
     },
 
@@ -131,7 +135,8 @@ impl fmt::Debug for SignerError {
             SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
                 write!(
                     f,
-                    "SignerError::BroadcastUnconfirmed(provider_tx_id: {provider_tx_id}, [REDACTED])"
+                    "SignerError::BroadcastUnconfirmed(provider_tx_id: {}, [REDACTED])",
+                    provider_tx_id.as_deref().unwrap_or("unknown")
                 )
             }
             SignerError::Other(_) => write!(f, "SignerError::Other([REDACTED])"),
@@ -158,7 +163,7 @@ mod tests {
             SignerError::IoError(secret.to_string()),
             SignerError::Other(secret.to_string()),
             SignerError::BroadcastUnconfirmed {
-                provider_tx_id: "tx-id".to_string(),
+                provider_tx_id: Some("tx-id".to_string()),
                 detail: secret.to_string(),
             },
         ];
@@ -219,7 +224,7 @@ mod tests {
     #[test]
     fn test_broadcast_unconfirmed_surfaces_tx_id_but_not_detail() {
         let err = SignerError::BroadcastUnconfirmed {
-            provider_tx_id: "provider-tx-123".to_string(),
+            provider_tx_id: Some("provider-tx-123".to_string()),
             detail: "sensitive-detail".to_string(),
         };
         let display = format!("{err}");
