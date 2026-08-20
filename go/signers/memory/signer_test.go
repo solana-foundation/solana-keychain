@@ -1,7 +1,9 @@
 package memory
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -143,5 +145,44 @@ func TestSignTransactionComplete(t *testing.T) {
 	}
 	if !s.IsAvailable(context.Background()) {
 		t.Error("memory signer should always be available")
+	}
+}
+
+func TestSignV1Transaction(t *testing.T) {
+	s, err := New(Config{PrivateKey: testutils.TestPrivateKey()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := testutils.CreateTestV1Transaction(s.Pubkey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgBytes, err := tx.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msgBytes[0] != 0x81 {
+		t.Fatalf("v1 message should open with 0x81, got 0x%02x", msgBytes[0])
+	}
+
+	res, err := s.SignTransaction(context.Background(), tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsComplete() {
+		t.Error("single-signer v1 transaction should be Complete")
+	}
+	if !core.VerifyEd25519(s.Pubkey(), msgBytes, res.Signature) {
+		t.Error("v1 signature should verify against the prefixed message bytes")
+	}
+	wire, err := base64.StdEncoding.DecodeString(res.EncodedTransaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(wire[:len(msgBytes)], msgBytes) {
+		t.Error("v1 envelope should lead with the message bytes")
+	}
+	if len(wire) != len(msgBytes)+core.SignatureLength {
+		t.Errorf("v1 envelope length = %d, want %d", len(wire), len(msgBytes)+core.SignatureLength)
 	}
 }

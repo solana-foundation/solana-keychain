@@ -69,8 +69,7 @@ func testPublicKey() solana.PublicKey {
 	return pub
 }
 
-// createTestV1Transaction is createTestTransaction as a v1 message. v1 carries its
-// resource limits inline and treats an unset limit as zero, so both are set.
+// createTestV1Transaction is createTestTransaction as a v1 message.
 func createTestV1Transaction(payer solana.PublicKey) (*solana.Transaction, error) {
 	tx, err := createTestTransaction(payer)
 	if err != nil {

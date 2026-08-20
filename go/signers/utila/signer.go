@@ -243,8 +243,7 @@ func terminalStateError(state transactionState) error {
 // extractSignatureFromRawTransaction decodes the base64 wire transaction Utila
 // returned, requires its message bytes to equal the locally requested message,
 // locates this wallet's required-signer position, and verifies the signature
-// before surfacing it. solana-go's Transaction decodes legacy and versioned
-// messages alike, so both wire formats share this one path.
+// before surfacing it.
 func (s *Signer) extractSignatureFromRawTransaction(rawTransaction string, expectedMessage []byte) (solana.Signature, error) {
 	raw, err := base64.StdEncoding.DecodeString(rawTransaction)
 	if err != nil {
@@ -267,21 +266,9 @@ func (s *Signer) extractSignatureFromRawTransaction(rawTransaction string, expec
 			"Utila returned a signed transaction with different message bytes")
 	}
 
-	requiredSigners := int(tx.Message.Header.NumRequiredSignatures)
-	if len(tx.Message.AccountKeys) < requiredSigners {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"invalid account index: not enough account keys")
-	}
-	position := -1
-	for i := 0; i < requiredSigners; i++ {
-		if tx.Message.AccountKeys[i] == s.pubkey {
-			position = i
-			break
-		}
-	}
-	if position < 0 {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"failed to locate signer pubkey in Utila transaction")
+	position, err := core.SigningPosition(tx, s.pubkey)
+	if err != nil {
+		return solana.Signature{}, err
 	}
 	if position >= len(tx.Signatures) || tx.Signatures[position].IsZero() {
 		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,

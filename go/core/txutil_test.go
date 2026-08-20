@@ -111,8 +111,6 @@ func TestClassifyPartialWhenMultiSig(t *testing.T) {
 	}
 }
 
-// A v1 envelope opens with 0x81 and puts its signatures at the tail, where legacy
-// and v0 lead with a compact-u16 signature count.
 func TestV1EnvelopePlacesMessageFirstAndSignaturesLast(t *testing.T) {
 	payer := testPublicKey()
 	tx, err := createTestV1Transaction(payer)
@@ -156,7 +154,6 @@ func TestV1TransactionRoundTripsAndClassifies(t *testing.T) {
 	}
 	signature := solana.Signature(ed25519.Sign(testPrivateKey(), messageBytes))
 
-	// The slot helpers are version-agnostic: a v1 message shares those fields.
 	position, err := SigningPosition(tx, payer)
 	if err != nil {
 		t.Fatal(err)
