@@ -597,6 +597,12 @@ func TestSignTransactionNativeManualPollingCancellationIsOrdinaryHTTPError(t *te
 func TestSignTransactionNativeManualSubmissionCancellationIsOrdinaryHTTPError(t *testing.T) {
 	publicKey := testutils.TestPublicKey()
 	submitted := make(chan struct{})
+	// Cancelling the client abandons the request without the test server seeing
+	// a connection close, so the handler's request context never fires. Release
+	// it from the test instead: this defer runs before t.Cleanup closes the
+	// server, which would otherwise block forever on the in-flight request.
+	release := make(chan struct{})
+	defer close(release)
 	signer := newTestSigner(t, nativeManualConfig(t), publicKey.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(_ http.ResponseWriter, r *http.Request) {
 			select {
@@ -604,7 +610,10 @@ func TestSignTransactionNativeManualSubmissionCancellationIsOrdinaryHTTPError(t 
 			default:
 				close(submitted)
 			}
-			<-r.Context().Done()
+			select {
+			case <-r.Context().Done():
+			case <-release:
+			}
 		})
 	})
 	tx := createVersionedManualTestTransaction(t, publicKey, solana.MessageVersionLegacy)

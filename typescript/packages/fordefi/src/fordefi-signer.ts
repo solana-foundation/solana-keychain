@@ -57,6 +57,11 @@ const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 50;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
+/**
+ * Native Solana push modes this signer can honor. Validated at runtime because
+ * an unrecognized value would otherwise fall through to auto and broadcast.
+ */
+const PUSH_MODES = new Set(['auto', 'manual']);
 /** Terminal success states for pushable transactions (solana_transaction with push_mode auto). */
 const PUSHABLE_SUCCESS_STATES = new Set(['completed']);
 /** Terminal success states for non-pushable transactions (black box, messages, and native manual). */
@@ -246,9 +251,15 @@ export async function createFordefiSigner<TAddress extends string = string>(
 export async function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig & { chain?: undefined },
 ): Promise<SolanaSigner<TAddress>>;
+// The catch-all deliberately covers only `FordefiSignerConfig`, whose `pushMode`
+// cannot be 'manual'. Manual mode stays reachable through the
+// `FordefiManualSignerConfig` overload above. Widening this to
+// `AnyFordefiSignerConfig` leaks `FordefiNativeManualSigner` into every
+// structurally-typed caller — including the `@solana/keychain` umbrella factory,
+// whose declared `SolanaSigner | SolanaSendingSigner` return then fails to build.
 export async function createFordefiSigner<TAddress extends string = string>(
-    config: AnyFordefiSignerConfig,
-): Promise<FordefiNativeManualSigner<TAddress> | FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>>;
+    config: FordefiSignerConfig,
+): Promise<FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>>;
 export async function createFordefiSigner<TAddress extends string = string>(
     config: AnyFordefiSignerConfig,
 ): Promise<FordefiNativeManualSigner<TAddress> | FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>> {
@@ -358,6 +369,12 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
         if (!config.requestSigner && !config.privateKeyPem) {
             return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
                 message: 'one of privateKeyPem or requestSigner must be provided',
+            });
+        }
+
+        if (config.pushMode !== undefined && !PUSH_MODES.has(config.pushMode)) {
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: "pushMode must be 'auto' or 'manual'",
             });
         }
 

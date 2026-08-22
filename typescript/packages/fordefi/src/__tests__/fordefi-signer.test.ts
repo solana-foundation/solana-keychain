@@ -215,6 +215,36 @@ describe('FordefiSigner', () => {
             expect(fetch).not.toHaveBeenCalled();
         });
 
+        // An unrecognized pushMode must never fall through to auto: that would
+        // hand back a broadcasting sending signer and move funds on-chain for a
+        // caller who asked for caller-managed broadcasting.
+        it.each(['Manual', 'MANUAL', 'manual\n', ' manual', 'push', ''])(
+            'should reject the unrecognized pushMode %o before any network call',
+            async pushMode => {
+                await expect(
+                    FordefiSigner.create({
+                        ...nativeManualConfig,
+                        pushMode,
+                    } as unknown as FordefiManualSignerConfig),
+                ).rejects.toMatchObject({ code: 'SIGNER_CONFIG_ERROR' });
+                expect(fetch).not.toHaveBeenCalled();
+            },
+        );
+
+        it('should accept an explicit auto pushMode as a sending signer', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce(
+                new Response(JSON.stringify({ address: MOCK_ADDRESS }), { status: 200 }),
+            );
+            const signer = await FordefiSigner.create({
+                ...nativeConfig,
+                pushMode: 'auto',
+            });
+            const guardInput = signer as unknown as { [key: string]: unknown; address: typeof signer.address };
+
+            expect(isTransactionSendingSigner(guardInput)).toBe(true);
+            expect(isTransactionModifyingSigner(guardInput)).toBe(false);
+        });
+
         it('should derive address from public_key_compressed for black box vaults', async () => {
             // Simulate a black box vault response with no address field.
             // Use base58-decode of MOCK_ADDRESS as the compressed key bytes.
