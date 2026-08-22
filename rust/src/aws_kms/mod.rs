@@ -1,6 +1,6 @@
 //! AWS KMS signer integration using EdDSA (Ed25519) signing
 
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::{error::SignerError, traits::SolanaSigner, transaction_util::TransactionUtil};
 use aws_config::Region;
@@ -194,9 +194,9 @@ impl AwsKmsSigner {
 
     async fn sign_and_serialize(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
-        let signature = self.sign_bytes(&transaction.message_data()).await?;
+        let signature = self.sign_bytes(&transaction.message.serialize()).await?;
 
         TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
 
@@ -249,7 +249,7 @@ impl SolanaSigner for AwsKmsSigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
         Ok(TransactionUtil::classify_signed_transaction(
@@ -816,7 +816,7 @@ mod tests {
         let keypair = create_test_keypair();
 
         let mut tx = create_test_transaction(&keypair.pubkey());
-        let signature = keypair.sign_message(&tx.message_data());
+        let signature = keypair.sign_message(&tx.message.serialize());
 
         Mock::given(any())
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({

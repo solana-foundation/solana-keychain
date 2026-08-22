@@ -1,7 +1,7 @@
 //! Google Cloud KMS signer integration using EdDSA (Ed25519) signing
 
 use crate::error::SignerError;
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
 use crate::transaction_util::TransactionUtil;
 use google_cloud_kms_v1::client::KeyManagementService;
@@ -140,9 +140,9 @@ impl GcpKmsSigner {
 
     async fn sign_and_serialize(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
-        let signature = self.sign_bytes(&transaction.message_data()).await?;
+        let signature = self.sign_bytes(&transaction.message.serialize()).await?;
 
         TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
 
@@ -185,7 +185,7 @@ impl SolanaSigner for GcpKmsSigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
         Ok(TransactionUtil::classify_signed_transaction(
@@ -504,7 +504,7 @@ mod tests {
 
         // Create a dummy transaction
         let mut tx = create_test_transaction(&keypair.pubkey());
-        let signature = keypair.sign_message(&tx.message_data());
+        let signature = keypair.sign_message(&tx.message.serialize());
 
         // Mock AsymmetricSign
         Mock::given(method("POST"))

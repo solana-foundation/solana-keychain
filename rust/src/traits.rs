@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use crate::error::SignerError;
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 
 pub type SignedTransaction = (String, Signature);
 #[derive(Debug)]
@@ -38,14 +38,16 @@ pub trait SolanaSigner: Send + Sync {
     ///
     /// # Arguments
     ///
-    /// * `tx` - The transaction to sign (will be modified in place)
+    /// * `tx` - The transaction to sign (will be modified in place). Legacy, v0
+    ///   and v1 are accepted; convert a legacy `Transaction` with `.into()`.
+    ///   v1 requires `sdk-v4`.
     ///
     /// # Returns
     ///
     /// The encoded transaction/signature tuple, explicitly marked as complete or partial.
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError>;
 
     /// Sign an arbitrary message

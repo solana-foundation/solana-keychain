@@ -1,13 +1,13 @@
 mod auth;
 mod types;
 
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::SignTransactionResult;
 pub use crate::traits::SignedTransaction;
+use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{
     error::SignerError, http_client_config::HttpClientConfig,
     signature_util::EXPECTED_SIGNATURE_LENGTH, traits::SolanaSigner,
-    transaction_util::TransactionUtil,
 };
 use types::{GenerateSignatureRequest, GenerateSignatureResponse, GetWalletResponse};
 
@@ -241,18 +241,19 @@ impl DfnsSigner {
 
     async fn sign_transaction_bytes(
         &self,
-        transaction: &Transaction,
+        transaction: &VersionedTransaction,
     ) -> Result<Signature, SignerError> {
-        let tx_bytes = bincode::serialize(transaction).map_err(|e| {
-            SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
-        })?;
+        let tx_bytes = serialize_wire_transaction(transaction)?;
         let request = GenerateSignatureRequest::Transaction {
             transaction: format!("0x{}", hex::encode(&tx_bytes)),
             blockchain_kind: "Solana".to_string(),
         };
         let sig = self.send_signature_request(request).await?;
 
-        if !sig.verify(&self.public_key.to_bytes(), &transaction.message_data()) {
+        if !sig.verify(
+            &self.public_key.to_bytes(),
+            &transaction.message.serialize(),
+        ) {
             return Err(SignerError::SigningFailed(
                 "Signature verification failed — the returned signature does not match the public key".to_string(),
             ));
@@ -286,7 +287,7 @@ impl DfnsSigner {
     /// Sign and serialize a transaction
     async fn sign_and_serialize(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
         let signature = self.sign_transaction_bytes(transaction).await?;
 
@@ -320,7 +321,7 @@ impl SolanaSigner for DfnsSigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
         Ok(TransactionUtil::classify_signed_transaction(
@@ -631,7 +632,7 @@ mod tests {
         signer.public_key = keypair_pubkey(&keypair);
 
         let mut transaction = create_test_transaction(&signer.pubkey());
-        let signature = keypair.sign_message(&transaction.message_data());
+        let signature = keypair.sign_message(&transaction.message.serialize());
         let sig_bytes = signature.as_ref();
         let r_hex = hex::encode(&sig_bytes[0..32]);
         let s_hex = hex::encode(&sig_bytes[32..64]);
@@ -687,7 +688,7 @@ mod tests {
         signer.public_key = keypair_pubkey(&different_keypair);
 
         let mut transaction = create_test_transaction(&signer.pubkey());
-        let signature = signing_keypair.sign_message(&transaction.message_data());
+        let signature = signing_keypair.sign_message(&transaction.message.serialize());
         let sig_bytes = signature.as_ref();
         let r_hex = hex::encode(&sig_bytes[0..32]);
         let s_hex = hex::encode(&sig_bytes[32..64]);

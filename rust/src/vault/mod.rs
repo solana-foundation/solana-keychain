@@ -7,7 +7,7 @@
 /// their own `Cargo.toml`.
 pub use reqwest;
 
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::{
     error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner,
@@ -221,9 +221,9 @@ impl VaultSigner {
 
     async fn sign_and_serialize(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
-        let signature = self.sign_bytes(&transaction.message_data()).await?;
+        let signature = self.sign_bytes(&transaction.message.serialize()).await?;
 
         TransactionUtil::add_signature_to_transaction(transaction, &self.pubkey, signature)?;
 
@@ -242,7 +242,7 @@ impl SolanaSigner for VaultSigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
         Ok(TransactionUtil::classify_signed_transaction(
@@ -574,7 +574,7 @@ mod tests {
         let signer =
             create_test_signer_with_pubkey(&mock_server.uri(), keypair.pubkey().to_string());
         let mut tx = create_test_transaction(&keypair.pubkey());
-        let signature = keypair.sign_message(&tx.message_data());
+        let signature = keypair.sign_message(&tx.message.serialize());
         let signature_b64 = STANDARD.encode(signature.as_ref());
 
         Mock::given(method("POST"))

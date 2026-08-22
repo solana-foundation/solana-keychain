@@ -2,7 +2,7 @@
 
 mod types;
 
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
@@ -242,9 +242,9 @@ impl ParaSigner {
 
     async fn sign_and_serialize(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
-        let signature = self.sign_bytes(&transaction.message_data()).await?;
+        let signature = self.sign_bytes(&transaction.message.serialize()).await?;
 
         TransactionUtil::add_signature_to_transaction(transaction, &self.pubkey(), signature)?;
 
@@ -300,7 +300,7 @@ impl SolanaSigner for ParaSigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
         Ok(TransactionUtil::classify_signed_transaction(
@@ -594,7 +594,7 @@ mod tests {
         let keypair = create_test_keypair();
 
         let tx = create_test_transaction(&keypair_pubkey(&keypair));
-        let signature = keypair.sign_message(&tx.message_data());
+        let signature = keypair.sign_message(&tx.message.serialize());
         let sig_hex = hex::encode(signature);
 
         Mock::given(method("POST"))
@@ -611,7 +611,7 @@ mod tests {
             create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
         signer.public_key = keypair_pubkey(&keypair);
 
-        let result = signer.sign_message(&tx.message_data()).await;
+        let result = signer.sign_message(&tx.message.serialize()).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), signature);
     }
@@ -622,7 +622,7 @@ mod tests {
         let keypair = create_test_keypair();
 
         let tx = create_test_transaction(&keypair_pubkey(&keypair));
-        let signature = keypair.sign_message(&tx.message_data());
+        let signature = keypair.sign_message(&tx.message.serialize());
         let sig_hex = format!("0x{}", hex::encode(signature));
 
         Mock::given(method("POST"))
@@ -638,7 +638,7 @@ mod tests {
             create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
         signer.public_key = keypair_pubkey(&keypair);
 
-        let result = signer.sign_message(&tx.message_data()).await;
+        let result = signer.sign_message(&tx.message.serialize()).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), signature);
     }
@@ -649,7 +649,7 @@ mod tests {
         let keypair = create_test_keypair();
 
         let mut tx = create_test_transaction(&keypair_pubkey(&keypair));
-        let signature = keypair.sign_message(&tx.message_data());
+        let signature = keypair.sign_message(&tx.message.serialize());
         let sig_hex = hex::encode(signature);
 
         Mock::given(method("POST"))

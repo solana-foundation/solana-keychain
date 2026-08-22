@@ -6,12 +6,14 @@ pub use solana_sdk_v3::hash::Hash;
 #[allow(unused_imports)]
 pub use solana_sdk_v3::instruction::{AccountMeta, Instruction};
 #[allow(unused_imports)]
-pub use solana_sdk_v3::message::Message;
+pub use solana_sdk_v3::message::{Message, VersionedMessage};
 pub use solana_sdk_v3::pubkey::Pubkey;
 pub use solana_sdk_v3::signature::{Keypair, Signature};
 #[allow(unused_imports)]
 pub use solana_sdk_v3::signer::Signer;
-pub use solana_sdk_v3::transaction::{Transaction, VersionedTransaction};
+#[allow(unused_imports)]
+pub use solana_sdk_v3::transaction::Transaction;
+pub use solana_sdk_v3::transaction::VersionedTransaction;
 
 /// Parse a keypair from bytes (v3 adapter)
 pub fn keypair_from_bytes(bytes: &[u8]) -> Result<Keypair, String> {

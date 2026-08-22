@@ -64,7 +64,7 @@ mod tests {
         let signer = get_signer().await;
 
         let transaction = create_test_transaction(&signer.pubkey());
-        let message = transaction.message_data();
+        let message = transaction.message.serialize();
 
         let signature = signer
             .sign_message(&message)

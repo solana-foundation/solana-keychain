@@ -2,9 +2,11 @@
 
 mod types;
 
-use crate::sdk_adapter::{Pubkey, Signature, Transaction, VersionedTransaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
-use crate::transaction_util::TransactionUtil;
+use crate::transaction_util::{
+    deserialize_wire_transaction, serialize_wire_transaction, TransactionUtil,
+};
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{Duration, Utc};
@@ -322,75 +324,31 @@ impl UtilaSigner {
             )
         })?;
 
-        let signature = match bincode::deserialize::<VersionedTransaction>(&bytes) {
-            Ok(transaction) => {
-                let remote_message = transaction.message.serialize();
-                if remote_message != expected_message {
-                    return Err(SignerError::SigningFailed(
-                        "Utila returned a signed transaction with different message bytes"
-                            .to_string(),
-                    ));
-                }
+        let transaction: VersionedTransaction =
+            deserialize_wire_transaction(&bytes).map_err(|_e| {
+                SignerError::SerializationError(
+                    "Failed to deserialize Utila rawTransaction".to_string(),
+                )
+            })?;
 
-                let required_signers =
-                    usize::from(transaction.message.header().num_required_signatures);
-                let signer_keys = transaction.message.static_account_keys();
-                if signer_keys.len() < required_signers {
-                    return Err(SignerError::SigningFailed(
-                        "Invalid account index: not enough account keys".to_string(),
-                    ));
-                }
+        let remote_message = transaction.message.serialize();
+        if remote_message != expected_message {
+            return Err(SignerError::SigningFailed(
+                "Utila returned a signed transaction with different message bytes".to_string(),
+            ));
+        }
 
-                let position = signer_keys
-                    .iter()
-                    .take(required_signers)
-                    .position(|key| key == &public_key)
-                    .ok_or_else(|| {
-                        SignerError::SigningFailed(
-                            "Failed to locate signer pubkey in Utila transaction".to_string(),
-                        )
-                    })?;
-
-                transaction
-                    .signatures
-                    .get(position)
-                    .copied()
-                    .filter(|sig| *sig != Signature::default())
-                    .ok_or_else(|| {
-                        SignerError::SigningFailed(
-                            "Utila rawTransaction did not contain a signer signature".to_string(),
-                        )
-                    })?
-            }
-            Err(_) => {
-                let transaction: Transaction = bincode::deserialize(&bytes).map_err(|_| {
-                    SignerError::SerializationError(
-                        "Failed to deserialize Utila rawTransaction".to_string(),
-                    )
-                })?;
-
-                let remote_message = transaction.message_data();
-                if remote_message != expected_message {
-                    return Err(SignerError::SigningFailed(
-                        "Utila returned a signed transaction with different message bytes"
-                            .to_string(),
-                    ));
-                }
-
-                let position =
-                    TransactionUtil::get_signing_keypair_position(&transaction, &public_key)?;
-                transaction
-                    .signatures
-                    .get(position)
-                    .copied()
-                    .filter(|sig| *sig != Signature::default())
-                    .ok_or_else(|| {
-                        SignerError::SigningFailed(
-                            "Utila rawTransaction did not contain a signer signature".to_string(),
-                        )
-                    })?
-            }
-        };
+        let position = TransactionUtil::get_signing_keypair_position(&transaction, &public_key)?;
+        let signature = transaction
+            .signatures
+            .get(position)
+            .copied()
+            .filter(|sig| *sig != Signature::default())
+            .ok_or_else(|| {
+                SignerError::SigningFailed(
+                    "Utila rawTransaction did not contain a signer signature".to_string(),
+                )
+            })?;
 
         if !signature.verify(&public_key.to_bytes(), expected_message) {
             return Err(SignerError::SigningFailed(
@@ -403,13 +361,11 @@ impl UtilaSigner {
 
     async fn sign_and_serialize(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
         let public_key = self.initialized_pubkey()?;
-        let expected_message = transaction.message_data();
-        let raw_transaction = STANDARD.encode(bincode::serialize(transaction).map_err(|e| {
-            SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
-        })?);
+        let expected_message = transaction.message.serialize();
+        let raw_transaction = STANDARD.encode(serialize_wire_transaction(transaction)?);
 
         let initiated = self.initiate_transaction(raw_transaction).await?;
         let signed = self.poll_signed_transaction(initiated).await?;
@@ -446,7 +402,7 @@ impl SolanaSigner for UtilaSigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
         Ok(TransactionUtil::classify_signed_transaction(
@@ -652,14 +608,14 @@ p6B5CCtpBPgD01Vm+bT/JQ==
         }))
     }
 
-    fn signed_transaction_payload() -> (Keypair, Transaction, String, String, Signature) {
+    fn signed_transaction_payload() -> (Keypair, VersionedTransaction, String, String, Signature) {
         let keypair = Keypair::new();
         let public_key = keypair_pubkey(&keypair);
         let unsigned = create_test_transaction(&public_key);
         let unsigned_raw = STANDARD.encode(bincode::serialize(&unsigned).unwrap());
 
         let mut signed = unsigned.clone();
-        let signature = keypair_sign_message(&keypair, &signed.message_data());
+        let signature = keypair_sign_message(&keypair, &signed.message.serialize());
         TransactionUtil::add_signature_to_transaction(&mut signed, &public_key, signature).unwrap();
         let signed_raw = STANDARD.encode(bincode::serialize(&signed).unwrap());
 
@@ -983,13 +939,19 @@ p6B5CCtpBPgD01Vm+bT/JQ==
 
     fn signed_transaction_payload_for_keypair(
         keypair: &Keypair,
-    ) -> (Transaction, Transaction, String, String, Signature) {
+    ) -> (
+        VersionedTransaction,
+        VersionedTransaction,
+        String,
+        String,
+        Signature,
+    ) {
         let public_key = keypair_pubkey(keypair);
         let unsigned = create_test_transaction(&public_key);
         let unsigned_raw = STANDARD.encode(bincode::serialize(&unsigned).unwrap());
 
         let mut signed = unsigned.clone();
-        let signature = keypair_sign_message(keypair, &signed.message_data());
+        let signature = keypair_sign_message(keypair, &signed.message.serialize());
         TransactionUtil::add_signature_to_transaction(&mut signed, &public_key, signature).unwrap();
         let signed_raw = STANDARD.encode(bincode::serialize(&signed).unwrap());
 

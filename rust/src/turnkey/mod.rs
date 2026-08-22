@@ -2,13 +2,13 @@
 
 mod types;
 
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::SignTransactionResult;
 pub use crate::traits::SignedTransaction;
-use crate::{
-    error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner,
-    transaction_util::TransactionUtil,
+use crate::transaction_util::{
+    deserialize_wire_transaction, serialize_wire_transaction, TransactionUtil,
 };
+use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::Engine;
 use p256::ecdsa::signature::Signer as P256Signer;
 use std::str::FromStr;
@@ -222,11 +222,9 @@ impl TurnkeySigner {
     /// conditions. Policies must allow `ACTIVITY_TYPE_SIGN_TRANSACTION_V2`.
     async fn sign_and_serialize(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
-        let unsigned_wire = bincode::serialize(transaction).map_err(|e| {
-            SignerError::SerializationError(format!("Failed to serialize transaction: {e}"))
-        })?;
+        let unsigned_wire = serialize_wire_transaction(transaction)?;
 
         let request = SignTransactionRequest {
             activity_type: "ACTIVITY_TYPE_SIGN_TRANSACTION_V2".to_string(),
@@ -257,11 +255,12 @@ impl TurnkeySigner {
                 "Failed to decode signed transaction returned by Turnkey: {e}"
             ))
         })?;
-        let returned: Transaction = bincode::deserialize(&signed_wire).map_err(|e| {
-            SignerError::SerializationError(format!(
-                "Failed to deserialize signed transaction returned by Turnkey: {e}"
-            ))
-        })?;
+        let returned: VersionedTransaction =
+            deserialize_wire_transaction(&signed_wire).map_err(|e| {
+                SignerError::SerializationError(format!(
+                    "Failed to deserialize signed transaction returned by Turnkey: {e}"
+                ))
+            })?;
 
         let position = TransactionUtil::get_signing_keypair_position(&returned, &self.public_key)?;
         let signature = returned.signatures.get(position).copied().ok_or_else(|| {
@@ -270,7 +269,10 @@ impl TurnkeySigner {
             )
         })?;
 
-        if !signature.verify(&self.public_key.to_bytes(), &transaction.message_data()) {
+        if !signature.verify(
+            &self.public_key.to_bytes(),
+            &transaction.message.serialize(),
+        ) {
             return Err(SignerError::SigningFailed(
                 "Signature verification failed — the returned signature does not match the public key".to_string(),
             ));
@@ -353,7 +355,7 @@ impl SolanaSigner for TurnkeySigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
         Ok(TransactionUtil::classify_signed_transaction(
@@ -557,7 +559,7 @@ mod tests {
 
         let mut tx = create_test_transaction(&keypair_pubkey(&keypair));
 
-        let signature = keypair.sign_message(&tx.message_data());
+        let signature = keypair.sign_message(&tx.message.serialize());
         let mut signed_tx = tx.clone();
         signed_tx.signatures = vec![signature];
         let signed_hex = hex::encode(bincode::serialize(&signed_tx).unwrap());
@@ -609,7 +611,7 @@ mod tests {
 
         let mut tx = create_test_transaction(&keypair_pubkey(&keypair));
         let mut other_tx = create_test_transaction(&keypair_pubkey(&keypair));
-        other_tx.signatures = vec![keypair.sign_message(&other_tx.message_data())];
+        other_tx.signatures = vec![keypair.sign_message(&other_tx.message.serialize())];
         let signed_hex = hex::encode(bincode::serialize(&other_tx).unwrap());
 
         Mock::given(method("POST"))

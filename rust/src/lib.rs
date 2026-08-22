@@ -484,7 +484,7 @@ impl SolanaSigner for Signer {
 
     async fn sign_transaction(
         &self,
-        tx: &mut sdk_adapter::Transaction,
+        tx: &mut sdk_adapter::VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         match self {
             #[cfg(feature = "memory")]

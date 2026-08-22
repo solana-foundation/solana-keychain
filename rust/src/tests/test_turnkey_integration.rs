@@ -14,6 +14,7 @@ mod tests {
     use crate::sdk_adapter::Pubkey;
     use crate::test_util::create_test_transaction;
     use crate::traits::SolanaSigner;
+    use crate::transaction_util::deserialize_wire_transaction;
     use crate::turnkey::TurnkeySigner;
     use std::env;
 
@@ -51,7 +52,7 @@ mod tests {
         let signer = get_signer().await;
 
         let transaction = create_test_transaction(&signer.pubkey());
-        let message = transaction.message_data();
+        let message = transaction.message.serialize();
 
         let signature = signer
             .sign_message(&message)
@@ -76,11 +77,13 @@ mod tests {
             .expect("Failed to start LiteSVM");
 
         let mut transaction = create_test_transaction(&signer.pubkey());
-        transaction.message.recent_blockhash = get_latest_blockhash(&lite_svm)
-            .await
-            .expect("Failed to get latest blockhash");
+        transaction.message.set_recent_blockhash(
+            get_latest_blockhash(&lite_svm)
+                .await
+                .expect("Failed to get latest blockhash"),
+        );
 
-        let original_message = transaction.message_data();
+        let original_message = transaction.message.serialize();
 
         let (base64_txn, signature) = signer
             .sign_transaction(&mut transaction)
@@ -91,7 +94,10 @@ mod tests {
         // Validate the signature
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
         assert!(
-            signature.verify(&signer.pubkey().to_bytes(), &transaction.message_data()),
+            signature.verify(
+                &signer.pubkey().to_bytes(),
+                &transaction.message.serialize()
+            ),
             "Signature should be valid"
         );
 
@@ -100,11 +106,11 @@ mod tests {
             .decode(&base64_txn)
             .expect("Failed to decode base64 transaction");
 
-        let decoded_transaction: crate::sdk_adapter::Transaction =
-            bincode::deserialize(&decoded_bytes).expect("Failed to deserialize transaction");
+        let decoded_transaction = deserialize_wire_transaction(&decoded_bytes)
+            .expect("Failed to deserialize transaction");
 
         assert_eq!(
-            decoded_transaction.message_data(),
+            decoded_transaction.message.serialize(),
             original_message,
             "Decoded transaction should have the same message"
         );

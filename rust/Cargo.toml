@@ -69,7 +69,7 @@ sdk-v2 = ["dep:solana-sdk"]
 sdk-v3 = ["dep:solana-sdk-v3", "dep:solana-shred-version-v3", "dep:solana-signature"]
 # solana-sdk 4.x bundles solana-signature/solana-shred-version via its `full`
 # feature at internally-consistent versions, so no companion-crate pins needed.
-sdk-v4 = ["dep:solana-sdk-v4"]
+sdk-v4 = ["dep:solana-sdk-v4", "dep:wincode"]
 
 # WARNING: DO NOT ENABLE IN PRODUCTION
 # This feature logs full API error responses which may contain sensitive information
@@ -119,6 +119,8 @@ rsa = { version = "0.9", optional = true }
 
 # Core dependencies (used by all signers for transaction serialization)
 bincode = "1.3"
+# serde cannot express the v1 envelope; wincode can.
+wincode = { version = "0.4.9", optional = true }
 base64 = "0.22.1"
 zeroize = "1.8.2"
 

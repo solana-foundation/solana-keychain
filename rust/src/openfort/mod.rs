@@ -30,7 +30,7 @@
 
 mod types;
 
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::EXPECTED_SIGNATURE_LENGTH;
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
@@ -456,10 +456,10 @@ impl OpenfortSigner {
 
     async fn sign_and_serialize(
         &self,
-        transaction: &mut Transaction,
+        transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
         let public_key = self.initialized_pubkey()?;
-        let signature = self.sign_bytes(&transaction.message_data()).await?;
+        let signature = self.sign_bytes(&transaction.message.serialize()).await?;
         TransactionUtil::add_signature_to_transaction(transaction, &public_key, signature)?;
 
         Ok((
@@ -477,7 +477,7 @@ impl SolanaSigner for OpenfortSigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
         Ok(TransactionUtil::classify_signed_transaction(
@@ -886,7 +886,7 @@ mod tests {
         let pubkey = keypair_pubkey(&keypair);
 
         let mut tx = create_test_transaction(&pubkey);
-        let signature = keypair_sign_message(&keypair, &tx.message_data());
+        let signature = keypair_sign_message(&keypair, &tx.message.serialize());
         let sig_hex = format!("0x{}", hex::encode(signature.as_ref()));
 
         let mut signer = create_test_signer(&mock_server.uri());
