@@ -47,7 +47,7 @@
         "test:treeshakability": "agadoo dist/index.js"
     },
     "dependencies": {
-        "@solana/addresses": "8.0.0-canary-20260819144513",
+        "@solana/addresses": "8.0.0",
         "@solana/keychain-core": "workspace:*",
         "@solana/keychain-aws-kms": "workspace:*",
         "@solana/keychain-cdp": "workspace:*",
@@ -65,12 +65,12 @@
         "@solana/keychain-vault": "workspace:*"
     },
     "peerDependencies": {
-        "@solana/addresses": ">=8.0.0-canary-20260819144513",
-        "@solana/codecs-core": ">=8.0.0-canary-20260819144513",
-        "@solana/codecs-strings": ">=8.0.0-canary-20260819144513",
-        "@solana/keys": ">=8.0.0-canary-20260819144513",
-        "@solana/signers": ">=8.0.0-canary-20260819144513",
-        "@solana/transactions": ">=8.0.0-canary-20260819144513"
+        "@solana/addresses": ">=8.0.0",
+        "@solana/codecs-core": ">=8.0.0",
+        "@solana/codecs-strings": ">=8.0.0",
+        "@solana/keys": ">=8.0.0",
+        "@solana/signers": ">=8.0.0",
+        "@solana/transactions": ">=8.0.0"
     },
     "publishConfig": {
         "access": "public"

@@ -44,25 +44,25 @@
         "@solana/keychain-core": "workspace:*"
     },
     "peerDependencies": {
-        "@solana/addresses": ">=8.0.0-canary-20260819144513",
-        "@solana/codecs-core": ">=8.0.0-canary-20260819144513",
-        "@solana/codecs-strings": ">=8.0.0-canary-20260819144513",
-        "@solana/keys": ">=8.0.0-canary-20260819144513",
-        "@solana/signers": ">=8.0.0-canary-20260819144513",
-        "@solana/transactions": ">=8.0.0-canary-20260819144513"
+        "@solana/addresses": ">=8.0.0",
+        "@solana/codecs-core": ">=8.0.0",
+        "@solana/codecs-strings": ">=8.0.0",
+        "@solana/keys": ">=8.0.0",
+        "@solana/signers": ">=8.0.0",
+        "@solana/transactions": ">=8.0.0"
     },
     "publishConfig": {
         "access": "public"
     },
     "devDependencies": {
-        "@solana/addresses": "8.0.0-canary-20260819144513",
-        "@solana/codecs-core": "8.0.0-canary-20260819144513",
-        "@solana/codecs-strings": "8.0.0-canary-20260819144513",
+        "@solana/addresses": "8.0.0",
+        "@solana/codecs-core": "8.0.0",
+        "@solana/codecs-strings": "8.0.0",
         "@solana/keychain-test-utils": "workspace:*",
-        "@solana/keys": "8.0.0-canary-20260819144513",
-        "@solana/nominal-types": "8.0.0-canary-20260819144513",
-        "@solana/signers": "8.0.0-canary-20260819144513",
-        "@solana/transactions": "8.0.0-canary-20260819144513",
+        "@solana/keys": "8.0.0",
+        "@solana/nominal-types": "8.0.0",
+        "@solana/signers": "8.0.0",
+        "@solana/transactions": "8.0.0",
         "dotenv": "^17.4.2"
     }
 }
