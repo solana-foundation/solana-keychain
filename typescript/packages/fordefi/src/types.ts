@@ -31,16 +31,17 @@ export type FordefiSolanaFee =
 
 /**
  * Request body for native Solana transaction signing via
- * `solana_serialized_transaction_message` with `push_mode: 'auto'`.
+ * `solana_serialized_transaction_message`.
  *
- * Fordefi signs the serialized transaction message and pushes it on-chain.
+ * Fordefi signs the serialized transaction message and either pushes it
+ * on-chain (`auto`) or returns it for caller-managed broadcasting (`manual`).
  */
 export interface FordefiSolanaTransactionRequest {
     details: {
         chain: SolanaChainUniqueId;
         data: string;
         fee?: FordefiSolanaFee;
-        push_mode: 'auto';
+        push_mode: 'auto' | 'manual';
         type: 'solana_serialized_transaction_message';
     };
     sign_mode: 'auto';

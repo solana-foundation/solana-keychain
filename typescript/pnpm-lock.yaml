@@ -286,7 +286,13 @@ importers:
       '@solana/keys':
         specifier: 8.0.0
         version: 8.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/kit':
+        specifier: 8.0.0
+        version: 8.0.0(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@solana/signers':
+        specifier: 8.0.0
+        version: 8.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/transaction-messages':
         specifier: 8.0.0
         version: 8.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/transactions':
