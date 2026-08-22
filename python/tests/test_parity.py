@@ -8,12 +8,14 @@ import base64
 
 from solders.hash import Hash
 from solders.keypair import Keypair
-from solders.message import Message
+from solders.message import Message, MessageV1, TransactionConfig
 from solders.pubkey import Pubkey
+from solders.signature import Signature
 from solders.system_program import TransferParams, transfer
-from solders.transaction import Transaction
+from solders.transaction import Transaction, VersionedTransaction
 
 from solana_keychain import MemorySigner
+from solana_keychain.core import signed_message_bytes
 
 # fmt: off
 CANONICAL_KEYPAIR_BYTES = bytes([
@@ -37,8 +39,23 @@ GOLDEN_SIGNED_TX_B64 = (
     "AAABAgIAAQwCAAAAQEIPAAAAAAA="
 )
 
+# The same canonical transfer compiled as v1.
+GOLDEN_V1_COMPUTE_UNIT_LIMIT = 30_000
+GOLDEN_V1_LOADED_ACCOUNTS_DATA_SIZE_LIMIT = 65_536
+GOLDEN_V1_MESSAGE_B64 = (
+    "gQEAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEDL155p8OISBadME1YP2A5erXz7Lzxhq7g"
+    "ZPYRqmgRlzACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAMHUAAAAAAQACAgwAAAECAAAAQEIPAAAAAAA="
+)
+GOLDEN_V1_SIGNED_TX_B64 = (
+    "gQEAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEDL155p8OISBadME1YP2A5erXz7Lzxhq7g"
+    "ZPYRqmgRlzACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAMHUAAAAAAQACAgwAAAECAAAAQEIPAAAAAABjiONJftmD9pTYIl4qhJx7j5a1jvnjR3dDp0HsO28jgxSS"
+    "eUnbN/xCxKnBj8eHWVVhCrbX+RCsAfx6cvQQQTQI"
+)
 
-def build_golden_transaction() -> tuple[Keypair, Transaction]:
+
+def build_golden_transaction() -> tuple[Keypair, VersionedTransaction]:
     """The canonical transaction behind the golden vectors: a System transfer of
     1_000_000 lamports from the canonical signer to the all-0x02 recipient, zero
     recent blockhash, payer = signer."""
@@ -48,7 +65,27 @@ def build_golden_transaction() -> tuple[Keypair, Transaction]:
         TransferParams(from_pubkey=keypair.pubkey(), to_pubkey=recipient, lamports=1_000_000)
     )
     message = Message.new_with_blockhash([instruction], keypair.pubkey(), Hash.default())
-    return keypair, Transaction.new_unsigned(message)
+    return keypair, VersionedTransaction.from_legacy(Transaction.new_unsigned(message))
+
+
+def build_golden_v1_transaction() -> tuple[Keypair, VersionedTransaction]:
+    """The canonical transfer above, compiled as v1."""
+    keypair = Keypair.from_bytes(CANONICAL_KEYPAIR_BYTES)
+    recipient = Pubkey.from_bytes(bytes([2] * 32))
+    instruction = transfer(
+        TransferParams(from_pubkey=keypair.pubkey(), to_pubkey=recipient, lamports=1_000_000)
+    )
+    message = MessageV1.try_compile(
+        keypair.pubkey(),
+        [instruction],
+        Hash.default(),
+        TransactionConfig(
+            compute_unit_limit=GOLDEN_V1_COMPUTE_UNIT_LIMIT,
+            loaded_accounts_data_size_limit=GOLDEN_V1_LOADED_ACCOUNTS_DATA_SIZE_LIMIT,
+        ),
+    )
+    unsigned = [Signature.default()] * message.header.num_required_signatures
+    return keypair, VersionedTransaction.populate(message, unsigned)
 
 
 def test_canonical_keypair_derives_golden_pubkey() -> None:
@@ -58,7 +95,7 @@ def test_canonical_keypair_derives_golden_pubkey() -> None:
 
 def test_message_bytes_match_golden_vector() -> None:
     _, transaction = build_golden_transaction()
-    encoded = base64.b64encode(transaction.message_data()).decode("ascii")
+    encoded = base64.b64encode(signed_message_bytes(transaction.message)).decode("ascii")
     assert encoded == GOLDEN_MESSAGE_B64
 
 
@@ -70,4 +107,32 @@ async def test_signed_transaction_matches_golden_vector() -> None:
 
     assert result.is_complete
     assert result.encoded_transaction == GOLDEN_SIGNED_TX_B64
-    assert result.signature.verify(signer.pubkey, transaction.message_data())
+    assert result.signature.verify(signer.pubkey, signed_message_bytes(transaction.message))
+
+
+def test_v1_message_bytes_match_golden_vector() -> None:
+    _, transaction = build_golden_v1_transaction()
+    message_bytes = signed_message_bytes(transaction.message)
+
+    assert message_bytes[0] == 0x81
+    assert base64.b64encode(message_bytes).decode("ascii") == GOLDEN_V1_MESSAGE_B64
+
+
+async def test_v1_signed_transaction_matches_golden_vector() -> None:
+    keypair, transaction = build_golden_v1_transaction()
+    signer = MemorySigner(keypair)
+
+    result = await signer.sign_transaction(transaction)
+
+    assert result.is_complete
+    assert result.encoded_transaction == GOLDEN_V1_SIGNED_TX_B64
+    assert result.signature.verify(signer.pubkey, signed_message_bytes(transaction.message))
+
+
+def test_v1_envelope_places_the_message_first_and_signatures_last() -> None:
+    """A v1 envelope leads with the message, so its signatures are at the tail."""
+    signed = base64.b64decode(GOLDEN_V1_SIGNED_TX_B64)
+    message = base64.b64decode(GOLDEN_V1_MESSAGE_B64)
+
+    assert signed[: len(message)] == message
+    assert len(signed) == len(message) + 64

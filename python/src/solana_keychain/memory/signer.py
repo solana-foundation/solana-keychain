@@ -5,13 +5,14 @@ from dataclasses import dataclass
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction
+from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
     serialize_transaction,
+    signed_message_bytes,
 )
 from solana_keychain.memory.keypair_util import (
     keypair_from_bytes,
@@ -58,8 +59,8 @@ class MemorySigner(SolanaSigner):
     def pubkey(self) -> Pubkey:
         return self._keypair.pubkey()
 
-    async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
-        signature = self._keypair.sign_message(transaction.message_data())
+    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
+        signature = self._keypair.sign_message(signed_message_bytes(transaction.message))
         add_signature_to_transaction(transaction, self.pubkey, signature)
         return classify_signed_transaction(
             transaction, serialize_transaction(transaction), signature

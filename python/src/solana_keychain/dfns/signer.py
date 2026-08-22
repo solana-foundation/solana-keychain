@@ -7,7 +7,7 @@ from urllib.parse import quote
 import httpx
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction
+from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
@@ -17,6 +17,7 @@ from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
     serialize_transaction,
+    signed_message_bytes,
 )
 from solana_keychain.dfns.auth import sign_user_action
 
@@ -220,7 +221,7 @@ class DfnsSigner(SolanaSigner):
             )
         return signature
 
-    async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
+    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         public_key, _ = self._initialized()
         signature = await self._send_signature_request(
             {
@@ -229,7 +230,7 @@ class DfnsSigner(SolanaSigner):
                 "blockchainKind": "Solana",
             }
         )
-        if not signature.verify(public_key, transaction.message_data()):
+        if not signature.verify(public_key, signed_message_bytes(transaction.message)):
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED,
                 "Signature verification failed — the returned signature does not match "

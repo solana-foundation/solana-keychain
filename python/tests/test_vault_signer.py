@@ -12,6 +12,7 @@ from solana_keychain import (
     VaultSignerConfig,
     create_vault_signer,
 )
+from solana_keychain.core import signed_message_bytes
 from solana_keychain.vault.signer import _strip_vault_signature_prefix
 from tests.util import create_test_transaction
 
@@ -153,7 +154,7 @@ async def test_sign_message_undecodable_signature() -> None:
 async def test_sign_transaction_success() -> None:
     keypair = Keypair()
     transaction = create_test_transaction(keypair.pubkey())
-    signature = keypair.sign_message(transaction.message_data())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
     mock_sign_response(base64.b64encode(bytes(signature)).decode("ascii"), prefix="vault:v2:")
 
     signer = make_signer(pubkey=str(keypair.pubkey()))

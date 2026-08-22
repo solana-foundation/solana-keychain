@@ -120,7 +120,7 @@ Single package under [python/](python/) (PyPI `solana-keychain`, import `solana_
 
 ### Architecture
 
-- **Contract** (`solana_keychain.core`): `SolanaSigner` ABC — `pubkey` property, async `sign_transaction()` / `sign_message()` / `is_available()`. `sign_transaction` returns `SignedTransaction` with `is_complete`.
+- **Contract** (`solana_keychain.core`): `SolanaSigner` ABC — `pubkey` property, async `sign_transaction()` / `sign_message()` / `is_available()`. `sign_transaction` takes a `VersionedTransaction` (legacy, v0 or v1) and returns `SignedTransaction` with `is_complete`. Use `signed_message_bytes()` for the bytes a signature covers; never hand-roll the version prefix.
 - **Errors**: `SignerError` with stable `code` values; `str()`/`repr()` only surface generic messages (detail is redacted and must never leak key material or raw remote responses).
 - **Serialization**: built on `solders`; golden wire-format vectors pinned in `python/tests/test_parity.py` — never regenerate them to make the suite pass.
 - **Remote API calls** go through `fetch_signer_json()` from `solana_keychain.core` — it owns the HTTP_ERROR/REMOTE_API_ERROR/PARSING_ERROR pipeline, response sanitization, redirect rejection, and a default 60s timeout. Base URLs must pass `assert_https_url()`. Unit tests mock HTTP with `respx`; no live API calls in unit tests.

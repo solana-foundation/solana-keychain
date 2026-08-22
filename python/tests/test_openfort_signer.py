@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.serialization import (
 from solders.keypair import Keypair
 
 from solana_keychain import SignerError, SignerErrorCode
+from solana_keychain.core import signed_message_bytes
 from solana_keychain.openfort import (
     OpenfortSigner,
     OpenfortSignerConfig,
@@ -242,7 +243,7 @@ async def test_sign_transaction_success() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
-    signature = keypair.sign_message(transaction.message_data())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
     mock_sign_response(f"0x{bytes(signature).hex()}")
 
     result = await signer.sign_transaction(transaction)

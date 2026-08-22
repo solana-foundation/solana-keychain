@@ -1,10 +1,11 @@
 from solders.hash import Hash
 from solders.instruction import AccountMeta, Instruction
-from solders.message import Message
+from solders.message import Message, MessageV1, TransactionConfig
 from solders.pubkey import Pubkey
+from solders.signature import Signature
 from solders.system_program import ID as SYSTEM_PROGRAM_ID
 from solders.system_program import TransferParams, transfer
-from solders.transaction import Transaction
+from solders.transaction import Transaction, VersionedTransaction
 
 TEST_KEYPAIR_BYTES = (
     "[41,99,180,88,51,57,48,80,61,63,219,75,176,49,116,254,227,176,196,204,122,47,166,133,"
@@ -17,17 +18,38 @@ TEST_KEYPAIR_BASE58 = (
 TEST_PUBKEY = "4BuiY9QUUfPoAGNJBja3JapAuVWMc9c7in6UCgyC2zPR"
 
 
-def create_test_transaction(from_pubkey: Pubkey, to_pubkey: Pubkey | None = None) -> Transaction:
+def _transfer_instruction(from_pubkey: Pubkey, to_pubkey: Pubkey | None) -> Instruction:
     if to_pubkey is None:
         to_pubkey = Pubkey.new_unique()
-    instruction = transfer(
+    return transfer(
         TransferParams(from_pubkey=from_pubkey, to_pubkey=to_pubkey, lamports=1_000_000)
     )
+
+
+def create_test_transaction(
+    from_pubkey: Pubkey, to_pubkey: Pubkey | None = None
+) -> VersionedTransaction:
+    instruction = _transfer_instruction(from_pubkey, to_pubkey)
     message = Message.new_with_blockhash([instruction], from_pubkey, Hash.default())
-    return Transaction.new_unsigned(message)
+    return VersionedTransaction.from_legacy(Transaction.new_unsigned(message))
 
 
-def create_two_signer_transaction(payer: Pubkey, cosigner: Pubkey) -> Transaction:
+def create_test_v1_transaction(
+    from_pubkey: Pubkey, to_pubkey: Pubkey | None = None
+) -> VersionedTransaction:
+    """A v1 transaction. v1 treats an unset resource limit as zero, not a default."""
+    instruction = _transfer_instruction(from_pubkey, to_pubkey)
+    message = MessageV1.try_compile(
+        from_pubkey,
+        [instruction],
+        Hash.default(),
+        TransactionConfig(compute_unit_limit=30_000, loaded_accounts_data_size_limit=65_536),
+    )
+    unsigned = [Signature.default()] * message.header.num_required_signatures
+    return VersionedTransaction.populate(message, unsigned)
+
+
+def create_two_signer_transaction(payer: Pubkey, cosigner: Pubkey) -> VersionedTransaction:
     instruction = Instruction(
         SYSTEM_PROGRAM_ID,
         bytes([2, 0, 0, 0]) + (1_000_000).to_bytes(8, "little"),
@@ -37,4 +59,4 @@ def create_two_signer_transaction(payer: Pubkey, cosigner: Pubkey) -> Transactio
         ],
     )
     message = Message.new_with_blockhash([instruction], payer, Hash.default())
-    return Transaction.new_unsigned(message)
+    return VersionedTransaction.from_legacy(Transaction.new_unsigned(message))

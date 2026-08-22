@@ -8,7 +8,7 @@ from urllib.parse import quote
 import httpx
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction
+from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
@@ -18,6 +18,7 @@ from solana_keychain.core.transaction_util import (
     classify_signed_transaction,
     get_signing_keypair_position,
     serialize_transaction,
+    signed_message_bytes,
 )
 from solana_keychain.privy.authorization import (
     DEFAULT_AUTHORIZATION_REQUEST_EXPIRY_MS,
@@ -170,7 +171,7 @@ class PrivySigner(SolanaSigner):
             )
         return signature
 
-    async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
+    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         """Sign via Privy's ``signTransaction`` RPC, submitting the full wire
         transaction so wallet policies with transaction conditions apply.
         Policies must allow the ``signTransaction`` method."""
@@ -192,7 +193,7 @@ class PrivySigner(SolanaSigner):
                 SignerErrorCode.REMOTE_API_ERROR, "No signed_transaction in Privy response"
             )
         try:
-            signed = Transaction.from_bytes(base64.b64decode(signed_b64, validate=True))
+            signed = VersionedTransaction.from_bytes(base64.b64decode(signed_b64, validate=True))
         except Exception:
             raise SignerError(
                 SignerErrorCode.SERIALIZATION_ERROR,
@@ -207,7 +208,7 @@ class PrivySigner(SolanaSigner):
                 "Privy signature slot missing from returned transaction",
             )
         signature = signatures[position]
-        if not signature.verify(public_key, transaction.message_data()):
+        if not signature.verify(public_key, signed_message_bytes(transaction.message)):
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED,
                 "Signature verification failed — the returned signature does not match "

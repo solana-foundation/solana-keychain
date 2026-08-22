@@ -17,8 +17,9 @@ import httpx
 import pytest
 from solders.hash import Hash
 from solders.message import Message
-from solders.transaction import Transaction
+from solders.transaction import Transaction, VersionedTransaction
 
+from solana_keychain.core import signed_message_bytes
 from solana_keychain.core.signer import SolanaSigner
 
 REQUIRE_RUN_ENV = "KEYCHAIN_INTEGRATION_REQUIRE_RUN"
@@ -113,13 +114,13 @@ async def assert_transaction_roundtrip(
     actually covers internally.
     """
     message = Message.new_with_blockhash([], signer.pubkey, await fetch_latest_blockhash())
-    transaction = Transaction.new_unsigned(message)
+    transaction = VersionedTransaction.from_legacy(Transaction.new_unsigned(message))
     result = await signer.sign_transaction(transaction)
 
     assert result.is_complete
     assert len(bytes(result.signature)) == 64
     if signs_caller_bytes:
         assert Transaction.from_bytes(base64.b64decode(result.encoded_transaction))
-        assert result.signature.verify(signer.pubkey, transaction.message_data())
+        assert result.signature.verify(signer.pubkey, signed_message_bytes(transaction.message))
     else:
         assert result.encoded_transaction == ""

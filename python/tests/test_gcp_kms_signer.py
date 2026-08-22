@@ -7,6 +7,7 @@ from google.cloud import kms_v1
 from solders.keypair import Keypair
 
 from solana_keychain import SignerError, SignerErrorCode
+from solana_keychain.core import signed_message_bytes
 from solana_keychain.gcp_kms import GcpKmsSigner, GcpKmsSignerConfig, create_gcp_kms_signer
 from tests.util import create_test_transaction
 
@@ -135,7 +136,7 @@ async def test_sign_message_signature_verification_failure() -> None:
 async def test_sign_transaction_success() -> None:
     keypair = Keypair()
     transaction = create_test_transaction(keypair.pubkey())
-    signature = keypair.sign_message(transaction.message_data())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
     client = StubKmsClient(signature=bytes(signature))
     signer = make_signer(str(keypair.pubkey()), client)
 

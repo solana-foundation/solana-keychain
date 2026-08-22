@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction
+from solders.transaction import VersionedTransaction
 
 
 @dataclass(frozen=True)
@@ -37,8 +37,10 @@ class SolanaSigner(ABC):
         return False
 
     @abstractmethod
-    async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
-        """Sign ``transaction`` (modified in place) and return the encoded result."""
+    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
+        """Sign ``transaction`` (modified in place) and return the encoded result.
+
+        Accepts legacy, v0 and v1."""
 
     @abstractmethod
     async def sign_message(self, message: bytes) -> Signature:

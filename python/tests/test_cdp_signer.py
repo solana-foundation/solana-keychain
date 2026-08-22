@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
 )
 from solders.keypair import Keypair
-from solders.transaction import Transaction
+from solders.transaction import VersionedTransaction
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.cdp import CdpSigner, CdpSignerConfig, create_cdp_signer
@@ -23,7 +23,8 @@ from solana_keychain.cdp.jwt import (
     create_wallet_jwt,
     extract_host,
 )
-from tests.util import create_test_transaction
+from solana_keychain.core import signed_message_bytes
+from tests.util import create_test_transaction, create_test_v1_transaction
 
 API_BASE_URL = "https://cdp.example.com"
 API_HOST = "cdp.example.com"
@@ -257,17 +258,16 @@ async def test_sign_message_api_error() -> None:
     assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
 
 
-def signed_transaction_b64(transaction: Transaction) -> str:
-    signature = _ACCOUNT_KEYPAIR.sign_message(transaction.message_data())
-    signed = Transaction.from_bytes(bytes(transaction))
-    signed.signatures = [signature]
+def signed_transaction_b64(transaction: VersionedTransaction) -> str:
+    signature = _ACCOUNT_KEYPAIR.sign_message(signed_message_bytes(transaction.message))
+    signed = VersionedTransaction.populate(transaction.message, [signature])
     return base64.b64encode(bytes(signed)).decode()
 
 
 @respx.mock
 async def test_sign_transaction_success() -> None:
     transaction = create_test_transaction(_ACCOUNT_KEYPAIR.pubkey())
-    expected_signature = _ACCOUNT_KEYPAIR.sign_message(transaction.message_data())
+    expected_signature = _ACCOUNT_KEYPAIR.sign_message(signed_message_bytes(transaction.message))
     respx.post(f"{API_BASE_URL}{BASE_PATH}/sign/transaction").mock(
         return_value=httpx.Response(
             200, json={"signedTransaction": signed_transaction_b64(transaction)}
@@ -282,6 +282,23 @@ async def test_sign_transaction_success() -> None:
     request = respx.calls.last.request
     wallet_claims = decode_wallet_claims(request)
     assert wallet_claims["reqHash"] is not None
+
+
+@respx.mock
+async def test_sign_transaction_accepts_a_v1_transaction() -> None:
+    transaction = create_test_v1_transaction(_ACCOUNT_KEYPAIR.pubkey())
+    expected_signature = _ACCOUNT_KEYPAIR.sign_message(signed_message_bytes(transaction.message))
+    respx.post(f"{API_BASE_URL}{BASE_PATH}/sign/transaction").mock(
+        return_value=httpx.Response(
+            200, json={"signedTransaction": signed_transaction_b64(transaction)}
+        )
+    )
+
+    result = await make_signer().sign_transaction(transaction)
+
+    assert result.is_complete
+    assert result.signature == expected_signature
+    assert base64.b64decode(result.encoded_transaction)[0] == 0x81
 
 
 @respx.mock

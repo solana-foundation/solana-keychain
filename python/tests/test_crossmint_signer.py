@@ -11,6 +11,7 @@ from solders.keypair import Keypair
 from solders.signature import Signature
 
 from solana_keychain import SignerError, SignerErrorCode
+from solana_keychain.core import signed_message_bytes
 from solana_keychain.crossmint import (
     CrossmintSigner,
     CrossmintSignerConfig,
@@ -58,7 +59,7 @@ def signed_transaction_b58(keypair: Keypair, transaction: Any) -> str:
     from solders.transaction import Transaction
 
     signed = Transaction.from_bytes(bytes(transaction))
-    signed.signatures = [keypair.sign_message(transaction.message_data())]
+    signed.signatures = [keypair.sign_message(signed_message_bytes(transaction.message))]
     return base58.b58encode(bytes(signed)).decode()
 
 
@@ -184,7 +185,7 @@ async def test_sign_transaction_success_from_embedded_transaction() -> None:
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
     unsigned_bytes = bytes(transaction)
-    expected_signature = keypair.sign_message(transaction.message_data())
+    expected_signature = keypair.sign_message(signed_message_bytes(transaction.message))
 
     respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json=tx_response("pending")))
     respx.get(f"{TRANSACTIONS_URL}/tx-1").mock(
@@ -204,7 +205,7 @@ async def test_sign_transaction_success_from_embedded_transaction() -> None:
     create_body = json.loads(respx.calls[1].request.content)
     assert "signer" not in create_body["params"]
     assert base58.b58decode(create_body["params"]["transaction"]) == unsigned_bytes
-    digest = bytearray(hashlib.sha256(transaction.message_data()).digest()[:16])
+    digest = bytearray(hashlib.sha256(signed_message_bytes(transaction.message)).digest()[:16])
     digest[6] = (digest[6] & 0x0F) | 0x40
     digest[8] = (digest[8] & 0x3F) | 0x80
     assert respx.calls[1].request.headers["x-idempotency-key"] == str(
@@ -217,7 +218,7 @@ async def test_sign_transaction_falls_back_to_tx_id() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
-    signature = keypair.sign_message(transaction.message_data())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
 
     respx.post(TRANSACTIONS_URL).mock(
         return_value=httpx.Response(
@@ -293,7 +294,7 @@ async def test_awaiting_approval_signs_only_our_pending_entry() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair, signer_secret=SIGNER_SECRET)
     transaction = create_test_transaction(keypair.pubkey())
-    expected_signature = keypair.sign_message(transaction.message_data())
+    expected_signature = keypair.sign_message(signed_message_bytes(transaction.message))
     delegated = derive_signing_key(SIGNER_SECRET, API_KEY)
     locator = f"server:{delegated.pubkey()}"
     challenge = b"approval-challenge-bytes"
@@ -367,8 +368,8 @@ async def test_rewritten_transaction_is_reported_as_a_broadcast_result() -> None
     transaction = create_test_transaction(keypair.pubkey())
 
     rewritten = create_test_transaction(keypair.pubkey())
-    assert rewritten.message_data() != transaction.message_data()
-    expected_signature = keypair.sign_message(rewritten.message_data())
+    assert signed_message_bytes(rewritten.message) != signed_message_bytes(transaction.message)
+    expected_signature = keypair.sign_message(signed_message_bytes(rewritten.message))
     rewritten.signatures = [expected_signature]
 
     respx.post(TRANSACTIONS_URL).mock(
@@ -387,7 +388,9 @@ async def test_rewritten_transaction_is_reported_as_a_broadcast_result() -> None
     assert result.is_complete
     assert result.encoded_transaction == ""
     assert all(sig == Signature.default() for sig in transaction.signatures)
-    assert not expected_signature.verify(keypair.pubkey(), transaction.message_data())
+    assert not expected_signature.verify(
+        keypair.pubkey(), signed_message_bytes(transaction.message)
+    )
 
 
 @respx.mock
@@ -401,7 +404,7 @@ async def test_delegated_signer_signature_is_located_and_verified() -> None:
 
     transaction = create_test_transaction(wallet_keypair.pubkey())
     rewritten = create_test_transaction(delegated.pubkey())
-    expected_signature = delegated.sign_message(rewritten.message_data())
+    expected_signature = delegated.sign_message(signed_message_bytes(rewritten.message))
     rewritten.signatures = [expected_signature]
 
     respx.post(TRANSACTIONS_URL).mock(
@@ -437,7 +440,7 @@ async def test_explicit_locator_signer_is_a_candidate_alongside_the_derived_key(
 
     transaction = create_test_transaction(wallet_keypair.pubkey())
     rewritten = create_test_transaction(admin.pubkey())
-    expected_signature = admin.sign_message(rewritten.message_data())
+    expected_signature = admin.sign_message(signed_message_bytes(rewritten.message))
     rewritten.signatures = [expected_signature]
 
     respx.post(TRANSACTIONS_URL).mock(
@@ -469,7 +472,7 @@ async def test_wallet_address_in_an_unsigned_slot_does_not_shadow_the_delegated_
     # Both keys are required signers and only the delegated signer actually
     # signed; the wallet address occupies a slot it never signed.
     rewritten = create_two_signer_transaction(delegated.pubkey(), wallet_keypair.pubkey())
-    expected_signature = delegated.sign_message(rewritten.message_data())
+    expected_signature = delegated.sign_message(signed_message_bytes(rewritten.message))
     rewritten.signatures = [expected_signature, Signature.default()]
 
     respx.post(TRANSACTIONS_URL).mock(
@@ -498,7 +501,7 @@ async def test_tx_id_signed_by_the_delegated_signer_is_accepted() -> None:
     signer = await initialized_signer(wallet_keypair, signer_secret=SIGNER_SECRET)
 
     transaction = create_test_transaction(wallet_keypair.pubkey())
-    expected_signature = delegated.sign_message(transaction.message_data())
+    expected_signature = delegated.sign_message(signed_message_bytes(transaction.message))
 
     respx.post(TRANSACTIONS_URL).mock(
         return_value=httpx.Response(
@@ -523,12 +526,12 @@ async def test_rewritten_transaction_approval_yields_the_fee_payer_transaction_i
     transaction = create_test_transaction(wallet_keypair.pubkey())
     # As Crossmint returns it: its fee payer signed, this wallet's slot is empty.
     executed = create_two_signer_transaction(fee_payer.pubkey(), delegated.pubkey())
-    fee_payer_signature = fee_payer.sign_message(executed.message_data())
+    fee_payer_signature = fee_payer.sign_message(signed_message_bytes(executed.message))
     executed.signatures = [
         fee_payer_signature,
         Signature.default(),
     ]
-    approval_signature = delegated.sign_message(executed.message_data())
+    approval_signature = delegated.sign_message(signed_message_bytes(executed.message))
 
     respx.post(TRANSACTIONS_URL).mock(
         return_value=httpx.Response(
@@ -546,7 +549,9 @@ async def test_rewritten_transaction_approval_yields_the_fee_payer_transaction_i
                                 "address": str(delegated.pubkey()),
                                 "locator": f"server:{delegated.pubkey()}",
                             },
-                            "message": base58.b58encode(executed.message_data()).decode(),
+                            "message": base58.b58encode(
+                                signed_message_bytes(executed.message)
+                            ).decode(),
                         }
                     ],
                 },
@@ -574,7 +579,7 @@ async def test_approval_signature_from_an_unconfigured_signer_is_rejected() -> N
     transaction = create_test_transaction(wallet_keypair.pubkey())
     executed = create_two_signer_transaction(fee_payer.pubkey(), stranger.pubkey())
     executed.signatures = [
-        fee_payer.sign_message(executed.message_data()),
+        fee_payer.sign_message(signed_message_bytes(executed.message)),
         Signature.default(),
     ]
 
@@ -588,9 +593,13 @@ async def test_approval_signature_from_an_unconfigured_signer_is_rejected() -> N
                     "pending": [],
                     "submitted": [
                         {
-                            "signature": str(stranger.sign_message(executed.message_data())),
+                            "signature": str(
+                                stranger.sign_message(signed_message_bytes(executed.message))
+                            ),
                             "signer": {"type": "server", "address": str(stranger.pubkey())},
-                            "message": base58.b58encode(executed.message_data()).decode(),
+                            "message": base58.b58encode(
+                                signed_message_bytes(executed.message)
+                            ).decode(),
                         }
                     ],
                 },
@@ -614,7 +623,7 @@ async def test_signature_from_an_unrelated_key_is_still_rejected() -> None:
     transaction = create_test_transaction(wallet_keypair.pubkey())
     stranger = Keypair()
     rewritten = create_test_transaction(stranger.pubkey())
-    rewritten.signatures = [stranger.sign_message(rewritten.message_data())]
+    rewritten.signatures = [stranger.sign_message(signed_message_bytes(rewritten.message))]
 
     respx.post(TRANSACTIONS_URL).mock(
         return_value=httpx.Response(
@@ -639,7 +648,7 @@ async def test_unrewritten_returned_transaction_is_placed_in_the_caller_transact
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
-    expected_signature = keypair.sign_message(transaction.message_data())
+    expected_signature = keypair.sign_message(signed_message_bytes(transaction.message))
 
     respx.post(TRANSACTIONS_URL).mock(
         return_value=httpx.Response(
@@ -665,7 +674,7 @@ async def test_caller_exact_signature_is_placed_in_the_caller_transaction() -> N
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
-    expected_signature = keypair.sign_message(transaction.message_data())
+    expected_signature = keypair.sign_message(signed_message_bytes(transaction.message))
 
     respx.post(TRANSACTIONS_URL).mock(
         return_value=httpx.Response(
@@ -678,7 +687,7 @@ async def test_caller_exact_signature_is_placed_in_the_caller_transaction() -> N
     assert result.signature == expected_signature
     assert result.encoded_transaction
     assert list(transaction.signatures) == [expected_signature]
-    assert expected_signature.verify(keypair.pubkey(), transaction.message_data())
+    assert expected_signature.verify(keypair.pubkey(), signed_message_bytes(transaction.message))
 
 
 @respx.mock

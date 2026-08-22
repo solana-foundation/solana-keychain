@@ -5,7 +5,7 @@ from solders.hash import Hash
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction
+from solders.transaction import VersionedTransaction
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.core import (
@@ -14,11 +14,16 @@ from solana_keychain.core import (
     get_signing_keypair_position,
     has_all_required_signatures,
     serialize_transaction,
+    signed_message_bytes,
 )
-from tests.util import create_test_transaction, create_two_signer_transaction
+from tests.util import (
+    create_test_transaction,
+    create_test_v1_transaction,
+    create_two_signer_transaction,
+)
 
 
-def signed_test_transaction() -> tuple[Keypair, Transaction]:
+def signed_test_transaction() -> tuple[Keypair, VersionedTransaction]:
     keypair = Keypair()
     transaction = create_test_transaction(keypair.pubkey())
     return keypair, transaction
@@ -38,7 +43,7 @@ def test_get_signing_keypair_position_rejects_non_signer() -> None:
 
 def test_add_signature_places_signature_at_signer_position() -> None:
     keypair, transaction = signed_test_transaction()
-    signature = keypair.sign_message(transaction.message_data())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
 
     add_signature_to_transaction(transaction, keypair.pubkey(), signature)
 
@@ -52,7 +57,7 @@ def test_has_all_required_signatures_false_while_slot_is_default() -> None:
 
 def test_classify_marks_fully_signed_transaction_complete() -> None:
     keypair, transaction = signed_test_transaction()
-    signature = keypair.sign_message(transaction.message_data())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
     add_signature_to_transaction(transaction, keypair.pubkey(), signature)
 
     result = classify_signed_transaction(transaction, serialize_transaction(transaction), signature)
@@ -64,7 +69,7 @@ def test_classify_marks_fully_signed_transaction_complete() -> None:
 def test_classify_marks_missing_cosigner_partial() -> None:
     keypair = Keypair()
     transaction = create_two_signer_transaction(keypair.pubkey(), Pubkey.new_unique())
-    signature = keypair.sign_message(transaction.message_data())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
     add_signature_to_transaction(transaction, keypair.pubkey(), signature)
 
     result = classify_signed_transaction(transaction, serialize_transaction(transaction), signature)
@@ -74,11 +79,11 @@ def test_classify_marks_missing_cosigner_partial() -> None:
 
 def test_serialize_transaction_round_trips_through_bincode() -> None:
     keypair, transaction = signed_test_transaction()
-    signature = keypair.sign_message(transaction.message_data())
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
     add_signature_to_transaction(transaction, keypair.pubkey(), signature)
 
     encoded = serialize_transaction(transaction)
-    decoded = Transaction.from_bytes(base64.b64decode(encoded))
+    decoded = VersionedTransaction.from_bytes(base64.b64decode(encoded))
 
     assert decoded == transaction
     assert Signature.default() not in decoded.signatures
@@ -109,4 +114,17 @@ def test_signed_message_bytes_leaves_legacy_messages_unchanged() -> None:
 
     keypair = Keypair()
     transaction = create_test_transaction(keypair.pubkey())
-    assert signed_message_bytes(transaction.message) == transaction.message_data()
+    assert signed_message_bytes(transaction.message) == signed_message_bytes(transaction.message)
+
+
+def test_signed_message_bytes_prefixes_v1_messages() -> None:
+    """A v1 message is signed over 0x81 ‖ serialization, not the bare bytes."""
+    keypair = Keypair()
+    transaction = create_test_v1_transaction(keypair.pubkey())
+    message = transaction.message
+    message_bytes = signed_message_bytes(message)
+
+    assert message_bytes == b"\x81" + bytes(message)
+    signature = keypair.sign_message(message_bytes)
+    assert signature.verify(keypair.pubkey(), message_bytes)
+    assert not signature.verify(keypair.pubkey(), bytes(message))

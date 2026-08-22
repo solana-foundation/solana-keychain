@@ -20,7 +20,7 @@ import httpx
 from solders.message import Message, MessageV0
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from solders.transaction import Transaction, VersionedTransaction
+from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
@@ -352,9 +352,9 @@ class UtilaSigner(SolanaSigner):
             )
         return signature
 
-    async def sign_transaction(self, transaction: Transaction) -> SignedTransaction:
+    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         public_key = self._initialized_pubkey()
-        expected_message = transaction.message_data()
+        expected_message = signed_message_bytes(transaction.message)
         raw_transaction = base64.b64encode(bytes(transaction)).decode("ascii")
 
         initiated = await self._initiate_transaction(raw_transaction)
