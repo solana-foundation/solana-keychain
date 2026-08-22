@@ -1,3 +1,4 @@
+import { abortableDelay } from './abort.js';
 import { SignerErrorCode, throwSignerError } from './errors.js';
 
 const MAX_RECOMMENDED_REQUEST_DELAY_MS = 3000;
@@ -29,17 +30,22 @@ export function validateRequestDelayMs(requestDelayMs: number): void {
  * @param items - The messages or transactions to sign.
  * @param fn - Signer-specific function that signs one item.
  * @param delayMs - Per-index stagger in ms (a backend's `requestDelayMs`).
+ * @param abortSignal - Cancels the pending stagger delays and rejects with the
+ * abort reason. Items already handed to `fn` are cancelled by `fn` itself.
  */
 export async function signBatchStaggered<TItem, TResult>(
     items: readonly TItem[],
     fn: (item: TItem, index: number) => Promise<TResult>,
     delayMs: number,
+    abortSignal?: AbortSignal,
 ): Promise<readonly TResult[]> {
+    abortSignal?.throwIfAborted();
     return await Promise.all(
         items.map(async (item, index) => {
             if (delayMs > 0 && index > 0) {
-                await new Promise(resolve => setTimeout(resolve, index * delayMs));
+                await abortableDelay(index * delayMs, abortSignal);
             }
+            abortSignal?.throwIfAborted();
             return await fn(item, index);
         }),
     );

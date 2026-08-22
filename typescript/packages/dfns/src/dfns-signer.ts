@@ -12,7 +12,12 @@ import {
     validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
-import { SignableMessage, SignatureDictionary } from '@solana/signers';
+import {
+    MessagePartialSignerConfig,
+    SignableMessage,
+    SignatureDictionary,
+    TransactionPartialSignerConfig,
+} from '@solana/signers';
 import {
     getTransactionEncoder,
     Transaction,
@@ -80,7 +85,7 @@ function bytesToBase58(bytes: Uint8Array): string {
  *
  * @example
  * ```typescript
- * const signer = await DfnsSigner.create({
+ * const signer = await createDfnsSigner({
  *   authToken: 'your-service-account-token',
  *   credId: 'your-credential-id',
  *   privateKeyPem: '-----BEGIN PRIVATE KEY-----\n...',
@@ -88,10 +93,8 @@ function bytesToBase58(bytes: Uint8Array): string {
  * });
  * const signed = await signTransactionMessageWithSigners(transactionMessage, [signer]);
  * ```
- *
- * @deprecated Prefer `createDfnsSigner()`. Class export will be removed in a future version.
  */
-export class DfnsSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class DfnsSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly authToken: string;
     private readonly credId: string;
@@ -127,7 +130,6 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
      *
      * Validates config fields, fetches the wallet from Dfns, and checks that
      * the wallet is active with an EdDSA/ed25519 signing key.
-     * @deprecated Use `createDfnsSigner()` instead.
      */
     static async create<TAddress extends string = string>(config: DfnsSignerConfig): Promise<DfnsSigner<TAddress>> {
         if (!config.authToken) {
@@ -209,7 +211,10 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     /**
      * Sign multiple messages using Dfns
      */
-    async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+    async signMessages(
+        messages: readonly SignableMessage[],
+        config?: MessagePartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             messages,
             async message => {
@@ -217,10 +222,13 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
                     message.content instanceof Uint8Array
                         ? message.content
                         : new Uint8Array(Array.from(message.content));
-                const signatureBytes = await this.sendSignatureRequest({
-                    kind: 'Message',
-                    message: `0x${bytesToHex(messageBytes)}`,
-                });
+                const signatureBytes = await this.sendSignatureRequest(
+                    {
+                        kind: 'Message',
+                        message: `0x${bytesToHex(messageBytes)}`,
+                    },
+                    config?.abortSignal,
+                );
                 await assertSignatureValid({
                     data: messageBytes,
                     signature: signatureBytes,
@@ -232,6 +240,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -240,17 +249,21 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
      */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        config?: TransactionPartialSignerConfig,
     ): Promise<readonly SignatureDictionary[]> {
         const txEncoder = getTransactionEncoder();
         return await signBatchStaggered(
             transactions,
             async transaction => {
                 const txBytes = txEncoder.encode(transaction);
-                const signatureBytes = await this.sendSignatureRequest({
-                    blockchainKind: 'Solana',
-                    kind: 'Transaction',
-                    transaction: `0x${bytesToHex(new Uint8Array(txBytes))}`,
-                });
+                const signatureBytes = await this.sendSignatureRequest(
+                    {
+                        blockchainKind: 'Solana',
+                        kind: 'Transaction',
+                        transaction: `0x${bytesToHex(new Uint8Array(txBytes))}`,
+                    },
+                    config?.abortSignal,
+                );
                 await assertSignatureValid({
                     data: transaction.messageBytes,
                     signature: signatureBytes,
@@ -262,6 +275,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -285,7 +299,10 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     /**
      * Send a signature request to the Dfns Keys API
      */
-    private async sendSignatureRequest(request: GenerateSignatureRequest): Promise<SignatureBytes> {
+    private async sendSignatureRequest(
+        request: GenerateSignatureRequest,
+        abortSignal?: AbortSignal,
+    ): Promise<SignatureBytes> {
         // keyId is server-issued (from the wallet response) and this path is signed into the
         // Dfns user-action challenge, which must match the routed request path verbatim — so it
         // is interpolated raw rather than percent-encoded.
@@ -300,9 +317,11 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
             'POST',
             httpPath,
             requestBody,
+            abortSignal,
         );
 
         const rawSigResponse = await fetchSignerJson<unknown>({
+            abortSignal,
             init: {
                 body: requestBody,
                 headers: {

@@ -1,7 +1,7 @@
 import type { Address } from '@solana/addresses';
 import { describe, expect, it } from 'vitest';
 
-import { isSolanaSendingSigner, isSolanaSigner } from '../utils.js';
+import { isSolanaSendingSigner, isSolanaSigner, signerCapabilities } from '../utils.js';
 
 const ADDRESS = '11111111111111111111111111111111' as Address;
 
@@ -40,5 +40,23 @@ describe('isSolanaSendingSigner', () => {
     it('rejects a signer without isAvailable', () => {
         const { isAvailable: _unused, ...withoutIsAvailable } = sendingSigner;
         expect(isSolanaSendingSigner(withoutIsAvailable as never)).toBe(false);
+    });
+});
+
+describe('signerCapabilities', () => {
+    it('reports the methods a partial signer exposes', () => {
+        expect(signerCapabilities(partialSigner)).toStrictEqual({
+            canSignAndSend: false,
+            canSignMessages: true,
+            canSignTransactions: true,
+        });
+    });
+
+    it('reports the methods a sending signer exposes', () => {
+        expect(signerCapabilities(sendingSigner)).toStrictEqual({
+            canSignAndSend: true,
+            canSignMessages: false,
+            canSignTransactions: false,
+        });
     });
 });

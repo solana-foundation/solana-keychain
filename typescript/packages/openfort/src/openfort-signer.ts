@@ -15,7 +15,12 @@ import {
     validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
-import type { SignableMessage, SignatureDictionary } from '@solana/signers';
+import type {
+    MessagePartialSignerConfig,
+    SignableMessage,
+    SignatureDictionary,
+    TransactionPartialSignerConfig,
+} from '@solana/signers';
 import { type Transaction, type TransactionWithinSizeLimit, type TransactionWithLifetime } from '@solana/transactions';
 
 import type { AccountResponse, OpenfortSignerConfig, SignResponse } from './types.js';
@@ -54,17 +59,15 @@ const JWT_LIFETIME_SECS = 120;
  *
  * @example
  * ```typescript
- * const signer = await OpenfortSigner.create({
+ * const signer = await createOpenfortSigner({
  *   secretKey: process.env.OPENFORT_SECRET_KEY!,
  *   accountId: process.env.OPENFORT_ACCOUNT_ID!,
  *   walletSecret: process.env.OPENFORT_WALLET_SECRET!,
  * });
  * const signed = await signTransactionMessageWithSigners(transactionMessage, [signer]);
  * ```
- *
- * @deprecated Prefer `createOpenfortSigner()`. Class export will be removed in a future version.
  */
-export class OpenfortSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class OpenfortSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly accountId: string;
     private readonly secretKey: string;
@@ -96,8 +99,6 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
      *
      * Loads the P-256 wallet key (base64 DER or PEM) and fetches the wallet's
      * Solana address from `GET /v2/accounts/{accountId}`.
-     *
-     * @deprecated Use `createOpenfortSigner()` instead.
      */
     static async create<TAddress extends string = string>(
         config: OpenfortSignerConfig,
@@ -148,7 +149,7 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
      * hex-encoded into the `data` field. For SVM accounts Openfort signs the
      * bytes as-is (no hashing) and returns a 64-byte ed25519 signature.
      */
-    private async signBytes(message: Uint8Array): Promise<SignatureBytes> {
+    private async signBytes(message: Uint8Array, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         const dataHex = `0x${getBase16Decoder().decode(message)}`;
         const path = `${BACKEND_PATH}/${encodeURIComponent(this.accountId)}/sign`;
         const url = `${this.baseUrl}${path}`;
@@ -162,6 +163,7 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
         });
 
         const data = await fetchSignerJson<SignResponse>({
+            abortSignal,
             init: {
                 body: JSON.stringify(body),
                 headers,
@@ -199,7 +201,10 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
     }
 
     /** Sign multiple messages by POSTing the raw bytes to Openfort. */
-    async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+    async signMessages(
+        messages: readonly SignableMessage[],
+        config?: MessagePartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             messages,
             async message => {
@@ -207,7 +212,7 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
                     message.content instanceof Uint8Array
                         ? message.content
                         : new Uint8Array(Array.from(message.content));
-                const signatureBytes = await this.signBytes(messageBytes);
+                const signatureBytes = await this.signBytes(messageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: messageBytes,
                     signature: signatureBytes,
@@ -219,18 +224,20 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
     /** Sign multiple transactions by signing each transaction's `messageBytes`. */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        config?: TransactionPartialSignerConfig,
     ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             transactions,
             async transaction => {
                 const messageBytes = new Uint8Array(transaction.messageBytes);
-                const signatureBytes = await this.signBytes(messageBytes);
+                const signatureBytes = await this.signBytes(messageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: messageBytes,
                     signature: signatureBytes,
@@ -242,6 +249,7 @@ export class OpenfortSigner<TAddress extends string = string> implements SolanaS
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 

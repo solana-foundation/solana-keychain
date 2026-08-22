@@ -20,7 +20,7 @@ vi.mock('@solana/keychain-core', async importOriginal => {
     };
 });
 
-import { OpenfortSigner } from '../openfort-signer.js';
+import { createOpenfortSigner } from '../openfort-signer.js';
 import type { OpenfortSignerConfig } from '../types.js';
 
 // --- Test fixtures ---
@@ -96,7 +96,7 @@ describe('OpenfortSigner', () => {
         it('fetches the address from /v2/accounts/{id} and returns a signer', async () => {
             mockGetAccount();
 
-            const signer = await OpenfortSigner.create(makeConfig());
+            const signer = await createOpenfortSigner(makeConfig());
 
             expect(signer.address).toBe(TEST_ADDRESS);
             assertIsSolanaSigner(signer);
@@ -106,58 +106,58 @@ describe('OpenfortSigner', () => {
         });
 
         it('throws CONFIG_ERROR when secretKey is missing', async () => {
-            await expect(OpenfortSigner.create(makeConfig({ secretKey: '' }))).rejects.toThrow(
+            await expect(createOpenfortSigner(makeConfig({ secretKey: '' }))).rejects.toThrow(
                 'Missing required secretKey field',
             );
         });
 
         it('throws CONFIG_ERROR when accountId is missing', async () => {
-            await expect(OpenfortSigner.create(makeConfig({ accountId: '' }))).rejects.toThrow(
+            await expect(createOpenfortSigner(makeConfig({ accountId: '' }))).rejects.toThrow(
                 'Missing required accountId field',
             );
         });
 
         it('throws CONFIG_ERROR when walletSecret is missing', async () => {
-            await expect(OpenfortSigner.create(makeConfig({ walletSecret: '' }))).rejects.toThrow(
+            await expect(createOpenfortSigner(makeConfig({ walletSecret: '' }))).rejects.toThrow(
                 'Missing required walletSecret field',
             );
         });
 
         it('throws CONFIG_ERROR when walletSecret is not a valid P-256 key', async () => {
-            await expect(OpenfortSigner.create(makeConfig({ walletSecret: 'not-a-pem-key' }))).rejects.toThrow(
+            await expect(createOpenfortSigner(makeConfig({ walletSecret: 'not-a-pem-key' }))).rejects.toThrow(
                 'Failed to load P-256 PKCS#8 key',
             );
         });
 
         it('also accepts walletSecret in PEM form', async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig({ walletSecret: TEST_WALLET_SECRET_PEM }));
+            const signer = await createOpenfortSigner(makeConfig({ walletSecret: TEST_WALLET_SECRET_PEM }));
             expect(signer.address).toBe(TEST_ADDRESS);
         });
 
         it('throws CONFIG_ERROR when baseUrl is not HTTPS', async () => {
-            await expect(
-                OpenfortSigner.create(makeConfig({ baseUrl: 'http://api.openfort.io' })),
-            ).rejects.toMatchObject({
-                code: 'SIGNER_CONFIG_ERROR',
-                message: expect.stringContaining('baseUrl must use HTTPS'),
-            });
+            await expect(createOpenfortSigner(makeConfig({ baseUrl: 'http://api.openfort.io' }))).rejects.toMatchObject(
+                {
+                    code: 'SIGNER_CONFIG_ERROR',
+                    message: expect.stringContaining('baseUrl must use HTTPS'),
+                },
+            );
         });
 
         it('throws CONFIG_ERROR for negative requestDelayMs', async () => {
-            await expect(OpenfortSigner.create(makeConfig({ requestDelayMs: -1 }))).rejects.toThrow(
+            await expect(createOpenfortSigner(makeConfig({ requestDelayMs: -1 }))).rejects.toThrow(
                 'requestDelayMs must not be negative',
             );
         });
 
         it('throws REMOTE_API_ERROR when /v2/accounts returns 401', async () => {
             mockGetAccount(TEST_ADDRESS, 401);
-            await expect(OpenfortSigner.create(makeConfig())).rejects.toThrow('Openfort API error: 401');
+            await expect(createOpenfortSigner(makeConfig())).rejects.toThrow('Openfort API error: 401');
         });
 
         it('throws CONFIG_ERROR when /v2/accounts returns a non-Solana address', async () => {
             mockGetAccount('0x742d35Cc6634C0532925a3b844Bc454e4438f44e');
-            await expect(OpenfortSigner.create(makeConfig())).rejects.toThrow('Openfort returned non-Solana address');
+            await expect(createOpenfortSigner(makeConfig())).rejects.toThrow('Openfort returned non-Solana address');
         });
 
         it('throws PARSING_ERROR when /v2/accounts response is invalid JSON', async () => {
@@ -166,7 +166,7 @@ describe('OpenfortSigner', () => {
                 ok: true,
                 status: 200,
             });
-            await expect(OpenfortSigner.create(makeConfig())).rejects.toMatchObject({
+            await expect(createOpenfortSigner(makeConfig())).rejects.toMatchObject({
                 code: 'SIGNER_PARSING_ERROR',
                 message: expect.stringContaining('Failed to parse Openfort response'),
             });
@@ -178,7 +178,7 @@ describe('OpenfortSigner', () => {
                 ok: true,
                 status: 200,
             });
-            await expect(OpenfortSigner.create(makeConfig())).rejects.toMatchObject({
+            await expect(createOpenfortSigner(makeConfig())).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
                 message: expect.stringContaining('Missing address in Openfort getAccount response'),
             });
@@ -188,7 +188,7 @@ describe('OpenfortSigner', () => {
     describe('signMessages', () => {
         it('hex-encodes the message bytes and POSTs them to /sign', async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig());
+            const signer = await createOpenfortSigner(makeConfig());
 
             mockSign();
             const result = await signer.signMessages([{ content: new TextEncoder().encode('hi'), signatures: {} }]);
@@ -206,7 +206,7 @@ describe('OpenfortSigner', () => {
 
         it('throws SIGNING_FAILED when the signature is the wrong length', async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig());
+            const signer = await createOpenfortSigner(makeConfig());
 
             mockSign('0x1234');
             await expect(
@@ -216,7 +216,7 @@ describe('OpenfortSigner', () => {
 
         it('throws PARSING_ERROR when the signature is not valid hex', async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig());
+            const signer = await createOpenfortSigner(makeConfig());
 
             mockSign('0xZZZZ');
             await expect(
@@ -226,7 +226,7 @@ describe('OpenfortSigner', () => {
 
         it('throws REMOTE_API_ERROR on non-2xx', async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig());
+            const signer = await createOpenfortSigner(makeConfig());
 
             mockFetch.mockResolvedValueOnce(new Response('{"error":"unauthorized"}', { status: 401 }));
             await expect(
@@ -236,7 +236,7 @@ describe('OpenfortSigner', () => {
 
         it('throws HTTP_ERROR on network failure', async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig());
+            const signer = await createOpenfortSigner(makeConfig());
 
             mockFetch.mockRejectedValueOnce(new Error('Network error'));
             await expect(
@@ -246,7 +246,7 @@ describe('OpenfortSigner', () => {
 
         it('throws PARSING_ERROR when sign response is invalid JSON', async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig());
+            const signer = await createOpenfortSigner(makeConfig());
 
             mockFetch.mockResolvedValueOnce({
                 json: () => Promise.reject(new Error('Invalid JSON')),
@@ -263,7 +263,7 @@ describe('OpenfortSigner', () => {
 
         it('throws REMOTE_API_ERROR when sign response is missing the signature field', async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig());
+            const signer = await createOpenfortSigner(makeConfig());
 
             mockFetch.mockResolvedValueOnce({
                 json: () => Promise.resolve({}),
@@ -280,7 +280,7 @@ describe('OpenfortSigner', () => {
 
         it('delays subsequent requests by requestDelayMs', async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig({ requestDelayMs: 30 }));
+            const signer = await createOpenfortSigner(makeConfig({ requestDelayMs: 30 }));
 
             // mockImplementation so each concurrent call gets a fresh Response (body can only be read once).
             mockFetch.mockImplementation(() =>
@@ -316,7 +316,7 @@ describe('OpenfortSigner', () => {
     describe('signTransactions', () => {
         it("POSTs the transaction's messageBytes hex-encoded to /sign", async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig());
+            const signer = await createOpenfortSigner(makeConfig());
 
             mockSign();
             const tx = createMockTransaction(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
@@ -331,7 +331,7 @@ describe('OpenfortSigner', () => {
     describe('isAvailable', () => {
         it('returns true when /v2/accounts still resolves to the same address', async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig());
+            const signer = await createOpenfortSigner(makeConfig());
 
             mockGetAccount(TEST_ADDRESS);
             expect(await signer.isAvailable()).toBe(true);
@@ -339,7 +339,7 @@ describe('OpenfortSigner', () => {
 
         it('returns false when the address has changed', async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig());
+            const signer = await createOpenfortSigner(makeConfig());
 
             mockGetAccount('FdJqs1XSREL5KPxX67YyQp9w6q8KEj1k4r6JBYGxJpvN');
             expect(await signer.isAvailable()).toBe(false);
@@ -347,7 +347,7 @@ describe('OpenfortSigner', () => {
 
         it('returns false when /v2/accounts returns 401', async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig());
+            const signer = await createOpenfortSigner(makeConfig());
 
             mockGetAccount(TEST_ADDRESS, 401);
             expect(await signer.isAvailable()).toBe(false);
@@ -355,7 +355,7 @@ describe('OpenfortSigner', () => {
 
         it('returns false on network failure', async () => {
             mockGetAccount();
-            const signer = await OpenfortSigner.create(makeConfig());
+            const signer = await createOpenfortSigner(makeConfig());
 
             mockFetch.mockRejectedValueOnce(new Error('Network error'));
             expect(await signer.isAvailable()).toBe(false);

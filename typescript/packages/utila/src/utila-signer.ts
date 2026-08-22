@@ -1,5 +1,6 @@
 import { type Address, assertIsAddress } from '@solana/addresses';
 import {
+    abortableDelay,
     assertHttpsUrl,
     assertSignatureValid,
     createSignerError,
@@ -13,7 +14,12 @@ import {
     throwSignerError,
     validateRequestDelayMs,
 } from '@solana/keychain-core';
-import type { SignableMessage, SignatureDictionary } from '@solana/signers';
+import type {
+    MessagePartialSignerConfig,
+    SignableMessage,
+    SignatureDictionary,
+    TransactionPartialSignerConfig,
+} from '@solana/signers';
 import {
     type Base64EncodedWireTransaction,
     getBase64EncodedWireTransaction,
@@ -88,10 +94,8 @@ export async function createUtilaAccessToken(
 
 /**
  * Utila-backed signer for Solana transactions.
- *
- * @deprecated Prefer `createUtilaSigner()`. Class export will be removed in a future version.
  */
-export class UtilaSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class UtilaSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly apiBaseUrl: string;
     private readonly designatedSigners: readonly string[];
@@ -212,7 +216,10 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
         this.walletId = config.walletId;
     }
 
-    async signMessages(_messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+    async signMessages(
+        _messages: readonly SignableMessage[],
+        _config?: MessagePartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]> {
         return await Promise.reject(
             createSignerError(SignerErrorCode.SIGNING_FAILED, {
                 message: 'Utila signMessages is not supported for Solana wallets in this signer',
@@ -222,11 +229,13 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
 
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        config?: TransactionPartialSignerConfig,
     ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             transactions,
-            transaction => this.signTransactionWithUtila(transaction),
+            transaction => this.signTransactionWithUtila(transaction, config?.abortSignal),
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -247,10 +256,11 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
 
     private async signTransactionWithUtila(
         transaction: Transaction & TransactionWithinSizeLimit & TransactionWithLifetime,
+        abortSignal?: AbortSignal,
     ): Promise<SignatureDictionary> {
         const rawTransaction = getBase64EncodedWireTransaction(transaction);
-        const initiated = await this.initiateTransaction(rawTransaction);
-        const signed = await this.pollSignedTransaction(initiated);
+        const initiated = await this.initiateTransaction(rawTransaction, abortSignal);
+        const signed = await this.pollSignedTransaction(initiated, abortSignal);
         const rawSignedTransaction = signed.solanaTransaction?.rawTransaction;
         if (!rawSignedTransaction) {
             throwSignerError(SignerErrorCode.SIGNING_FAILED, {
@@ -270,7 +280,7 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
         return sigDict;
     }
 
-    private async initiateTransaction(rawTransaction: string): Promise<UtilaTransaction> {
+    private async initiateTransaction(rawTransaction: string, abortSignal?: AbortSignal): Promise<UtilaTransaction> {
         const body: UtilaInitiateTransactionRequest = {
             designatedSigners: this.designatedSigners,
             details: {
@@ -288,19 +298,25 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
             `/v2/vaults/${encodeURIComponent(this.vaultId)}/transactions:initiate`,
             'POST',
             body,
+            abortSignal,
         );
         return parseTransactionEnvelope(response, 'initiate transaction');
     }
 
-    private async getTransaction(transactionId: string): Promise<UtilaTransaction> {
+    private async getTransaction(transactionId: string, abortSignal?: AbortSignal): Promise<UtilaTransaction> {
         const response = await this.request<UtilaTransactionEnvelope>(
             `/v2/vaults/${encodeURIComponent(this.vaultId)}/transactions/${encodeURIComponent(transactionId)}?view=FULL`,
             'GET',
+            undefined,
+            abortSignal,
         );
         return parseTransactionEnvelope(response, 'get transaction');
     }
 
-    private async pollSignedTransaction(transaction: UtilaTransaction): Promise<UtilaTransaction> {
+    private async pollSignedTransaction(
+        transaction: UtilaTransaction,
+        abortSignal?: AbortSignal,
+    ): Promise<UtilaTransaction> {
         let current = transaction;
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
@@ -313,8 +329,8 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
                 });
             }
 
-            await new Promise(resolve => setTimeout(resolve, this.pollIntervalMs));
-            current = await this.getTransaction(extractTransactionId(current.name));
+            await abortableDelay(this.pollIntervalMs, abortSignal);
+            current = await this.getTransaction(extractTransactionId(current.name), abortSignal);
         }
 
         if (current.state === 'SIGNED') {
@@ -360,7 +376,12 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
         return entry.tokenPromise;
     }
 
-    private async request<T>(path: string, method: 'GET' | 'POST', body?: unknown): Promise<T> {
+    private async request<T>(
+        path: string,
+        method: 'GET' | 'POST',
+        body?: unknown,
+        abortSignal?: AbortSignal,
+    ): Promise<T> {
         const url = `${this.apiBaseUrl}${path}`;
         const token = await this.getAccessToken();
         const headers: Record<string, string> = {
@@ -371,6 +392,7 @@ export class UtilaSigner<TAddress extends string = string> implements SolanaSign
         }
 
         return await fetchSignerJson<T>({
+            abortSignal,
             init: {
                 body: body != null ? JSON.stringify(body) : undefined,
                 headers,

@@ -206,6 +206,32 @@ export function isSolanaSendingSigner<TAddress extends string>(value: {
 }
 
 /**
+ * The signing methods a signer actually exposes. Kit classifies signers by
+ * method presence, so this reports what a signer can be used for rather than
+ * which interface it nominally implements.
+ */
+export type SignerCapabilities = Readonly<{
+    /** The signer signs and broadcasts through its provider. */
+    canSignAndSend: boolean;
+    /** The signer signs off-chain messages. */
+    canSignMessages: boolean;
+    /** The signer returns signatures for a caller-owned transaction. */
+    canSignTransactions: boolean;
+}>;
+
+/**
+ * Reports which signing methods the given signer exposes.
+ * @param signer - The signer to inspect
+ */
+export function signerCapabilities(signer: { address: Address }): SignerCapabilities {
+    return Object.freeze({
+        canSignAndSend: isTransactionSendingSigner(signer),
+        canSignMessages: isMessagePartialSigner(signer),
+        canSignTransactions: isTransactionPartialSigner(signer),
+    });
+}
+
+/**
  * Asserts that the given value is a SolanaSigner, throwing an error if it is not.
  * @param value - The value to check
  * @throws {SignerError} If the value is not a SolanaSigner

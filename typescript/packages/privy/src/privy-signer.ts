@@ -13,7 +13,12 @@ import {
     validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
-import { SignableMessage, SignatureDictionary } from '@solana/signers';
+import {
+    MessagePartialSignerConfig,
+    SignableMessage,
+    SignatureDictionary,
+    TransactionPartialSignerConfig,
+} from '@solana/signers';
 import {
     Base64EncodedWireTransaction,
     getBase64EncodedWireTransaction,
@@ -90,10 +95,8 @@ type ResolvedPrivySignerConfig = PrivySignerConfig & {
  * Privy-based signer using Privy's wallet API
  *
  * Note: Must initialize with create() to fetch the public key
- *
- * @deprecated Prefer `createPrivySigner()`. Class export will be removed in a future version.
  */
-export class PrivySigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class PrivySigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly appId: string;
     private readonly appSecret: string;
@@ -117,7 +120,6 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
     /**
      * Create and initialize a PrivySigner
      * Fetches the public key from Privy API during initialization
-     * @deprecated Use `createPrivySigner()` instead.
      */
     static async create<TAddress extends string = string>(config: PrivySignerConfig): Promise<PrivySigner<TAddress>> {
         if (!config.appId || !config.appSecret || !config.walletId) {
@@ -169,6 +171,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
      */
     private async signTransaction(
         base64WireTransaction: Base64EncodedWireTransaction,
+        abortSignal?: AbortSignal,
     ): Promise<Base64EncodedWireTransaction> {
         const url = `${this.apiBaseUrl}/wallets/${encodeURIComponent(this.walletId)}/rpc`;
 
@@ -190,6 +193,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
         });
 
         const signResponse = await fetchSignerJson<SignTransactionResponse>({
+            abortSignal,
             init: {
                 body: JSON.stringify(request),
                 headers: {
@@ -218,7 +222,10 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
      * @param base64EncodedMessage - The base64 encoded message to sign
      * @returns The signature bytes
      */
-    private async signMessage(base64EncodedMessage: TransactionMessageBytesBase64): Promise<SignatureBytes> {
+    private async signMessage(
+        base64EncodedMessage: TransactionMessageBytesBase64,
+        abortSignal?: AbortSignal,
+    ): Promise<SignatureBytes> {
         const url = `${this.apiBaseUrl}/wallets/${encodeURIComponent(this.walletId)}/rpc`;
 
         const request: SignMessageRequest = {
@@ -239,6 +246,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
         });
 
         const signResponse = await fetchSignerJson<SignMessageResponse>({
+            abortSignal,
             init: {
                 body: JSON.stringify(request),
                 headers: {
@@ -267,13 +275,16 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
      * @param messages - The messages to sign
      * @returns The signature dictionaries
      */
-    async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+    async signMessages(
+        messages: readonly SignableMessage[],
+        config?: MessagePartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             messages,
             async message => {
                 base64Decoder ||= getBase64Decoder();
                 const base64EncodedMessage = base64Decoder.decode(message.content) as TransactionMessageBytesBase64;
-                const signatureBytes = await this.signMessage(base64EncodedMessage);
+                const signatureBytes = await this.signMessage(base64EncodedMessage, config?.abortSignal);
                 await assertSignatureValid({
                     data: message.content,
                     signature: signatureBytes,
@@ -285,6 +296,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -295,12 +307,13 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
      */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        config?: TransactionPartialSignerConfig,
     ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             transactions,
             async transaction => {
                 const wireTransaction = getBase64EncodedWireTransaction(transaction);
-                const signedTx = await this.signTransaction(wireTransaction);
+                const signedTx = await this.signTransaction(wireTransaction, config?.abortSignal);
                 const sigDict = extractSignatureFromWireTransaction({
                     base64WireTransaction: signedTx,
                     signerAddress: this.address,
@@ -313,6 +326,7 @@ export class PrivySigner<TAddress extends string = string> implements SolanaSign
                 return sigDict;
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 

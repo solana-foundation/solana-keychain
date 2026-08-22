@@ -56,6 +56,41 @@ describe('signBatchStaggered', () => {
         await expect(promise).resolves.toEqual([0, 1, 2]);
     });
 
+    it('rejects with the abort reason for an already-aborted signal without calling fn', async () => {
+        const reason = new Error('already cancelled');
+        const fn = vi.fn(async (item: number) => item);
+
+        await expect(signBatchStaggered([1, 2], fn, 0, AbortSignal.abort(reason))).rejects.toBe(reason);
+        expect(fn).not.toHaveBeenCalled();
+    });
+
+    it('cancels the pending stagger delay and rejects with the abort reason', async () => {
+        vi.useFakeTimers();
+        const controller = new AbortController();
+        const reason = new Error('cancelled mid-batch');
+        const started: number[] = [];
+
+        const promise = signBatchStaggered(
+            ['a', 'b', 'c'],
+            async (_item, index) => {
+                started.push(index);
+                return index;
+            },
+            100,
+            controller.signal,
+        );
+        const rejects = expect(promise).rejects.toBe(reason);
+
+        await vi.advanceTimersByTimeAsync(0);
+        expect(started).toEqual([0]);
+
+        controller.abort(reason);
+        await rejects;
+
+        await vi.advanceTimersByTimeAsync(500);
+        expect(started).toEqual([0]);
+    });
+
     it('rejects when any item fails', async () => {
         await expect(
             signBatchStaggered(

@@ -3,6 +3,7 @@ import { createPrivateKey, createSign, type KeyObject } from 'node:crypto';
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase58Decoder, getBase58Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
+    abortableDelay,
     assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
@@ -21,9 +22,11 @@ import {
 import { SignatureBytes } from '@solana/keys';
 import {
     MessagePartialSigner,
+    MessagePartialSignerConfig,
     SignableMessage,
     SignatureDictionary,
     TransactionPartialSigner,
+    TransactionPartialSignerConfig,
     TransactionSendingSigner,
     TransactionSendingSignerConfig,
 } from '@solana/signers';
@@ -191,10 +194,8 @@ export async function createFordefiSigner<TAddress extends string = string>(
  *
  * Transaction signing is async: submit via POST, poll GET until MPC signing completes.
  * API requests require ECDSA P-256 request-level signing.
- *
- * Prefer `createFordefiSigner()`. Class export will be removed in a future version.
  */
-export class FordefiSigner<TAddress extends string = string> implements MessagePartialSigner<TAddress> {
+class FordefiSigner<TAddress extends string = string> implements MessagePartialSigner<TAddress> {
     readonly address: Address<TAddress>;
     declare signAndSendTransactions?: TransactionSendingSigner<TAddress>['signAndSendTransactions'];
     declare signTransactions?: TransactionPartialSigner<TAddress>['signTransactions'];
@@ -235,9 +236,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
         }
     }
 
-    /**
-     * Create a FordefiSigner with the provided configuration.
-     */
+    /** Create a FordefiSigner with the provided configuration. */
     static async create<TAddress extends string = string>(
         config: FordefiSignerConfig & { chain: SolanaChainUniqueId },
     ): Promise<FordefiNativeSigner<TAddress> & FordefiSigner<TAddress>>;
@@ -416,11 +415,14 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
         return true;
     }
 
-    async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+    async signMessages(
+        messages: readonly SignableMessage[],
+        config?: MessagePartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             messages,
             async message => {
-                const signatureBytes = await this.signMessage(message.content);
+                const signatureBytes = await this.signMessage(message.content, config?.abortSignal);
                 await assertSignatureValid({
                     data: message.content,
                     signature: signatureBytes,
@@ -432,6 +434,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -441,11 +444,15 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
      */
     private async signBlackBoxTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        config?: TransactionPartialSignerConfig,
     ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             transactions,
             async transaction => {
-                const { sigDict, verificationData } = await this.signBlackBoxTransaction(transaction.messageBytes);
+                const { sigDict, verificationData } = await this.signBlackBoxTransaction(
+                    transaction.messageBytes,
+                    config?.abortSignal,
+                );
                 const signatureBytes = Object.values(sigDict)[0];
                 if (!signatureBytes) {
                     return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
@@ -461,6 +468,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
                 return sigDict;
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -473,12 +481,13 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
      */
     private async signBlackBoxTransaction(
         messageBytes: ArrayLike<number>,
+        abortSignal?: AbortSignal,
     ): Promise<{ sigDict: SignatureDictionary; verificationData: Uint8Array }> {
         const bytes = messageBytes instanceof Uint8Array ? messageBytes : new Uint8Array(Array.from(messageBytes));
         const base64Data = Buffer.from(bytes).toString('base64');
 
-        const txId = await this.submitBlackBoxSignature(base64Data);
-        const result = await this.pollForResult(txId, { pushable: false });
+        const txId = await this.submitBlackBoxSignature(base64Data, abortSignal);
+        const result = await this.pollForResult(txId, { pushable: false }, abortSignal);
         const sigBase64 = this.extractSignatureData(result);
         const sigBytes = new Uint8Array(Buffer.from(sigBase64, 'base64'));
         if (sigBytes.length !== 64) {
@@ -521,7 +530,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
                 const base64Data = Buffer.from(transaction.messageBytes).toString('base64');
                 let txId: string;
                 try {
-                    txId = await this.submitSolanaTransaction(base64Data);
+                    txId = await this.submitSolanaTransaction(base64Data, config?.abortSignal);
                 } catch (error) {
                     if (!providerMayHaveAccepted(error)) {
                         throw error;
@@ -551,6 +560,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
                 }
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -562,7 +572,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
         txId: string,
         config?: TransactionSendingSignerConfig,
     ): Promise<SignatureBytes> {
-        const result = await this.pollForResult(txId, { pushable: true });
+        const result = await this.pollForResult(txId, { pushable: true }, config?.abortSignal);
         if (!result.raw_transaction) {
             return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                 message: 'Fordefi solana_transaction response missing raw_transaction',
@@ -625,6 +635,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
     private async submitTransaction(
         requestBody: FordefiBlackBoxSignatureRequest | FordefiSolanaMessageRequest | FordefiSolanaTransactionRequest,
         idempotenceId?: string,
+        abortSignal?: AbortSignal,
     ): Promise<string> {
         const apiPath = '/api/v1/transactions';
         const createResponse = await this.request<FordefiCreateTransactionResponse>(
@@ -633,6 +644,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
             JSON.stringify(requestBody),
             this.requestTimeoutMs,
             idempotenceId,
+            abortSignal,
         );
         return createResponse.id;
     }
@@ -640,7 +652,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
     /**
      * Submit a black_box_signature request for raw EdDSA signing.
      */
-    private async submitBlackBoxSignature(base64Data: string): Promise<string> {
+    private async submitBlackBoxSignature(base64Data: string, abortSignal?: AbortSignal): Promise<string> {
         const requestBody: FordefiBlackBoxSignatureRequest = {
             details: {
                 format: 'hash_binary',
@@ -651,13 +663,13 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
             type: 'black_box_signature',
             vault_id: this.vaultId,
         };
-        return await this.submitTransaction(requestBody);
+        return await this.submitTransaction(requestBody, undefined, abortSignal);
     }
 
     /**
      * Submit a native Solana serialized transaction message for signing + auto-push.
      */
-    private async submitSolanaTransaction(base64Data: string): Promise<string> {
+    private async submitSolanaTransaction(base64Data: string, abortSignal?: AbortSignal): Promise<string> {
         const requestBody: FordefiSolanaTransactionRequest = {
             details: {
                 chain: this.chain!,
@@ -674,13 +686,14 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
         return await this.submitTransaction(
             requestBody,
             await idempotencyKeyFromMessage(Buffer.from(base64Data, 'base64')),
+            abortSignal,
         );
     }
 
     /**
      * Submit a native Solana personal message for signing.
      */
-    private async submitSolanaMessage(base64Data: string): Promise<string> {
+    private async submitSolanaMessage(base64Data: string, abortSignal?: AbortSignal): Promise<string> {
         const requestBody: FordefiSolanaMessageRequest = {
             details: {
                 chain: this.chain!,
@@ -692,20 +705,20 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
             type: 'solana_message',
             vault_id: this.vaultId,
         };
-        return await this.submitTransaction(requestBody);
+        return await this.submitTransaction(requestBody, undefined, abortSignal);
     }
 
     /**
      * Sign a Solana personal message via Fordefi MPC.
      * Submits the message, polls for completion, and returns the raw 64-byte Ed25519 signature.
      */
-    private async signMessage(messageBytes: Uint8Array): Promise<SignatureBytes> {
+    private async signMessage(messageBytes: Uint8Array, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         const base64Data = Buffer.from(messageBytes).toString('base64');
 
         const txId = this.chain
-            ? await this.submitSolanaMessage(base64Data)
-            : await this.submitBlackBoxSignature(base64Data);
-        const result = await this.pollForResult(txId, { pushable: false });
+            ? await this.submitSolanaMessage(base64Data, abortSignal)
+            : await this.submitBlackBoxSignature(base64Data, abortSignal);
+        const result = await this.pollForResult(txId, { pushable: false }, abortSignal);
         const sigBase64 = this.extractSignatureData(result);
 
         let sigBytes: Uint8Array;
@@ -737,11 +750,19 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
     private async pollForResult(
         txId: string,
         { pushable }: { pushable: boolean },
+        abortSignal?: AbortSignal,
     ): Promise<FordefiTransactionStatusResponse> {
         const successStates = pushable ? PUSHABLE_SUCCESS_STATES : NON_PUSHABLE_SUCCESS_STATES;
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
-            const txData = await this.request<FordefiTransactionStatusResponse>('GET', `/api/v1/transactions/${txId}`);
+            const txData = await this.request<FordefiTransactionStatusResponse>(
+                'GET',
+                `/api/v1/transactions/${txId}`,
+                undefined,
+                undefined,
+                undefined,
+                abortSignal,
+            );
 
             if (successStates.has(txData.state)) {
                 return txData;
@@ -754,7 +775,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
             }
 
             if (attempt + 1 < this.maxPollAttempts) {
-                await new Promise(resolve => setTimeout(resolve, this.pollIntervalMs));
+                await abortableDelay(this.pollIntervalMs, abortSignal);
             }
         }
 
@@ -794,6 +815,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
         body?: string,
         timeoutMs = this.requestTimeoutMs,
         idempotenceId?: string,
+        abortSignal?: AbortSignal,
     ): Promise<T> {
         const headers: Record<string, string> = {
             Authorization: `Bearer ${this.accessToken}`,
@@ -809,6 +831,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
         }
 
         return await fetchSignerJson<T>({
+            abortSignal,
             init: { body, headers, method },
             providerName: 'Fordefi',
             timeoutMs,

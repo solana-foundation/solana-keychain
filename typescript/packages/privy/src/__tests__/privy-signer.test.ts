@@ -9,7 +9,7 @@ import {
 import { assertIsSolanaSigner } from '@solana/keychain-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PrivySigner } from '../privy-signer.js';
+import { createPrivySigner } from '../privy-signer.js';
 import { formatPrivyAuthorizationSignaturePayload, generatePrivyAuthorizationSignatures } from '../authorization.js';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
@@ -45,7 +45,7 @@ const createMockTransaction = (): Transaction & TransactionWithinSizeLimit & Tra
     return {} as Transaction & TransactionWithinSizeLimit & TransactionWithLifetime;
 };
 
-describe('PrivySigner', () => {
+describe('createPrivySigner', () => {
     beforeEach(() => {
         vi.resetAllMocks();
     });
@@ -95,7 +95,7 @@ describe('PrivySigner', () => {
 
             setupMockWalletResponse(keyPair.address);
 
-            const signer = await PrivySigner.create(mockConfig);
+            const signer = await createPrivySigner(mockConfig);
 
             expect(signer.address).toBeTruthy();
             expect(signer.signMessages).toBeDefined();
@@ -110,7 +110,7 @@ describe('PrivySigner', () => {
 
             setupMockWalletResponse(keyPair.address);
 
-            const signer = await PrivySigner.create(mockConfig);
+            const signer = await createPrivySigner(mockConfig);
 
             expect(signer.address).toBe(keyPair.address);
         });
@@ -123,7 +123,7 @@ describe('PrivySigner', () => {
                 status: 200,
             });
 
-            await PrivySigner.create({ ...mockConfig, walletId: '../../evil' });
+            await createPrivySigner({ ...mockConfig, walletId: '../../evil' });
 
             const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
             expect(url).toBe('https://api.privy.test/wallets/..%2F..%2Fevil');
@@ -137,13 +137,13 @@ describe('PrivySigner', () => {
                 text: () => Promise.resolve('Unauthorized'),
             });
 
-            await expect(PrivySigner.create(mockConfig)).rejects.toThrow();
+            await expect(createPrivySigner(mockConfig)).rejects.toThrow();
         });
 
         it('throws INVALID_PUBLIC_KEY (not a raw kit error) on invalid public key', async () => {
             setupMockWalletResponse('not-a-valid-address');
 
-            await expect(PrivySigner.create(mockConfig)).rejects.toMatchObject({
+            await expect(createPrivySigner(mockConfig)).rejects.toMatchObject({
                 code: 'SIGNER_INVALID_PUBLIC_KEY',
                 message: expect.stringContaining('Invalid Solana address in Privy wallet response'),
             });
@@ -161,7 +161,7 @@ describe('PrivySigner', () => {
                 status: 200,
             });
 
-            await expect(PrivySigner.create(mockConfig)).rejects.toMatchObject({
+            await expect(createPrivySigner(mockConfig)).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
                 message: expect.stringContaining('Expected Solana wallet, got chain_type=ethereum'),
             });
@@ -170,7 +170,7 @@ describe('PrivySigner', () => {
         describe('config validation', () => {
             it('throws CONFIG_ERROR when appId is missing', async () => {
                 const invalidConfig = { ...mockConfig, appId: '' };
-                await expect(PrivySigner.create(invalidConfig)).rejects.toMatchObject({
+                await expect(createPrivySigner(invalidConfig)).rejects.toMatchObject({
                     code: 'SIGNER_CONFIG_ERROR',
                     message: expect.stringContaining('Missing required configuration fields'),
                 });
@@ -178,7 +178,7 @@ describe('PrivySigner', () => {
 
             it('throws CONFIG_ERROR when appSecret is missing', async () => {
                 const invalidConfig = { ...mockConfig, appSecret: '' };
-                await expect(PrivySigner.create(invalidConfig)).rejects.toMatchObject({
+                await expect(createPrivySigner(invalidConfig)).rejects.toMatchObject({
                     code: 'SIGNER_CONFIG_ERROR',
                     message: expect.stringContaining('Missing required configuration fields'),
                 });
@@ -186,7 +186,7 @@ describe('PrivySigner', () => {
 
             it('throws CONFIG_ERROR when walletId is missing', async () => {
                 const invalidConfig = { ...mockConfig, walletId: '' };
-                await expect(PrivySigner.create(invalidConfig)).rejects.toMatchObject({
+                await expect(createPrivySigner(invalidConfig)).rejects.toMatchObject({
                     code: 'SIGNER_CONFIG_ERROR',
                     message: expect.stringContaining('Missing required configuration fields'),
                 });
@@ -194,7 +194,7 @@ describe('PrivySigner', () => {
 
             it('throws CONFIG_ERROR when apiBaseUrl is not a valid URL', async () => {
                 const invalidConfig = { ...mockConfig, apiBaseUrl: 'not-a-url' };
-                await expect(PrivySigner.create(invalidConfig)).rejects.toMatchObject({
+                await expect(createPrivySigner(invalidConfig)).rejects.toMatchObject({
                     code: 'SIGNER_CONFIG_ERROR',
                     message: expect.stringContaining('apiBaseUrl is not a valid URL'),
                 });
@@ -202,7 +202,7 @@ describe('PrivySigner', () => {
 
             it('throws CONFIG_ERROR when apiBaseUrl does not use HTTPS', async () => {
                 const invalidConfig = { ...mockConfig, apiBaseUrl: 'http://api.privy.test' };
-                await expect(PrivySigner.create(invalidConfig)).rejects.toMatchObject({
+                await expect(createPrivySigner(invalidConfig)).rejects.toMatchObject({
                     code: 'SIGNER_CONFIG_ERROR',
                     message: expect.stringContaining('apiBaseUrl must use HTTPS'),
                 });
@@ -215,7 +215,7 @@ describe('PrivySigner', () => {
                     authorizationRequestExpiryMs: -1,
                 };
 
-                await expect(PrivySigner.create(invalidConfig)).rejects.toMatchObject({
+                await expect(createPrivySigner(invalidConfig)).rejects.toMatchObject({
                     code: 'SIGNER_CONFIG_ERROR',
                     message: expect.stringContaining('authorizationRequestExpiryMs must not be negative'),
                 });
@@ -228,7 +228,7 @@ describe('PrivySigner', () => {
                     requestDelayMs: -1,
                 };
 
-                await expect(PrivySigner.create(invalidConfig)).rejects.toMatchObject({
+                await expect(createPrivySigner(invalidConfig)).rejects.toMatchObject({
                     code: 'SIGNER_CONFIG_ERROR',
                     message: expect.stringContaining('requestDelayMs must not be negative'),
                 });
@@ -240,7 +240,7 @@ describe('PrivySigner', () => {
             it('throws HTTP_ERROR when fetch fails during create', async () => {
                 (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Network timeout'));
 
-                await expect(PrivySigner.create(mockConfig)).rejects.toMatchObject({
+                await expect(createPrivySigner(mockConfig)).rejects.toMatchObject({
                     code: 'SIGNER_HTTP_ERROR',
                     message: expect.stringContaining('Privy network request failed'),
                 });
@@ -255,7 +255,7 @@ describe('PrivySigner', () => {
                     status: 200,
                 });
 
-                await expect(PrivySigner.create(mockConfig)).rejects.toMatchObject({
+                await expect(createPrivySigner(mockConfig)).rejects.toMatchObject({
                     code: 'SIGNER_PARSING_ERROR',
                     message: expect.stringContaining('Failed to parse Privy response'),
                 });
@@ -275,7 +275,7 @@ describe('PrivySigner', () => {
                     status: 200,
                 });
 
-                await expect(PrivySigner.create(mockConfig)).rejects.toMatchObject({
+                await expect(createPrivySigner(mockConfig)).rejects.toMatchObject({
                     code: 'SIGNER_REMOTE_API_ERROR',
                     message: expect.stringContaining('Missing address in Privy wallet response'),
                 });
@@ -291,7 +291,7 @@ describe('PrivySigner', () => {
 
             setupMockWalletResponse(address);
 
-            const signer = await PrivySigner.create(mockConfig);
+            const signer = await createPrivySigner(mockConfig);
 
             const messageContent = new Uint8Array([1, 2, 3, 4]);
             const signature = await signBytes(keyPair.privateKey, messageContent);
@@ -303,6 +303,36 @@ describe('PrivySigner', () => {
             const [sigDict] = await signer.signMessages([message]);
             expect(sigDict).toBeTruthy();
             expect(sigDict?.[signer.address]).toBeTruthy();
+        });
+
+        it('passes an aborting signal to fetch and rejects a pre-aborted signal without a request', async () => {
+            const keyPair = await generateKeyPair();
+            const keyPairSigner = await createSignerFromKeyPair(keyPair);
+
+            setupMockWalletResponse(keyPairSigner.address);
+            const signer = await createPrivySigner(mockConfig);
+
+            const messageContent = new Uint8Array([1, 2, 3, 4]);
+            const signature = await signBytes(keyPair.privateKey, messageContent);
+            setupMockSignMessageResponse(Buffer.from(signature).toString('base64'));
+
+            const message = createSignableMessage(messageContent);
+            const controller = new AbortController();
+            await signer.signMessages([message], { abortSignal: controller.signal });
+
+            const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+            const [, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+            const signal = init.signal as AbortSignal;
+            expect(signal.aborted).toBe(false);
+            controller.abort(new Error('cancelled'));
+            expect(signal.aborted).toBe(true);
+
+            const callsBefore = fetchMock.mock.calls.length;
+            const reason = new Error('already cancelled');
+            await expect(signer.signMessages([message], { abortSignal: AbortSignal.abort(reason) })).rejects.toBe(
+                reason,
+            );
+            expect(fetchMock.mock.calls).toHaveLength(callsBefore);
         });
 
         it('injects Privy authorization context headers into signMessage requests', async () => {
@@ -317,7 +347,7 @@ describe('PrivySigner', () => {
 
             setupMockWalletResponse(address);
 
-            const signer = await PrivySigner.create({
+            const signer = await createPrivySigner({
                 ...mockConfig,
                 authorizationContext: { sign_fns: [signFn] },
             });
@@ -369,7 +399,7 @@ describe('PrivySigner', () => {
 
             setupMockWalletResponse(address);
 
-            const signer = await PrivySigner.create({
+            const signer = await createPrivySigner({
                 ...mockConfig,
                 authorizationContext: { sign_fns: [signFn] },
                 authorizationRequestExpiryMs: null,
@@ -523,7 +553,7 @@ describe('PrivySigner', () => {
         it('throws HTTP_ERROR when fetch fails during signing', async () => {
             const keyPair = await generateKeyPairSigner();
             setupMockWalletResponse(keyPair.address);
-            const signer = await PrivySigner.create(mockConfig);
+            const signer = await createPrivySigner(mockConfig);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Network timeout'));
 
@@ -537,7 +567,7 @@ describe('PrivySigner', () => {
         it('throws PARSING_ERROR when response is invalid JSON', async () => {
             const keyPair = await generateKeyPairSigner();
             setupMockWalletResponse(keyPair.address);
-            const signer = await PrivySigner.create(mockConfig);
+            const signer = await createPrivySigner(mockConfig);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 json: () => Promise.reject(new Error('Invalid JSON')),
@@ -555,7 +585,7 @@ describe('PrivySigner', () => {
         it('throws REMOTE_API_ERROR when signature is missing from response', async () => {
             const keyPair = await generateKeyPairSigner();
             setupMockWalletResponse(keyPair.address);
-            const signer = await PrivySigner.create(mockConfig);
+            const signer = await createPrivySigner(mockConfig);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 json: () =>
@@ -584,7 +614,7 @@ describe('PrivySigner', () => {
 
             setupMockWalletResponse(keyPair.address);
 
-            const signer = await PrivySigner.create(mockConfig);
+            const signer = await createPrivySigner(mockConfig);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 ok: false,
@@ -607,7 +637,7 @@ describe('PrivySigner', () => {
 
             setupMockWalletResponse(keyPair.address);
 
-            const signer = await PrivySigner.create({
+            const signer = await createPrivySigner({
                 ...mockConfig,
                 authorizationContext: { sign_fns: [signFn] },
             });
@@ -650,7 +680,7 @@ describe('PrivySigner', () => {
         it('sanitizes remote API error text in error context', async () => {
             const keyPair = await generateKeyPairSigner();
             setupMockWalletResponse(keyPair.address);
-            const signer = await PrivySigner.create(mockConfig);
+            const signer = await createPrivySigner(mockConfig);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 ok: false,
@@ -679,7 +709,7 @@ describe('PrivySigner', () => {
         it('throws HTTP_ERROR when fetch fails during transaction signing', async () => {
             const keyPair = await generateKeyPairSigner();
             setupMockWalletResponse(keyPair.address);
-            const signer = await PrivySigner.create(mockConfig);
+            const signer = await createPrivySigner(mockConfig);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Network timeout'));
 
@@ -694,7 +724,7 @@ describe('PrivySigner', () => {
         it('throws PARSING_ERROR when response is invalid JSON', async () => {
             const keyPair = await generateKeyPairSigner();
             setupMockWalletResponse(keyPair.address);
-            const signer = await PrivySigner.create(mockConfig);
+            const signer = await createPrivySigner(mockConfig);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 json: () => Promise.reject(new Error('Invalid JSON')),
@@ -713,7 +743,7 @@ describe('PrivySigner', () => {
         it('throws REMOTE_API_ERROR when signed_transaction is missing from response', async () => {
             const keyPair = await generateKeyPairSigner();
             setupMockWalletResponse(keyPair.address);
-            const signer = await PrivySigner.create(mockConfig);
+            const signer = await createPrivySigner(mockConfig);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 json: () =>
@@ -741,7 +771,7 @@ describe('PrivySigner', () => {
         it('returns true when API is reachable', async () => {
             const keyPair = await generateKeyPairSigner();
             setupMockWalletResponse(keyPair.address);
-            const signer = await PrivySigner.create(mockConfig);
+            const signer = await createPrivySigner(mockConfig);
             setupMockWalletResponse(keyPair.address);
             const available = await signer.isAvailable();
             expect(available).toBe(true);
@@ -750,7 +780,7 @@ describe('PrivySigner', () => {
         it('returns false when API is unreachable', async () => {
             const keyPair = await generateKeyPairSigner();
             setupMockWalletResponse(keyPair.address);
-            const signer = await PrivySigner.create(mockConfig);
+            const signer = await createPrivySigner(mockConfig);
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 ok: false,
                 status: 500,

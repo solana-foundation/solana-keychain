@@ -13,7 +13,12 @@ import {
     validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
-import { SignableMessage, SignatureDictionary } from '@solana/signers';
+import {
+    MessagePartialSignerConfig,
+    SignableMessage,
+    SignatureDictionary,
+    TransactionPartialSignerConfig,
+} from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
 
 import type { ParaSignRawRequest, ParaSignRawResponse, ParaWalletResponse } from './types.js';
@@ -54,10 +59,8 @@ export interface ParaSignerConfig {
  *
  * Uses the /v1/wallets/:walletId/sign-raw endpoint for Ed25519 signing.
  * Raw bytes are signed directly with no hashing or transformation.
- *
- * @deprecated Prefer `createParaSigner()`. Class export will be removed in a future version.
  */
-export class ParaSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class ParaSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly apiKey: string;
     private readonly apiBaseUrl: string;
@@ -75,7 +78,6 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
 
     /**
      * Create a ParaSigner by fetching the wallet's public key from Para's API
-     * @deprecated Use `createParaSigner()` instead.
      */
     static async create<TAddress extends string = string>(config: ParaSignerConfig): Promise<ParaSigner<TAddress>> {
         if (!config.apiKey || !config.walletId) {
@@ -165,11 +167,14 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
     /**
      * Sign multiple messages using Para
      */
-    async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+    async signMessages(
+        messages: readonly SignableMessage[],
+        config?: MessagePartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             messages,
             async message => {
-                const signatureBytes = await this.signBytes(message.content);
+                const signatureBytes = await this.signBytes(message.content, config?.abortSignal);
                 await assertSignatureValid({
                     data: message.content,
                     signature: signatureBytes,
@@ -181,6 +186,7 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -189,11 +195,12 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
      */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        config?: TransactionPartialSignerConfig,
     ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             transactions,
             async transaction => {
-                const signatureBytes = await this.signBytes(transaction.messageBytes);
+                const signatureBytes = await this.signBytes(transaction.messageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: transaction.messageBytes,
                     signature: signatureBytes,
@@ -205,13 +212,14 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
     /**
      * Sign raw bytes via Para's /sign-raw endpoint
      */
-    private async signBytes(data: ArrayLike<number>): Promise<SignatureBytes> {
+    private async signBytes(data: ArrayLike<number>, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         const bytes = data instanceof Uint8Array ? data : new Uint8Array(Array.from(data));
         const hexData = getBase16Decoder().decode(bytes);
 
@@ -222,6 +230,7 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
         };
 
         const signResponse = await fetchSignerJson<ParaSignRawResponse>({
+            abortSignal,
             init: {
                 body: JSON.stringify(request),
                 headers: {

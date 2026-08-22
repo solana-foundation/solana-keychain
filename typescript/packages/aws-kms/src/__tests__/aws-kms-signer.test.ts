@@ -2,7 +2,7 @@ import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
 
-import { AwsKmsSigner } from '../aws-kms-signer.js';
+import { createAwsKmsSigner } from '../aws-kms-signer.js';
 import type { AwsKmsSignerConfig } from '../types.js';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
@@ -48,18 +48,18 @@ vi.mock('@aws-sdk/client-kms', () => {
     };
 });
 
-describe('AwsKmsSigner', () => {
+describe('createAwsKmsSigner', () => {
     const TEST_KEY_ID = 'arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012';
 
     beforeEach(() => {
         vi.clearAllMocks();
     });
 
-    describe('create', () => {
+    describe('basic construction', () => {
         it('creates an AwsKmsSigner with valid config', async () => {
             const keyPair = await generateKeyPairSigner();
 
-            const signer = AwsKmsSigner.create({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
             });
@@ -72,7 +72,7 @@ describe('AwsKmsSigner', () => {
             const keyPair = await generateKeyPairSigner();
 
             expect(() => {
-                AwsKmsSigner.create({
+                createAwsKmsSigner({
                     keyId: '',
                     publicKey: keyPair.address,
                 });
@@ -80,7 +80,7 @@ describe('AwsKmsSigner', () => {
         });
     });
 
-    describe('constructor', () => {
+    describe('createAwsKmsSigner (additional cases)', () => {
         it('creates an AwsKmsSigner with valid config', async () => {
             const keyPair = await generateKeyPairSigner();
 
@@ -89,7 +89,7 @@ describe('AwsKmsSigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new AwsKmsSigner(config);
+            const signer = createAwsKmsSigner(config);
 
             expect(signer.address).toBe(keyPair.address);
             assertIsSolanaSigner(signer);
@@ -106,7 +106,7 @@ describe('AwsKmsSigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new AwsKmsSigner(config);
+            const signer = createAwsKmsSigner(config);
             expect(signer.address).toBe(keyPair.address);
         });
 
@@ -114,7 +114,7 @@ describe('AwsKmsSigner', () => {
             const keyPair = await generateKeyPairSigner();
 
             expect(() => {
-                new AwsKmsSigner({
+                createAwsKmsSigner({
                     keyId: '',
                     publicKey: keyPair.address,
                 });
@@ -123,7 +123,7 @@ describe('AwsKmsSigner', () => {
 
         it('should throw error for missing publicKey', () => {
             expect(() => {
-                new AwsKmsSigner({
+                createAwsKmsSigner({
                     keyId: TEST_KEY_ID,
                     publicKey: '',
                 });
@@ -132,7 +132,7 @@ describe('AwsKmsSigner', () => {
 
         it('should throw error for invalid public key', () => {
             expect(() => {
-                new AwsKmsSigner({
+                createAwsKmsSigner({
                     keyId: TEST_KEY_ID,
                     publicKey: 'invalid-key',
                 });
@@ -143,7 +143,7 @@ describe('AwsKmsSigner', () => {
             const keyPair = await generateKeyPairSigner();
 
             expect(() => {
-                new AwsKmsSigner({
+                createAwsKmsSigner({
                     keyId: TEST_KEY_ID,
                     publicKey: keyPair.address,
                     requestDelayMs: -1,
@@ -155,7 +155,7 @@ describe('AwsKmsSigner', () => {
             const keyPair = await generateKeyPairSigner();
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-            new AwsKmsSigner({
+            createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
                 requestDelayMs: 5000,
@@ -169,7 +169,7 @@ describe('AwsKmsSigner', () => {
         it('should accept region configuration', async () => {
             const keyPair = await generateKeyPairSigner();
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
                 region: 'us-west-2',
@@ -181,7 +181,7 @@ describe('AwsKmsSigner', () => {
         it('should accept credentials configuration', async () => {
             const keyPair = await generateKeyPairSigner();
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
                 credentials: {
@@ -196,7 +196,7 @@ describe('AwsKmsSigner', () => {
         it('should accept session token in credentials', async () => {
             const keyPair = await generateKeyPairSigner();
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
                 credentials: {
@@ -218,7 +218,7 @@ describe('AwsKmsSigner', () => {
                 Signature: new Uint8Array(64).fill(0x42),
             });
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
             });
@@ -242,7 +242,7 @@ describe('AwsKmsSigner', () => {
                 Signature: new Uint8Array(64).fill(0x42),
             });
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
                 requestDelayMs: 10,
@@ -277,7 +277,7 @@ describe('AwsKmsSigner', () => {
                 Signature: new Uint8Array(32), // Wrong length
             });
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
             });
@@ -294,7 +294,7 @@ describe('AwsKmsSigner', () => {
                 Signature: undefined,
             });
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
             });
@@ -313,7 +313,7 @@ describe('AwsKmsSigner', () => {
                 Signature: new Uint8Array(64).fill(0x42),
             });
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
             });
@@ -344,7 +344,7 @@ describe('AwsKmsSigner', () => {
                 },
             });
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
             });
@@ -366,7 +366,7 @@ describe('AwsKmsSigner', () => {
                 },
             });
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
             });
@@ -388,7 +388,7 @@ describe('AwsKmsSigner', () => {
                 },
             });
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
             });
@@ -410,7 +410,7 @@ describe('AwsKmsSigner', () => {
                 },
             });
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
             });
@@ -425,7 +425,7 @@ describe('AwsKmsSigner', () => {
 
             mockSend.mockRejectedValue(new Error('AWS error'));
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
             });
@@ -442,7 +442,7 @@ describe('AwsKmsSigner', () => {
                 KeyMetadata: undefined,
             });
 
-            const signer = new AwsKmsSigner({
+            const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
                 publicKey: keyPair.address,
             });

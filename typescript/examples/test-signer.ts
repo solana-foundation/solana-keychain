@@ -24,10 +24,10 @@
  */
 
 import { assertIsSolanaSigner, SolanaSigner } from '@solana/keychain-core';
-import { FireblocksSigner } from '@solana/keychain-fireblocks';
-import { ParaSigner } from '@solana/keychain-para';
-import { PrivySigner } from '@solana/keychain-privy';
-import { TurnkeySigner } from '@solana/keychain-turnkey';
+import { createFireblocksSigner } from '@solana/keychain-fireblocks';
+import { createParaSigner } from '@solana/keychain-para';
+import { createPrivySigner } from '@solana/keychain-privy';
+import { createTurnkeySigner } from '@solana/keychain-turnkey';
 import {
     Address,
     airdropFactory,
@@ -86,21 +86,19 @@ const SIGNER_CONFIGS: Record<SignerType, SignerConfig> = {
     fireblocks: {
         requiredEnvVars: ['FIREBLOCKS_API_KEY', 'FIREBLOCKS_PRIVATE_KEY_PEM', 'FIREBLOCKS_VAULT_ACCOUNT_ID'],
         create: async () => {
-            const signer = new FireblocksSigner({
+            return await createFireblocksSigner({
                 apiKey: process.env.FIREBLOCKS_API_KEY!,
                 privateKeyPem: process.env.FIREBLOCKS_PRIVATE_KEY_PEM!,
                 vaultAccountId: process.env.FIREBLOCKS_VAULT_ACCOUNT_ID!,
                 assetId: 'SOL_TEST',
                 apiBaseUrl: 'https://api.fireblocks.io',
             });
-            await signer.init();
-            return signer;
         },
     },
     para: {
         requiredEnvVars: ['PARA_API_KEY', 'PARA_WALLET_ID'],
         create: async () => {
-            return await ParaSigner.create({
+            return await createParaSigner({
                 apiKey: process.env.PARA_API_KEY!,
                 walletId: process.env.PARA_WALLET_ID!,
                 apiBaseUrl: process.env.PARA_API_BASE_URL,
@@ -110,7 +108,7 @@ const SIGNER_CONFIGS: Record<SignerType, SignerConfig> = {
     privy: {
         requiredEnvVars: ['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'PRIVY_WALLET_ID'],
         create: async () => {
-            return await PrivySigner.create({
+            return await createPrivySigner({
                 appId: process.env.PRIVY_APP_ID!,
                 appSecret: process.env.PRIVY_APP_SECRET!,
                 walletId: process.env.PRIVY_WALLET_ID!,
@@ -127,7 +125,7 @@ const SIGNER_CONFIGS: Record<SignerType, SignerConfig> = {
             'TURNKEY_PUBLIC_KEY',
         ],
         create: async () => {
-            return new TurnkeySigner({
+            return createTurnkeySigner({
                 apiPublicKey: process.env.TURNKEY_API_PUBLIC_KEY!,
                 apiPrivateKey: process.env.TURNKEY_API_PRIVATE_KEY!,
                 organizationId: process.env.TURNKEY_ORGANIZATION_ID!,

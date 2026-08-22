@@ -18,7 +18,7 @@ vi.mock('@solana/keychain-core', async importOriginal => {
     };
 });
 
-import { ParaSigner } from '../para-signer.js';
+import { createParaSigner } from '../para-signer.js';
 
 // Mock fetch globally
 global.fetch = vi.fn();
@@ -61,7 +61,7 @@ describe('ParaSigner', () => {
         it('should create a signer by fetching wallet address', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
 
             expect(signer.address).toBe(MOCK_ADDRESS);
             expect(fetch).toHaveBeenCalledWith(
@@ -76,34 +76,34 @@ describe('ParaSigner', () => {
         it('should satisfy the SolanaSigner interface', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
 
             assertIsSolanaSigner(signer);
         });
 
         it('should throw CONFIG_ERROR for missing apiKey', async () => {
-            await expect(ParaSigner.create({ ...mockConfig, apiKey: '' })).rejects.toMatchObject({
+            await expect(createParaSigner({ ...mockConfig, apiKey: '' })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
                 message: expect.stringContaining('Missing required configuration fields'),
             });
         });
 
         it('should throw CONFIG_ERROR for missing walletId', async () => {
-            await expect(ParaSigner.create({ ...mockConfig, walletId: '' })).rejects.toMatchObject({
+            await expect(createParaSigner({ ...mockConfig, walletId: '' })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
                 message: expect.stringContaining('Missing required configuration fields'),
             });
         });
 
         it('should throw CONFIG_ERROR for non-sk_ apiKey', async () => {
-            await expect(ParaSigner.create({ ...mockConfig, apiKey: 'pk_test_key' })).rejects.toMatchObject({
+            await expect(createParaSigner({ ...mockConfig, apiKey: 'pk_test_key' })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
                 message: expect.stringContaining('apiKey must be a Para secret key'),
             });
         });
 
         it('should throw CONFIG_ERROR for non-UUID walletId', async () => {
-            await expect(ParaSigner.create({ ...mockConfig, walletId: 'not-a-uuid' })).rejects.toMatchObject({
+            await expect(createParaSigner({ ...mockConfig, walletId: 'not-a-uuid' })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
                 message: expect.stringContaining('walletId must be a valid UUID'),
             });
@@ -111,7 +111,7 @@ describe('ParaSigner', () => {
 
         it('should throw CONFIG_ERROR for non-HTTPS apiBaseUrl', async () => {
             await expect(
-                ParaSigner.create({ ...mockConfig, apiBaseUrl: 'http://api.getpara.com' }),
+                createParaSigner({ ...mockConfig, apiBaseUrl: 'http://api.getpara.com' }),
             ).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
                 message: expect.stringContaining('apiBaseUrl must use HTTPS'),
@@ -119,7 +119,7 @@ describe('ParaSigner', () => {
         });
 
         it('should throw CONFIG_ERROR for invalid apiBaseUrl', async () => {
-            await expect(ParaSigner.create({ ...mockConfig, apiBaseUrl: 'not-a-url' })).rejects.toMatchObject({
+            await expect(createParaSigner({ ...mockConfig, apiBaseUrl: 'not-a-url' })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
                 message: expect.stringContaining('apiBaseUrl is not a valid URL'),
             });
@@ -128,7 +128,7 @@ describe('ParaSigner', () => {
         it('should throw CONFIG_ERROR for non-SOLANA wallet type', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse({ type: 'EVM' }));
 
-            await expect(ParaSigner.create(mockConfig)).rejects.toMatchObject({
+            await expect(createParaSigner(mockConfig)).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
                 message: expect.stringContaining('Expected SOLANA wallet but got EVM'),
             });
@@ -137,7 +137,7 @@ describe('ParaSigner', () => {
         it('should throw REMOTE_API_ERROR when wallet has no address', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse({ address: null }));
 
-            await expect(ParaSigner.create(mockConfig)).rejects.toMatchObject({
+            await expect(createParaSigner(mockConfig)).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
                 message: expect.stringContaining('does not have an address'),
             });
@@ -148,7 +148,7 @@ describe('ParaSigner', () => {
                 new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 }),
             );
 
-            await expect(ParaSigner.create(mockConfig)).rejects.toMatchObject({
+            await expect(createParaSigner(mockConfig)).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
                 context: expect.objectContaining({
                     response: expect.stringContaining('Unauthorized'),
@@ -161,7 +161,7 @@ describe('ParaSigner', () => {
         it('should throw HTTP_ERROR when network fails', async () => {
             vi.mocked(fetch).mockRejectedValueOnce(new Error('Network error'));
 
-            await expect(ParaSigner.create(mockConfig)).rejects.toMatchObject({
+            await expect(createParaSigner(mockConfig)).rejects.toMatchObject({
                 code: 'SIGNER_HTTP_ERROR',
                 message: expect.stringContaining('Para network request failed'),
             });
@@ -170,7 +170,7 @@ describe('ParaSigner', () => {
         it('should remove trailing slash from apiBaseUrl', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
 
-            await ParaSigner.create({ ...mockConfig, apiBaseUrl: 'https://api.test.getpara.com/' });
+            await createParaSigner({ ...mockConfig, apiBaseUrl: 'https://api.test.getpara.com/' });
 
             expect(fetch).toHaveBeenCalledWith(
                 'https://api.test.getpara.com/v1/wallets/00000000-0000-0000-0000-000000000000',
@@ -181,7 +181,7 @@ describe('ParaSigner', () => {
         it('should throw CONFIG_ERROR for negative requestDelayMs', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
 
-            await expect(ParaSigner.create({ ...mockConfig, requestDelayMs: -1 })).rejects.toMatchObject({
+            await expect(createParaSigner({ ...mockConfig, requestDelayMs: -1 })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
                 message: expect.stringContaining('requestDelayMs must not be negative'),
             });
@@ -191,7 +191,7 @@ describe('ParaSigner', () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-            await ParaSigner.create({ ...mockConfig, requestDelayMs: 3001 });
+            await createParaSigner({ ...mockConfig, requestDelayMs: 3001 });
 
             expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
             warnSpy.mockRestore();
@@ -204,7 +204,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(mockWalletResponse({ status: 'ready' })); // isAvailable
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const result = await signer.isAvailable();
 
             expect(result).toBe(true);
@@ -215,7 +215,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(mockWalletResponse({ status: 'ACTIVE' })); // isAvailable
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const result = await signer.isAvailable();
 
             expect(result).toBe(true);
@@ -226,7 +226,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(mockWalletResponse({ status: 'Ready' })); // isAvailable
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const result = await signer.isAvailable();
 
             expect(result).toBe(true);
@@ -237,7 +237,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(mockWalletResponse({ status: 'creating' })); // isAvailable
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const result = await signer.isAvailable();
 
             expect(result).toBe(false);
@@ -248,7 +248,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(mockWalletResponse({ type: 'EVM', status: 'ready' })); // isAvailable
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const result = await signer.isAvailable();
 
             expect(result).toBe(false);
@@ -259,7 +259,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(new Response('', { status: 500 })); // isAvailable
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const result = await signer.isAvailable();
 
             expect(result).toBe(false);
@@ -270,7 +270,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockRejectedValueOnce(new Error('Network error')); // isAvailable
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const result = await signer.isAvailable();
 
             expect(result).toBe(false);
@@ -283,7 +283,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(mockSignResponse()); // sign
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const message = {
                 content: new Uint8Array([1, 2, 3, 4]),
                 signatures: {},
@@ -308,7 +308,7 @@ describe('ParaSigner', () => {
         it('should return empty array for empty input', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const result = await signer.signMessages([]);
 
             expect(result).toEqual([]);
@@ -319,7 +319,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(mockSignResponse('0x' + MOCK_SIGNATURE)); // sign
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
 
             const [result] = await signer.signMessages([message]);
@@ -332,7 +332,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'rate limited' }), { status: 429 }));
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
 
             await expect(signer.signMessages([message])).rejects.toMatchObject({
@@ -350,7 +350,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockRejectedValueOnce(new Error('Network failure'));
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
 
             await expect(signer.signMessages([message])).rejects.toMatchObject({
@@ -364,7 +364,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 }));
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
 
             await expect(signer.signMessages([message])).rejects.toMatchObject({
@@ -378,7 +378,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(mockSignResponse('aabb')); // too short
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
 
             await expect(signer.signMessages([message])).rejects.toMatchObject({
@@ -392,7 +392,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(mockSignResponse('zz'.repeat(64))); // invalid hex
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
 
             await expect(signer.signMessages([message])).rejects.toMatchObject({
@@ -409,7 +409,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockSignResponse()); // sign 3
 
             const delaySpy = vi.spyOn(global, 'setTimeout');
-            const signer = await ParaSigner.create({ ...mockConfig, requestDelayMs: 100 });
+            const signer = await createParaSigner({ ...mockConfig, requestDelayMs: 100 });
 
             const messages = [
                 { content: new Uint8Array([1, 2, 3, 4]), signatures: {} },
@@ -434,7 +434,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(mockSignResponse()); // sign
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const mockTransaction = {
                 messageBytes: new Uint8Array([1, 2, 3, 4]),
                 signatures: {},
@@ -455,7 +455,7 @@ describe('ParaSigner', () => {
         it('should return empty array for empty input', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const result = await signer.signTransactions([]);
 
             expect(result).toEqual([]);
@@ -467,7 +467,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockSignResponse()) // sign 1
                 .mockResolvedValueOnce(mockSignResponse()); // sign 2
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const transactions = [
                 { messageBytes: new Uint8Array([1, 2]), signatures: {} } as any,
                 { messageBytes: new Uint8Array([3, 4]), signatures: {} } as any,
@@ -485,7 +485,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'rate limited' }), { status: 429 }));
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const mockTransaction = { messageBytes: new Uint8Array([1, 2, 3, 4]), signatures: {} } as any;
 
             await expect(signer.signTransactions([mockTransaction])).rejects.toMatchObject({
@@ -503,7 +503,7 @@ describe('ParaSigner', () => {
                 .mockResolvedValueOnce(mockWalletResponse()) // create
                 .mockRejectedValueOnce(new Error('Network failure'));
 
-            const signer = await ParaSigner.create(mockConfig);
+            const signer = await createParaSigner(mockConfig);
             const mockTransaction = { messageBytes: new Uint8Array([1, 2, 3, 4]), signatures: {} } as any;
 
             await expect(signer.signTransactions([mockTransaction])).rejects.toMatchObject({

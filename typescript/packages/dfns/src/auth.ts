@@ -78,9 +78,11 @@ export async function signUserAction(
     httpMethod: string,
     httpPath: string,
     body: string,
+    abortSignal?: AbortSignal,
 ): Promise<string> {
     // Request a challenge
     const rawChallenge = await fetchSignerJson<unknown>({
+        abortSignal,
         init: {
             body: JSON.stringify({
                 userActionHttpMethod: httpMethod,
@@ -123,6 +125,7 @@ export async function signUserAction(
 
     // Submit the signed challenge
     const rawActionResponse = await fetchSignerJson<unknown>({
+        abortSignal,
         init: {
             body: JSON.stringify({
                 challengeIdentifier: challenge.challengeIdentifier,

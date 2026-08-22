@@ -1,4 +1,4 @@
-export { FordefiSigner, createFordefiSigner } from './fordefi-signer.js';
+export { createFordefiSigner } from './fordefi-signer.js';
 export type { FordefiNativeSigner, FordefiRequestSigner, FordefiSignerConfig } from './fordefi-signer.js';
 export type {
     FordefiBlackBoxSignatureRequest,

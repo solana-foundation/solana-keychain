@@ -1,4 +1,4 @@
-export { FireblocksSigner, createFireblocksSigner } from './fireblocks-signer.js';
+export { createFireblocksSigner } from './fireblocks-signer.js';
 export type {
     FireblocksSignerConfig,
     CreateProgramCallTransactionRequest,

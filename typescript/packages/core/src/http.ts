@@ -1,10 +1,25 @@
+import { anyAbortSignal } from './abort.js';
 import { sanitizeRemoteErrorResponse, SignerError, SignerErrorCode, throwSignerError } from './errors.js';
 
 /** Default timeout applied to remote signer API requests. */
 export const DEFAULT_FETCH_TIMEOUT_MS = 60_000;
 
 export interface FetchSignerJsonOptions {
-    /** Standard fetch options (method, headers, body, signal, ...). */
+    /**
+     * Caller-supplied cancellation, typically the `abortSignal` of a Kit signer
+     * config. It composes with the timeout: whichever fires first aborts the
+     * request. When it has already fired, no request is made at all and the
+     * abort reason is thrown unwrapped rather than as a signer error.
+     */
+    abortSignal?: AbortSignal;
+    /**
+     * Standard fetch options (method, headers, body, ...).
+     *
+     * A `signal` here is the raw escape hatch for callers that own the whole
+     * request lifetime: it replaces the timeout instead of composing with it,
+     * and still composes with {@link FetchSignerJsonOptions.abortSignal}.
+     * Prefer {@link FetchSignerJsonOptions.abortSignal} for cancellation.
+     */
     init?: RequestInit;
     /** Human-readable provider name used in error messages (e.g. "Privy"). */
     providerName: string;
@@ -40,19 +55,27 @@ export function providerMayHaveAccepted(error: unknown): boolean {
  * - invalid JSON body → `PARSING_ERROR`
  *
  * Redirects are always rejected and every request carries a timeout unless
- * the caller supplies its own `AbortSignal`.
+ * the caller supplies its own `init.signal`. A caller `abortSignal` propagates
+ * its abort reason unwrapped, so cancellation is distinguishable from failure.
  */
 export async function fetchSignerJson<TResponse>(options: FetchSignerJsonOptions): Promise<TResponse> {
-    const { init = {}, providerName, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, url } = options;
+    const { abortSignal, init = {}, providerName, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, url } = options;
+
+    abortSignal?.throwIfAborted();
+
+    const signals: AbortSignal[] = [];
+    if (abortSignal) signals.push(abortSignal);
+    signals.push(init.signal ?? AbortSignal.timeout(timeoutMs));
 
     let response: Response;
     try {
         response = await fetch(url, {
             ...init,
             redirect: 'error',
-            signal: init.signal ?? AbortSignal.timeout(timeoutMs),
+            signal: anyAbortSignal(signals),
         });
     } catch (error) {
+        abortSignal?.throwIfAborted();
         throwSignerError(SignerErrorCode.HTTP_ERROR, {
             cause: error,
             message: `${providerName} network request failed`,

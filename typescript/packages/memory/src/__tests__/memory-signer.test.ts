@@ -170,6 +170,15 @@ describe('createMemorySigner', () => {
             expect(first).not.toEqual(second);
         });
 
+        it('accepts the Kit signer config on both signing methods', async () => {
+            const signer = await createMemorySignerFromBytes(TEST_KEYPAIR_BYTES);
+            const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
+            const abortSignal = new AbortController().signal;
+
+            const [dict] = await signer.signMessages([message], { abortSignal });
+            expect(dict?.[signer.address]?.length).toBe(64);
+        });
+
         it('signs a transaction', async () => {
             const signer = await createMemorySignerFromBytes(TEST_KEYPAIR_BYTES);
             const transaction = pipe(

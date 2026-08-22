@@ -548,7 +548,7 @@ CI is a two-phase process. Coordinate with maintainers to prepare `main` before 
 - [ ] Create package `typescript/packages/<name>/`
 - [ ] Implement `SolanaSigner` interface from `@solana/keychain-core`
 - [ ] Export `createXSigner()` factory function returning `SolanaSigner<TAddress>`
-- [ ] Export `static create()` on the class
+- [ ] Keep the signer class internal — do not export it from `index.ts`
 - [ ] Export config interface (`XSignerConfig`)
 - [ ] Enforce HTTPS on `apiBaseUrl` config fields
 - [ ] Sanitize remote API error text with `sanitizeRemoteErrorResponse()`
@@ -610,7 +610,7 @@ export interface YourSignerConfig {
 
 #### Factory Function + Class
 
-The factory function is the primary public API. It returns `SolanaSigner<TAddress>` (the interface), not the concrete class. Place it above the class definition, after imports.
+The factory function is the only public API. It returns `SolanaSigner<TAddress>` (the interface), not the concrete class — the class itself is never exported from `index.ts`, so it stays reachable only through the factory (mirror `@solana/keychain-crossmint` for this pattern). Place the factory above the class definition, after imports.
 
 **Async signer** (fetches public key during init — most common):
 
@@ -623,7 +623,7 @@ export async function createYourSigner<TAddress extends string = string>(
     return await YourSigner.create(config);
 }
 
-export class YourSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class YourSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
 
     static async create<TAddress extends string = string>(
@@ -653,15 +653,11 @@ export class YourSigner<TAddress extends string = string> implements SolanaSigne
 export function createYourSigner<TAddress extends string = string>(
     config: YourSignerConfig,
 ): SolanaSigner<TAddress> {
-    return YourSigner.create(config);
+    return new YourSigner<TAddress>(config);
 }
 
-export class YourSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class YourSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
-
-    static create<TAddress extends string = string>(config: YourSignerConfig): YourSigner<TAddress> {
-        return new YourSigner<TAddress>(config);
-    }
 
     constructor(config: YourSignerConfig) {
         // validate config, set this.address from config.publicKey
@@ -703,7 +699,7 @@ export class YourSigner<TAddress extends string = string> implements SolanaSigne
 
 ```typescript
 // index.ts
-export { YourSigner, createYourSigner } from './your-signer.js';
+export { createYourSigner } from './your-signer.js';
 export type { YourSignerConfig } from './your-signer.js';
 export type { YourApiResponse, YourApiRequest } from './types.js';
 ```
@@ -825,7 +821,7 @@ case 'your-signer':
 // (falls through to createKeychainSigner call)
 ```
 
-**d) `keychain/src/index.ts`** — add 4 export lines across the tiers:
+**d) `keychain/src/index.ts`** — add 3 export lines across the tiers:
 
 ```typescript
 // Individual config type (flat re-export)
@@ -836,9 +832,6 @@ export * as yourSigner from '@solana/keychain-your-signer';
 
 // Factory function (preferred API)
 export { createYourSigner } from '@solana/keychain-your-signer';
-
-// Class export (deprecated tier)
-export { YourSigner } from '@solana/keychain-your-signer';
 ```
 
 **e) `keychain/package.json`** — add to `dependencies`:

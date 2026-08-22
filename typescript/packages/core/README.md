@@ -20,10 +20,18 @@ import { SolanaSigner } from '@solana/keychain-core';
 interface SolanaSigner {
     address: Address;
     isAvailable(): Promise<boolean>;
-    signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]>;
-    signTransactions(transactions: readonly Transaction[]): Promise<readonly SignatureDictionary[]>;
+    signMessages(
+        messages: readonly SignableMessage[],
+        config?: MessagePartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]>;
+    signTransactions(
+        transactions: readonly Transaction[],
+        config?: TransactionPartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]>;
 }
 ```
+
+`address`, `signMessages()` and `signTransactions()` are inherited from Kit's `MessagePartialSigner` and `TransactionPartialSigner`, so every signing method takes Kit's optional config — including `{ abortSignal }` to cancel an in-flight signing request.
 
 **`SolanaSendingSigner`** - Interface for managed-broadcast backends. A backend belongs in this category when it rewrites the transaction message and/or broadcasts server-side, so its signature cannot be applied to the caller's transaction. Such signers expose `signAndSendTransactions()` (Kit's `TransactionSendingSigner`) and deliberately **no** `signTransactions` or `signMessages` — Kit classifies signers by duck-typed method presence, and a present-but-throwing method would make Kit misroute the transaction and fail at runtime. Backends that also support message signing intersect `MessagePartialSigner` per package:
 
@@ -109,12 +117,12 @@ class MyCustomSigner implements SolanaSigner {
         // Check if backend is healthy
     }
 
-    async signMessages(messages: readonly SignableMessage[]) {
-        // Sign messages using your backend
+    async signMessages(messages: readonly SignableMessage[], config?: MessagePartialSignerConfig) {
+        // Sign messages using your backend, honoring config?.abortSignal
     }
 
-    async signTransactions(transactions: readonly Transaction[]) {
-        // Sign transactions using your backend
+    async signTransactions(transactions: readonly Transaction[], config?: TransactionPartialSignerConfig) {
+        // Sign transactions using your backend, honoring config?.abortSignal
     }
 }
 ```
