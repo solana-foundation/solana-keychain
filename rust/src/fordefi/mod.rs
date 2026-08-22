@@ -17,8 +17,8 @@ use crate::http_client_config::HttpClientConfig;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
 use crate::transaction_util::{
-    deserialize_wire_transaction, idempotency_key_from_message, unconfirmed_unless_rejected,
-    TransactionUtil,
+    deserialize_wire_transaction, idempotency_key_from_message, serialize_wire_transaction,
+    unconfirmed_unless_rejected, TransactionUtil,
 };
 pub use request_signer::{FordefiRequestSigner, PemRequestSigner};
 use types::{
@@ -26,13 +26,14 @@ use types::{
     SolanaMessageRequest, SolanaTransactionDetails, SolanaTransactionRequest,
     TransactionStatusResponse, VaultResponse,
 };
-pub use types::{FordefiPriorityLevel, FordefiSolanaFee, SolanaChainUniqueId};
+pub use types::{FordefiPriorityLevel, FordefiPushMode, FordefiSolanaFee, SolanaChainUniqueId};
 
 const DEFAULT_BASE_URL: &str = "https://api.fordefi.com";
 const DEFAULT_POLL_INTERVAL_MS: u64 = 2000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 50;
 const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const VAULT_VERIFICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const SOLANA_PACKET_DATA_SIZE: usize = 1232;
 
 /// Configuration for creating a FordefiSigner.
 #[derive(Clone)]
@@ -66,16 +67,20 @@ pub struct FordefiSignerConfig {
 
 /// Fordefi-based signer using Fordefi's MPC custody API.
 ///
-/// Supports two signing modes, which differ in what `sign_transaction` returns:
+/// Supports three signing modes, which differ in what `sign_transaction` returns:
 /// - **Black box** (default, `chain` = `None`): Signs raw bytes via `black_box_signature`
 ///   and returns nothing else. Fordefi does **not** broadcast; the returned serialized
 ///   transaction is the locally-assembled signed tx, which the caller submits to an RPC.
-/// - **Native Solana** (`chain` = `Some(...)`): Uses `solana_transaction` / `solana_message`
+/// - **Native auto** (`chain` = `Some(...)`, `push_mode` = `Auto`): Uses `solana_transaction` / `solana_message`
 ///   API types. Fordefi will modify the transaction (at minimum updating the blockhash,
 ///   and optionally adding priority fees) and **auto-broadcasts** it on-chain
 ///   (`push_mode: "auto"`). Because the transaction is already submitted, the returned
 ///   serialized transaction is **empty** — only the signature, the on-chain
 ///   identifier, is returned. The caller's `&mut Transaction` is left untouched.
+/// - **Native manual** (`chain` = `Some(...)`, `push_mode` = `Manual`): Fordefi
+///   modifies and signs the transaction without broadcasting it. The caller's
+///   transaction is replaced with Fordefi's returned transaction and the returned
+///   serialized transaction can be completed by downstream signers and broadcast.
 pub struct FordefiSigner {
     access_token: String,
     vault_id: String,
@@ -87,6 +92,7 @@ pub struct FordefiSigner {
     max_poll_attempts: u32,
     chain: Option<SolanaChainUniqueId>,
     fee: Option<FordefiSolanaFee>,
+    push_mode: FordefiPushMode,
 }
 
 impl std::fmt::Debug for FordefiSigner {
@@ -112,9 +118,30 @@ impl FordefiSigner {
         Ok(signer)
     }
 
+    /// Create a FordefiSigner with an explicit native transaction push mode.
+    ///
+    /// `Manual` requires `config.chain` and returns Fordefi-modified signed
+    /// transactions without broadcasting them. `Auto` preserves the behavior of
+    /// [`Self::from_config`].
+    pub async fn from_config_with_push_mode(
+        config: FordefiSignerConfig,
+        push_mode: FordefiPushMode,
+    ) -> Result<Self, SignerError> {
+        let signer = Self::build_with_push_mode(config, push_mode)?;
+        signer.verify_vault_address_with_timeout().await?;
+        Ok(signer)
+    }
+
     /// Shared construction: validate config, resolve the request-signing
     /// mechanism, and assemble the signer.
     fn build(config: FordefiSignerConfig) -> Result<Self, SignerError> {
+        Self::build_with_push_mode(config, FordefiPushMode::Auto)
+    }
+
+    fn build_with_push_mode(
+        config: FordefiSignerConfig,
+        push_mode: FordefiPushMode,
+    ) -> Result<Self, SignerError> {
         if config.access_token.is_empty() {
             return Err(SignerError::ConfigError(
                 "access_token must not be empty".to_string(),
@@ -183,6 +210,12 @@ impl FordefiSigner {
             ));
         }
 
+        if push_mode == FordefiPushMode::Manual && config.chain.is_none() {
+            return Err(SignerError::ConfigError(
+                "manual push mode requires chain to be set (native Solana mode)".to_string(),
+            ));
+        }
+
         let poll_interval_ms = config.poll_interval_ms.unwrap_or(DEFAULT_POLL_INTERVAL_MS);
         if poll_interval_ms == 0 {
             return Err(SignerError::ConfigError(
@@ -216,6 +249,7 @@ impl FordefiSigner {
             max_poll_attempts,
             chain: config.chain,
             fee: config.fee,
+            push_mode,
         })
     }
 
@@ -326,15 +360,29 @@ impl FordefiSigner {
                 detail_type: "solana_serialized_transaction_message",
                 chain: chain.clone(),
                 data: base64_data,
-                push_mode: "auto",
+                push_mode: self.push_mode,
                 fee: self.fee.clone(),
             },
         };
 
+        let idempotence_id = match self.push_mode {
+            FordefiPushMode::Auto => idempotency_key_from_message(data_bytes),
+            FordefiPushMode::Manual => {
+                let mut namespaced = format!(
+                    "fordefi:solana:manual:{}:{}:",
+                    chain.as_str(),
+                    self.vault_id
+                )
+                .into_bytes();
+                namespaced.extend_from_slice(data_bytes);
+                idempotency_key_from_message(&namespaced)
+            }
+        };
+
         self.submit_request(
             &request,
-            Some(&idempotency_key_from_message(data_bytes)),
-            true,
+            Some(&idempotence_id),
+            self.push_mode == FordefiPushMode::Auto,
         )
         .await
     }
@@ -369,7 +417,7 @@ impl FordefiSigner {
     ///
     /// When `pushable` is true (native Solana transactions), the only terminal
     /// success state is `completed` (in Fordefi's `finalized` aggregate). When
-    /// false (black box / messages), the terminal success state is `signed`
+    /// false (black box / messages / native manual), the terminal success state is `signed`
     /// (also accepting `completed` defensively).
     async fn poll_for_result(
         &self,
@@ -519,7 +567,7 @@ impl FordefiSigner {
     /// Each native create carries an `x-idempotence-id` derived from the message
     /// bytes, so replaying these exact bytes cannot create a second transaction; a
     /// rebuilt transaction derives a different id and is broadcast again.
-    async fn sign_and_serialize_native(
+    async fn sign_and_serialize_native_auto(
         &self,
         transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
@@ -575,6 +623,106 @@ impl FordefiSigner {
         Ok((String::new(), signature))
     }
 
+    /// Sign through Fordefi's native Solana path without broadcasting.
+    async fn sign_and_serialize_native_manual(
+        &self,
+        transaction: &mut VersionedTransaction,
+    ) -> Result<SignedTransaction, SignerError> {
+        self.validate_native_manual_transaction(transaction)?;
+        let message_data = transaction.message.serialize();
+        let tx_id = self.submit_solana_transaction(&message_data).await?;
+        let (returned_tx, signature) = self.finish_native_manual(&tx_id, transaction).await?;
+
+        let canonical_wire = serialize_wire_transaction(&returned_tx)?;
+        if canonical_wire.len() > SOLANA_PACKET_DATA_SIZE {
+            return Err(SignerError::SigningFailed(format!(
+                "Fordefi manual wire transaction exceeds the Solana size limit: {} > {} bytes",
+                canonical_wire.len(),
+                SOLANA_PACKET_DATA_SIZE
+            )));
+        }
+        let serialized_transaction = STANDARD.encode(canonical_wire);
+
+        // Do not mutate caller-owned state until every remote response check and
+        // local serialization step has succeeded.
+        *transaction = returned_tx;
+        Ok((serialized_transaction, signature))
+    }
+
+    /// Decode and validate the transaction returned by native manual signing.
+    async fn finish_native_manual(
+        &self,
+        tx_id: &str,
+        original_tx: &VersionedTransaction,
+    ) -> Result<(VersionedTransaction, Signature), SignerError> {
+        let result = self.poll_for_result(tx_id, false).await?;
+        let raw_tx_b64 = result.raw_transaction.as_ref().ok_or_else(|| {
+            SignerError::SigningFailed(
+                "Fordefi manual solana_transaction response missing raw_transaction".to_string(),
+            )
+        })?;
+
+        let wire_bytes = STANDARD.decode(raw_tx_b64).map_err(|e| {
+            SignerError::SerializationError(format!(
+                "Failed to decode Fordefi manual raw_transaction base64: {e}"
+            ))
+        })?;
+        if wire_bytes.len() > SOLANA_PACKET_DATA_SIZE {
+            return Err(SignerError::SigningFailed(format!(
+                "Fordefi manual wire transaction exceeds the Solana size limit: {} > {} bytes",
+                wire_bytes.len(),
+                SOLANA_PACKET_DATA_SIZE
+            )));
+        }
+
+        let returned_tx = deserialize_wire_transaction(&wire_bytes).map_err(|e| {
+            SignerError::SerializationError(format!(
+                "Failed to deserialize Fordefi manual wire transaction: {e}"
+            ))
+        })?;
+
+        let original_signers = Self::required_signer_keys(original_tx)?;
+        let returned_signers = Self::required_signer_keys(&returned_tx)?;
+        if original_signers != returned_signers {
+            return Err(SignerError::SigningFailed(
+                "Fordefi manual signing changed the transaction required-signer set".to_string(),
+            ));
+        }
+        if returned_tx.signatures.len() != returned_signers.len() {
+            return Err(SignerError::SigningFailed(
+                "Fordefi manual wire transaction has an invalid signature-slot count".to_string(),
+            ));
+        }
+
+        let signature = self.extract_vault_signature(&returned_tx)?;
+        if signature == Signature::default() {
+            return Err(SignerError::SigningFailed(
+                "Fordefi manual wire transaction did not contain the configured vault signature"
+                    .to_string(),
+            ));
+        }
+        if returned_tx
+            .signatures
+            .iter()
+            .skip(1)
+            .any(|signature| *signature != Signature::default())
+        {
+            return Err(SignerError::SigningFailed(
+                "Fordefi manual signing unexpectedly populated a downstream signer slot"
+                    .to_string(),
+            ));
+        }
+
+        let returned_message = returned_tx.message.serialize();
+        if !signature.verify(&self.public_key.to_bytes(), &returned_message) {
+            return Err(SignerError::SigningFailed(
+                "Signature verification failed against Fordefi-returned manual message".to_string(),
+            ));
+        }
+
+        Ok((returned_tx, signature))
+    }
+
     /// Native auto-broadcast currently submits message bytes only. Transactions
     /// with additional required signers would also need their partial signatures
     /// forwarded through Fordefi's `details.signatures` request field.
@@ -592,6 +740,44 @@ impl FordefiSigner {
             ));
         }
         Ok(())
+    }
+
+    /// Native manual signing must run first, with Fordefi as the fee payer.
+    fn validate_native_manual_transaction(
+        &self,
+        transaction: &VersionedTransaction,
+    ) -> Result<(), SignerError> {
+        let required_signers = Self::required_signer_keys(transaction)?;
+        if required_signers.first() != Some(&self.public_key) {
+            return Err(SignerError::SigningFailed(
+                "Fordefi native manual signing requires the configured vault to be the transaction fee payer"
+                    .to_string(),
+            ));
+        }
+        if transaction
+            .signatures
+            .iter()
+            .any(|signature| *signature != Signature::default())
+        {
+            return Err(SignerError::SigningFailed(
+                "Fordefi native manual signing must run before any transaction signatures are applied"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn required_signer_keys(transaction: &VersionedTransaction) -> Result<&[Pubkey], SignerError> {
+        let required_signatures = transaction.message.header().num_required_signatures as usize;
+        transaction
+            .message
+            .static_account_keys()
+            .get(..required_signatures)
+            .ok_or_else(|| {
+                SignerError::SigningFailed(
+                    "Transaction does not contain all required signer account keys".to_string(),
+                )
+            })
     }
 
     /// Locate the configured vault's signature by its required-signer account
@@ -618,10 +804,12 @@ impl FordefiSigner {
         &self,
         transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
-        if self.chain.is_some() {
-            self.sign_and_serialize_native(transaction).await
-        } else {
-            self.sign_and_serialize_black_box(transaction).await
+        match (self.chain.is_some(), self.push_mode) {
+            (true, FordefiPushMode::Auto) => self.sign_and_serialize_native_auto(transaction).await,
+            (true, FordefiPushMode::Manual) => {
+                self.sign_and_serialize_native_manual(transaction).await
+            }
+            (false, _) => self.sign_and_serialize_black_box(transaction).await,
         }
     }
 
@@ -735,7 +923,7 @@ impl SolanaSigner for FordefiSigner {
     }
 
     fn broadcasts_transactions(&self) -> bool {
-        self.chain.is_some()
+        self.chain.is_some() && self.push_mode == FordefiPushMode::Auto
     }
 
     async fn sign_transaction(
@@ -743,7 +931,7 @@ impl SolanaSigner for FordefiSigner {
         tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed_transaction = self.sign_and_serialize(tx).await?;
-        if self.chain.is_some() {
+        if self.broadcasts_transactions() {
             // Native mode has already broadcast the transaction, so it is
             // complete regardless of the caller's untouched signature slots.
             return Ok(SignTransactionResult::Complete(signed_transaction));
@@ -789,8 +977,12 @@ impl SolanaSigner for FordefiSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sdk_adapter::{keypair_pubkey, Keypair, Signer as SdkSigner};
-    use crate::test_util::{add_required_signer, create_test_transaction};
+    use crate::sdk_adapter::{keypair_pubkey, Hash, Keypair, Signer as SdkSigner};
+    #[cfg(feature = "sdk-v4")]
+    use crate::test_util::create_test_v1_transaction;
+    use crate::test_util::{
+        add_required_signer, create_test_transaction, create_test_v0_transaction,
+    };
     use p256::ecdsa::SigningKey;
     use wiremock::{
         matchers::{header, method, path, path_regex},
@@ -871,6 +1063,22 @@ mod tests {
         request_signer: Arc<dyn FordefiRequestSigner>,
         chain: Option<SolanaChainUniqueId>,
     ) -> FordefiSigner {
+        create_test_signer_with_mode(
+            base_url,
+            pubkey,
+            request_signer,
+            chain,
+            FordefiPushMode::Auto,
+        )
+    }
+
+    fn create_test_signer_with_mode(
+        base_url: &str,
+        pubkey: Pubkey,
+        request_signer: Arc<dyn FordefiRequestSigner>,
+        chain: Option<SolanaChainUniqueId>,
+        push_mode: FordefiPushMode,
+    ) -> FordefiSigner {
         FordefiSigner {
             access_token: "test-token".to_string(),
             vault_id: "test-vault-id".to_string(),
@@ -882,6 +1090,7 @@ mod tests {
             max_poll_attempts: 3,
             chain,
             fee: None,
+            push_mode,
         }
     }
 
@@ -900,11 +1109,25 @@ mod tests {
         )
     }
 
+    fn create_native_manual_test_signer(base_url: &str, pubkey: Pubkey) -> FordefiSigner {
+        create_test_signer_with_mode(
+            base_url,
+            pubkey,
+            test_request_signer(),
+            Some(SolanaChainUniqueId::SolanaMainnet),
+            FordefiPushMode::Manual,
+        )
+    }
+
     #[test]
     fn test_broadcasts_transactions_by_mode() {
         let pubkey = Pubkey::new_unique();
         assert!(!create_test_signer("https://example.com", pubkey).broadcasts_transactions());
         assert!(create_native_test_signer("https://example.com", pubkey).broadcasts_transactions());
+        assert!(
+            !create_native_manual_test_signer("https://example.com", pubkey)
+                .broadcasts_transactions()
+        );
     }
 
     /// Build a mock wire transaction: [1 byte sig_count][64-byte signature][message bytes]
@@ -916,6 +1139,120 @@ mod tests {
         wire.extend_from_slice(sig_bytes);
         wire.extend_from_slice(message_bytes);
         wire
+    }
+
+    fn signed_wire_transaction(
+        transaction: &mut VersionedTransaction,
+        keypair: &Keypair,
+    ) -> (Vec<u8>, Signature) {
+        let message_bytes = transaction.message.serialize();
+        let signature = keypair.sign_message(&message_bytes);
+        let required_signatures = transaction.message.header().num_required_signatures as usize;
+        transaction
+            .signatures
+            .resize(required_signatures, Signature::default());
+        transaction.signatures[0] = signature;
+        (
+            serialize_wire_transaction(transaction).expect("serialize signed transaction"),
+            signature,
+        )
+    }
+
+    async fn assert_native_manual_round_trip(
+        mut transaction: VersionedTransaction,
+        keypair: &Keypair,
+        terminal_state: &str,
+    ) {
+        let mock_server = MockServer::start().await;
+        let pubkey = keypair_pubkey(keypair);
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        let original_message = transaction.message.serialize();
+
+        let mut returned_tx = transaction.clone();
+        returned_tx.message.set_recent_blockhash(Hash::new_unique());
+        let returned_message = returned_tx.message.serialize();
+        let (wire_bytes, expected_signature) = signed_wire_transaction(&mut returned_tx, keypair);
+        let wire_b64 = STANDARD.encode(wire_bytes);
+
+        let mut idempotency_input = b"fordefi:solana:manual:solana_mainnet:test-vault-id:".to_vec();
+        idempotency_input.extend_from_slice(&original_message);
+        let expected_idempotence_id = idempotency_key_from_message(&idempotency_input);
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .and(header("x-idempotence-id", expected_idempotence_id.as_str()))
+            .and(wiremock::matchers::body_partial_json(serde_json::json!({
+                "type": "solana_transaction",
+                "details": {
+                    "type": "solana_serialized_transaction_message",
+                    "push_mode": "manual"
+                }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "native-manual-tx"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/transactions/native-manual-tx"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "state": terminal_state,
+                "raw_transaction": wire_b64
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = signer
+            .sign_transaction(&mut transaction)
+            .await
+            .expect("manual transaction should sign");
+        assert!(matches!(result, SignTransactionResult::Complete(_)));
+        let (serialized_transaction, signature) = result.into_signed_transaction();
+        assert!(!serialized_transaction.is_empty());
+        assert_eq!(signature, expected_signature);
+        assert!(signature.verify(&pubkey.to_bytes(), &returned_message));
+        assert_ne!(original_message, returned_message);
+        assert_eq!(transaction.message.serialize(), returned_message);
+        assert_eq!(transaction.signatures, returned_tx.signatures);
+
+        let decoded = deserialize_wire_transaction(
+            &STANDARD
+                .decode(serialized_transaction)
+                .expect("decode returned base64 transaction"),
+        )
+        .expect("decode returned wire transaction");
+        assert_eq!(decoded.message.serialize(), transaction.message.serialize());
+        assert_eq!(decoded.signatures, transaction.signatures);
+    }
+
+    async fn mount_native_manual_result(
+        mock_server: &MockServer,
+        tx_id: &str,
+        state: &str,
+        raw_transaction: Option<String>,
+    ) {
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": tx_id
+            })))
+            .expect(1)
+            .mount(mock_server)
+            .await;
+
+        let mut poll_body = serde_json::json!({ "state": state });
+        if let Some(raw_transaction) = raw_transaction {
+            poll_body["raw_transaction"] = serde_json::Value::String(raw_transaction);
+        }
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/transactions/{tx_id}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(poll_body))
+            .expect(1)
+            .mount(mock_server)
+            .await;
     }
 
     // --- Config validation tests ---
@@ -1023,6 +1360,25 @@ mod tests {
             ..base_test_config()
         });
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_fordefi_manual_config_requires_chain() {
+        let result =
+            FordefiSigner::build_with_push_mode(base_test_config(), FordefiPushMode::Manual);
+        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+    }
+
+    #[test]
+    fn test_fordefi_manual_config_with_chain_valid() {
+        let result = FordefiSigner::build_with_push_mode(
+            FordefiSignerConfig {
+                chain: Some(SolanaChainUniqueId::SolanaDevnet),
+                ..base_test_config()
+            },
+            FordefiPushMode::Manual,
+        );
+        assert_eq!(result.unwrap().push_mode, FordefiPushMode::Manual);
     }
 
     #[test]
@@ -1751,6 +2107,380 @@ mod tests {
             tx.signatures.iter().all(|s| *s == Signature::default()),
             "the caller's transaction must be left untouched by provider-chosen bytes"
         );
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_replaces_legacy_transaction() {
+        let keypair = create_test_keypair();
+        let transaction = create_test_transaction(&keypair_pubkey(&keypair));
+        assert_native_manual_round_trip(transaction, &keypair, "signed").await;
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_replaces_v0_transaction() {
+        let keypair = create_test_keypair();
+        let transaction = create_test_v0_transaction(&keypair_pubkey(&keypair));
+        assert_native_manual_round_trip(transaction, &keypair, "completed").await;
+    }
+
+    #[cfg(feature = "sdk-v4")]
+    #[tokio::test]
+    async fn test_fordefi_native_manual_replaces_v1_transaction() {
+        let keypair = create_test_keypair();
+        let transaction = create_test_v1_transaction(&keypair_pubkey(&keypair));
+        assert_native_manual_round_trip(transaction, &keypair, "signed").await;
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_returns_partial_multisigner_transaction() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let cosigner = keypair_pubkey(&create_test_keypair());
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+
+        let mut transaction = create_test_transaction(&pubkey);
+        add_required_signer(&mut transaction, cosigner);
+        transaction.signatures = vec![Signature::default(); 2];
+
+        let mut returned_tx = transaction.clone();
+        returned_tx.message.set_recent_blockhash(Hash::new_unique());
+        let (wire_bytes, expected_signature) = signed_wire_transaction(&mut returned_tx, &keypair);
+        mount_native_manual_result(
+            &mock_server,
+            "manual-multisigner",
+            "signed",
+            Some(STANDARD.encode(wire_bytes)),
+        )
+        .await;
+
+        let result = signer.sign_transaction(&mut transaction).await.unwrap();
+        assert!(matches!(result, SignTransactionResult::Partial(_)));
+        let (serialized_transaction, signature) = result.into_signed_transaction();
+        assert_eq!(signature, expected_signature);
+        assert!(!serialized_transaction.is_empty());
+        assert_eq!(transaction.signatures[0], expected_signature);
+        assert_eq!(transaction.signatures[1], Signature::default());
+        assert_eq!(
+            transaction.message.serialize(),
+            returned_tx.message.serialize()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_forwards_fee_configuration() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let mut signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        signer.fee = Some(FordefiSolanaFee::Custom {
+            unit_price: None,
+            priority_fee: Some("1000".to_string()),
+        });
+
+        let mut transaction = create_test_transaction(&pubkey);
+        let mut returned_tx = transaction.clone();
+        returned_tx.message.set_recent_blockhash(Hash::new_unique());
+        let (wire_bytes, _) = signed_wire_transaction(&mut returned_tx, &keypair);
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .and(wiremock::matchers::body_partial_json(serde_json::json!({
+                "details": {
+                    "push_mode": "manual",
+                    "fee": { "type": "custom", "priority_fee": "1000" }
+                }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "manual-fee"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/transactions/manual-fee"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "state": "signed",
+                "raw_transaction": STANDARD.encode(wire_bytes)
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        signer.sign_transaction(&mut transaction).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_rejects_presigned_input_before_submit() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        let mut transaction = create_test_transaction(&pubkey);
+        transaction.signatures[0] = keypair.sign_message(&transaction.message.serialize());
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&mock_server)
+            .await;
+
+        assert!(matches!(
+            signer.sign_transaction(&mut transaction).await.unwrap_err(),
+            SignerError::SigningFailed(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_rejects_non_vault_fee_payer_before_submit() {
+        let mock_server = MockServer::start().await;
+        let vault_keypair = create_test_keypair();
+        let signer =
+            create_native_manual_test_signer(&mock_server.uri(), keypair_pubkey(&vault_keypair));
+        let mut transaction = create_test_transaction(&keypair_pubkey(&create_test_keypair()));
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&mock_server)
+            .await;
+
+        assert!(matches!(
+            signer.sign_transaction(&mut transaction).await.unwrap_err(),
+            SignerError::SigningFailed(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_rejects_missing_raw_transaction() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        let mut transaction = create_test_transaction(&pubkey);
+        let original_message = transaction.message.serialize();
+        mount_native_manual_result(&mock_server, "manual-no-raw", "signed", None).await;
+
+        assert!(matches!(
+            signer.sign_transaction(&mut transaction).await.unwrap_err(),
+            SignerError::SigningFailed(_)
+        ));
+        assert_eq!(transaction.message.serialize(), original_message);
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_rejects_malformed_raw_transaction() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        let mut transaction = create_test_transaction(&pubkey);
+        mount_native_manual_result(
+            &mock_server,
+            "manual-malformed",
+            "signed",
+            Some(STANDARD.encode([1u8, 2, 3])),
+        )
+        .await;
+
+        assert!(matches!(
+            signer.sign_transaction(&mut transaction).await.unwrap_err(),
+            SignerError::SerializationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_rejects_oversized_raw_transaction() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        let mut transaction = create_test_transaction(&pubkey);
+        mount_native_manual_result(
+            &mock_server,
+            "manual-oversized",
+            "signed",
+            Some(STANDARD.encode(vec![0u8; SOLANA_PACKET_DATA_SIZE + 1])),
+        )
+        .await;
+
+        assert!(matches!(
+            signer.sign_transaction(&mut transaction).await.unwrap_err(),
+            SignerError::SigningFailed(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_rejects_missing_vault_signature() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        let mut transaction = create_test_transaction(&pubkey);
+        let returned_tx = transaction.clone();
+        let wire_bytes = serialize_wire_transaction(&returned_tx).unwrap();
+        mount_native_manual_result(
+            &mock_server,
+            "manual-no-signature",
+            "signed",
+            Some(STANDARD.encode(wire_bytes)),
+        )
+        .await;
+
+        assert!(matches!(
+            signer.sign_transaction(&mut transaction).await.unwrap_err(),
+            SignerError::SigningFailed(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_rejects_invalid_vault_signature() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        let mut transaction = create_test_transaction(&pubkey);
+        let mut returned_tx = transaction.clone();
+        returned_tx.signatures[0] = Signature::from([0xabu8; 64]);
+        let wire_bytes = serialize_wire_transaction(&returned_tx).unwrap();
+        mount_native_manual_result(
+            &mock_server,
+            "manual-invalid-signature",
+            "signed",
+            Some(STANDARD.encode(wire_bytes)),
+        )
+        .await;
+
+        assert!(matches!(
+            signer.sign_transaction(&mut transaction).await.unwrap_err(),
+            SignerError::SigningFailed(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_rejects_changed_signer_set() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        let mut transaction = create_test_transaction(&pubkey);
+        let mut returned_tx = transaction.clone();
+        add_required_signer(&mut returned_tx, keypair_pubkey(&create_test_keypair()));
+        returned_tx.signatures = vec![Signature::default(); 2];
+        let (wire_bytes, _) = signed_wire_transaction(&mut returned_tx, &keypair);
+        mount_native_manual_result(
+            &mock_server,
+            "manual-changed-signers",
+            "signed",
+            Some(STANDARD.encode(wire_bytes)),
+        )
+        .await;
+
+        assert!(matches!(
+            signer.sign_transaction(&mut transaction).await.unwrap_err(),
+            SignerError::SigningFailed(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_rejects_populated_downstream_signature() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let cosigner_keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        let mut transaction = create_test_transaction(&pubkey);
+        add_required_signer(&mut transaction, keypair_pubkey(&cosigner_keypair));
+        transaction.signatures = vec![Signature::default(); 2];
+
+        let mut returned_tx = transaction.clone();
+        let returned_message = returned_tx.message.serialize();
+        returned_tx.signatures = vec![
+            keypair.sign_message(&returned_message),
+            cosigner_keypair.sign_message(&returned_message),
+        ];
+        let wire_bytes = serialize_wire_transaction(&returned_tx).unwrap();
+        mount_native_manual_result(
+            &mock_server,
+            "manual-downstream-signature",
+            "signed",
+            Some(STANDARD.encode(wire_bytes)),
+        )
+        .await;
+
+        assert!(matches!(
+            signer.sign_transaction(&mut transaction).await.unwrap_err(),
+            SignerError::SigningFailed(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_failure_state_is_not_broadcast_unconfirmed() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        let mut transaction = create_test_transaction(&pubkey);
+        mount_native_manual_result(&mock_server, "manual-failed", "error_signing", None).await;
+
+        assert!(matches!(
+            signer.sign_transaction(&mut transaction).await.unwrap_err(),
+            SignerError::SigningFailed(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_poll_timeout_is_not_broadcast_unconfirmed() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        let mut transaction = create_test_transaction(&pubkey);
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "manual-pending"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/transactions/manual-pending"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "state": "pending_signature"
+            })))
+            .expect(3)
+            .mount(&mock_server)
+            .await;
+
+        assert!(matches!(
+            signer.sign_transaction(&mut transaction).await.unwrap_err(),
+            SignerError::RemoteApiError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_submit_error_is_not_broadcast_unconfirmed() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        let mut transaction = create_test_transaction(&pubkey);
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(ResponseTemplate::new(502))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        assert!(matches!(
+            signer.sign_transaction(&mut transaction).await.unwrap_err(),
+            SignerError::RemoteApiError(_)
+        ));
     }
 
     #[tokio::test]

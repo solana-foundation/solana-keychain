@@ -1,10 +1,8 @@
 use std::str::FromStr;
 
-#[cfg(feature = "sdk-v4")]
-use crate::sdk_adapter::Signature;
 use crate::sdk_adapter::{
-    AccountMeta, Hash, Instruction, Message, Pubkey, Transaction, VersionedMessage,
-    VersionedTransaction,
+    AccountMeta, Hash, Instruction, Message, Pubkey, Signature, Transaction, V0Message,
+    VersionedMessage, VersionedTransaction,
 };
 #[cfg(feature = "sdk-v4")]
 use solana_sdk_v4::message::v1::{Message as V1Message, TransactionConfig};
@@ -32,6 +30,18 @@ pub fn create_test_transaction_with_recipient(from: &Pubkey, to: &Pubkey) -> Ver
     let mut tx = Transaction::new_unsigned(message);
     tx.message.recent_blockhash = Hash::default();
     tx.into()
+}
+
+pub fn create_test_v0_transaction(from: &Pubkey) -> VersionedTransaction {
+    let to = Pubkey::new_unique();
+    let instruction = create_transfer_instruction(from, &to, 1_000_000);
+    let message = V0Message::try_compile(from, &[instruction], &[], Hash::default())
+        .expect("v0 test message should compile");
+
+    VersionedTransaction {
+        signatures: vec![Signature::default(); usize::from(message.header.num_required_signatures)],
+        message: VersionedMessage::V0(message),
+    }
 }
 
 /// Insert `pubkey` as a second required signer in a legacy test transaction.
