@@ -29,15 +29,17 @@
     "scripts": {
         "build": "tsc --build",
         "clean": "rm -rf dist *.tsbuildinfo",
+        "test:unit": "vitest run --config ../../vitest.config.unit.ts",
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
         "@solana-program/system": "^0.13.0",
         "@solana/keychain-core": "workspace:*",
-        "@solana/kit": "^7.0.0",
+        "@solana/kit": "8.0.0-canary-20260819144513",
         "litesvm": "^1.2.1"
     },
     "devDependencies": {
-        "@types/node": "^26.1.2"
+        "@types/node": "^26.1.2",
+        "vitest": "^4.1.10"
     }
 }
