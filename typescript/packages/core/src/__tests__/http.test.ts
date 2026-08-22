@@ -175,6 +175,55 @@ describe('fetchSignerJson', () => {
         ).rejects.toBe(reason);
     });
 
+    it('throws the abort reason rather than PARSING_ERROR when the caller aborts during the body read', async () => {
+        const controller = new AbortController();
+        const reason = new Error('caller cancelled');
+        mockFetch(
+            async () =>
+                ({
+                    json: async () => {
+                        controller.abort(reason);
+                        throw new Error('aborted');
+                    },
+                    ok: true,
+                    status: 200,
+                }) as unknown as Response,
+        );
+
+        await expect(
+            fetchSignerJson({
+                abortSignal: controller.signal,
+                providerName: 'Test',
+                url: 'https://api.example.com',
+            }),
+        ).rejects.toBe(reason);
+    });
+
+    it('keeps the provider status on a non-2xx response even when the caller aborts during the body read', async () => {
+        const controller = new AbortController();
+        mockFetch(
+            async () =>
+                ({
+                    ok: false,
+                    status: 400,
+                    text: async () => {
+                        controller.abort(new Error('caller cancelled'));
+                        throw new Error('aborted');
+                    },
+                }) as unknown as Response,
+        );
+
+        const error = await expectSignerError(
+            fetchSignerJson({
+                abortSignal: controller.signal,
+                providerName: 'Test',
+                url: 'https://api.example.com',
+            }),
+            SignerErrorCode.REMOTE_API_ERROR,
+        );
+        expect(error.context?.status).toBe(400);
+    });
+
     it('throws HTTP_ERROR when fetch rejects', async () => {
         mockFetch(async () => {
             throw new TypeError('network down');

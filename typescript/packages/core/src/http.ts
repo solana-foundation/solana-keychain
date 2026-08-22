@@ -57,6 +57,12 @@ export function providerMayHaveAccepted(error: unknown): boolean {
  * Redirects are always rejected and every request carries a timeout unless
  * the caller supplies its own `init.signal`. A caller `abortSignal` propagates
  * its abort reason unwrapped, so cancellation is distinguishable from failure.
+ *
+ * A non-2xx response is the one exception: the provider has already returned
+ * its verdict, and that verdict is what callers classify broadcast safety on
+ * (a 4xx rules the transaction out, an abort reason does not). Such a response
+ * surfaces as `REMOTE_API_ERROR` carrying the status even when the caller
+ * aborts while the error body is being read.
  */
 export async function fetchSignerJson<TResponse>(options: FetchSignerJsonOptions): Promise<TResponse> {
     const { abortSignal, init = {}, providerName, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, url } = options;
@@ -95,6 +101,7 @@ export async function fetchSignerJson<TResponse>(options: FetchSignerJsonOptions
     try {
         return (await response.json()) as TResponse;
     } catch (error) {
+        abortSignal?.throwIfAborted();
         throwSignerError(SignerErrorCode.PARSING_ERROR, {
             cause: error,
             message: `Failed to parse ${providerName} response`,
