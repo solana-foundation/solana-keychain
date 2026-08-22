@@ -24,14 +24,27 @@ const (
 
 // Chain selects Fordefi's native Solana signing mode. When set, transactions
 // are submitted as solana_transaction requests (Fordefi may replace the
-// blockhash and fees, signs, and auto-broadcasts) and messages as
-// solana_message requests. When empty, the signer uses black-box raw signing.
+// blockhash and fees before signing) and messages as solana_message requests.
+// PushMode controls whether Fordefi broadcasts native transactions. When Chain
+// is empty, the signer uses black-box raw signing.
 type Chain string
 
 // The Solana chains supported by Fordefi's native signing mode.
 const (
 	ChainSolanaDevnet  Chain = "solana_devnet"
 	ChainSolanaMainnet Chain = "solana_mainnet"
+)
+
+// PushMode controls who broadcasts a native Solana transaction. Auto asks
+// Fordefi to modify, sign, and broadcast it. Manual asks Fordefi to modify and
+// sign it, then returns the authoritative transaction for caller-managed
+// downstream signing and broadcasting.
+type PushMode string
+
+// The push modes supported by Fordefi's native Solana transaction API.
+const (
+	PushModeAuto   PushMode = "auto"
+	PushModeManual PushMode = "manual"
 )
 
 // PriorityLevel is a named priority-fee tier for native Solana transactions.
@@ -98,6 +111,10 @@ type Config struct {
 	// Chain, when set, switches from black-box raw signing to Fordefi's native
 	// Solana signing mode (see Chain).
 	Chain Chain
+
+	// PushMode controls broadcasting for native Solana transactions. Empty is
+	// equivalent to PushModeAuto. PushModeManual requires Chain.
+	PushMode PushMode
 
 	// Fee is the native-mode fee configuration. Requires Chain.
 	Fee *Fee

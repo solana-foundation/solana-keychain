@@ -154,6 +154,56 @@ when unset, requests go through an HTTPS-enforcing client built from
 The KMS backends (`awskms`, `gcpkms`) expose the equivalent SDK-level client
 override instead.
 
+### Fordefi Signing Modes
+
+Fordefi supports three transaction modes:
+
+- **Black box** (`Chain` empty): signs the caller's exact message bytes, updates
+  the transaction locally, and returns its base64 wire encoding for the caller
+  to broadcast.
+- **Native auto** (`Chain` set and `PushMode` empty or `PushModeAuto`): Fordefi
+  may modify the transaction, signs it, and broadcasts it. The caller's
+  transaction is intentionally left untouched and `EncodedTransaction` is
+  empty because it must not be sent again.
+- **Native manual** (`Chain` set and `PushModeManual`): Fordefi may modify and
+  sign the transaction but does not broadcast it. `SignTransaction` replaces
+  the caller's `*solana.Transaction` with Fordefi's validated result and returns
+  a non-empty base64 wire transaction.
+
+Manual mode must run first with the Fordefi vault as fee payer. Single-signer
+results are complete and ready for caller-managed broadcasting. Multisigner
+results are partial: add every downstream signature to the replaced `tx`, then
+serialize that completed transaction rather than broadcasting the earlier
+partial encoding.
+
+```go
+import "github.com/solana-foundation/solana-keychain/go/signers/fordefi"
+
+signer, err := fordefi.New(ctx, fordefi.Config{
+	AccessToken:   os.Getenv("FORDEFI_ACCESS_TOKEN"),
+	VaultID:       os.Getenv("FORDEFI_VAULT_ID"),
+	PublicKey:     os.Getenv("FORDEFI_PUBLIC_KEY"),
+	PrivateKeyPEM: os.Getenv("FORDEFI_PRIVATE_KEY_PEM"),
+	Chain:         fordefi.ChainSolanaDevnet,
+	PushMode:      fordefi.PushModeManual,
+})
+if err != nil {
+	return err
+}
+
+result, err := signer.SignTransaction(ctx, tx)
+if err != nil {
+	return err
+}
+// tx now contains Fordefi's authoritative message and signature. If
+// result.IsComplete(), result.EncodedTransaction can be sent to Solana RPC.
+```
+
+Fordefi can replace the recent blockhash but does not return its
+`lastValidBlockHeight`. Go retains the replacement blockhash in `tx`; broadcast
+manual results promptly rather than relying on local block-height expiry
+detection.
+
 ### Batch Signing
 
 Single-item methods match the contract 1:1; batch signing is provided as free
@@ -209,7 +259,7 @@ present.
 | [`signers/para`](signers/para/) | Para wallet API |
 | [`signers/crossmint`](signers/crossmint/) | Crossmint (create/poll/approve flow, HKDF delegated-signer key) |
 | [`signers/openfort`](signers/openfort/) | Openfort (ES256 x-wallet-auth JWTs) |
-| [`signers/fordefi`](signers/fordefi/) | Fordefi (black-box or native Solana MPC signing with status polling, P-256 request signing) |
+| [`signers/fordefi`](signers/fordefi/) | Fordefi (black-box, native auto, or native manual Solana MPC signing with status polling and P-256 request signing) |
 | [`testutils`](testutils/) | Deterministic keypair + test-transaction helpers for testing your own signers |
 
 Backend-behavior quirks: `crossmint` intentionally does not support

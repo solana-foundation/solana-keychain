@@ -59,11 +59,11 @@ type blackBoxDetails struct {
 }
 
 type solanaTransactionDetails struct {
-	Type     string `json:"type"`
-	Chain    Chain  `json:"chain"`
-	Data     string `json:"data"`
-	PushMode string `json:"push_mode"`
-	Fee      *Fee   `json:"fee,omitempty"`
+	Type     string   `json:"type"`
+	Chain    Chain    `json:"chain"`
+	Data     string   `json:"data"`
+	PushMode PushMode `json:"push_mode"`
+	Fee      *Fee     `json:"fee,omitempty"`
 }
 
 type solanaMessageDetails struct {
