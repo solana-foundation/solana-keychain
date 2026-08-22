@@ -51,6 +51,20 @@ Requires **Go 1.25+** (the `gcpkms` module requires the toolchain floor set by
 [`github.com/gagliardetto/solana-go`](https://github.com/gagliardetto/solana-go)
 for the on-chain types and canonical transaction serialization.
 
+### v1 transactions pin an unreleased solana-go
+
+No released solana-go decodes v1
+([PR #481](https://github.com/solana-foundation/solana-go/pull/481) is unmerged),
+so every module carries a `replace` onto that pull request's branch:
+
+```
+replace github.com/gagliardetto/solana-go => github.com/sonicfromnewyoke/solana-go v0.0.0-20260817125726-409ee9873f6d
+```
+
+This is a development pin, not a release configuration: the fork branch can be
+rebased or deleted, and `replace` does not reach consumers of a published module.
+Drop the directives and require a released version once PR #481 lands.
+
 Until the first `go/...` version tags are published, `@latest` cannot resolve
 the in-repo `go/core` dependency. The signer modules use `replace` directives
 during development, and `replace` only applies to the main module — a signer is

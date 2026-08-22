@@ -6,9 +6,8 @@ import (
 	"github.com/gagliardetto/solana-go"
 )
 
-// Serialize encodes a transaction to a base64 string. solana-go's MarshalBinary
-// targets the canonical Solana wire format (compact-u16 signature count, then
-// 64-byte signatures, then the message).
+// Serialize encodes a transaction to a base64 string in the canonical Solana
+// wire format.
 func Serialize(tx *solana.Transaction) (string, error) {
 	b, err := tx.MarshalBinary()
 	if err != nil {
