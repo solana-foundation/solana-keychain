@@ -82,6 +82,7 @@ async def main() -> None:
     #   result.encoded_transaction  # base64 wire transaction
     #   result.signature            # this signer's signature
     #   result.is_complete          # are all required signatures present?
+    #   result.transaction          # authoritative provider replacement, when present
 
 
 asyncio.run(main())
@@ -110,6 +111,54 @@ Remote HTTP backends accept an optional `http_client` override in their config
 through an HTTPS-enforcing one-shot client with a 60s timeout and redirects
 rejected.
 
+### Fordefi signing modes
+
+Fordefi supports three transaction modes:
+
+- With no `chain`, black-box mode signs the caller's exact message bytes and
+  leaves broadcasting to the caller.
+- With `chain` and the default `push_mode="auto"`, Fordefi may update the
+  blockhash and fees, then signs and broadcasts the transaction. The result's
+  encoded transaction is empty and the caller's transaction remains untouched.
+- With `chain` and `push_mode="manual"`, Fordefi may modify and sign the
+  transaction but does not broadcast it. The caller's solders transaction
+  cannot have its read-only message replaced, so use `result.transaction` as
+  the authoritative transaction for downstream signing and broadcasting.
+
+```python
+import os
+
+from solana_keychain.fordefi import FordefiSignerConfig, create_fordefi_signer
+
+signer = await create_fordefi_signer(
+    FordefiSignerConfig(
+        access_token=os.environ["FORDEFI_ACCESS_TOKEN"],
+        vault_id=os.environ["FORDEFI_VAULT_ID"],
+        public_key=os.environ["FORDEFI_PUBLIC_KEY"],
+        private_key_pem=os.environ["FORDEFI_PRIVATE_KEY_PEM"],
+        chain="solana_mainnet",
+        push_mode="manual",
+    )
+)
+
+result = await signer.sign_transaction(transaction)
+fordefi_transaction = result.transaction
+if fordefi_transaction is None:
+    raise RuntimeError("Fordefi manual signing did not return a transaction")
+
+if result.is_complete:
+    # Broadcast result.encoded_transaction through your RPC client.
+    pass
+else:
+    # Apply downstream signatures to fordefi_transaction, reserialize, and broadcast.
+    pass
+```
+
+Manual mode requires Fordefi to be the fee payer and to sign before every
+downstream signer. Fordefi normally refreshes the transaction blockhash but
+does not return its exact `lastValidBlockHeight`; broadcast manual results
+promptly rather than relying on a locally known block-height expiry.
+
 ## Core API
 
 Every signer implements the `SolanaSigner` ABC from `solana_keychain.core`:
@@ -126,10 +175,12 @@ class SolanaSigner(ABC):
     async def is_available(self) -> bool: ...
 ```
 
-`sign_transaction` signs the transaction in place and returns a
-`SignedTransaction(encoded_transaction, signature, is_complete)`; `is_complete`
-reports whether every required signature is present. Legacy, v0 and v1
-transactions are all accepted.
+`sign_transaction` returns a
+`SignedTransaction(encoded_transaction, signature, is_complete, transaction=...)`;
+`is_complete` reports whether every required signature is present. Most signers
+modify the supplied transaction in place. When a provider returns authoritative
+replacement bytes that cannot be applied in place, the optional `transaction`
+field carries the replacement. Legacy, v0 and v1 transactions are accepted.
 
 Errors are always `SignerError` with a stable `code`
 (`SIGNER_INVALID_PRIVATE_KEY`, `SIGNER_SIGNING_FAILED`, …).

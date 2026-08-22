@@ -11,7 +11,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 import httpx
@@ -33,6 +33,7 @@ from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
     get_signing_keypair_position,
+    has_all_required_signatures,
     idempotency_key_from_message,
     serialize_transaction,
     signed_message_bytes,
@@ -45,6 +46,9 @@ DEFAULT_API_BASE_URL = "https://api.fordefi.com"
 DEFAULT_POLL_INTERVAL_MS = 2000
 DEFAULT_MAX_POLL_ATTEMPTS = 50
 SUPPORTED_CHAINS = ("solana_devnet", "solana_mainnet")
+SOLANA_PACKET_DATA_SIZE = 1232
+
+FordefiPushMode = Literal["auto", "manual"]
 
 _AVAILABILITY_TIMEOUT_SECONDS = 5.0
 _VAULT_VERIFICATION_TIMEOUT_SECONDS = 10.0
@@ -78,8 +82,9 @@ class FordefiSignerConfig:
     ``request_signer`` for KMS/HSM-backed request signing.
 
     ``chain`` (``solana_devnet`` / ``solana_mainnet``) switches from black-box
-    raw signing to Fordefi's native Solana API types: transactions are signed
-    and auto-broadcast by Fordefi, messages use ``solana_message``.
+    raw signing to Fordefi's native Solana API types. ``push_mode`` controls
+    whether Fordefi broadcasts native transactions (``auto``) or returns them
+    for caller-managed broadcasting (``manual``). Messages use ``solana_message``.
 
     ``fee`` is the native-mode fee configuration passed through verbatim,
     e.g. ``{"type": "priority", "priority_level": "medium"}`` or
@@ -97,6 +102,7 @@ class FordefiSignerConfig:
     chain: str | None = None
     fee: dict[str, Any] | None = None
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
+    push_mode: FordefiPushMode = "auto"
 
 
 class FordefiSigner(SolanaSigner):
@@ -107,8 +113,10 @@ class FordefiSigner(SolanaSigner):
     ``vault_id``. ``create_fordefi_signer()`` does this for you.
 
     Black-box mode (default) signs the caller's exact message bytes and the
-    caller broadcasts. Native mode (``chain`` set) lets Fordefi replace the
-    blockhash and fees, sign, and auto-broadcast; see ``sign_transaction``.
+    caller broadcasts. Native auto mode lets Fordefi replace the blockhash and
+    fees, sign, and broadcast. Native manual mode returns Fordefi's replacement
+    through ``SignedTransaction.transaction`` for the caller to finish signing
+    and broadcast; see ``sign_transaction``.
     """
 
     def __init__(self, config: FordefiSignerConfig) -> None:
@@ -132,6 +140,16 @@ class FordefiSigner(SolanaSigner):
             raise SignerError(
                 SignerErrorCode.CONFIG_ERROR,
                 f"chain must be one of {', '.join(SUPPORTED_CHAINS)}",
+            )
+        if config.push_mode not in ("auto", "manual"):
+            raise SignerError(
+                SignerErrorCode.CONFIG_ERROR,
+                "push_mode must be one of auto, manual",
+            )
+        if config.push_mode == "manual" and config.chain is None:
+            raise SignerError(
+                SignerErrorCode.CONFIG_ERROR,
+                "manual push_mode requires chain to be set (native Solana mode)",
             )
         if config.fee is not None and config.chain is None:
             raise SignerError(
@@ -160,6 +178,7 @@ class FordefiSigner(SolanaSigner):
         self._max_poll_attempts = config.max_poll_attempts
         self._chain = config.chain
         self._fee = config.fee
+        self._push_mode = config.push_mode
         self._http_client = config.http_client
         try:
             self._public_key = Pubkey.from_string(config.public_key)
@@ -191,7 +210,7 @@ class FordefiSigner(SolanaSigner):
 
     @property
     def broadcasts_transactions(self) -> bool:
-        return self._chain is not None
+        return self._chain is not None and self._push_mode == "auto"
 
     async def _sign_request(self, path: str, timestamp: int, body: str) -> str:
         return await self._request_signer.sign_request(f"{path}|{timestamp}|{body}".encode())
@@ -252,7 +271,7 @@ class FordefiSigner(SolanaSigner):
             "type": "solana_serialized_transaction_message",
             "chain": self._chain,
             "data": base64.b64encode(data).decode("ascii"),
-            "push_mode": "auto",
+            "push_mode": self._push_mode,
         }
         if self._fee is not None:
             details["fee"] = self._fee
@@ -344,27 +363,31 @@ class FordefiSigner(SolanaSigner):
         ``transaction`` in place, and returns the encoded transaction for the
         caller to broadcast.
 
-        Native mode (``chain`` set) submits the message for signing with
-        ``push_mode: auto``: Fordefi replaces the blockhash (and optionally
-        fees), signs, and broadcasts the transaction itself. The returned
-        ``encoded_transaction`` is therefore empty and ``transaction`` is left
-        unmodified — the returned signature identifies the on-chain
-        transaction. Only legacy transactions whose sole required signer is
-        the configured vault are supported.
+        Native auto mode submits the message with ``push_mode: auto``. Fordefi
+        replaces the blockhash (and optionally fees), signs, and broadcasts the
+        transaction itself. The returned ``encoded_transaction`` is empty and
+        the caller's transaction is left unmodified; the signature identifies
+        the on-chain transaction. The configured vault must be the sole signer.
 
-        Native mode is not retry-safe: any failure after Fordefi accepts the
+        Native manual mode submits with ``push_mode: manual``. Fordefi modifies
+        and signs without broadcasting. Because solders messages are read-only,
+        the caller's object stays untouched and the authoritative replacement is
+        returned in ``SignedTransaction.transaction`` and as canonical base64 in
+        ``encoded_transaction``. Fordefi must be the fee payer and sign first.
+
+        Native auto mode is not retry-safe: any failure after Fordefi accepts the
         submission raises ``BROADCAST_UNCONFIRMED`` carrying
         ``provider_transaction_id``; check that transaction with Fordefi
         before retrying. A submission that fails without a usable response
         raises ``BROADCAST_UNCONFIRMED`` with no ``provider_transaction_id``.
 
-        Each native create carries an ``x-idempotence-id`` derived from the
-        message bytes, so replaying these exact bytes cannot create a second
-        transaction; a rebuilt transaction derives a different id and is
-        broadcast again.
+        Each native create carries a deterministic ``x-idempotence-id``. Manual
+        mode uses a mode/chain/vault namespace so it never collides with auto.
         """
         if self._chain is not None:
-            return await self._sign_transaction_native(transaction)
+            if self._push_mode == "manual":
+                return await self._sign_transaction_native_manual(transaction)
+            return await self._sign_transaction_native_auto(transaction)
         message_data = signed_message_bytes(transaction.message)
         signature = await self._sign_black_box(message_data)
         self._verify_signature(signature, message_data)
@@ -384,7 +407,7 @@ class FordefiSigner(SolanaSigner):
                 "whose sole required signer is the configured vault",
             )
 
-    async def _sign_transaction_native(
+    async def _sign_transaction_native_auto(
         self, transaction: VersionedTransaction
     ) -> SignedTransaction:
         self._require_sole_required_signer(transaction)
@@ -432,6 +455,126 @@ class FordefiSigner(SolanaSigner):
                 error._detail,
                 provider_transaction_id=transaction_id,
             ) from None
+
+    @staticmethod
+    def _required_signer_keys(transaction: VersionedTransaction) -> tuple[Pubkey, ...]:
+        required_signatures = transaction.message.header.num_required_signatures
+        account_keys = transaction.message.account_keys
+        if len(account_keys) < required_signatures:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Transaction does not contain all required signer account keys",
+            )
+        return tuple(account_keys[:required_signatures])
+
+    def _validate_native_manual_transaction(self, transaction: VersionedTransaction) -> None:
+        required_signers = self._required_signer_keys(transaction)
+        if not required_signers or required_signers[0] != self._public_key:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi native manual signing requires the configured vault to be "
+                "the transaction fee payer",
+            )
+        default_signature = Signature.default()
+        if any(signature != default_signature for signature in transaction.signatures):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi native manual signing must run before any transaction "
+                "signatures are applied",
+            )
+
+    def _manual_idempotence_id(self, message_data: bytes) -> str:
+        namespace = f"fordefi:solana:manual:{self._chain}:{self._vault_id}:".encode() + message_data
+        return idempotency_key_from_message(namespace)
+
+    async def _sign_transaction_native_manual(
+        self, transaction: VersionedTransaction
+    ) -> SignedTransaction:
+        self._validate_native_manual_transaction(transaction)
+        message_data = signed_message_bytes(transaction.message)
+        transaction_id = await self._post_transaction(
+            self._solana_transaction_request(message_data),
+            idempotence_id=self._manual_idempotence_id(message_data),
+        )
+        return await self._finish_native_manual(transaction_id, transaction)
+
+    async def _finish_native_manual(
+        self, transaction_id: str, original: VersionedTransaction
+    ) -> SignedTransaction:
+        result = await self._poll_for_result(transaction_id, pushable=False)
+        raw_transaction = result.get("raw_transaction")
+        if not isinstance(raw_transaction, str):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual solana_transaction response missing raw_transaction",
+            )
+        try:
+            wire_bytes = base64.b64decode(raw_transaction, validate=True)
+        except Exception:
+            raise SignerError(
+                SignerErrorCode.SERIALIZATION_ERROR,
+                "Failed to decode Fordefi manual raw_transaction base64",
+            ) from None
+        if len(wire_bytes) > SOLANA_PACKET_DATA_SIZE:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual wire transaction exceeds the Solana size limit",
+            )
+        try:
+            returned = VersionedTransaction.from_bytes(wire_bytes)
+        except Exception:
+            raise SignerError(
+                SignerErrorCode.SERIALIZATION_ERROR,
+                "Failed to deserialize Fordefi manual wire transaction",
+            ) from None
+
+        original_signers = self._required_signer_keys(original)
+        returned_signers = self._required_signer_keys(returned)
+        if returned_signers != original_signers:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual signing changed the transaction required-signer set",
+            )
+
+        signatures = list(returned.signatures)
+        if len(signatures) != len(returned_signers):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual wire transaction has an invalid signature-slot count",
+            )
+        signature = signatures[0]
+        default_signature = Signature.default()
+        if signature == default_signature:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual wire transaction did not contain the configured vault signature",
+            )
+        if any(item != default_signature for item in signatures[1:]):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual signing unexpectedly populated a downstream signer slot",
+            )
+        self._verify_signature(signature, signed_message_bytes(returned.message))
+
+        try:
+            canonical_wire = bytes(returned)
+        except Exception:
+            raise SignerError(
+                SignerErrorCode.SERIALIZATION_ERROR,
+                "Failed to serialize Fordefi manual wire transaction",
+            ) from None
+        if len(canonical_wire) > SOLANA_PACKET_DATA_SIZE:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual wire transaction exceeds the Solana size limit",
+            )
+
+        return SignedTransaction(
+            encoded_transaction=base64.b64encode(canonical_wire).decode("ascii"),
+            signature=signature,
+            is_complete=has_all_required_signatures(returned),
+            transaction=returned,
+        )
 
     async def _finish_native_broadcast(self, transaction_id: str) -> SignedTransaction:
         result = await self._poll_for_result(transaction_id, pushable=True)

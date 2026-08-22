@@ -1,7 +1,7 @@
 """Core contract definitions for Solana signers."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from solders.pubkey import Pubkey
 from solders.signature import Signature
@@ -14,12 +14,17 @@ class SignedTransaction:
 
     ``encoded_transaction`` is ``base64(bincode(tx))``. ``is_complete`` is True when
     every required signature slot is populated, False when other signers still need
-    to sign.
+    to sign. ``transaction`` is the authoritative in-memory transaction when a
+    provider returns modified bytes that cannot be applied to the caller's solders
+    object in place.
     """
 
     encoded_transaction: str
     signature: Signature
     is_complete: bool
+    transaction: VersionedTransaction | None = field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
 
 
 class SolanaSigner(ABC):
@@ -38,9 +43,11 @@ class SolanaSigner(ABC):
 
     @abstractmethod
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
-        """Sign ``transaction`` (modified in place) and return the encoded result.
+        """Sign ``transaction`` and return the encoded result.
 
-        Accepts legacy, v0 and v1."""
+        Most signers modify the input in place. When a provider returns an
+        authoritative replacement that cannot be applied in place, it is exposed
+        as ``SignedTransaction.transaction``. Accepts legacy, v0 and v1."""
 
     @abstractmethod
     async def sign_message(self, message: bytes) -> Signature:

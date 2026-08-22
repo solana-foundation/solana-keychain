@@ -1,5 +1,6 @@
 from solana_keychain.fordefi.request_signer import FordefiRequestSigner, PemRequestSigner
 from solana_keychain.fordefi.signer import (
+    FordefiPushMode,
     FordefiSigner,
     FordefiSignerConfig,
     create_fordefi_signer,
@@ -7,6 +8,7 @@ from solana_keychain.fordefi.signer import (
 
 __all__ = [
     "FordefiRequestSigner",
+    "FordefiPushMode",
     "FordefiSigner",
     "FordefiSignerConfig",
     "PemRequestSigner",

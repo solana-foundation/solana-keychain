@@ -7,6 +7,7 @@
 - thirteen-backend parity: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila (#210, #211, #213–#221)
 - `create_keychain_signer()` umbrella factory with lazy per-backend imports, plus the env-gated live integration suite (#222)
 - Fordefi backend: black-box raw signing and native Solana auto-broadcast mode, pluggable P-256 request signer, vault ownership verification (#227)
+- Fordefi native manual mode: provider-modified signing with caller-managed broadcasting and authoritative returned transactions
 
 ### Bug Fixes
 

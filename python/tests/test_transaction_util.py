@@ -7,7 +7,7 @@ from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
-from solana_keychain import SignerError, SignerErrorCode
+from solana_keychain import SignedTransaction, SignerError, SignerErrorCode
 from solana_keychain.core import (
     add_signature_to_transaction,
     classify_signed_transaction,
@@ -75,6 +75,18 @@ def test_classify_marks_missing_cosigner_partial() -> None:
     result = classify_signed_transaction(transaction, serialize_transaction(transaction), signature)
 
     assert not result.is_complete
+
+
+def test_signed_transaction_authoritative_transaction_is_optional_and_non_comparing() -> None:
+    _, transaction = signed_test_transaction()
+    signature = Signature.default()
+    existing_shape = SignedTransaction("encoded", signature, False)
+    with_transaction = SignedTransaction("encoded", signature, False, transaction=transaction)
+
+    assert existing_shape.transaction is None
+    assert with_transaction.transaction is transaction
+    assert existing_shape == with_transaction
+    assert ", transaction=" not in repr(with_transaction)
 
 
 def test_serialize_transaction_round_trips_through_bincode() -> None:
