@@ -146,7 +146,17 @@ func (s *Signer) signRequest(ctx context.Context, path string, timestamp int64, 
 
 // submitTransaction POSTs a signing request to /api/v1/transactions with
 // request-level P-256 signing and returns the Fordefi transaction ID.
-func (s *Signer) submitTransaction(ctx context.Context, request transactionRequest, idempotenceID string) (string, error) {
+//
+// broadcastManaged marks a submit whose acceptance means Fordefi is already
+// broadcasting, so an unresolved failure is reported as unconfirmed.
+func (s *Signer) submitTransaction(ctx context.Context, request transactionRequest, idempotenceID string, broadcastManaged bool) (string, error) {
+	classify := func(status int, err error) error {
+		if !broadcastManaged {
+			return err
+		}
+		return core.UnconfirmedUnlessRejected(status, err)
+	}
+
 	body, err := json.Marshal(request)
 	if err != nil {
 		return "", core.WrapSignerError(core.CodeSerializationError, "failed to serialize fordefi request", err)
@@ -171,15 +181,15 @@ func (s *Signer) submitTransaction(ctx context.Context, request transactionReque
 
 	status, respBody, err := s.send(req)
 	if err != nil {
-		return "", err
+		return "", classify(status, err)
 	}
 	if !is2xx(status) {
-		return "", core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status))
+		return "", classify(status, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status)))
 	}
 
 	var created createTransactionResponse
 	if err := json.Unmarshal(respBody, &created); err != nil || created.ID == "" {
-		return "", core.NewSignerError(core.CodeSerializationError, "failed to parse response")
+		return "", classify(status, core.NewSignerError(core.CodeSerializationError, "failed to parse response"))
 	}
 	return created.ID, nil
 }

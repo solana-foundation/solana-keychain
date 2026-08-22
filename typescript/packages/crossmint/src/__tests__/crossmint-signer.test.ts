@@ -24,7 +24,7 @@ vi.mock('@solana/transactions', async importOriginal => {
     };
 });
 
-import { assertSignatureValid, isSolanaSendingSigner, isSolanaSigner } from '@solana/keychain-core';
+import { assertSignatureValid, isSolanaSendingSigner, isSolanaSigner, type SignerError } from '@solana/keychain-core';
 import { isMessagePartialSigner, isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
 import { getTransactionDecoder } from '@solana/transactions';
 import { createCrossmintSigner } from '../crossmint-signer.js';
@@ -306,7 +306,7 @@ describe('CrossmintSigner', () => {
                     createMockTransaction(),
                     createMockTransaction(),
                 ]),
-            ).rejects.toMatchObject({ code: 'SIGNER_REMOTE_API_ERROR' });
+            ).rejects.toMatchObject({ code: 'SIGNER_BROADCAST_UNCONFIRMED' });
 
             // wallet create + tx0 create + tx1 create = 3 fetches; tx2 must not be created.
             expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
@@ -883,7 +883,7 @@ describe('CrossmintSigner', () => {
             });
         });
 
-        it('throws on HTTP error during transaction creation', async () => {
+        it('keeps a 4xx during transaction creation a plain failure', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()
                 .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 }));
@@ -904,7 +904,7 @@ describe('CrossmintSigner', () => {
             });
         });
 
-        it('throws on network error during transaction creation', async () => {
+        it('reports a network error during transaction creation as unconfirmed with no transaction id', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()
                 .mockRejectedValueOnce(new Error('network down'));
@@ -915,9 +915,60 @@ describe('CrossmintSigner', () => {
                 pollIntervalMs: 1,
             });
 
-            await expect(signer.signAndSendTransactions([createMockTransaction()])).rejects.toMatchObject({
-                code: 'SIGNER_HTTP_ERROR',
+            const error = await signer.signAndSendTransactions([createMockTransaction()]).then(
+                () => {
+                    throw new Error('expected the create failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+            expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            expect(error.context?.cause).toMatchObject({ code: 'SIGNER_HTTP_ERROR' });
+            expect(error.context?.providerTransactionId).toBeUndefined();
+            expect(error.context?.status).toBeUndefined();
+        });
+
+        it('reports a 5xx during transaction creation as unconfirmed with no transaction id', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse()) // create()
+                .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'unavailable' }), { status: 503 }));
+
+            const signer = await createCrossmintSigner({
+                ...mockConfig,
+                maxPollAttempts: 1,
+                pollIntervalMs: 1,
             });
+
+            const error = await signer.signAndSendTransactions([createMockTransaction()]).then(
+                () => {
+                    throw new Error('expected the create failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+            expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            expect(error.context?.cause).toMatchObject({ code: 'SIGNER_REMOTE_API_ERROR' });
+            expect(error.context?.providerTransactionId).toBeUndefined();
+            expect(error.context?.status).toBe(503);
+        });
+
+        it('reports an accepted create with no id as unconfirmed', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse()) // create()
+                .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'pending' }), { status: 201 }));
+
+            const signer = await createCrossmintSigner({
+                ...mockConfig,
+                maxPollAttempts: 1,
+                pollIntervalMs: 1,
+            });
+
+            const error = await signer.signAndSendTransactions([createMockTransaction()]).then(
+                () => {
+                    throw new Error('expected the create failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+            expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            expect(error.context?.providerTransactionId).toBeUndefined();
         });
 
         it('uses the final polled response when maxPollAttempts is 1', async () => {

@@ -6,7 +6,7 @@ use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::SignTransactionResult;
 use crate::transaction_util::{
     deserialize_wire_transaction, idempotency_key_from_message, serialize_wire_transaction,
-    TransactionUtil,
+    unconfirmed_unless_rejected, TransactionUtil,
 };
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use std::str::FromStr;
@@ -244,9 +244,13 @@ impl CrossmintSigner {
             .header("x-idempotency-key", idempotency_key)
             .json(&request)
             .send()
-            .await?;
+            .await
+            .map_err(|error| unconfirmed_unless_rejected(None, error.into()))?;
 
-        Self::parse_response_with_required_field(response, "id", "create_transaction").await
+        let status = response.status().as_u16();
+        Self::parse_response_with_required_field(response, "id", "create_transaction")
+            .await
+            .map_err(|error| unconfirmed_unless_rejected(Some(status), error))
     }
 
     async fn get_transaction(
@@ -768,9 +772,13 @@ impl CrossmintSigner {
     ///
     /// Not retry-safe: any failure after the create is accepted returns
     /// [`SignerError::BroadcastUnconfirmed`] carrying the Crossmint transaction id;
-    /// check that transaction with Crossmint before retrying. Each create carries
-    /// an `x-idempotency-key` derived from the message bytes, so retrying the
-    /// exact same bytes cannot create a second transaction.
+    /// check that transaction with Crossmint before retrying. A create that fails
+    /// without a usable response returns `BroadcastUnconfirmed` with no id.
+    ///
+    /// Each create carries an `x-idempotency-key` derived from the message bytes,
+    /// so replaying these exact bytes cannot create a second transaction; a
+    /// rebuilt transaction derives a different key and executes as a new
+    /// transfer.
     async fn sign_and_serialize(
         &self,
         transaction: &mut VersionedTransaction,
@@ -796,7 +804,8 @@ impl CrossmintSigner {
             .finish_managed_transaction(create_response, &expected_message)
             .await
             .map_err(|error| SignerError::BroadcastUnconfirmed {
-                provider_tx_id,
+                provider_tx_id: Some(provider_tx_id),
+                provider_status: None,
                 detail: error.detail_string(),
             })?;
 
@@ -1474,14 +1483,117 @@ mod tests {
             SignerError::BroadcastUnconfirmed {
                 provider_tx_id,
                 detail,
+                ..
             } => {
-                assert_eq!(provider_tx_id, "tx-approval");
+                assert_eq!(provider_tx_id.as_deref(), Some("tx-approval"));
                 assert!(
                     detail.contains("Unable to extract signature"),
                     "Unexpected error detail: {detail}"
                 );
             }
             other => panic!("Expected BroadcastUnconfirmed error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_server_error_is_unconfirmed_without_a_transaction_id() {
+        let server = MockServer::start().await;
+        let wallet_keypair = Keypair::new();
+        let signer_address = keypair_pubkey(&wallet_keypair).to_string();
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .respond_with(wallet_response(&signer_address))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .respond_with(ResponseTemplate::new(503).set_body_json(serde_json::json!({
+                "error": "service unavailable"
+            })))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 1);
+        signer.init().await.unwrap();
+        let mut tx = create_test_transaction(&signer.pubkey());
+
+        match signer.sign_transaction(&mut tx).await.unwrap_err() {
+            SignerError::BroadcastUnconfirmed {
+                provider_tx_id,
+                provider_status,
+                ..
+            } => {
+                assert_eq!(provider_tx_id, None);
+                assert_eq!(provider_status, Some(503));
+            }
+            other => panic!("Expected BroadcastUnconfirmed error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_accepted_without_an_id_is_unconfirmed() {
+        let server = MockServer::start().await;
+        let wallet_keypair = Keypair::new();
+        let signer_address = keypair_pubkey(&wallet_keypair).to_string();
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .respond_with(wallet_response(&signer_address))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .set_body_json(serde_json::json!({ "status": "pending" })),
+            )
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 1);
+        signer.init().await.unwrap();
+        let mut tx = create_test_transaction(&signer.pubkey());
+
+        match signer.sign_transaction(&mut tx).await.unwrap_err() {
+            SignerError::BroadcastUnconfirmed {
+                provider_tx_id,
+                provider_status,
+                ..
+            } => {
+                assert_eq!(provider_tx_id, None);
+                assert_eq!(provider_status, None);
+            }
+            other => panic!("Expected BroadcastUnconfirmed error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_rejected_by_crossmint_stays_a_plain_failure() {
+        let server = MockServer::start().await;
+        let wallet_keypair = Keypair::new();
+        let signer_address = keypair_pubkey(&wallet_keypair).to_string();
+
+        Mock::given(method("GET"))
+            .and(path("/2025-06-09/wallets/test-wallet"))
+            .respond_with(wallet_response(&signer_address))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "message": "invalid transaction"
+            })))
+            .mount(&server)
+            .await;
+
+        let mut signer = create_test_signer(&server.uri(), 1, 1);
+        signer.init().await.unwrap();
+        let mut tx = create_test_transaction(&signer.pubkey());
+
+        match signer.sign_transaction(&mut tx).await.unwrap_err() {
+            SignerError::RemoteApiError(_) => {}
+            other => panic!("Expected RemoteApiError, got: {:?}", other),
         }
     }
 

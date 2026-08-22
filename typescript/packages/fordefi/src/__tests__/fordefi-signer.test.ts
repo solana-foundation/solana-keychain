@@ -366,6 +366,22 @@ describe('FordefiSigner', () => {
             await expect(signer.signTransactions([mockTx])).rejects.toThrow();
         });
 
+        // Black-box mode only signs, so a failed submit has no on-chain outcome to be unconfirmed about.
+        it('does not report a 5xx on a black-box submit as unconfirmed', async () => {
+            setupCreateVaultMock();
+            const signer = await FordefiSigner.create(mockConfig);
+            vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ message: 'boom' }), { status: 502 }));
+
+            const mockTx = { messageBytes: new Uint8Array(32) } as never;
+            const error = await signer.signTransactions([mockTx]).then(
+                () => {
+                    throw new Error('expected the submit failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+            expect(error.code).toBe('SIGNER_REMOTE_API_ERROR');
+        });
+
         it('should handle completed state without signatures', async () => {
             setupCreateVaultMock();
             const signer = await FordefiSigner.create(mockConfig);
@@ -624,6 +640,66 @@ describe('FordefiSigner', () => {
             const cause = error.context?.cause as SignerError;
             expect(cause.code).toBe('SIGNER_SIGNING_FAILED');
             expect(cause.context?.message).toContain('no fee-payer signature');
+        });
+
+        it('reports a 5xx on submit as unconfirmed with no transaction id', async () => {
+            setupCreateVaultMock();
+            const signer = await FordefiSigner.create(nativeConfig);
+            vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ message: 'boom' }), { status: 502 }));
+
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+            const error = await signer.signAndSendTransactions([mockTx]).then(
+                () => {
+                    throw new Error('expected the submit failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+            expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            expect(error.context?.providerTransactionId).toBeUndefined();
+            expect(error.context?.status).toBe(502);
+        });
+
+        it('reports an accepted submit with no id as unconfirmed', async () => {
+            setupCreateVaultMock();
+            const signer = await FordefiSigner.create(nativeConfig);
+            vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ state: 'pending' }), { status: 200 }));
+
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+            const error = await signer.signAndSendTransactions([mockTx]).then(
+                () => {
+                    throw new Error('expected the submit failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+            expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            expect(error.context?.providerTransactionId).toBeUndefined();
+            expect(error.context?.status).toBeUndefined();
+        });
+
+        it('keeps a 4xx on submit a plain failure', async () => {
+            setupCreateVaultMock();
+            const signer = await FordefiSigner.create(nativeConfig);
+            vi.mocked(fetch).mockResolvedValueOnce(
+                new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 }),
+            );
+
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+            const error = await signer.signAndSendTransactions([mockTx]).then(
+                () => {
+                    throw new Error('expected the submit failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+            expect(error.code).toBe('SIGNER_REMOTE_API_ERROR');
         });
 
         it('should throw when raw_transaction is missing from response', async () => {

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
@@ -15,7 +16,12 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    provider_may_have_accepted,
+)
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
@@ -26,6 +32,8 @@ from solana_keychain.core.transaction_util import (
     signed_message_bytes,
 )
 from solana_keychain.crossmint.derive import derive_signing_key
+
+_logger = logging.getLogger("solana_keychain")
 
 DEFAULT_API_BASE_URL = "https://www.crossmint.com/api"
 API_VERSION_PATH = "2025-06-09"
@@ -241,14 +249,34 @@ class CrossmintSigner(SolanaSigner):
         params: dict[str, Any] = {"transaction": transaction_b58}
         if self._signer is not None:
             params["signer"] = self._signer
-        return await self._request_with_required_field(
-            method="POST",
-            url=self._wallets_url("transactions"),
-            required_field="id",
-            context="create_transaction",
-            json_body={"params": params},
-            extra_headers={"x-idempotency-key": idempotency_key},
-        )
+        try:
+            return await self._request_with_required_field(
+                method="POST",
+                url=self._wallets_url("transactions"),
+                required_field="id",
+                context="create_transaction",
+                json_body={"params": params},
+                extra_headers={"x-idempotency-key": idempotency_key},
+            )
+        except asyncio.CancelledError as error:
+            # The re-raise must stay a CancelledError for asyncio, so the warning
+            # goes to the log.
+            _logger.warning(
+                "Crossmint may have created a cancelled transaction with no id "
+                "returned; check before retrying"
+            )
+            raise asyncio.CancelledError(
+                "Crossmint may have created the transaction, but no transaction id was returned"
+            ) from error
+        except SignerError as error:
+            if not provider_may_have_accepted(error.status_code):
+                raise
+            # Crossmint may be executing a transaction whose id never reached us.
+            raise SignerError(
+                SignerErrorCode.BROADCAST_UNCONFIRMED,
+                error._detail,
+                status_code=error.status_code,
+            ) from None
 
     async def _get_transaction(self, transaction_id: str) -> dict[str, Any]:
         return await self._request_with_required_field(
@@ -555,9 +583,14 @@ class CrossmintSigner(SolanaSigner):
 
         Not retry-safe: any failure after the create is accepted raises
         ``BROADCAST_UNCONFIRMED`` carrying ``provider_transaction_id``; check
-        that transaction with Crossmint before retrying. Each create carries an
-        ``x-idempotency-key`` derived from the message bytes, so retrying the
-        exact same bytes cannot create a second transaction.
+        that transaction with Crossmint before retrying. A create that fails
+        without a usable response raises ``BROADCAST_UNCONFIRMED`` with no
+        ``provider_transaction_id``.
+
+        Each create carries an ``x-idempotency-key`` derived from the message
+        bytes, so replaying these exact bytes cannot create a second
+        transaction; a rebuilt transaction derives a different key and executes
+        as a new transfer.
         """
         public_key = self._initialized_pubkey()
         expected_message = signed_message_bytes(transaction.message)
@@ -573,6 +606,17 @@ class CrossmintSigner(SolanaSigner):
             return await self._finish_managed_transaction(
                 create_response, transaction, expected_message, public_key
             )
+        except asyncio.CancelledError as error:
+            # Awaiting a cancelled task strips the raised instance, so the id is
+            # also logged; the re-raise must stay a CancelledError for asyncio.
+            _logger.warning(
+                "Crossmint may have executed cancelled transaction %s; check it before retrying",
+                provider_transaction_id,
+            )
+            raise asyncio.CancelledError(
+                "Crossmint may have executed the transaction, but the outcome could "
+                f"not be confirmed (provider transaction id: {provider_transaction_id})"
+            ) from error
         except SignerError as error:
             raise SignerError(
                 SignerErrorCode.BROADCAST_UNCONFIRMED,

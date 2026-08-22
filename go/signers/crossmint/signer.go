@@ -202,9 +202,12 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 //
 // Not retry-safe: any failure after the create is accepted returns
 // CodeBroadcastUnconfirmed carrying the Crossmint transaction id; check that
-// transaction with Crossmint before retrying. Each create carries an
-// x-idempotency-key derived from the message bytes, so retrying the exact
-// same bytes cannot create a second transaction.
+// transaction with Crossmint before retrying. A create that fails without a
+// usable response returns CodeBroadcastUnconfirmed with no transaction id.
+//
+// Each create carries an x-idempotency-key derived from the message bytes, so
+// replaying these exact bytes cannot create a second transaction; a rebuilt
+// transaction derives a different key and executes as a new transfer.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.publicKey.IsZero() {
 		return core.SignedTransaction{}, core.NewSignerError(core.CodeConfigError, "signer not initialized")

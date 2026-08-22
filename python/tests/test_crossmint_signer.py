@@ -1,5 +1,7 @@
+import asyncio
 import hashlib
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -274,6 +276,115 @@ async def test_sign_transaction_polling_timeout() -> None:
         await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id == "tx-1"
+
+
+@respx.mock
+async def test_create_server_error_is_unconfirmed_without_a_transaction_id() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(503, json={"error": "service unavailable"})
+    )
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id is None
+    assert excinfo.value.status_code == 503
+
+
+@respx.mock
+async def test_create_accepted_without_an_id_is_unconfirmed() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"status": "pending"}))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id is None
+    assert excinfo.value.status_code is None
+
+
+@respx.mock
+async def test_create_rejected_by_crossmint_stays_a_plain_failure() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(400, json={"error": "invalid transaction"})
+    )
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
+
+
+@respx.mock
+async def test_cancellation_during_create_warns_without_a_transaction_id(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """No id exists yet, so the warning is all the caller gets."""
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    creating = asyncio.Event()
+    observed: list[str] = []
+
+    async def hang(_request: httpx.Request) -> httpx.Response:
+        creating.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    respx.post(TRANSACTIONS_URL).mock(side_effect=hang)
+
+    async def run() -> None:
+        try:
+            await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        except asyncio.CancelledError as error:
+            observed.append(str(error))
+            raise
+
+    task = asyncio.create_task(run())
+    await creating.wait()
+    task.cancel()
+    with caplog.at_level(logging.WARNING, logger="solana_keychain"):
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert observed and "may have created the transaction" in observed[0]
+    assert "check before retrying" in caplog.text
+
+
+@respx.mock
+async def test_cancellation_after_create_carries_the_transaction_id(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The re-raised CancelledError must carry the provider transaction id, and the
+    id must also be logged: awaiting the cancelled task yields a fresh
+    CancelledError from the task machinery, without the message."""
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    polling = asyncio.Event()
+    observed: list[str] = []
+
+    async def hang(_request: httpx.Request) -> httpx.Response:
+        polling.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json=tx_response("pending")))
+    respx.get(f"{TRANSACTIONS_URL}/tx-1").mock(side_effect=hang)
+
+    async def run() -> None:
+        try:
+            await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        except asyncio.CancelledError as error:
+            observed.append(str(error))
+            raise
+
+    task = asyncio.create_task(run())
+    await polling.wait()
+    task.cancel()
+    with caplog.at_level(logging.WARNING, logger="solana_keychain"):
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert observed and "tx-1" in observed[0]
+    assert "tx-1" in caplog.text
 
 
 @respx.mock

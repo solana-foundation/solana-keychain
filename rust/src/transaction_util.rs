@@ -24,6 +24,22 @@ pub(crate) fn idempotency_key_from_message(message_bytes: &[u8]) -> String {
     )
 }
 
+/// A 4xx is the only create outcome that rules out a transaction; anything else
+/// (no response, timeout, 5xx, unusable success body) may already be executing.
+/// `status` is `None` when no response arrived, and is passed on only when the
+/// response was the failure.
+#[cfg(any(feature = "crossmint", feature = "fordefi"))]
+pub(crate) fn unconfirmed_unless_rejected(status: Option<u16>, error: SignerError) -> SignerError {
+    if matches!(status, Some(status) if (400..500).contains(&status)) {
+        return error;
+    }
+    SignerError::BroadcastUnconfirmed {
+        provider_tx_id: None,
+        provider_status: status.filter(|status| *status >= 400),
+        detail: error.detail_string(),
+    }
+}
+
 /// Serialize a transaction to canonical wire bytes.
 #[cfg(feature = "sdk-v4")]
 pub(crate) fn serialize_wire_transaction(

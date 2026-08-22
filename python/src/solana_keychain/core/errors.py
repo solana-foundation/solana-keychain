@@ -49,6 +49,9 @@ class SignerError(Exception):
     Security: ``str()``, ``repr()``, and ``args`` only ever expose the fixed generic
     message for the code. The per-error ``detail`` is kept private so key material and
     raw remote-API responses cannot leak through formatted output or logs.
+
+    ``status_code`` is the remote HTTP status when the failure came from a response,
+    and ``None`` otherwise.
     """
 
     def __init__(
@@ -57,6 +60,7 @@ class SignerError(Exception):
         detail: str = "",
         *,
         provider_transaction_id: str | None = None,
+        status_code: int | None = None,
     ) -> None:
         message = _GENERIC_MESSAGES[code]
         if provider_transaction_id is not None:
@@ -65,6 +69,7 @@ class SignerError(Exception):
         self.code = code
         self._detail = detail
         self.provider_transaction_id = provider_transaction_id
+        self.status_code = status_code
 
     def __repr__(self) -> str:
         return f"SignerError({self.code.value})"

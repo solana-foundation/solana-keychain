@@ -106,9 +106,13 @@ func (s *Signer) createTransaction(ctx context.Context, transaction, idempotency
 	}}
 	status, body, err := s.doRequest(ctx, http.MethodPost, u, req, idempotencyKey)
 	if err != nil {
-		return transactionResponse{}, err
+		return transactionResponse{}, core.UnconfirmedUnlessRejected(status, err)
 	}
-	return parseResponseWithRequiredField[transactionResponse](status, body, "id", "create_transaction")
+	created, err := parseResponseWithRequiredField[transactionResponse](status, body, "id", "create_transaction")
+	if err != nil {
+		return transactionResponse{}, core.UnconfirmedUnlessRejected(status, err)
+	}
+	return created, nil
 }
 
 // getTransaction fetches the current state of a transaction.

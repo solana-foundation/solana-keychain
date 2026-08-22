@@ -25,6 +25,7 @@ from solana_keychain.core.http import (
     assert_https_url,
     fetch_signer_json,
     normalize_base_url,
+    provider_may_have_accepted,
 )
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
@@ -354,9 +355,13 @@ class FordefiSigner(SolanaSigner):
         Native mode is not retry-safe: any failure after Fordefi accepts the
         submission raises ``BROADCAST_UNCONFIRMED`` carrying
         ``provider_transaction_id``; check that transaction with Fordefi
-        before retrying. Each native create carries an ``x-idempotence-id``
-        derived from the message bytes, so retrying the exact same bytes
-        cannot create a second transaction.
+        before retrying. A submission that fails without a usable response
+        raises ``BROADCAST_UNCONFIRMED`` with no ``provider_transaction_id``.
+
+        Each native create carries an ``x-idempotence-id`` derived from the
+        message bytes, so replaying these exact bytes cannot create a second
+        transaction; a rebuilt transaction derives a different id and is
+        broadcast again.
         """
         if self._chain is not None:
             return await self._sign_transaction_native(transaction)
@@ -384,10 +389,30 @@ class FordefiSigner(SolanaSigner):
     ) -> SignedTransaction:
         self._require_sole_required_signer(transaction)
         message_data = signed_message_bytes(transaction.message)
-        transaction_id = await self._post_transaction(
-            self._solana_transaction_request(message_data),
-            idempotence_id=idempotency_key_from_message(message_data),
-        )
+        try:
+            transaction_id = await self._post_transaction(
+                self._solana_transaction_request(message_data),
+                idempotence_id=idempotency_key_from_message(message_data),
+            )
+        except asyncio.CancelledError as error:
+            # The re-raise must stay a CancelledError for asyncio, so the warning
+            # goes to the log.
+            _logger.warning(
+                "Fordefi may have accepted a cancelled transaction with no id "
+                "returned; check before retrying"
+            )
+            raise asyncio.CancelledError(
+                "Fordefi may have accepted the transaction, but no transaction id was returned"
+            ) from error
+        except SignerError as error:
+            if not provider_may_have_accepted(error.status_code):
+                raise
+            # Fordefi may be broadcasting a transaction whose id never reached us.
+            raise SignerError(
+                SignerErrorCode.BROADCAST_UNCONFIRMED,
+                error._detail,
+                status_code=error.status_code,
+            ) from None
         try:
             return await self._finish_native_broadcast(transaction_id)
         except asyncio.CancelledError as error:

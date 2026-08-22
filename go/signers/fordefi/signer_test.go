@@ -689,6 +689,97 @@ func assertBroadcastUnconfirmed(t *testing.T, err error, wantTxID string) {
 	}
 }
 
+func TestSignTransactionNativeSubmitServerErrorIsUnconfirmedWithoutID(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	if err == nil {
+		t.Fatal("expected a failed submit to be reported")
+	}
+	assertBroadcastUnconfirmedWithoutID(t, err, http.StatusBadGateway)
+}
+
+func TestSignTransactionNativeSubmitWithoutIDIsUnconfirmed(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, map[string]any{"state": "pending"})
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	if err == nil {
+		t.Fatal("expected an accepted submit without an id to be reported")
+	}
+	assertBroadcastUnconfirmedWithoutID(t, err, 0)
+}
+
+func TestSignTransactionNativeSubmitRejectionStaysPlainFailure(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	if code, _ := core.CodeOf(err); code != core.CodeRemoteAPIError {
+		t.Errorf("got %s, want REMOTE_API_ERROR", code)
+	}
+}
+
+// Black-box mode only signs, so a failed submit has no on-chain outcome to be unconfirmed about.
+func TestSignTransactionBlackBoxSubmitServerErrorIsNotUnconfirmed(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	s := newTestSigner(t, baseConfig(t), pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	if code, _ := core.CodeOf(err); code != core.CodeRemoteAPIError {
+		t.Errorf("got %s, want REMOTE_API_ERROR", code)
+	}
+}
+
+// assertBroadcastUnconfirmedWithoutID checks for an unconfirmed broadcast with no
+// id, carrying wantStatus (0 when the provider sent no failing status).
+func assertBroadcastUnconfirmedWithoutID(t *testing.T, err error, wantStatus int) {
+	t.Helper()
+	if code, _ := core.CodeOf(err); code != core.CodeBroadcastUnconfirmed {
+		t.Errorf("got %s, want BROADCAST_UNCONFIRMED", code)
+	}
+	var se *core.SignerError
+	if !errors.As(err, &se) || se.ProviderTxID != "" {
+		t.Errorf("error must carry no provider transaction id, got %v", err)
+	}
+	if se != nil && se.ProviderStatus != wantStatus {
+		t.Errorf("provider status = %d, want %d", se.ProviderStatus, wantStatus)
+	}
+}
+
 func TestSignTransactionNativeRejectsMultiSigner(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	var requests atomic.Int64

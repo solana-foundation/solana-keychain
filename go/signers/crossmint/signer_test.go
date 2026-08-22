@@ -439,6 +439,64 @@ func TestSignTransactionSuccess(t *testing.T) {
 	}
 }
 
+// createStatusSigner points a signer at a create endpoint answering status/body.
+func createStatusSigner(t *testing.T, status int, body string) *Signer {
+	t.Helper()
+	priv := testutils.TestPrivateKey()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, pubkeyOf(priv).String()))
+	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, status, body)
+	})
+	cfg := baseConfig(startServer(t, mux))
+	cfg.MaxPollAttempts = 1
+	return newTestSigner(t, cfg)
+}
+
+// assertUnconfirmedWithoutID checks for an unconfirmed broadcast with no id,
+// carrying wantStatus (0 when the provider sent no failing status).
+func assertUnconfirmedWithoutID(t *testing.T, err error, wantStatus int) {
+	t.Helper()
+	assertCode(t, err, core.CodeBroadcastUnconfirmed)
+	var se *core.SignerError
+	if !errors.As(err, &se) || se.ProviderTxID != "" {
+		t.Errorf("error must carry no provider transaction id, got %v", err)
+	}
+	if se != nil && se.ProviderStatus != wantStatus {
+		t.Errorf("provider status = %d, want %d", se.ProviderStatus, wantStatus)
+	}
+}
+
+func TestCreateServerErrorIsUnconfirmedWithoutID(t *testing.T) {
+	s := createStatusSigner(t, http.StatusServiceUnavailable, `{"message":"unavailable"}`)
+	tx, err := testutils.CreateTestTransaction(s.Pubkey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	assertUnconfirmedWithoutID(t, err, http.StatusServiceUnavailable)
+}
+
+func TestCreateAcceptedWithoutIDIsUnconfirmed(t *testing.T) {
+	s := createStatusSigner(t, http.StatusCreated, `{"status":"pending"}`)
+	tx, err := testutils.CreateTestTransaction(s.Pubkey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	assertUnconfirmedWithoutID(t, err, 0)
+}
+
+func TestCreateRejectionStaysPlainFailure(t *testing.T) {
+	s := createStatusSigner(t, http.StatusBadRequest, `{"message":"invalid transaction"}`)
+	tx, err := testutils.CreateTestTransaction(s.Pubkey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	assertCode(t, err, core.CodeRemoteAPIError)
+}
+
 // TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes:
 // approval signatures (over Crossmint's internal payload) must never be used
 // as the transaction signature.

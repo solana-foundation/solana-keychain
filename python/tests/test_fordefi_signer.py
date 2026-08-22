@@ -365,6 +365,92 @@ async def test_sign_transaction_native_polling_timeout_is_broadcast_unconfirmed(
 
 
 @respx.mock
+async def test_native_submit_server_error_is_unconfirmed_without_a_transaction_id() -> None:
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(502, json={"error": "bad gateway"})
+    )
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id is None
+    assert excinfo.value.status_code == 502
+
+
+@respx.mock
+async def test_native_submit_accepted_without_an_id_is_unconfirmed() -> None:
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"state": "pending"}))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id is None
+    assert excinfo.value.status_code is None
+
+
+@respx.mock
+async def test_native_submit_rejected_by_fordefi_stays_a_plain_failure() -> None:
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(401, json={"error": "unauthorized"})
+    )
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
+
+
+@respx.mock
+async def test_black_box_submit_server_error_is_not_reported_as_unconfirmed() -> None:
+    """Black-box mode only signs, so a failed submit has no on-chain outcome to be
+    unconfirmed about."""
+    keypair = Keypair()
+    signer = make_signer(keypair)
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(502, json={"error": "bad gateway"})
+    )
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
+
+
+@respx.mock
+async def test_cancellation_during_native_submit_warns_without_a_transaction_id(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """No id exists yet, so the warning is all the caller gets."""
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet")
+    submitting = asyncio.Event()
+    observed: list[str] = []
+
+    async def hang(_request: httpx.Request) -> httpx.Response:
+        submitting.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    respx.post(TRANSACTIONS_URL).mock(side_effect=hang)
+
+    async def run() -> None:
+        try:
+            await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        except asyncio.CancelledError as error:
+            observed.append(str(error))
+            raise
+
+    task = asyncio.create_task(run())
+    await submitting.wait()
+    task.cancel()
+    with caplog.at_level(logging.WARNING, logger="solana_keychain"):
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert observed and "may have accepted the transaction" in observed[0]
+    assert "check before retrying" in caplog.text
+
+
+@respx.mock
 async def test_sign_transaction_native_cancellation_carries_the_transaction_id(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
