@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -208,6 +209,118 @@ func TestValidateManualMessageMutationFeePolicy(t *testing.T) {
 		if err := (&Signer{fee: &Fee{Type: FeeTypeCustom, UnitPrice: "11"}}).
 			validateManualMessageMutation(originalPrice, cloneManualTestTransaction(originalPrice)); err == nil {
 			t.Fatal("expected a caller-supplied price that conflicts with custom unit_price to be rejected")
+		}
+	})
+}
+
+func TestValidateManualFeeCeiling(t *testing.T) {
+	payer := solana.MustPublicKeyFromBase58("11111111111111111111111111111112")
+	base := createVersionedManualTestTransaction(t, payer, solana.MessageVersionLegacy)
+
+	// ceilingPrice is the largest compute-unit price that still lands on the
+	// default ceiling when Fordefi also sets the maximum compute-unit limit.
+	const ceilingPrice = DefaultMaxPriorityFeeLamports * microLamportsPerLamport / maxComputeUnitLimit
+
+	withFee := func(signer *Signer, price, limit uint64) error {
+		returned := cloneManualTestTransaction(base)
+		prependManualComputeBudgetInstruction(returned, setComputeUnitLimitDiscriminator, limit)
+		prependManualComputeBudgetInstruction(returned, setComputeUnitPriceDiscriminator, price)
+		return signer.validateManualMessageMutation(base, returned)
+	}
+
+	t.Run("default ceiling rejects a drain-sized fee in every uncapped mode", func(t *testing.T) {
+		for _, fee := range []*Fee{
+			nil,
+			{Type: FeeTypePriority, PriorityLevel: PriorityHigh},
+			{Type: FeeTypeCustom},
+		} {
+			if err := withFee(&Signer{fee: fee}, math.MaxUint64, maxComputeUnitLimit); err == nil {
+				t.Fatalf("expected rejection for fee %+v", fee)
+			}
+		}
+	})
+
+	t.Run("default ceiling allows ordinary and congestion-level fees", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			price uint64
+			limit uint64
+		}{
+			{"ordinary", 1_000_000, 200_000},
+			{"congestion", 10_000_000, maxComputeUnitLimit},
+			{"exactly at the ceiling", ceilingPrice, maxComputeUnitLimit},
+		} {
+			if err := withFee(&Signer{}, tc.price, tc.limit); err != nil {
+				t.Fatalf("%s: unexpected rejection: %v", tc.name, err)
+			}
+		}
+	})
+
+	t.Run("one micro-lamport past the ceiling is rejected", func(t *testing.T) {
+		if err := withFee(&Signer{}, ceilingPrice+1, maxComputeUnitLimit); err == nil {
+			t.Fatal("expected rejection just above the default ceiling")
+		}
+	})
+
+	t.Run("an absent compute-unit limit is charged at the runtime maximum", func(t *testing.T) {
+		returned := cloneManualTestTransaction(base)
+		prependManualComputeBudgetInstruction(returned, setComputeUnitPriceDiscriminator, ceilingPrice+1)
+		if err := (&Signer{}).validateManualMessageMutation(base, returned); err == nil {
+			t.Fatal("expected a priceonly fee to be charged at the maximum compute-unit limit")
+		}
+	})
+
+	t.Run("an explicit ceiling overrides the default in both directions", func(t *testing.T) {
+		raised := uint64(10_000_000_000)
+		if err := withFee(&Signer{maxPriorityFeeLamports: &raised}, 1_000_000_000, maxComputeUnitLimit); err != nil {
+			t.Fatalf("raised ceiling should permit 1.4 SOL: %v", err)
+		}
+		lowered := uint64(1_000)
+		if err := withFee(&Signer{maxPriorityFeeLamports: &lowered}, 1_000_000, 200_000); err == nil {
+			t.Fatal("lowered ceiling should reject an otherwise ordinary fee")
+		}
+	})
+
+	t.Run("a custom priority_fee governs instead of the default ceiling", func(t *testing.T) {
+		// 0.42 SOL exceeds the 0.1 SOL default but honors the caller's own bound.
+		signer := &Signer{fee: &Fee{Type: FeeTypeCustom, PriorityFee: "500000000"}}
+		if err := withFee(signer, 300_000_000, maxComputeUnitLimit); err != nil {
+			t.Fatalf("caller-stated bound should govern: %v", err)
+		}
+		if err := withFee(signer, 400_000_000, maxComputeUnitLimit); err == nil {
+			t.Fatal("expected rejection above the caller-stated bound")
+		}
+	})
+
+	t.Run("an explicit ceiling still applies alongside a custom priority_fee", func(t *testing.T) {
+		tight := uint64(1_000)
+		signer := &Signer{
+			fee:                    &Fee{Type: FeeTypeCustom, PriorityFee: "500000000"},
+			maxPriorityFeeLamports: &tight,
+		}
+		if err := withFee(signer, 300_000_000, maxComputeUnitLimit); err == nil {
+			t.Fatal("an explicit ceiling should not be widened by a custom priority_fee")
+		}
+	})
+
+	t.Run("a caller-authored price is never subject to the ceiling", func(t *testing.T) {
+		// The caller set the price themselves, so the message is compared
+		// byte-for-byte and Fordefi has no discretion left to bound.
+		original := cloneManualTestTransaction(base)
+		prependManualComputeBudgetInstruction(original, setComputeUnitLimitDiscriminator, maxComputeUnitLimit)
+		prependManualComputeBudgetInstruction(original, setComputeUnitPriceDiscriminator, math.MaxUint64)
+		returned := cloneManualTestTransaction(original)
+		setManualTestBlockhash(returned, 0x7f)
+		if err := (&Signer{}).validateManualMessageMutation(original, returned); err != nil {
+			t.Fatalf("caller-authored fee should be accepted: %v", err)
+		}
+	})
+
+	t.Run("a fee with no price is unaffected", func(t *testing.T) {
+		returned := cloneManualTestTransaction(base)
+		prependManualComputeBudgetInstruction(returned, setComputeUnitLimitDiscriminator, maxComputeUnitLimit)
+		if err := (&Signer{}).validateManualMessageMutation(base, returned); err != nil {
+			t.Fatalf("limit-only mutation should be accepted: %v", err)
 		}
 	})
 }

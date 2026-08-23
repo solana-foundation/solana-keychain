@@ -41,6 +41,13 @@ const SET_COMPUTE_UNIT_LIMIT: u8 = 2;
 const SET_COMPUTE_UNIT_PRICE: u8 = 3;
 const MAX_COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
 const MICRO_LAMPORTS_PER_LAMPORT: u128 = 1_000_000;
+/// Default bound on the priority fee Fordefi may introduce on its own
+/// initiative during native manual signing, in lamports.
+///
+/// It applies whenever the caller has not stated a bound of their own, so a
+/// compromised or malfunctioning API response cannot drain the fee payer. Raise
+/// it via [`FordefiSignerConfig::max_priority_fee_lamports`].
+pub const DEFAULT_MAX_PRIORITY_FEE_LAMPORTS: u64 = 100_000_000;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ManualFeeInstructions {
@@ -158,6 +165,15 @@ fn normalize_manual_fee_components(
     Ok(fees)
 }
 
+/// Converts a compute-unit price into the lamports it can actually cost,
+/// rounding up. A message with no explicit limit is charged at the maximum the
+/// runtime allows.
+fn effective_manual_priority_fee_lamports(fee: ManualFeeInstructions) -> u128 {
+    let price = fee.price.unwrap_or(0) as u128;
+    let limit = fee.limit.unwrap_or(MAX_COMPUTE_UNIT_LIMIT) as u128;
+    (price * limit).saturating_add(MICRO_LAMPORTS_PER_LAMPORT - 1) / MICRO_LAMPORTS_PER_LAMPORT
+}
+
 fn prune_unused_compute_budget_key(
     header: &mut MessageHeader,
     account_keys: &mut Vec<Pubkey>,
@@ -246,6 +262,18 @@ pub struct FordefiSignerConfig {
     pub chain: Option<SolanaChainUniqueId>,
     /// Fee configuration for native Solana transactions (only used when `chain` is set).
     pub fee: Option<FordefiSolanaFee>,
+    /// Bound, in lamports, on the priority fee Fordefi may introduce on its own
+    /// initiative during native manual signing.
+    ///
+    /// `None` applies [`DEFAULT_MAX_PRIORITY_FEE_LAMPORTS`] unless `fee` states a
+    /// custom `priority_fee`, in which case that bound governs. Set this to raise
+    /// or lower the ceiling; `u64::MAX` lifts it past any payable amount, being
+    /// many times the total SOL supply.
+    ///
+    /// The ceiling never applies to a compute-unit price the caller placed in the
+    /// transaction themselves, because those requests are validated byte-for-byte
+    /// and carry no Fordefi discretion.
+    pub max_priority_fee_lamports: Option<u64>,
 }
 
 /// Fordefi-based signer using Fordefi's MPC custody API.
@@ -276,6 +304,8 @@ pub struct FordefiSigner {
     chain: Option<SolanaChainUniqueId>,
     fee: Option<FordefiSolanaFee>,
     push_mode: FordefiPushMode,
+    /// `None` when the caller did not state a ceiling.
+    max_priority_fee_lamports: Option<u64>,
 }
 
 impl std::fmt::Debug for FordefiSigner {
@@ -433,6 +463,7 @@ impl FordefiSigner {
             chain: config.chain,
             fee: config.fee,
             push_mode,
+            max_priority_fee_lamports: config.max_priority_fee_lamports,
         })
     }
 
@@ -873,6 +904,9 @@ impl FordefiSigner {
 
         let (mut normalized_returned, returned_fee) =
             normalize_manual_fee_message(&returned_tx.message)?;
+        // The caller set no compute-unit price, so any price here is Fordefi's
+        // own and is bounded by the absolute ceiling as well as any custom fee.
+        self.validate_manual_fee_ceiling(returned_fee)?;
         self.validate_manual_custom_fee(returned_fee)?;
         normalized_returned.set_recent_blockhash(*normalized_original.recent_blockhash());
         if normalized_returned.serialize() != normalized_original.serialize() {
@@ -906,20 +940,56 @@ impl FordefiSigner {
                 ));
             }
         }
-        if let (Some(configured), Some(returned_price)) = (priority_fee, returned_fee.price) {
+        if let (Some(configured), Some(_)) = (priority_fee, returned_fee.price) {
             let maximum = configured.parse::<u128>().map_err(|_| {
                 SignerError::SigningFailed("Configured custom priority_fee is invalid".to_string())
             })?;
-            let limit = returned_fee.limit.unwrap_or(MAX_COMPUTE_UNIT_LIMIT) as u128;
-            let effective = ((returned_price as u128) * limit)
-                .saturating_add(MICRO_LAMPORTS_PER_LAMPORT - 1)
-                / MICRO_LAMPORTS_PER_LAMPORT;
-            if effective > maximum {
+            if effective_manual_priority_fee_lamports(returned_fee) > maximum {
                 return Err(SignerError::SigningFailed(
                     "Fordefi returned a priority fee above the configured custom priority_fee"
                         .to_string(),
                 ));
             }
+        }
+        Ok(())
+    }
+
+    /// Absolute lamport bound for a Fordefi-introduced priority fee, or `None`
+    /// when the caller already stated their own total bound through a custom
+    /// `priority_fee`.
+    fn manual_priority_fee_ceiling(&self) -> Option<u128> {
+        if let Some(configured) = self.max_priority_fee_lamports {
+            return Some(configured as u128);
+        }
+        if let Some(FordefiSolanaFee::Custom {
+            priority_fee: Some(_),
+            ..
+        }) = &self.fee
+        {
+            return None;
+        }
+        Some(DEFAULT_MAX_PRIORITY_FEE_LAMPORTS as u128)
+    }
+
+    /// Bound a priority fee Fordefi introduced on its own initiative, so a
+    /// compromised or malfunctioning response cannot drain the fee payer even
+    /// when no custom fee bound is configured.
+    fn validate_manual_fee_ceiling(
+        &self,
+        returned_fee: ManualFeeInstructions,
+    ) -> Result<(), SignerError> {
+        if returned_fee.price.is_none() {
+            return Ok(());
+        }
+        let Some(ceiling) = self.manual_priority_fee_ceiling() else {
+            return Ok(());
+        };
+        if effective_manual_priority_fee_lamports(returned_fee) > ceiling {
+            return Err(SignerError::SigningFailed(
+                "Fordefi returned a priority fee above the configured maximum; raise \
+                 max_priority_fee_lamports to allow it"
+                    .to_string(),
+            ));
         }
         Ok(())
     }
@@ -1322,6 +1392,7 @@ mod tests {
             http_client_config: None,
             chain: None,
             fee: None,
+            max_priority_fee_lamports: None,
         }
     }
 
@@ -1370,6 +1441,7 @@ mod tests {
             chain,
             fee: None,
             push_mode,
+            max_priority_fee_lamports: None,
         }
     }
 
@@ -2451,6 +2523,196 @@ mod tests {
         let keypair = create_test_keypair();
         let transaction = create_test_v0_transaction(&keypair_pubkey(&keypair));
         assert_native_manual_round_trip(transaction, &keypair, "completed").await;
+    }
+
+    /// Largest compute-unit price that still lands on the default ceiling when
+    /// Fordefi also sets the maximum compute-unit limit.
+    const CEILING_PRICE: u64 = (DEFAULT_MAX_PRIORITY_FEE_LAMPORTS as u128
+        * MICRO_LAMPORTS_PER_LAMPORT
+        / MAX_COMPUTE_UNIT_LIMIT as u128) as u64;
+
+    fn manual_signer_with_fee_policy(
+        pubkey: Pubkey,
+        fee: Option<FordefiSolanaFee>,
+        max_priority_fee_lamports: Option<u64>,
+    ) -> FordefiSigner {
+        let mut signer = create_native_manual_test_signer("https://example.com", pubkey);
+        signer.fee = fee;
+        signer.max_priority_fee_lamports = max_priority_fee_lamports;
+        signer
+    }
+
+    /// Builds a Fordefi-mutated transaction carrying the given fee instructions.
+    fn returned_with_fee(
+        base: &VersionedTransaction,
+        price: u64,
+        limit: Option<u32>,
+    ) -> VersionedTransaction {
+        let mut returned = base.clone();
+        if let Some(limit) = limit {
+            prepend_manual_compute_budget_instruction(
+                &mut returned,
+                compute_limit_data(limit),
+                vec![],
+            );
+        }
+        prepend_manual_compute_budget_instruction(&mut returned, compute_price_data(price), vec![]);
+        returned
+    }
+
+    #[test]
+    fn test_fordefi_native_manual_default_fee_ceiling_rejects_drain_sized_fees() {
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let base = create_test_v0_transaction(&pubkey);
+        let returned = returned_with_fee(&base, u64::MAX, Some(MAX_COMPUTE_UNIT_LIMIT));
+
+        for fee in [
+            None,
+            Some(FordefiSolanaFee::Priority {
+                priority_level: FordefiPriorityLevel::High,
+            }),
+            Some(FordefiSolanaFee::Custom {
+                unit_price: None,
+                priority_fee: None,
+            }),
+        ] {
+            let signer = manual_signer_with_fee_policy(pubkey, fee, None);
+            assert!(
+                signer
+                    .validate_manual_message_mutation(&base, &returned)
+                    .is_err(),
+                "an uncapped fee mode must reject a drain-sized priority fee"
+            );
+        }
+    }
+
+    #[test]
+    fn test_fordefi_native_manual_default_fee_ceiling_allows_realistic_fees() {
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let base = create_test_v0_transaction(&pubkey);
+        let signer = manual_signer_with_fee_policy(pubkey, None, None);
+
+        for (label, price, limit) in [
+            ("ordinary", 1_000_000, 200_000),
+            ("congestion", 10_000_000, MAX_COMPUTE_UNIT_LIMIT),
+            (
+                "exactly at the ceiling",
+                CEILING_PRICE,
+                MAX_COMPUTE_UNIT_LIMIT,
+            ),
+        ] {
+            signer
+                .validate_manual_message_mutation(
+                    &base,
+                    &returned_with_fee(&base, price, Some(limit)),
+                )
+                .unwrap_or_else(|error| panic!("{label} fee should be accepted: {error}"));
+        }
+
+        assert!(
+            signer
+                .validate_manual_message_mutation(
+                    &base,
+                    &returned_with_fee(&base, CEILING_PRICE + 1, Some(MAX_COMPUTE_UNIT_LIMIT)),
+                )
+                .is_err(),
+            "one micro-lamport past the ceiling must be rejected"
+        );
+
+        // With no explicit limit the fee is charged at the runtime maximum.
+        assert!(
+            signer
+                .validate_manual_message_mutation(
+                    &base,
+                    &returned_with_fee(&base, CEILING_PRICE + 1, None),
+                )
+                .is_err(),
+            "a price-only fee must be charged at the maximum compute-unit limit"
+        );
+    }
+
+    #[test]
+    fn test_fordefi_native_manual_fee_ceiling_precedence() {
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let base = create_test_v0_transaction(&pubkey);
+
+        // An explicit ceiling overrides the default in both directions.
+        manual_signer_with_fee_policy(pubkey, None, Some(10_000_000_000))
+            .validate_manual_message_mutation(
+                &base,
+                &returned_with_fee(&base, 1_000_000_000, Some(MAX_COMPUTE_UNIT_LIMIT)),
+            )
+            .expect("a raised ceiling should permit 1.4 SOL");
+        assert!(
+            manual_signer_with_fee_policy(pubkey, None, Some(1_000))
+                .validate_manual_message_mutation(
+                    &base,
+                    &returned_with_fee(&base, 1_000_000, Some(200_000)),
+                )
+                .is_err(),
+            "a lowered ceiling should reject an otherwise ordinary fee"
+        );
+
+        // A caller-stated custom priority_fee governs instead of the default.
+        let custom = Some(FordefiSolanaFee::Custom {
+            unit_price: None,
+            priority_fee: Some("500000000".to_string()),
+        });
+        manual_signer_with_fee_policy(pubkey, custom.clone(), None)
+            .validate_manual_message_mutation(
+                &base,
+                &returned_with_fee(&base, 300_000_000, Some(MAX_COMPUTE_UNIT_LIMIT)),
+            )
+            .expect("the caller-stated bound should govern");
+        assert!(
+            manual_signer_with_fee_policy(pubkey, custom.clone(), None)
+                .validate_manual_message_mutation(
+                    &base,
+                    &returned_with_fee(&base, 400_000_000, Some(MAX_COMPUTE_UNIT_LIMIT)),
+                )
+                .is_err(),
+            "a fee above the caller-stated bound must be rejected"
+        );
+
+        // An explicit ceiling is never widened by a custom priority_fee.
+        assert!(
+            manual_signer_with_fee_policy(pubkey, custom, Some(1_000))
+                .validate_manual_message_mutation(
+                    &base,
+                    &returned_with_fee(&base, 300_000_000, Some(MAX_COMPUTE_UNIT_LIMIT)),
+                )
+                .is_err(),
+            "an explicit ceiling must still apply alongside a custom priority_fee"
+        );
+    }
+
+    #[test]
+    fn test_fordefi_native_manual_fee_ceiling_spares_caller_authored_prices() {
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = manual_signer_with_fee_policy(pubkey, None, None);
+
+        // The caller set the price themselves, so the message is compared
+        // byte-for-byte and Fordefi has no discretion left to bound.
+        let mut original = create_test_v0_transaction(&pubkey);
+        prepend_manual_compute_budget_instruction(
+            &mut original,
+            compute_limit_data(MAX_COMPUTE_UNIT_LIMIT),
+            vec![],
+        );
+        prepend_manual_compute_budget_instruction(
+            &mut original,
+            compute_price_data(u64::MAX),
+            vec![],
+        );
+        let mut returned = original.clone();
+        returned.message.set_recent_blockhash(Hash::new_unique());
+        signer
+            .validate_manual_message_mutation(&original, &returned)
+            .expect("a caller-authored price must not be subject to the ceiling");
     }
 
     #[test]

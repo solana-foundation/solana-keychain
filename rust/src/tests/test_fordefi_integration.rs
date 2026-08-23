@@ -59,6 +59,7 @@ mod tests {
             http_client_config: None,
             chain,
             fee: None,
+            max_priority_fee_lamports: None,
         };
 
         match push_mode {

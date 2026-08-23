@@ -329,6 +329,8 @@ Fordefi supports three signing modes, which differ in whether Fordefi modifies o
 - **Native auto mode** (recommended for managed broadcasting): Uses Solana-specific API types. Fordefi modifies the transaction (at minimum updating the blockhash, and optionally adding priority fees) and **auto-broadcasts** it on-chain (`push_mode: "auto"`). Because the transaction is already submitted, `sign_transaction` returns an **empty** serialized transaction (only the signature is meaningful) and leaves your `&mut VersionedTransaction` untouched — do not re-send it. The current auto-broadcast request supports only transactions whose sole required signer is the configured Fordefi vault; additional required signers are rejected before submission. Use with a regular Fordefi Solana vault.
 - **Native manual mode**: Fordefi may replace the recent blockhash and manage `SetComputeUnitPrice`/`SetComputeUnitLimit`, then signs the transaction but does **not** broadcast it (`push_mode: "manual"`). Every other message field is validated exactly. Custom unit prices must match and custom priority fees cap the effective returned fee. `sign_transaction` replaces your `&mut VersionedTransaction` with Fordefi's validated transaction and returns a non-empty serialized transaction. Fordefi must be the fee payer and must sign before every downstream signer.
 
+A priority fee Fordefi introduces on its own initiative is capped at `DEFAULT_MAX_PRIORITY_FEE_LAMPORTS` (0.1 SOL), so a compromised or malfunctioning response cannot drain the fee payer. Set `max_priority_fee_lamports` to raise or lower that ceiling; a custom `priority_fee` governs instead when set. The ceiling never applies to a compute-unit price the caller placed in the transaction themselves, since those requests are validated byte-for-byte.
+
 Construction is async because it fetches the Fordefi vault and verifies that its
 authoritative address matches the configured `public_key` before returning.
 
@@ -352,6 +354,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_client_config: None,
         chain: None,
         fee: None,
+        max_priority_fee_lamports: None,
     })
     .await?;
 
@@ -386,6 +389,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fee: Some(FordefiSolanaFee::Priority {
             priority_level: FordefiPriorityLevel::Medium,
         }),
+        max_priority_fee_lamports: None,
     })
     .await?;
 
@@ -421,6 +425,8 @@ let signer = FordefiSigner::from_config_with_push_mode(
         http_client_config: None,
         chain: Some(SolanaChainUniqueId::SolanaMainnet),
         fee: None,
+        // Cap a Fordefi-introduced priority fee; None applies the 0.1 SOL default.
+        max_priority_fee_lamports: None,
     },
     FordefiPushMode::Manual,
 )
@@ -487,6 +493,7 @@ let signer = FordefiSigner::from_config(FordefiSignerConfig {
     http_client_config: None,
     chain: None,
     fee: None,
+    max_priority_fee_lamports: None,
 })
 .await?;
 ```

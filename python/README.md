@@ -128,6 +128,14 @@ Fordefi supports three transaction modes:
   read-only message replaced, so use `result.transaction` for downstream
   signing and broadcasting.
 
+A priority fee Fordefi introduces on its own initiative is capped at
+`DEFAULT_MAX_PRIORITY_FEE_LAMPORTS` (0.1 SOL), so a compromised or
+malfunctioning response cannot drain the fee payer. Set
+`max_priority_fee_lamports` to raise or lower that ceiling; a custom
+`priority_fee` governs instead when set. The ceiling never applies to a
+compute-unit price the caller placed in the transaction themselves, since those
+requests are validated byte-for-byte.
+
 ```python
 import os
 

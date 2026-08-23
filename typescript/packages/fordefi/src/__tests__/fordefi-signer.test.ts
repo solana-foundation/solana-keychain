@@ -39,6 +39,7 @@ vi.mock('@solana/keychain-core', async importOriginal => {
 
 import {
     createFordefiSigner,
+    DEFAULT_MAX_PRIORITY_FEE_LAMPORTS,
     type FordefiManualSignerConfig,
     type FordefiNativeManualSigner,
     type FordefiNativeSigner,
@@ -595,6 +596,105 @@ describe('FordefiSigner', () => {
             const signer = await FordefiSigner.create(config);
             await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
+            });
+        });
+
+        describe('priority-fee ceiling', () => {
+            // Largest compute-unit price that still lands on the default ceiling
+            // when Fordefi also sets the maximum compute-unit limit.
+            const CEILING_PRICE = (DEFAULT_MAX_PRIORITY_FEE_LAMPORTS * 1_000_000n) / 1_400_000n;
+
+            /** Runs a manual signing round trip against a Fordefi-introduced fee. */
+            async function attemptWithFee(
+                configOverrides: Partial<FordefiManualSignerConfig>,
+                price: bigint,
+                limit: number | undefined = 1_400_000,
+            ) {
+                const { config, fixture, transaction } = await setupNativeManual(0);
+                const returned = wireWithComputeBudgetInstructions(fixture.wireTransaction, [
+                    { data: computePriceData(price) },
+                    ...(limit === undefined ? [] : [{ data: computeLimitData(limit) }]),
+                ]);
+                vi.mocked(fetch)
+                    .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                    .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-fee-ceiling'))
+                    .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
+                const signer = await FordefiSigner.create({ ...config, ...configOverrides });
+                return signer.modifyAndSignTransactions([transaction]);
+            }
+
+            it.each([
+                ['no fee config', undefined],
+                ['a priority level', { priority_level: 'high', type: 'priority' } as const],
+                ['a bare custom fee', { type: 'custom' } as const],
+            ])('rejects a drain-sized fee with %s', async (_label, fee) => {
+                await expect(attemptWithFee({ fee }, 2n ** 64n - 1n)).rejects.toMatchObject({
+                    code: 'SIGNER_SIGNING_FAILED',
+                });
+            });
+
+            it.each([
+                ['an ordinary fee', 1_000_000n, 200_000],
+                ['a congestion-level fee', 10_000_000n, 1_400_000],
+                ['a fee exactly at the ceiling', CEILING_PRICE, 1_400_000],
+            ])('accepts %s', async (_label, price, limit) => {
+                await expect(attemptWithFee({}, price, limit)).resolves.toHaveLength(1);
+            });
+
+            it('rejects one micro-lamport past the ceiling', async () => {
+                await expect(attemptWithFee({}, CEILING_PRICE + 1n)).rejects.toMatchObject({
+                    code: 'SIGNER_SIGNING_FAILED',
+                });
+            });
+
+            it('charges a fee with no explicit limit at the runtime maximum', async () => {
+                await expect(attemptWithFee({}, CEILING_PRICE + 1n, undefined)).rejects.toMatchObject({
+                    code: 'SIGNER_SIGNING_FAILED',
+                });
+            });
+
+            it('lets an explicit ceiling override the default in both directions', async () => {
+                await expect(
+                    attemptWithFee({ maxPriorityFeeLamports: 10_000_000_000n }, 1_000_000_000n),
+                ).resolves.toHaveLength(1);
+                await expect(
+                    attemptWithFee({ maxPriorityFeeLamports: 1_000n }, 1_000_000n, 200_000),
+                ).rejects.toMatchObject({ code: 'SIGNER_SIGNING_FAILED' });
+            });
+
+            it('lets a caller-stated custom priority_fee govern instead of the default', async () => {
+                const fee = { priority_fee: '500000000', type: 'custom' } as const;
+                await expect(attemptWithFee({ fee }, 300_000_000n)).resolves.toHaveLength(1);
+                await expect(attemptWithFee({ fee }, 400_000_000n)).rejects.toMatchObject({
+                    code: 'SIGNER_SIGNING_FAILED',
+                });
+            });
+
+            it('never widens an explicit ceiling via a custom priority_fee', async () => {
+                await expect(
+                    attemptWithFee(
+                        { fee: { priority_fee: '500000000', type: 'custom' }, maxPriorityFeeLamports: 1_000n },
+                        300_000_000n,
+                    ),
+                ).rejects.toMatchObject({ code: 'SIGNER_SIGNING_FAILED' });
+            });
+
+            it('never applies the ceiling to a caller-authored price', async () => {
+                // The caller set the price themselves, so the message is compared
+                // byte-for-byte and Fordefi has no discretion left to bound.
+                const { config, fixture, transaction } = await setupNativeManual(0);
+                const original = wireWithComputeBudgetInstructions(fixture.wireTransaction, [
+                    { data: computePriceData(2n ** 64n - 1n) },
+                    { data: computeLimitData(1_400_000) },
+                ]);
+                const input = { ...transaction, messageBytes: original.messageBytes } as unknown as Transaction &
+                    TransactionWithLifetime;
+                vi.mocked(fetch)
+                    .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                    .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-caller-price'))
+                    .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, original.wireTransaction));
+                const signer = await FordefiSigner.create(config);
+                await expect(signer.modifyAndSignTransactions([input])).resolves.toHaveLength(1);
             });
         });
 

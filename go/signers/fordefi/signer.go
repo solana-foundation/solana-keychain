@@ -46,6 +46,9 @@ type Signer struct {
 	chain           Chain
 	pushMode        PushMode
 	fee             *Fee
+
+	// maxPriorityFeeLamports is nil when the caller did not state a ceiling.
+	maxPriorityFeeLamports *uint64
 }
 
 // Ensure Signer satisfies the core contract at compile time.
@@ -145,6 +148,8 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		chain:           cfg.Chain,
 		pushMode:        pushMode,
 		fee:             cfg.Fee,
+
+		maxPriorityFeeLamports: cfg.MaxPriorityFeeLamports,
 	}
 
 	if err := s.verifyVaultOwnership(ctx); err != nil {

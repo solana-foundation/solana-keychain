@@ -68,6 +68,11 @@ func (s *Signer) validateManualMessageMutation(original, returned *solana.Transa
 	if err != nil {
 		return fmt.Errorf("returned transaction has invalid priority-fee instructions: %w", err)
 	}
+	// The caller set no compute-unit price, so any price here is Fordefi's own
+	// and is bounded by the absolute ceiling as well as any custom fee config.
+	if err := s.validateManualFeeCeiling(returnedFee); err != nil {
+		return err
+	}
 	if err := s.validateManualCustomFee(returnedFee); err != nil {
 		return err
 	}
@@ -234,16 +239,55 @@ func (s *Signer) validateManualCustomFee(fee manualFeeInstructions) error {
 		if !ok || maximum.Sign() < 0 {
 			return fmt.Errorf("configured custom priority_fee is invalid")
 		}
-		limit := uint64(maxComputeUnitLimit)
-		if fee.hasLimit {
-			limit = uint64(fee.limit)
-		}
-		effective := new(big.Int).Mul(new(big.Int).SetUint64(fee.price), new(big.Int).SetUint64(limit))
-		effective.Add(effective, big.NewInt(microLamportsPerLamport-1))
-		effective.Div(effective, big.NewInt(microLamportsPerLamport))
-		if effective.Cmp(maximum) > 0 {
+		if effectiveManualPriorityFeeLamports(fee).Cmp(maximum) > 0 {
 			return fmt.Errorf("returned priority fee exceeds the configured custom priority_fee")
 		}
+	}
+	return nil
+}
+
+// effectiveManualPriorityFeeLamports converts a compute-unit price into the
+// lamports it can actually cost, rounding up. A message with no explicit limit
+// is charged at the maximum the runtime allows.
+func effectiveManualPriorityFeeLamports(fee manualFeeInstructions) *big.Int {
+	limit := uint64(maxComputeUnitLimit)
+	if fee.hasLimit {
+		limit = uint64(fee.limit)
+	}
+	effective := new(big.Int).Mul(new(big.Int).SetUint64(fee.price), new(big.Int).SetUint64(limit))
+	effective.Add(effective, big.NewInt(microLamportsPerLamport-1))
+	return effective.Div(effective, big.NewInt(microLamportsPerLamport))
+}
+
+// manualPriorityFeeCeiling reports the absolute lamport bound for a
+// Fordefi-introduced priority fee, or nil when the caller already stated their
+// own total bound through a custom priority_fee.
+func (s *Signer) manualPriorityFeeCeiling() *big.Int {
+	if s.maxPriorityFeeLamports != nil {
+		return new(big.Int).SetUint64(*s.maxPriorityFeeLamports)
+	}
+	if s.fee != nil && s.fee.Type == FeeTypeCustom && s.fee.PriorityFee != "" {
+		return nil
+	}
+	return new(big.Int).SetUint64(DefaultMaxPriorityFeeLamports)
+}
+
+// validateManualFeeCeiling bounds a priority fee Fordefi introduced on its own
+// initiative, so a compromised or malfunctioning response cannot drain the fee
+// payer even when no custom fee bound is configured.
+func (s *Signer) validateManualFeeCeiling(fee manualFeeInstructions) error {
+	if !fee.hasPrice {
+		return nil
+	}
+	ceiling := s.manualPriorityFeeCeiling()
+	if ceiling == nil {
+		return nil
+	}
+	effective := effectiveManualPriorityFeeLamports(fee)
+	if effective.Cmp(ceiling) > 0 {
+		return fmt.Errorf(
+			"returned priority fee of %s lamports exceeds the %s lamport ceiling; raise Config.MaxPriorityFeeLamports to allow it",
+			effective, ceiling)
 	}
 	return nil
 }

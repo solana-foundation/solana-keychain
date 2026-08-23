@@ -173,6 +173,13 @@ Fordefi supports three transaction modes:
   base64 wire transaction. Custom unit prices must match and custom priority
   fees cap the effective returned fee.
 
+A priority fee Fordefi introduces on its own initiative is capped at
+`DefaultMaxPriorityFeeLamports` (0.1 SOL), so a compromised or malfunctioning
+response cannot drain the fee payer. Set `Config.MaxPriorityFeeLamports` to
+raise or lower that ceiling; a custom `priority_fee` governs instead when set.
+The ceiling never applies to a compute-unit price the caller placed in the
+transaction themselves, since those requests are validated byte-for-byte.
+
 Manual mode must run first with the Fordefi vault as fee payer. Single-signer
 results are complete and ready for caller-managed broadcasting. Multisigner
 results are partial: add every downstream signature to the replaced `tx`, then

@@ -66,6 +66,15 @@ const SET_COMPUTE_UNIT_LIMIT = 2;
 const SET_COMPUTE_UNIT_PRICE = 3;
 const MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
 const MICRO_LAMPORTS_PER_LAMPORT = 1_000_000n;
+/**
+ * Default bound on the priority fee Fordefi may introduce on its own initiative
+ * during native manual signing, in lamports.
+ *
+ * It applies whenever the caller has not stated a bound of their own, so a
+ * compromised or malfunctioning API response cannot drain the fee payer. Raise
+ * it via {@link FordefiSignerConfig.maxPriorityFeeLamports}.
+ */
+export const DEFAULT_MAX_PRIORITY_FEE_LAMPORTS = 100_000_000n;
 
 /**
  * Native Solana push modes this signer can honor. Validated at runtime because
@@ -115,6 +124,7 @@ type MutableCompiledInstruction = {
     programAddressIndex: number;
 };
 type ManualFeeInstructions = { limit?: number; price?: bigint };
+type ManualFeePolicy = { fee?: FordefiSolanaFee; maxPriorityFeeLamports?: bigint };
 
 function bytesEqual(left: ArrayLike<number>, right: ArrayLike<number>): boolean {
     if (left.length !== right.length) return false;
@@ -222,6 +232,43 @@ function normalizeManualFeeMessage(message: LegacyOrV0CompiledMessage): {
     return { fees, message: normalized };
 }
 
+/**
+ * Converts a compute-unit price into the lamports it can actually cost, rounding
+ * up. A message with no explicit limit is charged at the runtime maximum.
+ */
+function effectivePriorityFeeLamports(fee: ManualFeeInstructions): bigint {
+    const price = fee.price ?? 0n;
+    const limit = BigInt(fee.limit ?? MAX_COMPUTE_UNIT_LIMIT);
+    return (price * limit + MICRO_LAMPORTS_PER_LAMPORT - 1n) / MICRO_LAMPORTS_PER_LAMPORT;
+}
+
+/**
+ * Absolute lamport bound for a Fordefi-introduced priority fee, or `undefined`
+ * when the caller already stated their own total bound via a custom
+ * `priority_fee`.
+ */
+function manualPriorityFeeCeiling(policy: ManualFeePolicy): bigint | undefined {
+    if (policy.maxPriorityFeeLamports !== undefined) return policy.maxPriorityFeeLamports;
+    if (policy.fee?.type === 'custom' && policy.fee.priority_fee !== undefined) return undefined;
+    return DEFAULT_MAX_PRIORITY_FEE_LAMPORTS;
+}
+
+/**
+ * Bounds a priority fee Fordefi introduced on its own initiative, so a
+ * compromised or malfunctioning response cannot drain the fee payer even when no
+ * custom fee bound is configured.
+ */
+function validateManualFeeCeiling(policy: ManualFeePolicy, returned: ManualFeeInstructions): void {
+    if (returned.price === undefined) return;
+    const ceiling = manualPriorityFeeCeiling(policy);
+    if (ceiling === undefined) return;
+    if (effectivePriorityFeeLamports(returned) > ceiling) {
+        throw new Error(
+            'Fordefi returned a priority fee above the configured maximum; raise maxPriorityFeeLamports to allow it',
+        );
+    }
+}
+
 function validateManualCustomFee(fee: FordefiSolanaFee | undefined, returned: ManualFeeInstructions): void {
     if (fee?.type !== 'custom') return;
     if (fee.unit_price !== undefined) {
@@ -233,10 +280,7 @@ function validateManualCustomFee(fee: FordefiSolanaFee | undefined, returned: Ma
         }
     }
     if (fee.priority_fee !== undefined && returned.price !== undefined) {
-        const configuredMaximum = BigInt(fee.priority_fee);
-        const limit = BigInt(returned.limit ?? MAX_COMPUTE_UNIT_LIMIT);
-        const effectiveFee = (returned.price * limit + MICRO_LAMPORTS_PER_LAMPORT - 1n) / MICRO_LAMPORTS_PER_LAMPORT;
-        if (effectiveFee > configuredMaximum) {
+        if (effectivePriorityFeeLamports(returned) > BigInt(fee.priority_fee)) {
             throw new Error('Fordefi returned a priority fee above the configured custom priority_fee');
         }
     }
@@ -246,7 +290,7 @@ function validateManualCustomFee(fee: FordefiSolanaFee | undefined, returned: Ma
 async function manualMessagesMatchFordefiMutationPolicy(
     originalMessageBytes: Uint8Array,
     returnedMessageBytes: Uint8Array,
-    fee: FordefiSolanaFee | undefined,
+    policy: ManualFeePolicy,
 ): Promise<boolean> {
     const decoder = getCompiledTransactionMessageDecoder();
     const original = decoder.decode(originalMessageBytes);
@@ -258,7 +302,7 @@ async function manualMessagesMatchFordefiMutationPolicy(
     if ('nonce' in originalLifetime) {
         if (!bytesEqual(originalMessageBytes, returnedMessageBytes)) return false;
         if (original.version !== 1) {
-            validateManualCustomFee(fee, normalizeManualFeeMessage(original).fees);
+            validateManualCustomFee(policy.fee, normalizeManualFeeMessage(original).fees);
         }
         return true;
     }
@@ -269,11 +313,14 @@ async function manualMessagesMatchFordefiMutationPolicy(
     const normalizedOriginal = normalizeManualFeeMessage(original);
     if (normalizedOriginal.fees.price !== undefined) {
         if (!compareManualMessagesExactly(original, returned, true)) return false;
-        validateManualCustomFee(fee, normalizedOriginal.fees);
+        validateManualCustomFee(policy.fee, normalizedOriginal.fees);
         return true;
     }
     const normalizedReturned = normalizeManualFeeMessage(returned);
-    validateManualCustomFee(fee, normalizedReturned.fees);
+    // The caller set no compute-unit price, so any price here is Fordefi's own
+    // and is bounded by the absolute ceiling as well as any custom fee config.
+    validateManualFeeCeiling(policy, normalizedReturned.fees);
+    validateManualCustomFee(policy.fee, normalizedReturned.fees);
     const comparableReturned = {
         ...normalizedReturned.message,
         lifetimeToken: normalizedOriginal.message.lifetimeToken,
@@ -345,6 +392,19 @@ export interface FordefiSignerConfig {
     fee?: FordefiSolanaFee;
     /** Positive integer max polling attempts before timeout (default: 50) */
     maxPollAttempts?: number;
+    /**
+     * Bound, in lamports, on the priority fee Fordefi may introduce on its own
+     * initiative during native manual signing.
+     *
+     * Omitted applies {@link DEFAULT_MAX_PRIORITY_FEE_LAMPORTS} unless `fee`
+     * states a custom `priority_fee`, in which case that bound governs. Set this
+     * to raise or lower the ceiling.
+     *
+     * The ceiling never applies to a compute-unit price the caller placed in the
+     * transaction themselves, because those requests are validated byte-for-byte
+     * and carry no Fordefi discretion.
+     */
+    maxPriorityFeeLamports?: bigint | number;
     /** Non-negative integer polling interval in ms (default: 2000) */
     pollIntervalMs?: number;
     /**
@@ -472,6 +532,8 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
     private readonly chain?: SolanaChainUniqueId;
     private readonly fee?: FordefiSolanaFee;
     private readonly maxPollAttempts: number;
+    /** `undefined` when the caller did not state a ceiling. */
+    private readonly maxPriorityFeeLamports?: bigint;
     private readonly pollIntervalMs: number;
     private readonly pushMode: 'auto' | 'manual';
     private readonly requestSigner: FordefiRequestSigner;
@@ -485,6 +547,8 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
         this.chain = config.chain;
         this.fee = config.fee;
         this.maxPollAttempts = config.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS;
+        this.maxPriorityFeeLamports =
+            config.maxPriorityFeeLamports === undefined ? undefined : BigInt(config.maxPriorityFeeLamports);
         this.pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
         this.pushMode = config.pushMode ?? 'auto';
         this.requestSigner = config.requestSigner ?? new PemRequestSigner(config.privateKeyPem ?? '');
@@ -854,7 +918,7 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
             messageContentMatches = await manualMessagesMatchFordefiMutationPolicy(
                 new Uint8Array(originalTransaction.messageBytes),
                 new Uint8Array(decodedTransaction.messageBytes),
-                this.fee,
+                { fee: this.fee, maxPriorityFeeLamports: this.maxPriorityFeeLamports },
             );
         } catch (error) {
             return throwSignerError(SignerErrorCode.SIGNING_FAILED, {

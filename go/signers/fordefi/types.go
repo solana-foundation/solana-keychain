@@ -20,6 +20,12 @@ const (
 	DefaultPollInterval = 2 * time.Second
 	// DefaultMaxPollAttempts bounds how many status polls run before timing out.
 	DefaultMaxPollAttempts = 50
+	// DefaultMaxPriorityFeeLamports bounds the priority fee Fordefi may
+	// introduce on its own initiative during native manual signing. It applies
+	// whenever the caller has not stated a bound of their own, so a compromised
+	// or malfunctioning API response cannot drain the fee payer. Raise it via
+	// Config.MaxPriorityFeeLamports.
+	DefaultMaxPriorityFeeLamports uint64 = 100_000_000
 )
 
 // Chain selects Fordefi's native Solana signing mode. When set, transactions
@@ -119,6 +125,18 @@ type Config struct {
 
 	// Fee is the native-mode fee configuration. Requires Chain.
 	Fee *Fee
+
+	// MaxPriorityFeeLamports caps the priority fee Fordefi may introduce on its
+	// own initiative during native manual signing, in lamports. Nil applies
+	// DefaultMaxPriorityFeeLamports unless Fee states a custom priority_fee, in
+	// which case that bound governs. Set this to raise or lower the ceiling;
+	// math.MaxUint64 lifts it past any payable amount, being many times the
+	// total SOL supply.
+	//
+	// The ceiling never applies to a compute-unit price the caller placed in the
+	// transaction themselves, because those requests are validated byte-for-byte
+	// and carry no Fordefi discretion.
+	MaxPriorityFeeLamports *uint64
 
 	// HTTPClientConfig holds optional HTTP timeouts; the zero value uses the
 	// core defaults.

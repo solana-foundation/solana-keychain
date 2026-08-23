@@ -29,6 +29,7 @@ from solana_keychain import SignerError, SignerErrorCode, create_keychain_signer
 from solana_keychain.core import signed_message_bytes
 from solana_keychain.core.transaction_util import idempotency_key_from_message
 from solana_keychain.fordefi import (
+    DEFAULT_MAX_PRIORITY_FEE_LAMPORTS,
     FordefiPushMode,
     FordefiRequestSigner,
     FordefiSigner,
@@ -710,6 +711,100 @@ def compute_limit_data(limit: int) -> bytes:
 
 def compute_price_data(price: int) -> bytes:
     return bytes([3]) + price.to_bytes(8, "little")
+
+
+# Largest compute-unit price that still lands on the default ceiling when
+# Fordefi also sets the maximum compute-unit limit.
+CEILING_PRICE = DEFAULT_MAX_PRIORITY_FEE_LAMPORTS * 1_000_000 // 1_400_000
+
+
+def returned_with_fee(
+    base: VersionedTransaction, price: int, limit: int | None = 1_400_000
+) -> VersionedTransaction:
+    """Build a Fordefi-mutated transaction carrying the given fee instructions."""
+    returned = base
+    if limit is not None:
+        returned = transaction_with_compute_budget_instruction(returned, compute_limit_data(limit))
+    return transaction_with_compute_budget_instruction(returned, compute_price_data(price))
+
+
+def test_native_manual_default_fee_ceiling_rejects_drain_sized_fees() -> None:
+    keypair = Keypair()
+    base = create_test_v0_transaction(keypair.pubkey())
+    returned = returned_with_fee(base, 2**64 - 1)
+
+    for fee in (
+        None,
+        {"type": "priority", "priority_level": "high"},
+        {"type": "custom"},
+    ):
+        signer = make_signer(keypair, chain="solana_devnet", push_mode="manual", fee=fee)
+        with pytest.raises(ValueError, match="priority fee exceeds the maximum"):
+            signer._validate_manual_message_mutation(base, returned)
+
+
+def test_native_manual_default_fee_ceiling_allows_realistic_fees() -> None:
+    keypair = Keypair()
+    base = create_test_v0_transaction(keypair.pubkey())
+    signer = make_signer(keypair, chain="solana_devnet", push_mode="manual")
+
+    # Ordinary, congestion-level, and exactly-at-the-ceiling fees all pass.
+    signer._validate_manual_message_mutation(base, returned_with_fee(base, 1_000_000, 200_000))
+    signer._validate_manual_message_mutation(base, returned_with_fee(base, 10_000_000))
+    signer._validate_manual_message_mutation(base, returned_with_fee(base, CEILING_PRICE))
+
+    with pytest.raises(ValueError, match="priority fee exceeds the maximum"):
+        signer._validate_manual_message_mutation(base, returned_with_fee(base, CEILING_PRICE + 1))
+
+    # With no explicit limit the fee is charged at the runtime maximum.
+    with pytest.raises(ValueError, match="priority fee exceeds the maximum"):
+        signer._validate_manual_message_mutation(
+            base, returned_with_fee(base, CEILING_PRICE + 1, limit=None)
+        )
+
+
+def test_native_manual_fee_ceiling_precedence() -> None:
+    keypair = Keypair()
+    base = create_test_v0_transaction(keypair.pubkey())
+    manual = {"chain": "solana_devnet", "push_mode": "manual"}
+
+    # An explicit ceiling overrides the default in both directions.
+    make_signer(
+        keypair, **manual, max_priority_fee_lamports=10_000_000_000
+    )._validate_manual_message_mutation(base, returned_with_fee(base, 1_000_000_000))
+    with pytest.raises(ValueError, match="priority fee exceeds the maximum"):
+        make_signer(
+            keypair, **manual, max_priority_fee_lamports=1_000
+        )._validate_manual_message_mutation(base, returned_with_fee(base, 1_000_000, 200_000))
+
+    # A caller-stated custom priority_fee governs instead of the default.
+    custom = {"type": "custom", "priority_fee": "500000000"}
+    make_signer(keypair, **manual, fee=custom)._validate_manual_message_mutation(
+        base, returned_with_fee(base, 300_000_000)
+    )
+    with pytest.raises(ValueError, match="exceeds the configured custom priority_fee"):
+        make_signer(keypair, **manual, fee=custom)._validate_manual_message_mutation(
+            base, returned_with_fee(base, 400_000_000)
+        )
+
+    # An explicit ceiling is never widened by a custom priority_fee.
+    with pytest.raises(ValueError, match="priority fee exceeds the maximum"):
+        make_signer(
+            keypair, **manual, fee=custom, max_priority_fee_lamports=1_000
+        )._validate_manual_message_mutation(base, returned_with_fee(base, 300_000_000))
+
+
+def test_native_manual_fee_ceiling_spares_caller_authored_prices() -> None:
+    keypair = Keypair()
+    base = create_test_v0_transaction(keypair.pubkey())
+    signer = make_signer(keypair, chain="solana_devnet", push_mode="manual")
+
+    # The caller set the price themselves, so the message is compared
+    # byte-for-byte and Fordefi has no discretion left to bound.
+    original = returned_with_fee(base, 2**64 - 1)
+    signer._validate_manual_message_mutation(
+        original, transaction_with_blockhash(original, Hash.new_unique())
+    )
 
 
 def test_native_manual_message_mutation_fee_policy() -> None:
