@@ -153,6 +153,7 @@ func TestIntegrationSignTransactionNativeManualWithoutBroadcast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	originalMessage := cloneManualMessage(tx.Message)
 	result, err := s.SignTransaction(context.Background(), tx)
 	if err != nil {
 		t.Fatalf("SignTransaction native manual: %v", err)
@@ -181,6 +182,26 @@ func TestIntegrationSignTransactionNativeManualWithoutBroadcast(t *testing.T) {
 	}
 	if !bytes.Equal(gotWire, wantWire) {
 		t.Error("encoded manual result must match the caller's replaced transaction")
+	}
+	originalNormalized, _, err := normalizeManualFeeMessage(originalMessage)
+	if err != nil {
+		t.Fatalf("normalize original manual message: %v", err)
+	}
+	returnedNormalized, _, err := normalizeManualFeeMessage(tx.Message)
+	if err != nil {
+		t.Fatalf("normalize returned manual message: %v", err)
+	}
+	returnedNormalized.RecentBlockhash = originalNormalized.RecentBlockhash
+	originalNormalizedBytes, err := originalNormalized.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	returnedNormalizedBytes, err := returnedNormalized.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(originalNormalizedBytes, returnedNormalizedBytes) {
+		t.Error("live Fordefi mutation must be limited to blockhash and permitted fee instructions")
 	}
 
 	// Intentionally no RPC submission: caller-managed broadcasting is the

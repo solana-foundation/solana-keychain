@@ -330,6 +330,11 @@ async def test_live_sign_transaction(backend: str) -> None:
 
 
 async def test_live_fordefi_native_manual_signs_without_broadcasting() -> None:
+    from solana_keychain.fordefi.signer import (
+        _messages_match_with_blockhash_policy,
+        _normalize_manual_fee_message,
+    )
+
     _skip_unless_selected("fordefi")
     signer = await make_fordefi_manual_signer()
     assert not signer.broadcasts_transactions
@@ -356,6 +361,13 @@ async def test_live_fordefi_native_manual_signs_without_broadcasting() -> None:
     assert result.transaction is not None
     assert base64.b64decode(result.encoded_transaction, validate=True) == bytes(result.transaction)
     assert result.signature.verify(signer.pubkey, signed_message_bytes(result.transaction.message))
+    assert isinstance(transaction.message, MessageV0)
+    assert isinstance(result.transaction.message, MessageV0)
+    original_normalized, _ = _normalize_manual_fee_message(transaction.message)
+    returned_normalized, _ = _normalize_manual_fee_message(result.transaction.message)
+    assert _messages_match_with_blockhash_policy(
+        original_normalized, returned_normalized, replaceable_blockhash=True
+    ), "live Fordefi mutation must be limited to blockhash and permitted fee instructions"
     # Intentionally no RPC submission: this test verifies sign-without-send only.
 
 

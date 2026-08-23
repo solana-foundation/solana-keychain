@@ -23,10 +23,11 @@ const (
 )
 
 // Chain selects Fordefi's native Solana signing mode. When set, transactions
-// are submitted as solana_transaction requests (Fordefi may replace the
-// blockhash and fees before signing) and messages as solana_message requests.
-// PushMode controls whether Fordefi broadcasts native transactions. When Chain
-// is empty, the signer uses black-box raw signing.
+// are submitted as solana_transaction requests and messages as solana_message
+// requests. For unsigned native requests, Fordefi may replace the blockhash and
+// manage priority fees regardless of push mode. PushMode controls whether
+// Fordefi broadcasts the signed transaction. When Chain is empty, the signer
+// uses black-box raw signing.
 type Chain string
 
 // The Solana chains supported by Fordefi's native signing mode.

@@ -165,10 +165,13 @@ Fordefi supports three transaction modes:
   may modify the transaction, signs it, and broadcasts it. The caller's
   transaction is intentionally left untouched and `EncodedTransaction` is
   empty because it must not be sent again.
-- **Native manual** (`Chain` set and `PushModeManual`): Fordefi may modify and
-  sign the transaction but does not broadcast it. `SignTransaction` replaces
-  the caller's `*solana.Transaction` with Fordefi's validated result and returns
-  a non-empty base64 wire transaction.
+- **Native manual** (`Chain` set and `PushModeManual`): Fordefi may replace the
+  recent blockhash and manage `SetComputeUnitPrice`/`SetComputeUnitLimit`, then
+  signs the transaction without broadcasting it. Every other message field is
+  validated exactly. `SignTransaction` replaces the caller's
+  `*solana.Transaction` with Fordefi's validated result and returns a non-empty
+  base64 wire transaction. Custom unit prices must match and custom priority
+  fees cap the effective returned fee.
 
 Manual mode must run first with the Fordefi vault as fee payer. Single-signer
 results are complete and ready for caller-managed broadcasting. Multisigner
@@ -203,6 +206,14 @@ Fordefi can replace the recent blockhash but does not return its
 `lastValidBlockHeight`. Go retains the replacement blockhash in `tx`; broadcast
 manual results promptly rather than relying on local block-height expiry
 detection.
+
+Mutation eligibility depends on whether signatures are supplied, not on
+`push_mode`. This SDK's native manual request is unsigned, omits
+`details.signatures`, and rejects pre-signed inputs, so Fordefi may refresh the
+blockhash and manage fees. A future provided-signatures flow must preserve the
+complete message byte-for-byte. `push_mode` controls submission only.
+Durable-nonce transactions keep both their lifetime and fee layout exact; v1
+transactions may replace only the blockhash and keep their inline configuration exact.
 
 ### Batch Signing
 

@@ -14,7 +14,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::SignerError;
 use crate::http_client_config::HttpClientConfig;
-use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
+use crate::sdk_adapter::{
+    CompiledInstruction, MessageHeader, Pubkey, Signature, VersionedMessage, VersionedTransaction,
+    COMPUTE_BUDGET_PROGRAM_ID,
+};
 use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
 use crate::transaction_util::{
     deserialize_wire_transaction, idempotency_key_from_message, serialize_wire_transaction,
@@ -34,6 +37,186 @@ const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 50;
 const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const VAULT_VERIFICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const SOLANA_PACKET_DATA_SIZE: usize = 1232;
+const SET_COMPUTE_UNIT_LIMIT: u8 = 2;
+const SET_COMPUTE_UNIT_PRICE: u8 = 3;
+const MAX_COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
+const MICRO_LAMPORTS_PER_LAMPORT: u128 = 1_000_000;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ManualFeeInstructions {
+    limit: Option<u32>,
+    price: Option<u64>,
+}
+
+fn compare_manual_messages_exactly(
+    original: &VersionedMessage,
+    returned: &VersionedMessage,
+    allow_blockhash_replacement: bool,
+) -> Result<(), SignerError> {
+    let mut comparable = returned.clone();
+    if allow_blockhash_replacement {
+        comparable.set_recent_blockhash(*original.recent_blockhash());
+    }
+    if comparable.serialize() != original.serialize() {
+        return Err(SignerError::SigningFailed(
+            "Fordefi manual signing changed transaction content outside the permitted recent blockhash"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn normalize_manual_fee_message(
+    message: &VersionedMessage,
+) -> Result<(VersionedMessage, ManualFeeInstructions), SignerError> {
+    let mut normalized = message.clone();
+    let fees = match &mut normalized {
+        VersionedMessage::Legacy(message) => normalize_manual_fee_components(
+            &mut message.header,
+            &mut message.account_keys,
+            &mut message.instructions,
+        )?,
+        VersionedMessage::V0(message) => normalize_manual_fee_components(
+            &mut message.header,
+            &mut message.account_keys,
+            &mut message.instructions,
+        )?,
+        #[cfg(feature = "sdk-v4")]
+        VersionedMessage::V1(_) => {
+            return Err(SignerError::SigningFailed(
+                "Fordefi manual v1 transactions may only replace the recent blockhash".to_string(),
+            ));
+        }
+    };
+    Ok((normalized, fees))
+}
+
+fn normalize_manual_fee_components(
+    header: &mut MessageHeader,
+    account_keys: &mut Vec<Pubkey>,
+    instructions: &mut Vec<CompiledInstruction>,
+) -> Result<ManualFeeInstructions, SignerError> {
+    let compute_budget_id = COMPUTE_BUDGET_PROGRAM_ID;
+    let mut fees = ManualFeeInstructions::default();
+    let mut retained = Vec::with_capacity(instructions.len());
+
+    for instruction in instructions.drain(..) {
+        let program_id = account_keys.get(instruction.program_id_index as usize);
+        if program_id != Some(&compute_budget_id)
+            || !matches!(
+                instruction.data.first().copied(),
+                Some(SET_COMPUTE_UNIT_LIMIT) | Some(SET_COMPUTE_UNIT_PRICE)
+            )
+        {
+            retained.push(instruction);
+            continue;
+        }
+        if !instruction.accounts.is_empty() {
+            return Err(SignerError::SigningFailed(
+                "Fordefi returned an account-bearing Compute Budget fee instruction".to_string(),
+            ));
+        }
+        match instruction.data.first().copied() {
+            Some(SET_COMPUTE_UNIT_LIMIT) => {
+                if instruction.data.len() != 5 || fees.limit.is_some() {
+                    return Err(SignerError::SigningFailed(
+                        "Fordefi returned a malformed or duplicate compute-unit limit".to_string(),
+                    ));
+                }
+                let value =
+                    u32::from_le_bytes(instruction.data[1..5].try_into().map_err(|_| {
+                        SignerError::SigningFailed(
+                            "Fordefi returned a malformed compute-unit limit".to_string(),
+                        )
+                    })?);
+                if value == 0 || value > MAX_COMPUTE_UNIT_LIMIT {
+                    return Err(SignerError::SigningFailed(
+                        "Fordefi returned an out-of-range compute-unit limit".to_string(),
+                    ));
+                }
+                fees.limit = Some(value);
+            }
+            Some(SET_COMPUTE_UNIT_PRICE) => {
+                if instruction.data.len() != 9 || fees.price.is_some() {
+                    return Err(SignerError::SigningFailed(
+                        "Fordefi returned a malformed or duplicate compute-unit price".to_string(),
+                    ));
+                }
+                fees.price = Some(u64::from_le_bytes(
+                    instruction.data[1..9].try_into().map_err(|_| {
+                        SignerError::SigningFailed(
+                            "Fordefi returned a malformed compute-unit price".to_string(),
+                        )
+                    })?,
+                ));
+            }
+            _ => unreachable!(),
+        }
+    }
+    *instructions = retained;
+    prune_unused_compute_budget_key(header, account_keys, instructions, &compute_budget_id)?;
+    Ok(fees)
+}
+
+fn prune_unused_compute_budget_key(
+    header: &mut MessageHeader,
+    account_keys: &mut Vec<Pubkey>,
+    instructions: &mut [CompiledInstruction],
+    compute_budget_id: &Pubkey,
+) -> Result<(), SignerError> {
+    let positions: Vec<usize> = account_keys
+        .iter()
+        .enumerate()
+        .filter_map(|(index, key)| (key == compute_budget_id).then_some(index))
+        .collect();
+    if positions.len() != 1 {
+        return Ok(());
+    }
+    let index = positions[0];
+    let unsigned_readonly_start = account_keys
+        .len()
+        .checked_sub(header.num_readonly_unsigned_accounts as usize)
+        .ok_or_else(|| {
+            SignerError::SigningFailed("Invalid transaction message header".to_string())
+        })?;
+    if index < header.num_required_signatures as usize || index < unsigned_readonly_start {
+        return Ok(());
+    }
+    let referenced = instructions.iter().any(|instruction| {
+        instruction.program_id_index as usize == index
+            || instruction
+                .accounts
+                .iter()
+                .any(|account| *account as usize == index)
+    });
+    if referenced {
+        return Ok(());
+    }
+
+    account_keys.remove(index);
+    header.num_readonly_unsigned_accounts = header
+        .num_readonly_unsigned_accounts
+        .checked_sub(1)
+        .ok_or_else(|| {
+            SignerError::SigningFailed("Invalid transaction message header".to_string())
+        })?;
+    for instruction in instructions {
+        if instruction.program_id_index as usize > index {
+            instruction.program_id_index =
+                instruction.program_id_index.checked_sub(1).ok_or_else(|| {
+                    SignerError::SigningFailed("Invalid compiled instruction index".to_string())
+                })?;
+        }
+        for account in &mut instruction.accounts {
+            if *account as usize > index {
+                *account = account.checked_sub(1).ok_or_else(|| {
+                    SignerError::SigningFailed("Invalid compiled account index".to_string())
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Configuration for creating a FordefiSigner.
 #[derive(Clone)]
@@ -77,10 +260,10 @@ pub struct FordefiSignerConfig {
 ///   (`push_mode: "auto"`). Because the transaction is already submitted, the returned
 ///   serialized transaction is **empty** — only the signature, the on-chain
 ///   identifier, is returned. The caller's `&mut Transaction` is left untouched.
-/// - **Native manual** (`chain` = `Some(...)`, `push_mode` = `Manual`): Fordefi
-///   modifies and signs the transaction without broadcasting it. The caller's
-///   transaction is replaced with Fordefi's returned transaction and the returned
-///   serialized transaction can be completed by downstream signers and broadcast.
+/// - **Native manual** (`chain` = `Some(...)`, `push_mode` = `Manual`): for the
+///   unsigned requests supported here, Fordefi may replace the blockhash and
+///   manage priority-fee instructions without broadcasting. The caller's
+///   transaction is replaced only after all other content is validated.
 pub struct FordefiSigner {
     access_token: String,
     vault_id: String,
@@ -120,9 +303,9 @@ impl FordefiSigner {
 
     /// Create a FordefiSigner with an explicit native transaction push mode.
     ///
-    /// `Manual` requires `config.chain` and returns Fordefi-modified signed
-    /// transactions without broadcasting them. `Auto` preserves the behavior of
-    /// [`Self::from_config`].
+    /// `Manual` requires `config.chain` and returns validated blockhash/fee-
+    /// updated signed transactions without broadcasting them. `Auto` preserves
+    /// the behavior of [`Self::from_config`].
     pub async fn from_config_with_push_mode(
         config: FordefiSignerConfig,
         push_mode: FordefiPushMode,
@@ -649,6 +832,98 @@ impl FordefiSigner {
         Ok((serialized_transaction, signature))
     }
 
+    fn validate_manual_message_mutation(
+        &self,
+        original_tx: &VersionedTransaction,
+        returned_tx: &VersionedTransaction,
+    ) -> Result<(), SignerError> {
+        if std::mem::discriminant(&original_tx.message)
+            != std::mem::discriminant(&returned_tx.message)
+        {
+            return Err(SignerError::SigningFailed(
+                "Fordefi manual signing changed the transaction message version".to_string(),
+            ));
+        }
+
+        if original_tx.uses_durable_nonce() {
+            compare_manual_messages_exactly(&original_tx.message, &returned_tx.message, false)?;
+            #[cfg(feature = "sdk-v4")]
+            if matches!(&original_tx.message, VersionedMessage::V1(_)) {
+                return Ok(());
+            }
+            let (_, original_fee) = normalize_manual_fee_message(&original_tx.message)?;
+            return self.validate_manual_custom_fee(original_fee);
+        }
+
+        #[cfg(feature = "sdk-v4")]
+        if matches!(&original_tx.message, VersionedMessage::V1(_)) {
+            return compare_manual_messages_exactly(
+                &original_tx.message,
+                &returned_tx.message,
+                true,
+            );
+        }
+
+        let (normalized_original, original_fee) =
+            normalize_manual_fee_message(&original_tx.message)?;
+        if original_fee.price.is_some() {
+            compare_manual_messages_exactly(&original_tx.message, &returned_tx.message, true)?;
+            return self.validate_manual_custom_fee(original_fee);
+        }
+
+        let (mut normalized_returned, returned_fee) =
+            normalize_manual_fee_message(&returned_tx.message)?;
+        self.validate_manual_custom_fee(returned_fee)?;
+        normalized_returned.set_recent_blockhash(*normalized_original.recent_blockhash());
+        if normalized_returned.serialize() != normalized_original.serialize() {
+            return Err(SignerError::SigningFailed(
+                "Fordefi manual signing changed transaction content outside the recent blockhash and priority fee"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_manual_custom_fee(
+        &self,
+        returned_fee: ManualFeeInstructions,
+    ) -> Result<(), SignerError> {
+        let Some(FordefiSolanaFee::Custom {
+            unit_price,
+            priority_fee,
+        }) = &self.fee
+        else {
+            return Ok(());
+        };
+        if let Some(configured) = unit_price {
+            let expected = configured.parse::<u64>().map_err(|_| {
+                SignerError::SigningFailed("Configured custom unit_price is invalid".to_string())
+            })?;
+            if returned_fee.price != Some(expected) {
+                return Err(SignerError::SigningFailed(
+                    "Fordefi returned a compute-unit price that does not match the configured custom unit_price"
+                        .to_string(),
+                ));
+            }
+        }
+        if let (Some(configured), Some(returned_price)) = (priority_fee, returned_fee.price) {
+            let maximum = configured.parse::<u128>().map_err(|_| {
+                SignerError::SigningFailed("Configured custom priority_fee is invalid".to_string())
+            })?;
+            let limit = returned_fee.limit.unwrap_or(MAX_COMPUTE_UNIT_LIMIT) as u128;
+            let effective = ((returned_price as u128) * limit)
+                .saturating_add(MICRO_LAMPORTS_PER_LAMPORT - 1)
+                / MICRO_LAMPORTS_PER_LAMPORT;
+            if effective > maximum {
+                return Err(SignerError::SigningFailed(
+                    "Fordefi returned a priority fee above the configured custom priority_fee"
+                        .to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Decode and validate the transaction returned by native manual signing.
     async fn finish_native_manual(
         &self,
@@ -688,6 +963,8 @@ impl FordefiSigner {
                 "Fordefi manual signing changed the transaction required-signer set".to_string(),
             ));
         }
+
+        self.validate_manual_message_mutation(original_tx, &returned_tx)?;
         if returned_tx.signatures.len() != returned_signers.len() {
             return Err(SignerError::SigningFailed(
                 "Fordefi manual wire transaction has an invalid signature-slot count".to_string(),
@@ -977,7 +1254,9 @@ impl SolanaSigner for FordefiSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sdk_adapter::{keypair_pubkey, Hash, Keypair, Signer as SdkSigner};
+    use crate::sdk_adapter::{
+        keypair_pubkey, Hash, Keypair, Signer as SdkSigner, VersionedMessage,
+    };
     #[cfg(feature = "sdk-v4")]
     use crate::test_util::create_test_v1_transaction;
     use crate::test_util::{
@@ -1156,6 +1435,57 @@ mod tests {
             serialize_wire_transaction(transaction).expect("serialize signed transaction"),
             signature,
         )
+    }
+
+    fn prepend_manual_compute_budget_instruction(
+        transaction: &mut VersionedTransaction,
+        data: Vec<u8>,
+        accounts: Vec<u8>,
+    ) {
+        let compute_budget_id = COMPUTE_BUDGET_PROGRAM_ID;
+        let (header, account_keys, instructions) = match &mut transaction.message {
+            VersionedMessage::Legacy(message) => (
+                &mut message.header,
+                &mut message.account_keys,
+                &mut message.instructions,
+            ),
+            VersionedMessage::V0(message) => (
+                &mut message.header,
+                &mut message.account_keys,
+                &mut message.instructions,
+            ),
+            #[cfg(feature = "sdk-v4")]
+            VersionedMessage::V1(_) => panic!("fee helper does not support v1"),
+        };
+        let program_id_index = account_keys
+            .iter()
+            .position(|key| key == &compute_budget_id)
+            .unwrap_or_else(|| {
+                let index = account_keys.len();
+                account_keys.push(compute_budget_id);
+                header.num_readonly_unsigned_accounts += 1;
+                index
+            });
+        instructions.insert(
+            0,
+            CompiledInstruction {
+                program_id_index: u8::try_from(program_id_index).unwrap(),
+                accounts,
+                data,
+            },
+        );
+    }
+
+    fn compute_limit_data(limit: u32) -> Vec<u8> {
+        let mut data = vec![SET_COMPUTE_UNIT_LIMIT];
+        data.extend_from_slice(&limit.to_le_bytes());
+        data
+    }
+
+    fn compute_price_data(price: u64) -> Vec<u8> {
+        let mut data = vec![SET_COMPUTE_UNIT_PRICE];
+        data.extend_from_slice(&price.to_le_bytes());
+        data
     }
 
     async fn assert_native_manual_round_trip(
@@ -2123,6 +2453,210 @@ mod tests {
         assert_native_manual_round_trip(transaction, &keypair, "completed").await;
     }
 
+    #[test]
+    fn test_fordefi_native_manual_message_mutation_fee_policy() {
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let base = create_test_v0_transaction(&pubkey);
+        let signer = create_native_manual_test_signer("https://example.com", pubkey);
+
+        let mut returned = base.clone();
+        returned.message.set_recent_blockhash(Hash::new_unique());
+        prepend_manual_compute_budget_instruction(
+            &mut returned,
+            compute_limit_data(300_000),
+            vec![],
+        );
+        prepend_manual_compute_budget_instruction(&mut returned, compute_price_data(7), vec![]);
+        signer
+            .validate_manual_message_mutation(&base, &returned)
+            .unwrap();
+
+        let mut original_limit = base.clone();
+        prepend_manual_compute_budget_instruction(
+            &mut original_limit,
+            compute_limit_data(200_000),
+            vec![],
+        );
+        let mut adjusted_limit = base.clone();
+        prepend_manual_compute_budget_instruction(
+            &mut adjusted_limit,
+            compute_limit_data(400_000),
+            vec![],
+        );
+        signer
+            .validate_manual_message_mutation(&original_limit, &adjusted_limit)
+            .unwrap();
+        signer
+            .validate_manual_message_mutation(&original_limit, &base)
+            .unwrap();
+
+        let mut heap = base.clone();
+        prepend_manual_compute_budget_instruction(&mut heap, vec![1, 0, 128, 0, 0], vec![]);
+        let mut heap_with_price = heap.clone();
+        prepend_manual_compute_budget_instruction(
+            &mut heap_with_price,
+            compute_price_data(5),
+            vec![],
+        );
+        signer
+            .validate_manual_message_mutation(&heap, &heap_with_price)
+            .unwrap();
+        if let VersionedMessage::V0(message) = &mut heap_with_price.message {
+            message.instructions[1].data[1] ^= 1;
+        }
+        assert!(signer
+            .validate_manual_message_mutation(&heap, &heap_with_price)
+            .is_err());
+    }
+
+    #[test]
+    fn test_fordefi_native_manual_rejects_invalid_fee_mutations() {
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let base = create_test_transaction(&pubkey);
+        let signer = create_native_manual_test_signer("https://example.com", pubkey);
+
+        let mut original_price = base.clone();
+        prepend_manual_compute_budget_instruction(
+            &mut original_price,
+            compute_price_data(5),
+            vec![],
+        );
+        signer
+            .validate_manual_message_mutation(&original_price, &original_price)
+            .unwrap();
+        let mut changed_price = base.clone();
+        prepend_manual_compute_budget_instruction(
+            &mut changed_price,
+            compute_price_data(6),
+            vec![],
+        );
+        assert!(signer
+            .validate_manual_message_mutation(&original_price, &changed_price)
+            .is_err());
+
+        let mut malformed = base.clone();
+        prepend_manual_compute_budget_instruction(
+            &mut malformed,
+            vec![SET_COMPUTE_UNIT_LIMIT, 1],
+            vec![],
+        );
+        let mut duplicate = base.clone();
+        prepend_manual_compute_budget_instruction(&mut duplicate, compute_price_data(1), vec![]);
+        prepend_manual_compute_budget_instruction(&mut duplicate, compute_price_data(2), vec![]);
+        let mut account_bearing = base.clone();
+        prepend_manual_compute_budget_instruction(
+            &mut account_bearing,
+            compute_price_data(1),
+            vec![0],
+        );
+        let mut out_of_range = base.clone();
+        prepend_manual_compute_budget_instruction(
+            &mut out_of_range,
+            compute_limit_data(MAX_COMPUTE_UNIT_LIMIT + 1),
+            vec![],
+        );
+        let mut unknown = base.clone();
+        prepend_manual_compute_budget_instruction(&mut unknown, vec![9], vec![]);
+        for invalid in [malformed, duplicate, account_bearing, out_of_range, unknown] {
+            assert!(signer
+                .validate_manual_message_mutation(&base, &invalid)
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn test_fordefi_native_manual_enforces_custom_fee_constraints() {
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let base = create_test_v0_transaction(&pubkey);
+        let mut returned = base.clone();
+        prepend_manual_compute_budget_instruction(
+            &mut returned,
+            compute_limit_data(200_000),
+            vec![],
+        );
+        prepend_manual_compute_budget_instruction(&mut returned, compute_price_data(10), vec![]);
+
+        let mut exact = create_native_manual_test_signer("https://example.com", pubkey);
+        exact.fee = Some(FordefiSolanaFee::Custom {
+            unit_price: Some("10".to_string()),
+            priority_fee: Some("2".to_string()),
+        });
+        exact
+            .validate_manual_message_mutation(&base, &returned)
+            .unwrap();
+        assert!(exact
+            .validate_manual_message_mutation(&base, &base)
+            .is_err());
+
+        let mut capped = create_native_manual_test_signer("https://example.com", pubkey);
+        capped.fee = Some(FordefiSolanaFee::Custom {
+            unit_price: None,
+            priority_fee: Some("1".to_string()),
+        });
+        assert!(capped
+            .validate_manual_message_mutation(&base, &returned)
+            .is_err());
+
+        let mut original_price = base.clone();
+        prepend_manual_compute_budget_instruction(
+            &mut original_price,
+            compute_price_data(10),
+            vec![],
+        );
+        let mut conflicting = create_native_manual_test_signer("https://example.com", pubkey);
+        conflicting.fee = Some(FordefiSolanaFee::Custom {
+            unit_price: Some("11".to_string()),
+            priority_fee: None,
+        });
+        assert!(conflicting
+            .validate_manual_message_mutation(&original_price, &original_price)
+            .is_err());
+    }
+
+    #[test]
+    fn test_fordefi_native_manual_restricts_durable_nonce_lifetime() {
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer("https://example.com", pubkey);
+        let mut nonce = create_test_transaction(&pubkey);
+        if let VersionedMessage::Legacy(message) = &mut nonce.message {
+            message.instructions[0].data = vec![4, 0, 0, 0];
+        }
+        assert!(nonce.uses_durable_nonce());
+        let mut changed = nonce.clone();
+        changed.message.set_recent_blockhash(Hash::new_unique());
+        assert!(signer
+            .validate_manual_message_mutation(&nonce, &changed)
+            .is_err());
+    }
+
+    #[cfg(feature = "sdk-v4")]
+    #[test]
+    fn test_fordefi_native_manual_restricts_v1_inline_config() {
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer("https://example.com", pubkey);
+        let original = create_test_v1_transaction(&pubkey);
+        let mut blockhash_changed = original.clone();
+        blockhash_changed
+            .message
+            .set_recent_blockhash(Hash::new_unique());
+        signer
+            .validate_manual_message_mutation(&original, &blockhash_changed)
+            .unwrap();
+
+        let mut config_changed = blockhash_changed;
+        if let VersionedMessage::V1(message) = &mut config_changed.message {
+            message.config.priority_fee = Some(99);
+        }
+        assert!(signer
+            .validate_manual_message_mutation(&original, &config_changed)
+            .is_err());
+    }
+
     #[cfg(feature = "sdk-v4")]
     #[tokio::test]
     async fn test_fordefi_native_manual_replaces_v1_transaction() {
@@ -2373,6 +2907,33 @@ mod tests {
         mount_native_manual_result(
             &mock_server,
             "manual-changed-signers",
+            "signed",
+            Some(STANDARD.encode(wire_bytes)),
+        )
+        .await;
+
+        assert!(matches!(
+            signer.sign_transaction(&mut transaction).await.unwrap_err(),
+            SignerError::SigningFailed(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fordefi_native_manual_rejects_changed_instruction_content() {
+        let mock_server = MockServer::start().await;
+        let keypair = create_test_keypair();
+        let pubkey = keypair_pubkey(&keypair);
+        let signer = create_native_manual_test_signer(&mock_server.uri(), pubkey);
+        let mut transaction = create_test_transaction(&pubkey);
+        let mut returned_tx = transaction.clone();
+        match &mut returned_tx.message {
+            VersionedMessage::Legacy(message) => message.instructions[0].data[0] ^= 0x01,
+            _ => panic!("expected legacy test transaction"),
+        }
+        let (wire_bytes, _) = signed_wire_transaction(&mut returned_tx, &keypair);
+        mount_native_manual_result(
+            &mock_server,
+            "manual-changed-content",
             "signed",
             Some(STANDARD.encode(wire_bytes)),
         )

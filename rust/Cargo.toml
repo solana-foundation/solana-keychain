@@ -65,11 +65,20 @@ all = [
 ]
 
 # SDK version selection (mutually exclusive)
-sdk-v2 = ["dep:solana-sdk"]
-sdk-v3 = ["dep:solana-sdk-v3", "dep:solana-shred-version-v3", "dep:solana-signature"]
+sdk-v2 = ["dep:solana-sdk", "dep:solana-compute-budget-interface-v2"]
+sdk-v3 = [
+    "dep:solana-sdk-v3",
+    "dep:solana-shred-version-v3",
+    "dep:solana-signature",
+    "dep:solana-compute-budget-interface-v3",
+]
 # solana-sdk 4.x bundles solana-signature/solana-shred-version via its `full`
 # feature at internally-consistent versions, so no companion-crate pins needed.
-sdk-v4 = ["dep:solana-sdk-v4", "dep:wincode"]
+sdk-v4 = [
+    "dep:solana-sdk-v4",
+    "dep:wincode",
+    "dep:solana-compute-budget-interface-v3",
+]
 
 # WARNING: DO NOT ENABLE IN PRODUCTION
 # This feature logs full API error responses which may contain sensitive information
@@ -82,7 +91,9 @@ integration-tests = []
 [dependencies]
 # Solana SDK (version selected by feature flags)
 solana-sdk = { version = "2.3.0", optional = true }
+solana-compute-budget-interface-v2 = { package = "solana-compute-budget-interface", version = "2.2.2", optional = true }
 solana-sdk-v3 = { package = "solana-sdk", version = "=3.0.0", optional = true }
+solana-compute-budget-interface-v3 = { package = "solana-compute-budget-interface", version = "3.0.0", optional = true }
 # Pinned to =3.0.0 to avoid broken transitive deps (solana-signature v3.3 / solana-hash v3 vs v4)
 solana-shred-version-v3 = { package = "solana-shred-version", version = "=3.0.0", optional = true }
 # Pin solana-signature to avoid v3.3.0 where DecodeError doesn't implement std::error::Error

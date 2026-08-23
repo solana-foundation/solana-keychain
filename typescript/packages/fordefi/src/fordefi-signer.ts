@@ -29,7 +29,12 @@ import {
     TransactionSendingSigner,
     TransactionSendingSignerConfig,
 } from '@solana/signers';
-import { getCompiledTransactionMessageDecoder } from '@solana/transaction-messages';
+import {
+    type CompiledTransactionMessage,
+    type CompiledTransactionMessageWithLifetime,
+    getCompiledTransactionMessageDecoder,
+    getCompiledTransactionMessageEncoder,
+} from '@solana/transaction-messages';
 import {
     assertIsTransactionWithinSizeLimit,
     Base64EncodedWireTransaction,
@@ -40,6 +45,7 @@ import {
     TransactionWithinSizeLimit,
     TransactionWithLifetime,
 } from '@solana/transactions';
+import { COMPUTE_BUDGET_PROGRAM_ADDRESS } from '@solana-program/compute-budget';
 
 import type {
     FordefiBlackBoxSignatureRequest,
@@ -56,6 +62,10 @@ const DEFAULT_BASE_URL = 'https://api.fordefi.com';
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 50;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const SET_COMPUTE_UNIT_LIMIT = 2;
+const SET_COMPUTE_UNIT_PRICE = 3;
+const MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
+const MICRO_LAMPORTS_PER_LAMPORT = 1_000_000n;
 
 /**
  * Native Solana push modes this signer can honor. Validated at runtime because
@@ -95,6 +105,180 @@ function anyAbortSignal(signals: readonly AbortSignal[]): AbortSignal {
         });
     }
     return controller.signal;
+}
+
+type DecodedCompiledMessage = CompiledTransactionMessage & CompiledTransactionMessageWithLifetime;
+type LegacyOrV0CompiledMessage = Extract<DecodedCompiledMessage, { version: 'legacy' | 0 }>;
+type MutableCompiledInstruction = {
+    accountIndices?: number[];
+    data?: Uint8Array;
+    programAddressIndex: number;
+};
+type ManualFeeInstructions = { limit?: number; price?: bigint };
+
+function bytesEqual(left: ArrayLike<number>, right: ArrayLike<number>): boolean {
+    if (left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index++) {
+        if (left[index] !== right[index]) return false;
+    }
+    return true;
+}
+
+function encodeCompiledMessage(message: DecodedCompiledMessage): ArrayLike<number> {
+    return getCompiledTransactionMessageEncoder().encode(message);
+}
+
+function compareManualMessagesExactly(
+    original: DecodedCompiledMessage,
+    returned: DecodedCompiledMessage,
+    allowBlockhashReplacement: boolean,
+): boolean {
+    const comparable = allowBlockhashReplacement
+        ? ({ ...returned, lifetimeToken: original.lifetimeToken } as DecodedCompiledMessage)
+        : returned;
+    return bytesEqual(encodeCompiledMessage(original), encodeCompiledMessage(comparable));
+}
+
+function normalizeManualFeeMessage(message: LegacyOrV0CompiledMessage): {
+    fees: ManualFeeInstructions;
+    message: LegacyOrV0CompiledMessage;
+} {
+    const normalized = {
+        ...message,
+        header: { ...message.header },
+        instructions: message.instructions.map(instruction => ({
+            ...instruction,
+            accountIndices: instruction.accountIndices ? [...instruction.accountIndices] : undefined,
+            data: instruction.data ? new Uint8Array(instruction.data) : undefined,
+        })),
+        staticAccounts: [...message.staticAccounts],
+    } as LegacyOrV0CompiledMessage & {
+        header: {
+            numReadonlyNonSignerAccounts: number;
+            numReadonlySignerAccounts: number;
+            numSignerAccounts: number;
+        };
+        instructions: MutableCompiledInstruction[];
+        staticAccounts: Address[];
+    };
+    const fees: ManualFeeInstructions = {};
+    const retained: MutableCompiledInstruction[] = [];
+
+    for (const instruction of normalized.instructions) {
+        const programAddress = normalized.staticAccounts[instruction.programAddressIndex];
+        const opcode = instruction.data?.[0];
+        if (
+            programAddress !== COMPUTE_BUDGET_PROGRAM_ADDRESS ||
+            (opcode !== SET_COMPUTE_UNIT_LIMIT && opcode !== SET_COMPUTE_UNIT_PRICE)
+        ) {
+            retained.push(instruction);
+            continue;
+        }
+        if ((instruction.accountIndices?.length ?? 0) !== 0) {
+            throw new Error('Fordefi returned an account-bearing Compute Budget fee instruction');
+        }
+        if (opcode === SET_COMPUTE_UNIT_LIMIT) {
+            if (instruction.data?.length !== 5 || fees.limit !== undefined) {
+                throw new Error('Fordefi returned a malformed or duplicate compute-unit limit');
+            }
+            const limit = Buffer.from(instruction.data).readUInt32LE(1);
+            if (limit === 0 || limit > MAX_COMPUTE_UNIT_LIMIT) {
+                throw new Error('Fordefi returned an out-of-range compute-unit limit');
+            }
+            fees.limit = limit;
+        } else {
+            if (instruction.data?.length !== 9 || fees.price !== undefined) {
+                throw new Error('Fordefi returned a malformed or duplicate compute-unit price');
+            }
+            fees.price = Buffer.from(instruction.data).readBigUInt64LE(1);
+        }
+    }
+    normalized.instructions = retained;
+
+    const computeBudgetPositions = normalized.staticAccounts.flatMap((address, index) =>
+        address === COMPUTE_BUDGET_PROGRAM_ADDRESS ? [index] : [],
+    );
+    if (computeBudgetPositions.length === 1) {
+        const index = computeBudgetPositions[0]!;
+        const readonlyNonSignerStart =
+            normalized.staticAccounts.length - normalized.header.numReadonlyNonSignerAccounts;
+        const referenced = normalized.instructions.some(
+            instruction =>
+                instruction.programAddressIndex === index || instruction.accountIndices?.includes(index) === true,
+        );
+        if (index >= normalized.header.numSignerAccounts && index >= readonlyNonSignerStart && !referenced) {
+            normalized.staticAccounts.splice(index, 1);
+            normalized.header.numReadonlyNonSignerAccounts--;
+            for (const instruction of normalized.instructions) {
+                if (instruction.programAddressIndex > index) {
+                    instruction.programAddressIndex--;
+                }
+                instruction.accountIndices = instruction.accountIndices?.map(accountIndex =>
+                    accountIndex > index ? accountIndex - 1 : accountIndex,
+                );
+            }
+        }
+    }
+    return { fees, message: normalized };
+}
+
+function validateManualCustomFee(fee: FordefiSolanaFee | undefined, returned: ManualFeeInstructions): void {
+    if (fee?.type !== 'custom') return;
+    if (fee.unit_price !== undefined) {
+        const configuredPrice = BigInt(fee.unit_price);
+        if (returned.price === undefined || returned.price !== configuredPrice) {
+            throw new Error(
+                'Fordefi returned a compute-unit price that does not match the configured custom unit_price',
+            );
+        }
+    }
+    if (fee.priority_fee !== undefined && returned.price !== undefined) {
+        const configuredMaximum = BigInt(fee.priority_fee);
+        const limit = BigInt(returned.limit ?? MAX_COMPUTE_UNIT_LIMIT);
+        const effectiveFee = (returned.price * limit + MICRO_LAMPORTS_PER_LAMPORT - 1n) / MICRO_LAMPORTS_PER_LAMPORT;
+        if (effectiveFee > configuredMaximum) {
+            throw new Error('Fordefi returned a priority fee above the configured custom priority_fee');
+        }
+    }
+}
+
+/** Validate the mutation set Fordefi documents for an unsigned native manual request. */
+async function manualMessagesMatchFordefiMutationPolicy(
+    originalMessageBytes: Uint8Array,
+    returnedMessageBytes: Uint8Array,
+    fee: FordefiSolanaFee | undefined,
+): Promise<boolean> {
+    const decoder = getCompiledTransactionMessageDecoder();
+    const original = decoder.decode(originalMessageBytes);
+    const returned = decoder.decode(returnedMessageBytes);
+    if (original.version !== returned.version) {
+        return false;
+    }
+    const originalLifetime = await getTransactionLifetimeConstraintFromCompiledTransactionMessage(original);
+    if ('nonce' in originalLifetime) {
+        if (!bytesEqual(originalMessageBytes, returnedMessageBytes)) return false;
+        if (original.version !== 1) {
+            validateManualCustomFee(fee, normalizeManualFeeMessage(original).fees);
+        }
+        return true;
+    }
+    if (original.version === 1 || returned.version === 1) {
+        return compareManualMessagesExactly(original, returned, true);
+    }
+
+    const normalizedOriginal = normalizeManualFeeMessage(original);
+    if (normalizedOriginal.fees.price !== undefined) {
+        if (!compareManualMessagesExactly(original, returned, true)) return false;
+        validateManualCustomFee(fee, normalizedOriginal.fees);
+        return true;
+    }
+    const normalizedReturned = normalizeManualFeeMessage(returned);
+    validateManualCustomFee(fee, normalizedReturned.fees);
+    const comparableReturned = {
+        ...normalizedReturned.message,
+        lifetimeToken: normalizedOriginal.message.lifetimeToken,
+    } as LegacyOrV0CompiledMessage;
+    return bytesEqual(encodeCompiledMessage(normalizedOriginal.message), encodeCompiledMessage(comparableReturned));
 }
 
 /** Resolve after `ms`, or reject as soon as the caller aborts. */
@@ -228,9 +412,10 @@ export interface FordefiNativeSigner<TAddress extends string = string>
 /**
  * Fordefi signer shape returned for native Solana `push_mode: 'manual'`.
  *
- * Fordefi may replace the recent blockhash or add priority-fee instructions,
- * then returns the signed transaction without broadcasting it. The caller may
- * apply any remaining partial signatures and owns submission to the network.
+ * Current requests are unsigned, so Fordefi may replace the recent blockhash
+ * and manage narrowly scoped priority-fee instructions. It returns the signed
+ * transaction without broadcasting it; the caller may apply any remaining
+ * partial signatures and owns submission to the network.
  */
 export interface FordefiNativeManualSigner<TAddress extends string = string>
     extends TransactionModifyingSigner<TAddress>, MessagePartialSigner<TAddress> {
@@ -599,9 +784,9 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
     /**
      * Native manual path for Kit's TransactionModifyingSigner contract.
      *
-     * Fordefi signs first so it may safely replace the lifetime token or add
-     * fee instructions. Remaining signers can sign the returned transaction
-     * before the caller broadcasts it.
+     * Fordefi signs first so it may safely replace the lifetime token and
+     * manage priority-fee instructions. Remaining signers can sign the
+     * validated returned transaction before the caller broadcasts it.
      */
     private async modifyAndSignNativeTransactions(
         transactions: readonly (Transaction | (Transaction & TransactionWithLifetime))[],
@@ -661,6 +846,27 @@ export class FordefiSigner<TAddress extends string = string> implements MessageP
             return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                 address: this.address,
                 message: 'Fordefi manual signing changed the transaction required-signer set',
+            });
+        }
+
+        let messageContentMatches: boolean;
+        try {
+            messageContentMatches = await manualMessagesMatchFordefiMutationPolicy(
+                new Uint8Array(originalTransaction.messageBytes),
+                new Uint8Array(decodedTransaction.messageBytes),
+                this.fee,
+            );
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                cause: error,
+                message: 'Fordefi returned an invalid manual transaction mutation',
+            });
+        }
+        if (!messageContentMatches) {
+            return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                address: this.address,
+                message:
+                    'Fordefi manual signing changed transaction content outside the recent blockhash and priority fee',
             });
         }
 

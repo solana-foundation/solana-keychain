@@ -30,9 +30,10 @@ const (
 //     via black_box_signature; the caller broadcasts the signed transaction.
 //   - Native auto (Chain set, PushMode empty or Auto): Fordefi may replace the
 //     blockhash and fees, signs, and broadcasts the transaction itself.
-//   - Native manual (Chain set, PushMode Manual): Fordefi may replace the
-//     blockhash and fees and signs, but returns the transaction for the caller
-//     to finish signing and broadcast. See SignTransaction.
+//   - Native manual (Chain set, PushMode Manual): for the unsigned requests this
+//     signer supports, Fordefi may replace the blockhash and manage priority-fee
+//     instructions, then returns the transaction for downstream signing and
+//     caller-managed broadcasting. See SignTransaction.
 type Signer struct {
 	accessToken     string
 	vaultID         string
@@ -230,14 +231,17 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 // fails without a usable response returns CodeBroadcastUnconfirmed with no
 // transaction id.
 //
-// Native manual mode submits with push_mode "manual": Fordefi may modify and
-// sign the transaction but does not broadcast it. After validating Fordefi's
-// returned wire transaction, SignTransaction replaces tx and returns its
-// non-empty base64 encoding. Fordefi must be the fee payer and manual signing
-// must happen before any other signer. A sole-signer result is Complete; a
-// multisigner result is Partial so downstream signers can update tx before the
-// caller broadcasts it. Fordefi may replace the blockhash but does not provide
-// its lastValidBlockHeight, so manual results should be broadcast promptly.
+// Native manual mode submits an unsigned message with push_mode "manual".
+// Fordefi may replace its recent blockhash and, unless it already sets a
+// compute-unit price, manage SetComputeUnitPrice/SetComputeUnitLimit. It signs
+// but does not broadcast. After validating that all content outside the
+// documented blockhash and fee mutation set is unchanged, SignTransaction
+// replaces tx and returns its non-empty base64 encoding. Fordefi must be the
+// fee payer and manual signing must happen before any other signer. A
+// sole-signer result is Complete; a multisigner result is Partial so downstream
+// signers can update tx before the caller broadcasts it.
+// Fordefi does not provide the replacement blockhash's lastValidBlockHeight, so
+// manual results should be broadcast promptly.
 //
 // Native creates carry deterministic x-idempotence-id values. Auto mode retains
 // its message-only key; manual mode namespaces its key by mode, chain, and vault.
@@ -483,7 +487,7 @@ func (s *Signer) validateNativeManualInput(tx *solana.Transaction) error {
 	return nil
 }
 
-// finishNativeManual validates Fordefi's authoritative replacement transaction,
+// finishNativeManual validates Fordefi's candidate replacement transaction,
 // then atomically transfers it to the caller and returns its canonical wire form.
 func (s *Signer) finishNativeManual(ctx context.Context, txID string, original *solana.Transaction) (core.SignedTransaction, error) {
 	result, err := s.pollForResult(ctx, txID, false)
@@ -521,6 +525,10 @@ func (s *Signer) finishNativeManual(ctx context.Context, txID string, original *
 			return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
 				"Fordefi manual signing changed the transaction required-signer set")
 		}
+	}
+	if err := s.validateManualMessageMutation(original, returned); err != nil {
+		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
+			"Fordefi manual signing returned an unauthorized transaction mutation: "+err.Error())
 	}
 	if len(returned.Signatures) != numRequired {
 		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,

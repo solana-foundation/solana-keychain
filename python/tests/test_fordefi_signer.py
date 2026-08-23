@@ -16,7 +16,11 @@ from cryptography.hazmat.primitives.serialization import (
     NoEncryption,
     PrivateFormat,
 )
+from solders.compute_budget import ID as COMPUTE_BUDGET_ID
+from solders.hash import Hash
+from solders.instruction import CompiledInstruction
 from solders.keypair import Keypair
+from solders.message import Message, MessageHeader, MessageV0, MessageV1, TransactionConfig
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
@@ -618,6 +622,227 @@ def signed_wire(keypair: Keypair, transaction: VersionedTransaction) -> tuple[st
     return base64.b64encode(bytes(transaction)).decode("ascii"), signature
 
 
+def transaction_with_blockhash(
+    transaction: VersionedTransaction, blockhash: Hash
+) -> VersionedTransaction:
+    message = transaction.message
+    replaced_message: Message | MessageV0 | MessageV1
+    if isinstance(message, Message):
+        header = message.header
+        replaced_message = Message.new_with_compiled_instructions(
+            header.num_required_signatures,
+            header.num_readonly_signed_accounts,
+            header.num_readonly_unsigned_accounts,
+            message.account_keys,
+            blockhash,
+            message.instructions,
+        )
+    elif isinstance(message, MessageV0):
+        replaced_message = MessageV0(
+            message.header,
+            message.account_keys,
+            blockhash,
+            message.instructions,
+            message.address_table_lookups,
+        )
+    elif isinstance(message, MessageV1):
+        replaced_message = MessageV1(
+            message.header,
+            message.config,
+            blockhash,
+            message.account_keys,
+            message.instructions,
+        )
+    else:
+        raise AssertionError(f"unsupported message type: {type(message).__name__}")
+    return VersionedTransaction.populate(
+        replaced_message,
+        [Signature.default()] * replaced_message.header.num_required_signatures,
+    )
+
+
+def transaction_with_compute_budget_instruction(
+    transaction: VersionedTransaction, data: bytes, accounts: bytes = b""
+) -> VersionedTransaction:
+    message = transaction.message
+    assert isinstance(message, (Message, MessageV0))
+    account_keys = list(message.account_keys)
+    try:
+        program_index = account_keys.index(COMPUTE_BUDGET_ID)
+        header = message.header
+    except ValueError:
+        program_index = len(account_keys)
+        account_keys.append(COMPUTE_BUDGET_ID)
+        header = MessageHeader(
+            message.header.num_required_signatures,
+            message.header.num_readonly_signed_accounts,
+            message.header.num_readonly_unsigned_accounts + 1,
+        )
+    instructions = [
+        CompiledInstruction(program_index, data, accounts),
+        *message.instructions,
+    ]
+    if isinstance(message, Message):
+        replaced: Message | MessageV0 = Message.new_with_compiled_instructions(
+            header.num_required_signatures,
+            header.num_readonly_signed_accounts,
+            header.num_readonly_unsigned_accounts,
+            account_keys,
+            message.recent_blockhash,
+            instructions,
+        )
+    else:
+        replaced = MessageV0(
+            header,
+            account_keys,
+            message.recent_blockhash,
+            instructions,
+            message.address_table_lookups,
+        )
+    return VersionedTransaction.populate(
+        replaced, [Signature.default()] * replaced.header.num_required_signatures
+    )
+
+
+def compute_limit_data(limit: int) -> bytes:
+    return bytes([2]) + limit.to_bytes(4, "little")
+
+
+def compute_price_data(price: int) -> bytes:
+    return bytes([3]) + price.to_bytes(8, "little")
+
+
+def test_native_manual_message_mutation_fee_policy() -> None:
+    keypair = Keypair()
+    base = create_test_v0_transaction(keypair.pubkey())
+    signer = make_signer(keypair, chain="solana_devnet", push_mode="manual")
+
+    returned = transaction_with_blockhash(base, Hash.new_unique())
+    returned = transaction_with_compute_budget_instruction(returned, compute_limit_data(300_000))
+    returned = transaction_with_compute_budget_instruction(returned, compute_price_data(7))
+    signer._validate_manual_message_mutation(base, returned)
+
+    original_limit = transaction_with_compute_budget_instruction(base, compute_limit_data(200_000))
+    adjusted_limit = transaction_with_compute_budget_instruction(base, compute_limit_data(400_000))
+    signer._validate_manual_message_mutation(original_limit, adjusted_limit)
+    signer._validate_manual_message_mutation(original_limit, base)
+
+    heap = transaction_with_compute_budget_instruction(base, bytes([1, 0, 128, 0, 0]))
+    heap_with_price = transaction_with_compute_budget_instruction(heap, compute_price_data(5))
+    signer._validate_manual_message_mutation(heap, heap_with_price)
+    changed_heap = transaction_with_compute_budget_instruction(base, bytes([1, 0, 132, 0, 0]))
+    changed_heap = transaction_with_compute_budget_instruction(changed_heap, compute_price_data(5))
+    with pytest.raises(ValueError):
+        signer._validate_manual_message_mutation(heap, changed_heap)
+
+
+def test_native_manual_message_mutation_rejects_invalid_fees() -> None:
+    keypair = Keypair()
+    base = create_test_transaction(keypair.pubkey())
+    signer = make_signer(keypair, chain="solana_devnet", push_mode="manual")
+
+    original_price = transaction_with_compute_budget_instruction(base, compute_price_data(5))
+    signer._validate_manual_message_mutation(original_price, original_price)
+    changed_price = transaction_with_compute_budget_instruction(base, compute_price_data(6))
+    with pytest.raises(ValueError):
+        signer._validate_manual_message_mutation(original_price, changed_price)
+
+    invalid = [
+        transaction_with_compute_budget_instruction(base, bytes([2, 1])),
+        transaction_with_compute_budget_instruction(
+            transaction_with_compute_budget_instruction(base, compute_price_data(1)),
+            compute_price_data(2),
+        ),
+        transaction_with_compute_budget_instruction(base, compute_price_data(1), b"\x00"),
+        transaction_with_compute_budget_instruction(base, compute_limit_data(1_400_001)),
+        transaction_with_compute_budget_instruction(base, bytes([9])),
+    ]
+    for returned in invalid:
+        with pytest.raises(ValueError):
+            signer._validate_manual_message_mutation(base, returned)
+
+
+def test_native_manual_message_mutation_enforces_custom_fees() -> None:
+    keypair = Keypair()
+    base = create_test_v0_transaction(keypair.pubkey())
+    matching = transaction_with_compute_budget_instruction(base, compute_limit_data(200_000))
+    matching = transaction_with_compute_budget_instruction(matching, compute_price_data(10))
+
+    exact = make_signer(
+        keypair,
+        chain="solana_devnet",
+        push_mode="manual",
+        fee={"type": "custom", "unit_price": "10", "priority_fee": "2"},
+    )
+    exact._validate_manual_message_mutation(base, matching)
+    with pytest.raises(ValueError):
+        exact._validate_manual_message_mutation(base, base)
+
+    capped = make_signer(
+        keypair,
+        chain="solana_devnet",
+        push_mode="manual",
+        fee={"type": "custom", "priority_fee": "1"},
+    )
+    with pytest.raises(ValueError):
+        capped._validate_manual_message_mutation(base, matching)
+
+    original_price = transaction_with_compute_budget_instruction(base, compute_price_data(10))
+    conflicting = make_signer(
+        keypair,
+        chain="solana_devnet",
+        push_mode="manual",
+        fee={"type": "custom", "unit_price": "11"},
+    )
+    with pytest.raises(ValueError):
+        conflicting._validate_manual_message_mutation(original_price, original_price)
+
+
+def test_native_manual_message_mutation_restricts_v1_and_durable_nonce() -> None:
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet", push_mode="manual")
+
+    v1 = create_test_v1_transaction(keypair.pubkey())
+    v1_blockhash = transaction_with_blockhash(v1, Hash.new_unique())
+    signer._validate_manual_message_mutation(v1, v1_blockhash)
+    assert isinstance(v1_blockhash.message, MessageV1)
+    v1_config_message = MessageV1(
+        v1_blockhash.message.header,
+        TransactionConfig(priority_fee=99),
+        v1_blockhash.message.recent_blockhash,
+        v1_blockhash.message.account_keys,
+        v1_blockhash.message.instructions,
+    )
+    v1_config_changed = VersionedTransaction.populate(
+        v1_config_message,
+        [Signature.default()] * v1_config_message.header.num_required_signatures,
+    )
+    with pytest.raises(ValueError):
+        signer._validate_manual_message_mutation(v1, v1_config_changed)
+
+    nonce = create_test_transaction(keypair.pubkey())
+    assert isinstance(nonce.message, Message)
+    nonce_instructions = list(nonce.message.instructions)
+    first = nonce_instructions[0]
+    nonce_instructions[0] = CompiledInstruction(
+        first.program_id_index, bytes([4, 0, 0, 0]), bytes(first.accounts)
+    )
+    header = nonce.message.header
+    nonce_message = Message.new_with_compiled_instructions(
+        header.num_required_signatures,
+        header.num_readonly_signed_accounts,
+        header.num_readonly_unsigned_accounts,
+        nonce.message.account_keys,
+        nonce.message.recent_blockhash,
+        nonce_instructions,
+    )
+    nonce = VersionedTransaction.populate(nonce_message, [Signature.default()])
+    assert nonce.uses_durable_nonce()
+    nonce_changed = transaction_with_blockhash(nonce, Hash.new_unique())
+    with pytest.raises(ValueError):
+        signer._validate_manual_message_mutation(nonce, nonce_changed)
+
+
 @respx.mock
 async def test_sign_transaction_native_success() -> None:
     keypair = Keypair()
@@ -710,7 +935,7 @@ async def test_sign_transaction_native_manual_returns_modified_transaction(
     )
     transaction = create_transaction_version(version, keypair.pubkey())
     original_wire = bytes(transaction)
-    returned = create_transaction_version(version, keypair.pubkey())
+    returned = transaction_with_blockhash(transaction, Hash.new_unique())
     assert signed_message_bytes(returned.message) != signed_message_bytes(transaction.message)
     raw_transaction, signature = signed_wire(keypair, returned)
     mock_sign_flow(
@@ -747,6 +972,20 @@ async def test_sign_transaction_native_manual_returns_modified_transaction(
     manual_id = str(uuid.UUID(bytes=bytes(digest)))
     assert request.headers["x-idempotence-id"] == manual_id
     assert manual_id != idempotency_key_from_message(signed_message_bytes(transaction.message))
+
+
+@respx.mock
+async def test_sign_transaction_native_manual_rejects_changed_non_signer_account() -> None:
+    keypair = Keypair()
+    signer = make_signer(keypair, chain="solana_devnet", push_mode="manual")
+    transaction = create_test_transaction(keypair.pubkey())
+    returned = create_test_transaction(keypair.pubkey(), Pubkey.new_unique())
+    raw_transaction, _ = signed_wire(keypair, returned)
+    mock_sign_flow(status_response("signed", raw_transaction=raw_transaction))
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
 
 
 @respx.mock

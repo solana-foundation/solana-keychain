@@ -15,6 +15,9 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 import httpx
+from solders.compute_budget import ID as COMPUTE_BUDGET_ID
+from solders.instruction import CompiledInstruction
+from solders.message import Message, MessageHeader, MessageV0, MessageV1
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
@@ -68,6 +71,156 @@ _TERMINAL_FAILURE_STATES = frozenset(
     }
 )
 
+_SET_COMPUTE_UNIT_LIMIT = 2
+_SET_COMPUTE_UNIT_PRICE = 3
+_MAX_COMPUTE_UNIT_LIMIT = 1_400_000
+_MICRO_LAMPORTS_PER_LAMPORT = 1_000_000
+
+
+@dataclass(frozen=True)
+class _ManualFeeInstructions:
+    limit: int | None = None
+    price: int | None = None
+
+
+def _message_with_recent_blockhash(message: Any, recent_blockhash: Any) -> Any:
+    """Clone a supported message while replacing only its lifetime hash."""
+    if isinstance(message, Message):
+        header = message.header
+        return Message.new_with_compiled_instructions(
+            header.num_required_signatures,
+            header.num_readonly_signed_accounts,
+            header.num_readonly_unsigned_accounts,
+            message.account_keys,
+            recent_blockhash,
+            message.instructions,
+        )
+    if isinstance(message, MessageV0):
+        return MessageV0(
+            message.header,
+            message.account_keys,
+            recent_blockhash,
+            message.instructions,
+            message.address_table_lookups,
+        )
+    if isinstance(message, MessageV1):
+        return MessageV1(
+            message.header,
+            message.config,
+            recent_blockhash,
+            message.account_keys,
+            message.instructions,
+        )
+    raise TypeError(f"Unsupported Solana message type: {type(message).__name__}")
+
+
+def _normalize_manual_fee_message(
+    message: Message | MessageV0,
+) -> tuple[Any, _ManualFeeInstructions]:
+    """Remove only the priority-fee instructions Fordefi is allowed to manage."""
+    account_keys = list(message.account_keys)
+    kept: list[CompiledInstruction] = []
+    limit: int | None = None
+    price: int | None = None
+
+    for instruction in message.instructions:
+        program_index = instruction.program_id_index
+        data = bytes(instruction.data)
+        is_mutable_fee = (
+            program_index < len(account_keys)
+            and account_keys[program_index] == COMPUTE_BUDGET_ID
+            and data
+            and data[0] in (_SET_COMPUTE_UNIT_LIMIT, _SET_COMPUTE_UNIT_PRICE)
+        )
+        if not is_mutable_fee:
+            kept.append(instruction)
+            continue
+        if instruction.accounts:
+            raise ValueError("priority-fee instruction has accounts")
+        if data[0] == _SET_COMPUTE_UNIT_LIMIT:
+            if limit is not None:
+                raise ValueError("duplicate SetComputeUnitLimit")
+            if len(data) != 5:
+                raise ValueError("malformed SetComputeUnitLimit")
+            limit = int.from_bytes(data[1:], "little")
+            if limit == 0 or limit > _MAX_COMPUTE_UNIT_LIMIT:
+                raise ValueError("SetComputeUnitLimit is out of range")
+        else:
+            if price is not None:
+                raise ValueError("duplicate SetComputeUnitPrice")
+            if len(data) != 9:
+                raise ValueError("malformed SetComputeUnitPrice")
+            price = int.from_bytes(data[1:], "little")
+
+    compute_budget_indexes = [
+        index for index, account_key in enumerate(account_keys) if account_key == COMPUTE_BUDGET_ID
+    ]
+    if len(compute_budget_indexes) == 1:
+        key_index = compute_budget_indexes[0]
+        header = message.header
+        first_readonly_unsigned = len(account_keys) - header.num_readonly_unsigned_accounts
+        is_readonly_unsigned = (
+            header.num_readonly_unsigned_accounts > 0
+            and key_index >= header.num_required_signatures
+            and key_index >= first_readonly_unsigned
+        )
+        is_still_used = any(
+            instruction.program_id_index == key_index or key_index in instruction.accounts
+            for instruction in kept
+        )
+        if is_readonly_unsigned and not is_still_used:
+            del account_keys[key_index]
+            header = MessageHeader(
+                header.num_required_signatures,
+                header.num_readonly_signed_accounts,
+                header.num_readonly_unsigned_accounts - 1,
+            )
+            reindexed: list[CompiledInstruction] = []
+            for instruction in kept:
+                program_index = instruction.program_id_index
+                if program_index > key_index:
+                    program_index -= 1
+                accounts = bytes(
+                    index - 1 if index > key_index else index for index in instruction.accounts
+                )
+                reindexed.append(
+                    CompiledInstruction(program_index, bytes(instruction.data), accounts)
+                )
+            kept = reindexed
+        else:
+            header = message.header
+    else:
+        header = message.header
+
+    if isinstance(message, Message):
+        normalized: Any = Message.new_with_compiled_instructions(
+            header.num_required_signatures,
+            header.num_readonly_signed_accounts,
+            header.num_readonly_unsigned_accounts,
+            account_keys,
+            message.recent_blockhash,
+            kept,
+        )
+    else:
+        normalized = MessageV0(
+            header,
+            account_keys,
+            message.recent_blockhash,
+            kept,
+            message.address_table_lookups,
+        )
+    return normalized, _ManualFeeInstructions(limit=limit, price=price)
+
+
+def _messages_match_with_blockhash_policy(
+    original: Any, returned: Any, *, replaceable_blockhash: bool
+) -> bool:
+    if type(original) is not type(returned):
+        return False
+    if replaceable_blockhash:
+        returned = _message_with_recent_blockhash(returned, original.recent_blockhash)
+    return signed_message_bytes(original) == signed_message_bytes(returned)
+
 
 def _timestamp_ms() -> int:
     return int(time.time() * 1000)
@@ -114,9 +267,10 @@ class FordefiSigner(SolanaSigner):
 
     Black-box mode (default) signs the caller's exact message bytes and the
     caller broadcasts. Native auto mode lets Fordefi replace the blockhash and
-    fees, sign, and broadcast. Native manual mode returns Fordefi's replacement
-    through ``SignedTransaction.transaction`` for the caller to finish signing
-    and broadcast; see ``sign_transaction``.
+    fees, sign, and broadcast. For the unsigned native manual requests supported
+    here, Fordefi may replace the blockhash and manage priority-fee instructions,
+    then returns the validated transaction through
+    ``SignedTransaction.transaction``; see ``sign_transaction``.
     """
 
     def __init__(self, config: FordefiSignerConfig) -> None:
@@ -369,10 +523,13 @@ class FordefiSigner(SolanaSigner):
         the caller's transaction is left unmodified; the signature identifies
         the on-chain transaction. The configured vault must be the sole signer.
 
-        Native manual mode submits with ``push_mode: manual``. Fordefi modifies
-        and signs without broadcasting. Because solders messages are read-only,
-        the caller's object stays untouched and the authoritative replacement is
-        returned in ``SignedTransaction.transaction`` and as canonical base64 in
+        Native manual mode submits an unsigned message with ``push_mode:
+        manual``. Fordefi may replace the blockhash and manage compute-unit
+        price/limit instructions, then signs without broadcasting. All content
+        outside that documented mutation set is validated exactly. Because
+        solders messages are read-only, the caller's object stays untouched and
+        the validated replacement is returned in
+        ``SignedTransaction.transaction`` and as canonical base64 in
         ``encoded_transaction``. Fordefi must be the fee payer and sign first.
 
         Native auto mode is not retry-safe: any failure after Fordefi accepts the
@@ -487,6 +644,80 @@ class FordefiSigner(SolanaSigner):
         namespace = f"fordefi:solana:manual:{self._chain}:{self._vault_id}:".encode() + message_data
         return idempotency_key_from_message(namespace)
 
+    def _validate_manual_custom_fee(self, fee: _ManualFeeInstructions) -> None:
+        if not isinstance(self._fee, dict) or self._fee.get("type") != "custom":
+            return
+        configured_unit_price = self._fee.get("unit_price")
+        if configured_unit_price is not None:
+            try:
+                expected_price = int(configured_unit_price)
+            except (TypeError, ValueError):
+                raise ValueError("configured custom unit_price is invalid") from None
+            if expected_price < 0 or fee.price is None or expected_price != fee.price:
+                raise ValueError(
+                    "returned compute-unit price does not match the configured custom unit_price"
+                )
+        configured_priority_fee = self._fee.get("priority_fee")
+        if configured_priority_fee is not None and fee.price is not None:
+            try:
+                maximum_fee = int(configured_priority_fee)
+            except (TypeError, ValueError):
+                raise ValueError("configured custom priority_fee is invalid") from None
+            if maximum_fee < 0:
+                raise ValueError("configured custom priority_fee is invalid")
+            compute_limit = fee.limit or _MAX_COMPUTE_UNIT_LIMIT
+            effective_fee = (
+                fee.price * compute_limit + _MICRO_LAMPORTS_PER_LAMPORT - 1
+            ) // _MICRO_LAMPORTS_PER_LAMPORT
+            if effective_fee > maximum_fee:
+                raise ValueError("returned priority fee exceeds the configured custom priority_fee")
+
+    def _validate_manual_message_mutation(
+        self, original: VersionedTransaction, returned: VersionedTransaction
+    ) -> None:
+        if type(original.message) is not type(returned.message):
+            raise ValueError("changed the transaction message version")
+        if original.uses_durable_nonce():
+            if not _messages_match_with_blockhash_policy(
+                original.message, returned.message, replaceable_blockhash=False
+            ):
+                raise ValueError("changed a durable-nonce transaction")
+            if isinstance(original.message, (Message, MessageV0)):
+                _, original_fee = _normalize_manual_fee_message(original.message)
+                self._validate_manual_custom_fee(original_fee)
+            return
+        if isinstance(original.message, MessageV1):
+            if not _messages_match_with_blockhash_policy(
+                original.message, returned.message, replaceable_blockhash=True
+            ):
+                raise ValueError("changed v1 content outside the recent blockhash")
+            return
+
+        if not isinstance(original.message, (Message, MessageV0)) or not isinstance(
+            returned.message, (Message, MessageV0)
+        ):
+            raise ValueError("unsupported transaction message version")
+
+        normalized_original, original_fee = _normalize_manual_fee_message(original.message)
+        if original_fee.price is not None:
+            if not _messages_match_with_blockhash_policy(
+                original.message, returned.message, replaceable_blockhash=True
+            ):
+                raise ValueError(
+                    "changed transaction content after the caller set a compute-unit price"
+                )
+            self._validate_manual_custom_fee(original_fee)
+            return
+
+        normalized_returned, returned_fee = _normalize_manual_fee_message(returned.message)
+        self._validate_manual_custom_fee(returned_fee)
+        if not _messages_match_with_blockhash_policy(
+            normalized_original, normalized_returned, replaceable_blockhash=True
+        ):
+            raise ValueError(
+                "changed transaction content outside the recent blockhash and priority fee"
+            )
+
     async def _sign_transaction_native_manual(
         self, transaction: VersionedTransaction
     ) -> SignedTransaction:
@@ -535,6 +766,19 @@ class FordefiSigner(SolanaSigner):
                 SignerErrorCode.SIGNING_FAILED,
                 "Fordefi manual signing changed the transaction required-signer set",
             )
+
+        try:
+            self._validate_manual_message_mutation(original, returned)
+        except ValueError as error:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                f"Fordefi manual signing returned an unauthorized transaction mutation: {error}",
+            ) from None
+        except Exception:
+            raise SignerError(
+                SignerErrorCode.SERIALIZATION_ERROR,
+                "Failed to validate Fordefi-returned manual transaction message",
+            ) from None
 
         signatures = list(returned.signatures)
         if len(signatures) != len(returned_signers):

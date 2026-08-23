@@ -17,7 +17,8 @@ mod tests {
 
     use super::*;
     use crate::fordefi::{
-        FordefiPushMode, FordefiSigner, FordefiSignerConfig, SolanaChainUniqueId,
+        normalize_manual_fee_message, FordefiPushMode, FordefiSigner, FordefiSignerConfig,
+        SolanaChainUniqueId,
     };
     #[cfg(feature = "integration-tests")]
     use crate::sdk_adapter::{AccountMeta, Instruction, Message, VersionedTransaction};
@@ -350,6 +351,7 @@ mod tests {
         };
         let message = Message::new(&[transfer_ix], Some(&from));
         let mut transaction: VersionedTransaction = Transaction::new_unsigned(message).into();
+        let original_versioned_message = transaction.message.clone();
         let original_message = transaction.message.serialize();
 
         let (serialized_tx, signature) = signer
@@ -361,6 +363,17 @@ mod tests {
         assert!(!serialized_tx.is_empty());
         assert!(signature.verify(&from.to_bytes(), &transaction.message.serialize()));
         assert_ne!(transaction.message.serialize(), original_message);
+
+        let (normalized_original, _) = normalize_manual_fee_message(&original_versioned_message)
+            .expect("Original manual message must normalize");
+        let (mut normalized_returned, _) = normalize_manual_fee_message(&transaction.message)
+            .expect("Returned manual message must contain only valid fee instructions");
+        normalized_returned.set_recent_blockhash(*normalized_original.recent_blockhash());
+        assert_eq!(
+            normalized_returned.serialize(),
+            normalized_original.serialize(),
+            "live Fordefi mutation must be limited to blockhash and permitted fee instructions"
+        );
 
         let decoded = deserialize_wire_transaction(
             &STANDARD

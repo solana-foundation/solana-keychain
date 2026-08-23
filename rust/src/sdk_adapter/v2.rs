@@ -1,14 +1,15 @@
 //! Adapter for Solana SDK v2.x
 
 // Re-export core types from solana-sdk v2
+pub use solana_compute_budget_interface_v2::ID as COMPUTE_BUDGET_PROGRAM_ID;
 #[allow(unused_imports)]
 pub use solana_sdk::hash::Hash;
 #[allow(unused_imports)]
-pub use solana_sdk::instruction::{AccountMeta, Instruction};
+pub use solana_sdk::instruction::{AccountMeta, CompiledInstruction, Instruction};
 #[allow(unused_imports)]
 pub use solana_sdk::message::v0::Message as V0Message;
 #[allow(unused_imports)]
-pub use solana_sdk::message::{Message, VersionedMessage};
+pub use solana_sdk::message::{Message, MessageHeader, VersionedMessage};
 pub use solana_sdk::pubkey::Pubkey;
 pub use solana_sdk::signature::{Keypair, Signature};
 pub use solana_sdk::signer::Signer;

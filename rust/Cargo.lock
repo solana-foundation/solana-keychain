@@ -6734,6 +6734,8 @@ dependencies = [
  "serde_json",
  "serial_test",
  "sha2 0.10.9",
+ "solana-compute-budget-interface 2.2.2",
+ "solana-compute-budget-interface 3.0.0",
  "solana-sdk 2.3.1",
  "solana-sdk 3.0.0",
  "solana-sdk 4.0.1",

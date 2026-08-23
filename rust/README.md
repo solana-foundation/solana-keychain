@@ -327,7 +327,7 @@ Fordefi supports three signing modes, which differ in whether Fordefi modifies o
 
 - **Black box mode** : Signs raw bytes via EdDSA; the wire transaction is assembled locally. Fordefi does **not** broadcast — `sign_transaction` returns the signed serialized transaction, and **you** submit it to an RPC. Use with a Fordefi black box vault.
 - **Native auto mode** (recommended for managed broadcasting): Uses Solana-specific API types. Fordefi modifies the transaction (at minimum updating the blockhash, and optionally adding priority fees) and **auto-broadcasts** it on-chain (`push_mode: "auto"`). Because the transaction is already submitted, `sign_transaction` returns an **empty** serialized transaction (only the signature is meaningful) and leaves your `&mut VersionedTransaction` untouched — do not re-send it. The current auto-broadcast request supports only transactions whose sole required signer is the configured Fordefi vault; additional required signers are rejected before submission. Use with a regular Fordefi Solana vault.
-- **Native manual mode**: Fordefi modifies and signs the transaction but does **not** broadcast it (`push_mode: "manual"`). `sign_transaction` replaces your `&mut VersionedTransaction` with Fordefi's returned transaction and returns a non-empty serialized transaction. Fordefi must be the fee payer and must sign before every downstream signer.
+- **Native manual mode**: Fordefi may replace the recent blockhash and manage `SetComputeUnitPrice`/`SetComputeUnitLimit`, then signs the transaction but does **not** broadcast it (`push_mode: "manual"`). Every other message field is validated exactly. Custom unit prices must match and custom priority fees cap the effective returned fee. `sign_transaction` replaces your `&mut VersionedTransaction` with Fordefi's validated transaction and returns a non-empty serialized transaction. Fordefi must be the fee payer and must sign before every downstream signer.
 
 Construction is async because it fetches the Fordefi vault and verifies that its
 authoritative address matches the configured `public_key` before returning.
@@ -441,6 +441,14 @@ Fordefi normally replaces the recent blockhash immediately before signing. The
 returned Rust transaction contains that replacement blockhash, but Fordefi does not
 return its exact `lastValidBlockHeight`. Broadcast promptly; callers cannot use a
 locally known block height to detect expiry when the blockhash changed.
+
+Mutation eligibility depends on whether signatures are supplied, not on
+`push_mode`. This SDK's native manual request is unsigned, omits
+`details.signatures`, and rejects pre-signed inputs, so Fordefi may refresh the
+blockhash and manage fees. A future provided-signatures flow must preserve the
+complete message byte-for-byte. `push_mode` controls submission only.
+Durable-nonce transactions keep both their lifetime and fee layout exact; v1
+transactions may replace only the blockhash and keep their inline configuration exact.
 
 #### Custom API-request signer (KMS/HSM)
 

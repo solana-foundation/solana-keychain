@@ -120,10 +120,13 @@ Fordefi supports three transaction modes:
 - With `chain` and the default `push_mode="auto"`, Fordefi may update the
   blockhash and fees, then signs and broadcasts the transaction. The result's
   encoded transaction is empty and the caller's transaction remains untouched.
-- With `chain` and `push_mode="manual"`, Fordefi may modify and sign the
-  transaction but does not broadcast it. The caller's solders transaction
-  cannot have its read-only message replaced, so use `result.transaction` as
-  the authoritative transaction for downstream signing and broadcasting.
+- With `chain` and `push_mode="manual"`, Fordefi may replace the recent
+  blockhash and manage `SetComputeUnitPrice`/`SetComputeUnitLimit`, then signs
+  the transaction without broadcasting it. Every other message field is
+  validated exactly. Custom unit prices must match and custom priority fees cap
+  the effective returned fee. The caller's solders transaction cannot have its
+  read-only message replaced, so use `result.transaction` for downstream
+  signing and broadcasting.
 
 ```python
 import os
@@ -158,6 +161,14 @@ Manual mode requires Fordefi to be the fee payer and to sign before every
 downstream signer. Fordefi normally refreshes the transaction blockhash but
 does not return its exact `lastValidBlockHeight`; broadcast manual results
 promptly rather than relying on a locally known block-height expiry.
+
+Mutation eligibility depends on whether signatures are supplied, not on
+`push_mode`. This SDK's native manual request is unsigned, omits
+`details.signatures`, and rejects pre-signed inputs, so Fordefi may refresh the
+blockhash and manage fees. A future provided-signatures flow must preserve the
+complete message byte-for-byte. `push_mode` controls submission only.
+Durable-nonce transactions keep both their lifetime and fee layout exact; v1
+transactions may replace only the blockhash and keep their inline configuration exact.
 
 ## Core API
 

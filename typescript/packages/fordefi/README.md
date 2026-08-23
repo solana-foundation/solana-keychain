@@ -38,9 +38,9 @@ Native auto-broadcast currently supports transactions whose only required signer
 
 ### Native manual mode
 
-Set `chain` and `pushMode: 'manual'` to let Fordefi update and sign the transaction while leaving broadcasting to the caller. This returns a Kit `TransactionModifyingSigner` (`FordefiNativeManualSigner`) with `modifyAndSignTransactions()` and no `signTransactions()` or `signAndSendTransactions()`.
+Set `chain` and `pushMode: 'manual'` to let Fordefi replace the recent blockhash and manage `SetComputeUnitPrice`/`SetComputeUnitLimit`, then sign the transaction while leaving broadcasting to the caller. Every other message field is validated exactly. Custom unit prices must match and custom priority fees cap the effective returned fee. This returns a Kit `TransactionModifyingSigner` (`FordefiNativeManualSigner`) with `modifyAndSignTransactions()` and no `signTransactions()` or `signAndSendTransactions()`.
 
-Fordefi must be the transaction fee payer and must sign before any other signer. The returned transaction retains unsigned slots for downstream partial signers, which can sign Fordefi's modified message before the caller submits it.
+Fordefi must be the transaction fee payer and must sign before any other signer. The validated transaction retains unsigned slots for downstream partial signers, which can sign the blockhash-updated message before the caller submits it.
 
 ```typescript
 import { createFordefiSigner } from '@solana/keychain-fordefi';
@@ -64,6 +64,10 @@ const fullySignedTransaction = await partiallySignTransactionWithSigners(
 ```
 
 Fordefi may replace the recent blockhash immediately before signing. Its response does not include that blockhash's exact `lastValidBlockHeight`, so the returned transaction uses Kit's standard unknown-height sentinel when the lifetime token changes. Broadcast promptly; local confirmation logic cannot detect blockhash expiry from an exact height in that case.
+
+Mutation eligibility depends on whether signatures are supplied, not on `push_mode`. This SDK's native manual request is unsigned, omits `details.signatures`, and rejects pre-signed inputs, so Fordefi may refresh the blockhash and manage fees. A future provided-signatures flow must preserve the complete message byte-for-byte. `push_mode` controls submission only.
+
+Durable-nonce transactions keep both their lifetime and fee layout exact. V1 transactions may replace only the blockhash and keep their inline transaction configuration exact.
 
 ### Black box mode
 

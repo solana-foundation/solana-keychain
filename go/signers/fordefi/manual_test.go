@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -55,6 +56,187 @@ func createVersionedManualTestTransaction(t *testing.T, payer solana.PublicKey, 
 func setManualTestBlockhash(tx *solana.Transaction, marker byte) {
 	for i := range tx.Message.RecentBlockhash {
 		tx.Message.RecentBlockhash[i] = marker
+	}
+}
+
+func cloneManualTestTransaction(tx *solana.Transaction) *solana.Transaction {
+	return &solana.Transaction{
+		Signatures: append([]solana.Signature(nil), tx.Signatures...),
+		Message:    cloneManualMessage(tx.Message),
+	}
+}
+
+func prependManualComputeBudgetInstruction(tx *solana.Transaction, discriminator byte, value uint64) {
+	programIndex := -1
+	for i, key := range tx.Message.AccountKeys {
+		if key == solana.ComputeBudget {
+			programIndex = i
+			break
+		}
+	}
+	if programIndex == -1 {
+		programIndex = len(tx.Message.AccountKeys)
+		tx.Message.AccountKeys = append(tx.Message.AccountKeys, solana.ComputeBudget)
+		tx.Message.Header.NumReadonlyUnsignedAccounts++
+	}
+	data := []byte{discriminator}
+	switch discriminator {
+	case setComputeUnitLimitDiscriminator:
+		data = make([]byte, 5)
+		data[0] = discriminator
+		binary.LittleEndian.PutUint32(data[1:], uint32(value))
+	case setComputeUnitPriceDiscriminator:
+		data = make([]byte, 9)
+		data[0] = discriminator
+		binary.LittleEndian.PutUint64(data[1:], value)
+	}
+	tx.Message.Instructions = append([]solana.CompiledInstruction{{
+		ProgramIDIndex: uint16(programIndex),
+		Data:           data,
+	}}, tx.Message.Instructions...)
+}
+
+func TestValidateManualMessageMutationFeePolicy(t *testing.T) {
+	publicKey := testutils.TestPublicKey()
+	base := createVersionedManualTestTransaction(t, publicKey, solana.MessageVersionV0)
+
+	t.Run("accepts blockhash and fee insertion", func(t *testing.T) {
+		returned := cloneManualTestTransaction(base)
+		setManualTestBlockhash(returned, 0x52)
+		prependManualComputeBudgetInstruction(returned, setComputeUnitLimitDiscriminator, 300_000)
+		prependManualComputeBudgetInstruction(returned, setComputeUnitPriceDiscriminator, 7)
+		if err := (&Signer{}).validateManualMessageMutation(base, returned); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("accepts limit adjustment and removal without an original price", func(t *testing.T) {
+		original := cloneManualTestTransaction(base)
+		prependManualComputeBudgetInstruction(original, setComputeUnitLimitDiscriminator, 200_000)
+		adjusted := cloneManualTestTransaction(base)
+		prependManualComputeBudgetInstruction(adjusted, setComputeUnitLimitDiscriminator, 400_000)
+		if err := (&Signer{}).validateManualMessageMutation(original, adjusted); err != nil {
+			t.Fatalf("adjusted limit: %v", err)
+		}
+		if err := (&Signer{}).validateManualMessageMutation(original, cloneManualTestTransaction(base)); err != nil {
+			t.Fatalf("removed limit: %v", err)
+		}
+	})
+
+	t.Run("preserves non-fee Compute Budget instructions", func(t *testing.T) {
+		original := cloneManualTestTransaction(base)
+		prependManualComputeBudgetInstruction(original, 1, 0)
+		original.Message.Instructions[0].Data = []byte{1, 0, 128, 0, 0}
+		returned := cloneManualTestTransaction(original)
+		prependManualComputeBudgetInstruction(returned, setComputeUnitPriceDiscriminator, 5)
+		if err := (&Signer{}).validateManualMessageMutation(original, returned); err != nil {
+			t.Fatal(err)
+		}
+		returned.Message.Instructions[len(returned.Message.Instructions)-len(base.Message.Instructions)-1].Data[1] ^= 1
+		if err := (&Signer{}).validateManualMessageMutation(original, returned); err == nil {
+			t.Fatal("expected a changed heap-frame instruction to be rejected")
+		}
+	})
+
+	t.Run("freezes all fees when the original sets a price", func(t *testing.T) {
+		original := cloneManualTestTransaction(base)
+		prependManualComputeBudgetInstruction(original, setComputeUnitPriceDiscriminator, 5)
+		if err := (&Signer{}).validateManualMessageMutation(original, cloneManualTestTransaction(original)); err != nil {
+			t.Fatalf("unchanged caller-supplied price: %v", err)
+		}
+		returned := cloneManualTestTransaction(base)
+		prependManualComputeBudgetInstruction(returned, setComputeUnitPriceDiscriminator, 6)
+		if err := (&Signer{}).validateManualMessageMutation(original, returned); err == nil {
+			t.Fatal("expected a caller-supplied price mutation to be rejected")
+		}
+	})
+
+	t.Run("rejects malformed duplicate account-bearing and out-of-range fees", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			mutate func(*solana.Transaction)
+		}{
+			{name: "malformed", mutate: func(tx *solana.Transaction) {
+				prependManualComputeBudgetInstruction(tx, setComputeUnitLimitDiscriminator, 1)
+				tx.Message.Instructions[0].Data = []byte{setComputeUnitLimitDiscriminator, 1}
+			}},
+			{name: "duplicate", mutate: func(tx *solana.Transaction) {
+				prependManualComputeBudgetInstruction(tx, setComputeUnitPriceDiscriminator, 1)
+				prependManualComputeBudgetInstruction(tx, setComputeUnitPriceDiscriminator, 2)
+			}},
+			{name: "account-bearing", mutate: func(tx *solana.Transaction) {
+				prependManualComputeBudgetInstruction(tx, setComputeUnitPriceDiscriminator, 1)
+				tx.Message.Instructions[0].Accounts = []uint16{0}
+			}},
+			{name: "out-of-range", mutate: func(tx *solana.Transaction) {
+				prependManualComputeBudgetInstruction(tx, setComputeUnitLimitDiscriminator, maxComputeUnitLimit+1)
+			}},
+			{name: "unknown", mutate: func(tx *solana.Transaction) {
+				prependManualComputeBudgetInstruction(tx, 9, 0)
+			}},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				returned := cloneManualTestTransaction(base)
+				tc.mutate(returned)
+				if err := (&Signer{}).validateManualMessageMutation(base, returned); err == nil {
+					t.Fatal("expected invalid fee mutation to be rejected")
+				}
+			})
+		}
+	})
+
+	t.Run("enforces custom fee constraints", func(t *testing.T) {
+		missing := cloneManualTestTransaction(base)
+		if err := (&Signer{fee: &Fee{Type: FeeTypeCustom, UnitPrice: "10"}}).
+			validateManualMessageMutation(base, missing); err == nil {
+			t.Fatal("expected a missing custom unit price to be rejected")
+		}
+		returned := cloneManualTestTransaction(base)
+		prependManualComputeBudgetInstruction(returned, setComputeUnitLimitDiscriminator, 200_000)
+		prependManualComputeBudgetInstruction(returned, setComputeUnitPriceDiscriminator, 10)
+		if err := (&Signer{fee: &Fee{Type: FeeTypeCustom, UnitPrice: "10", PriorityFee: "2"}}).
+			validateManualMessageMutation(base, returned); err != nil {
+			t.Fatalf("matching custom fee: %v", err)
+		}
+		if err := (&Signer{fee: &Fee{Type: FeeTypeCustom, PriorityFee: "1"}}).
+			validateManualMessageMutation(base, returned); err == nil {
+			t.Fatal("expected effective fee above the cap to be rejected")
+		}
+		originalPrice := cloneManualTestTransaction(base)
+		prependManualComputeBudgetInstruction(originalPrice, setComputeUnitPriceDiscriminator, 10)
+		if err := (&Signer{fee: &Fee{Type: FeeTypeCustom, UnitPrice: "11"}}).
+			validateManualMessageMutation(originalPrice, cloneManualTestTransaction(originalPrice)); err == nil {
+			t.Fatal("expected a caller-supplied price that conflicts with custom unit_price to be rejected")
+		}
+	})
+}
+
+func TestValidateManualMessageMutationRestrictsV1AndDurableNonce(t *testing.T) {
+	publicKey := testutils.TestPublicKey()
+	signer := &Signer{}
+
+	v1 := createVersionedManualTestTransaction(t, publicKey, solana.MessageVersionV1)
+	v1Blockhash := cloneManualTestTransaction(v1)
+	setManualTestBlockhash(v1Blockhash, 0x61)
+	if err := signer.validateManualMessageMutation(v1, v1Blockhash); err != nil {
+		t.Fatalf("v1 blockhash replacement: %v", err)
+	}
+	v1ConfigChanged := cloneManualTestTransaction(v1Blockhash)
+	v1ConfigChanged.Message.TransactionConfig = solana.TransactionConfig{}.WithPriorityFee(99)
+	if err := signer.validateManualMessageMutation(v1, v1ConfigChanged); err == nil {
+		t.Fatal("expected v1 inline configuration mutation to be rejected")
+	}
+
+	nonce := createVersionedManualTestTransaction(t, publicKey, solana.MessageVersionLegacy)
+	nonce.Message.Instructions[0].Data = []byte{4, 0, 0, 0}
+	if !nonce.UsesDurableNonce() {
+		t.Fatal("test transaction must be recognized as durable nonce")
+	}
+	nonceChanged := cloneManualTestTransaction(nonce)
+	setManualTestBlockhash(nonceChanged, 0x62)
+	if err := signer.validateManualMessageMutation(nonce, nonceChanged); err == nil {
+		t.Fatal("expected durable-nonce lifetime mutation to be rejected")
 	}
 }
 
@@ -436,6 +618,22 @@ func TestSignTransactionNativeManualRejectsInvalidReturnedTransactions(t *testin
 			makeRaw: func(t *testing.T) string {
 				returned := createVersionedManualTestTransaction(t, downstream, solana.MessageVersionLegacy)
 				signManualReturnedTransaction(t, returned, downstreamPrivateKey)
+				return encodeManualReturnedTransaction(t, returned)
+			},
+			wantCode: core.CodeSigningFailed,
+		},
+		{
+			name: "changed instruction content",
+			makeInput: func(t *testing.T) *solana.Transaction {
+				return createVersionedManualTestTransaction(t, publicKey, solana.MessageVersionLegacy)
+			},
+			makeRaw: func(t *testing.T) string {
+				returned := createVersionedManualTestTransaction(t, publicKey, solana.MessageVersionLegacy)
+				returned.Message.Instructions[0].Data = append(
+					[]byte(nil), returned.Message.Instructions[0].Data...,
+				)
+				returned.Message.Instructions[0].Data[len(returned.Message.Instructions[0].Data)-1] ^= 0x01
+				signManualReturnedTransaction(t, returned, privateKey)
 				return encodeManualReturnedTransaction(t, returned)
 			},
 			wantCode: core.CodeSigningFailed,
