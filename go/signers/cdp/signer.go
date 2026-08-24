@@ -67,7 +67,7 @@ func New(cfg Config) (*Signer, error) {
 	if !strings.HasPrefix(baseURL, "https://") {
 		return nil, core.NewSignerError(core.CodeConfigError, "cdp api_base_url must use HTTPS")
 	}
-	apiHost, err := extractHost(baseURL)
+	apiHost, err := core.HostFromURL(baseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +214,7 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 // plus X-Wallet-Auth wallet JWT) and decodes the 2xx JSON response into out.
 // what names the endpoint in error details ("sign_message" / "sign_transaction").
 func (s *Signer) doPost(ctx context.Context, path string, body map[string]any, out any, what string) error {
-	bodyBytes, err := marshalCanonicalJSON(body)
+	bodyBytes, err := core.MarshalCanonicalJSON(body)
 	if err != nil {
 		return core.WrapSignerError(core.CodeSerializationError, "failed to serialize request body", err)
 	}

@@ -3,26 +3,12 @@ package dfns
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
-
-// marshalJSON encodes v without HTML escaping, leaving `<`, `>`, and `&`
-// intact. This matters for the user-action client data, whose exact bytes are
-// signed and verified by Dfns.
-func marshalJSON(v any) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		return nil, core.WrapSignerError(core.CodeSerializationError, "failed to serialize request body", err)
-	}
-	return bytes.TrimRight(buf.Bytes(), "\n"), nil
-}
 
 // do sends a Dfns API request and returns the response body on 2xx.
 //

@@ -6,12 +6,9 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -29,32 +26,6 @@ func jwtURI(host, method, path string) string {
 	return method + " " + host + path
 }
 
-// extractHost returns the request host (including port if present) from a base
-// URL.
-func extractHost(baseURL string) (string, error) {
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return "", core.WrapSignerError(core.CodeConfigError, "invalid CDP base URL: "+baseURL, err)
-	}
-	if u.Host == "" {
-		return "", core.NewSignerError(core.CodeConfigError, "missing host in CDP base URL: "+baseURL)
-	}
-	return u.Host, nil
-}
-
-// marshalCanonicalJSON serializes v to compact JSON with recursively sorted
-// object keys (encoding/json sorts map keys at every nesting level) and no
-// HTML escaping, producing the canonical bytes hashed into reqHash.
-func marshalCanonicalJSON(v any) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		return nil, err
-	}
-	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
-}
-
 // computeReqHash computes the hex-encoded SHA-256 of the canonical JSON request
 // body for wallet authentication. It reports ok=false when the body is absent or
 // an empty object, in which case no reqHash claim is included.
@@ -62,12 +33,11 @@ func computeReqHash(body map[string]any) (string, bool, error) {
 	if len(body) == 0 {
 		return "", false, nil
 	}
-	canonical, err := marshalCanonicalJSON(body)
+	hash, err := core.CanonicalRequestHash(body)
 	if err != nil {
-		return "", false, core.WrapSignerError(core.CodeSerializationError, "failed to serialize request body", err)
+		return "", false, err
 	}
-	sum := sha256.Sum256(canonical)
-	return hex.EncodeToString(sum[:]), true, nil
+	return hash, true, nil
 }
 
 // validateEd25519KeypairBytes checks a decoded CDP API key (seed || pubkey):
@@ -92,18 +62,6 @@ func randomNonce() (string, error) {
 		return "", core.WrapSignerError(core.CodeSigningFailed, "failed to generate JWT nonce", err)
 	}
 	return hex.EncodeToString(b[:]), nil
-}
-
-// randomUUID returns a random version-4 UUID string for the wallet JWT jti claim.
-func randomUUID() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", core.WrapSignerError(core.CodeSigningFailed, "failed to generate JWT id", err)
-	}
-	b[6] = (b[6] & 0x0f) | 0x40 // version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
-	h := hex.EncodeToString(b[:])
-	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:], nil
 }
 
 // createAuthJWT creates the main CDP API authentication JWT (Authorization
@@ -176,7 +134,7 @@ func createWalletJWT(walletSecret, host, method, path string, requestBody map[st
 	if err != nil {
 		return "", err
 	}
-	jti, err := randomUUID()
+	jti, err := core.RandomUUIDv4()
 	if err != nil {
 		return "", err
 	}

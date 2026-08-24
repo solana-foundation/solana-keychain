@@ -1,7 +1,6 @@
 package fireblocks
 
 import (
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/hex"
@@ -33,7 +32,7 @@ func parseSigningKey(privateKeyPEM string) (*rsa.PrivateKey, error) {
 // exp = now + TTL, sub = apiKey, and bodyHash = hex(sha256(body)) (empty string
 // body for GET requests).
 func createJWT(apiKey string, signingKey *rsa.PrivateKey, uri, body string) (string, error) {
-	nonce, err := newNonce()
+	nonce, err := core.RandomUUIDv4()
 	if err != nil {
 		return "", core.WrapSignerError(core.CodeSigningFailed, "failed to create JWT", err)
 	}
@@ -58,18 +57,4 @@ func createJWT(apiKey string, signingKey *rsa.PrivateKey, uri, body string) (str
 		return "", core.WrapSignerError(core.CodeSigningFailed, "failed to create JWT", err)
 	}
 	return token, nil
-}
-
-// newNonce generates a random UUIDv4 string: the standard library has no UUID
-// type, so the 16 random bytes are version/variant-tagged and formatted
-// manually.
-func newNonce() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	b[6] = (b[6] & 0x0f) | 0x40 // version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
-	h := hex.EncodeToString(b[:])
-	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:], nil
 }

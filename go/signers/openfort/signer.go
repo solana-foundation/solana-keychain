@@ -153,7 +153,7 @@ func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 // JWT's reqHash is computed over.
 func (s *Signer) callSign(ctx context.Context, message []byte) (signResponse, error) {
 	path := backendPath + "/" + s.accountID + "/sign"
-	body, err := marshalCanonical(map[string]any{"data": "0x" + hex.EncodeToString(message)})
+	body, err := core.MarshalCanonicalJSON(map[string]any{"data": "0x" + hex.EncodeToString(message)})
 	if err != nil {
 		return signResponse{}, err
 	}

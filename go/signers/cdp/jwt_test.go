@@ -48,7 +48,7 @@ func TestExtractHost(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			got, err := extractHost(tc.baseURL)
+			got, err := core.HostFromURL(tc.baseURL)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("expected error")

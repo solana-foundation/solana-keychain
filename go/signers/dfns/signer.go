@@ -146,7 +146,7 @@ func (s *Signer) getWallet(ctx context.Context) (*getWalletResponse, error) {
 // request to the Keys API, returning the combined 64-byte signature.
 func (s *Signer) sendSignatureRequest(ctx context.Context, request generateSignatureRequest) (solana.Signature, error) {
 	httpPath := "/keys/" + s.keyID + "/signatures"
-	bodyJSON, err := marshalJSON(request)
+	bodyJSON, err := core.MarshalCanonicalJSON(request)
 	if err != nil {
 		return solana.Signature{}, err
 	}

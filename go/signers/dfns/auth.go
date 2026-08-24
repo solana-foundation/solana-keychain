@@ -78,7 +78,7 @@ type clientData struct {
 // request and returns the token to include as the x-dfns-useraction header.
 func (s *Signer) signUserAction(ctx context.Context, httpMethod, httpPath, body string) (string, error) {
 	// Request a challenge.
-	initBody, err := marshalJSON(userActionInitRequest{
+	initBody, err := core.MarshalCanonicalJSON(userActionInitRequest{
 		UserActionPayload:    body,
 		UserActionHTTPMethod: httpMethod,
 		UserActionHTTPPath:   httpPath,
@@ -109,7 +109,7 @@ func (s *Signer) signUserAction(ctx context.Context, httpMethod, httpPath, body 
 	}
 
 	// Sign the challenge.
-	clientDataBytes, err := marshalJSON(clientData{Challenge: challenge.Challenge, Type: "key.get"})
+	clientDataBytes, err := core.MarshalCanonicalJSON(clientData{Challenge: challenge.Challenge, Type: "key.get"})
 	if err != nil {
 		return "", err
 	}
@@ -119,7 +119,7 @@ func (s *Signer) signUserAction(ctx context.Context, httpMethod, httpPath, body 
 	}
 
 	// Submit the signed challenge.
-	signBody, err := marshalJSON(userActionSignRequest{
+	signBody, err := core.MarshalCanonicalJSON(userActionSignRequest{
 		ChallengeIdentifier: challenge.ChallengeIdentifier,
 		FirstFactor: keyAssertion{
 			Kind: "Key",
