@@ -38,6 +38,41 @@ func AttachSignature(tx *solana.Transaction, pubkey solana.PublicKey, sig solana
 	return Classify(tx, encoded, sig), nil
 }
 
+// SendTransactionFn broadcasts a base64-encoded wire transaction and returns the
+// signature identifying it. Core has no RPC dependency, so the network hop is
+// always injected: implement it with whatever transport the caller already has,
+// an rpc.Client.SendEncodedTransaction call or a relayer endpoint.
+type SendTransactionFn func(ctx context.Context, encodedTransaction string) (solana.Signature, error)
+
+// SignAndSendTransaction gets tx on chain with one call, whichever shape the
+// signer has. A TransactionBroadcaster signs and broadcasts through its provider,
+// so its own signature identifies the transaction; any other signer signs and send
+// broadcasts the result.
+//
+// send is required for signers that do not broadcast and ignored by the ones that
+// do. It is checked before signing so a missing one cannot waste a signature.
+func SignAndSendTransaction(ctx context.Context, s Signer, tx *solana.Transaction, send SendTransactionFn) (solana.Signature, error) {
+	broadcaster, ok := s.(TransactionBroadcaster)
+	broadcasts := ok && broadcaster.BroadcastsTransactions()
+	if !broadcasts && send == nil {
+		return solana.Signature{}, NewSignerError(CodeConfigError,
+			"this signer cannot broadcast transactions; supply a SendTransactionFn to broadcast the signed one")
+	}
+
+	signed, err := s.SignTransaction(ctx, tx)
+	if err != nil {
+		return solana.Signature{}, err
+	}
+	if broadcasts {
+		return signed.Signature, nil
+	}
+	if !signed.IsComplete() {
+		return solana.Signature{}, NewSignerError(CodeSigningFailed,
+			"transaction is still missing signatures after signing and cannot be broadcast")
+	}
+	return send(ctx, signed.EncodedTransaction)
+}
+
 // SignTransactionWith signs tx's message with signFn and attaches the resulting
 // signature at pubkey's position. Backends whose remote API signs the message
 // bytes directly implement SignTransaction through this helper.

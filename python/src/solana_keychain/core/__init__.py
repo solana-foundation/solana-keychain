@@ -6,6 +6,7 @@ from solana_keychain.core.http import (
     normalize_base_url,
     sanitize_remote_error_response,
 )
+from solana_keychain.core.send import SendTransactionFn, sign_and_send_transaction
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner, require_initialized
 from solana_keychain.core.transaction_util import (
@@ -21,6 +22,7 @@ from solana_keychain.core.transaction_util import (
 __all__ = [
     "DEFAULT_REQUEST_TIMEOUT_SECONDS",
     "ED25519_SIGNATURE_LENGTH",
+    "SendTransactionFn",
     "SignedTransaction",
     "SignerError",
     "SignerErrorCode",
@@ -35,6 +37,7 @@ __all__ = [
     "require_initialized",
     "sanitize_remote_error_response",
     "serialize_transaction",
+    "sign_and_send_transaction",
     "signed_message_bytes",
     "verify_returned_signature",
 ]

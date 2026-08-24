@@ -135,6 +135,22 @@ Errors are always `SignerError` with a stable `code`
 (`SIGNER_INVALID_PRIVATE_KEY`, `SIGNER_SIGNING_FAILED`, …).
 `str()`/`repr()` of a `SignerError` never include key material or raw remote responses.
 
+### Sign and Send
+
+`sign_and_send_transaction` gets a transaction on chain with one call whichever
+shape the signer has. Signers whose `broadcasts_transactions` is True (Crossmint,
+Fordefi native mode) broadcast through their provider and the send function is
+never called; every other signer signs and the injected function broadcasts the
+result:
+
+```python
+from solana_keychain import sign_and_send_transaction
+
+signature = await sign_and_send_transaction(
+    signer, transaction, lambda encoded: rpc_send(encoded)
+)
+```
+
 ## Development
 
 From the repo root (recipes bootstrap `python/.venv` automatically):
