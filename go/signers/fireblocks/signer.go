@@ -5,7 +5,6 @@ import (
 	"crypto/rsa"
 	"encoding/hex"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gagliardetto/solana-go"
@@ -48,12 +47,9 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 	if assetID == "" {
 		assetID = DefaultAssetID
 	}
-	apiBaseURL := cfg.APIBaseURL
-	if apiBaseURL == "" {
-		apiBaseURL = DefaultAPIBaseURL
-	}
-	if !strings.HasPrefix(apiBaseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "fireblocks api_base_url must use HTTPS")
+	apiBaseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
 	pollInterval, maxPollAttempts, err := core.ResolvePollBounds(
 		cfg.PollInterval, DefaultPollInterval, cfg.MaxPollAttempts, DefaultMaxPollAttempts)

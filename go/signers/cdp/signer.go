@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/gagliardetto/solana-go"
@@ -60,12 +59,9 @@ func New(cfg Config) (*Signer, error) {
 		return nil, core.WrapSignerError(core.CodeInvalidPublicKey, "invalid Solana address: "+cfg.Address, err)
 	}
 
-	baseURL := cfg.APIBaseURL
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-	if !strings.HasPrefix(baseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "cdp api_base_url must use HTTPS")
+	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, defaultBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
 	apiHost, err := core.HostFromURL(baseURL)
 	if err != nil {
@@ -195,6 +191,8 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 // accessible by fetching the account info (GET, bearer auth only). All errors
 // are swallowed and reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	path := basePath + "/" + s.pubkey.String()
 	authToken, err := createAuthJWT(s.apiKeyID, s.apiKeySecret, s.apiHost, http.MethodGet, path)
 	if err != nil {

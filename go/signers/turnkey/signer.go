@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gagliardetto/solana-go"
@@ -48,12 +47,9 @@ func New(cfg Config) (*Signer, error) {
 	if client == nil {
 		client = core.NewHTTPClient(cfg.HTTPClientConfig)
 	}
-	baseURL := cfg.APIBaseURL
-	if baseURL == "" {
-		baseURL = DefaultAPIBaseURL
-	}
-	if !strings.HasPrefix(baseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "turnkey api_base_url must use HTTPS")
+	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
 	return &Signer{
 		organizationID: cfg.OrganizationID,
@@ -174,6 +170,8 @@ func (s *Signer) postActivity(ctx context.Context, path string, body []byte) (*a
 // credentials are valid, via a stamped whoami query. All errors are swallowed
 // and reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	body, err := json.Marshal(whoAmIRequest{OrganizationID: s.organizationID})
 	if err != nil {
 		return false

@@ -6,9 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/gagliardetto/solana-go"
 
@@ -52,21 +50,13 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, core.NewSignerError(core.CodeConfigError, "wallet_secret must not be empty")
 	}
 
-	baseURL := cfg.APIBaseURL
-	if baseURL == "" {
-		baseURL = defaultBaseURL
+	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, defaultBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
-	baseURL = strings.TrimRight(baseURL, "/")
-	parsed, err := url.Parse(baseURL)
-	if err != nil || parsed.Scheme == "" {
-		return nil, core.NewSignerError(core.CodeConfigError, "invalid openfort base URL: "+baseURL)
-	}
-	if parsed.Host == "" {
-		return nil, core.NewSignerError(core.CodeConfigError, "missing host in openfort base URL: "+baseURL)
-	}
-
-	if parsed.Scheme != "https" {
-		return nil, core.NewSignerError(core.CodeConfigError, "openfort base URL must use HTTPS")
+	apiHost, err := core.HostFromURL(baseURL)
+	if err != nil {
+		return nil, err
 	}
 
 	client := cfg.HTTPClient
@@ -79,7 +69,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		accountID:    cfg.AccountID,
 		walletSecret: cfg.WalletSecret,
 		baseURL:      baseURL,
-		apiHost:      parsed.Host,
+		apiHost:      apiHost,
 		client:       client,
 	}
 	pubkey, err := s.fetchPublicKey(ctx)
@@ -118,6 +108,8 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 // matches the one resolved during New. All errors are swallowed and reported
 // as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	pubkey, err := s.fetchPublicKey(ctx)
 	return err == nil && pubkey == s.pubkey
 }

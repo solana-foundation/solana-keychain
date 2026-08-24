@@ -164,7 +164,7 @@ func TestSignMessageBeforeInit(t *testing.T) {
 	s := newBareSigner(srv, "test-api-key")
 
 	_, err := s.SignMessage(context.Background(), []byte("test"))
-	testutils.AssertCode(t, err, core.CodeConfigError)
+	testutils.AssertCode(t, err, core.CodeNotInitialized)
 }
 
 // --- Init tests ---

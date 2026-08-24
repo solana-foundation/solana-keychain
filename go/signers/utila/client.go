@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -45,28 +44,6 @@ func createAccessToken(serviceAccountEmail string, signingKey *rsa.PrivateKey) (
 		return "", core.WrapSignerError(core.CodeSigningFailed, "Failed to create Utila access token", err)
 	}
 	return token, nil
-}
-
-// normalizeAPIBaseURL applies the default, trims trailing slashes, and validates
-// the URL, which must be usable as a base URL. It runs regardless of whether a
-// custom HTTP client is supplied, so HTTPS is always enforced.
-func normalizeAPIBaseURL(raw string) (string, error) {
-	if raw == "" {
-		raw = DefaultAPIBaseURL
-	}
-	normalized := strings.TrimRight(raw, "/")
-
-	parsed, err := url.Parse(normalized)
-	if err != nil {
-		return "", core.WrapSignerError(core.CodeConfigError, "invalid api_base_url", err)
-	}
-	if parsed.Scheme != "https" {
-		return "", core.NewSignerError(core.CodeConfigError, "api_base_url must use HTTPS")
-	}
-	if parsed.Opaque != "" || parsed.Host == "" {
-		return "", core.NewSignerError(core.CodeConfigError, "api_base_url cannot be used as a base URL")
-	}
-	return normalized, nil
 }
 
 // fetchWallet retrieves the wallet object holding the Solana address. The

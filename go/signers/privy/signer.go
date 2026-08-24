@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gagliardetto/solana-go"
 
@@ -41,12 +40,9 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 	if client == nil {
 		client = core.NewHTTPClient(cfg.HTTPClientConfig)
 	}
-	baseURL := cfg.APIBaseURL
-	if baseURL == "" {
-		baseURL = DefaultAPIBaseURL
-	}
-	if !strings.HasPrefix(baseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "privy api_base_url must use HTTPS")
+	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
 	s := &Signer{
 		appID:                        cfg.AppID,
@@ -171,6 +167,8 @@ func (s *Signer) postRPC(ctx context.Context, request any) ([]byte, error) {
 // still resolves to this signer's public key. All errors are swallowed and
 // reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	pubkey, err := s.fetchPublicKey(ctx)
 	return err == nil && pubkey == s.pubkey
 }

@@ -200,3 +200,9 @@ func SanitizeRemoteResponseN(responseText string, maxLength int) string {
 	}
 	return string(runes[:maxLength]) + " [truncated]"
 }
+
+// NewNotInitializedError reports that a signer was used before its remote
+// identity was resolved.
+func NewNotInitializedError(backend string) error {
+	return NewSignerError(CodeNotInitialized, backend+" signer is not initialized")
+}

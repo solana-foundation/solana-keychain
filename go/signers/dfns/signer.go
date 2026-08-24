@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/gagliardetto/solana-go"
 
@@ -81,12 +80,9 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, core.NewSignerError(core.CodeConfigError, "missing required wallet id field")
 	}
 
-	baseURL := cfg.APIBaseURL
-	if baseURL == "" {
-		baseURL = DefaultAPIBaseURL
-	}
-	if !strings.HasPrefix(baseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "dfns api_base_url must use HTTPS")
+	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
 	client := cfg.HTTPClient
 	if client == nil {
@@ -250,6 +246,8 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 // reachable, active, and backed by an EdDSA/ed25519 signing key. All errors
 // are swallowed.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	wallet, err := s.getWallet(ctx)
 	if err != nil {
 		return false

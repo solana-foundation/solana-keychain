@@ -95,6 +95,8 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 // whether it is a signing-capable ed25519 key. All errors are swallowed and
 // reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	url := s.vaultAddr + "/v1/transit/keys/" + s.keyName
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

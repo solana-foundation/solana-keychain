@@ -52,7 +52,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		}
 	}
 
-	apiBaseURL, err := normalizeAPIBaseURL(cfg.APIBaseURL)
+	apiBaseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
 	if err != nil {
 		return nil, err
 	}
@@ -134,8 +134,7 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 // adds it to tx.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.pubkey.IsZero() {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeConfigError,
-			"UtilaSigner is not initialized")
+		return core.SignedTransaction{}, core.NewNotInitializedError("utila")
 	}
 
 	expectedMessage, err := tx.Message.MarshalBinary()
@@ -172,7 +171,7 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 // IsAvailable reports whether the Utila wallet can be fetched within the
 // availability timeout. Errors are swallowed.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(ctx, availabilityTimeout)
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
 	defer cancel()
 	_, err := s.fetchWallet(ctx)
 	return err == nil

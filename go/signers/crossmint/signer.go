@@ -62,14 +62,9 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, core.NewSignerError(core.CodeConfigError, "wallet_locator must not be empty")
 	}
 
-	apiBaseURL := cfg.APIBaseURL
-	if apiBaseURL == "" {
-		apiBaseURL = DefaultBaseURL
-	}
-	apiBaseURL = strings.TrimRight(apiBaseURL, "/")
-
-	if !strings.HasPrefix(apiBaseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "api_base_url must use HTTPS")
+	apiBaseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
 
 	pollInterval, maxPollAttempts, err := core.ResolvePollBounds(
@@ -199,7 +194,7 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 // transaction derives a different key and executes as a new transfer.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.publicKey.IsZero() {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeConfigError, "signer not initialized")
+		return core.SignedTransaction{}, core.NewNotInitializedError("crossmint")
 	}
 
 	expectedMessage, err := tx.Message.MarshalBinary()
@@ -253,7 +248,7 @@ func (s *Signer) finishManagedTransaction(ctx context.Context, tx *solana.Transa
 // IsAvailable reports whether the Crossmint wallet can be fetched within the
 // availability timeout. Errors are swallowed.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(ctx, availabilityTimeout)
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
 	defer cancel()
 	_, err := s.fetchWallet(ctx)
 	return err == nil

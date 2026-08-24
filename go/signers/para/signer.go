@@ -9,15 +9,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gagliardetto/solana-go"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
-
-// availabilityTimeout bounds the IsAvailable health check.
-const availabilityTimeout = 5 * time.Second
 
 // Signer signs Solana transactions and messages via Para's wallet API. All
 // fields are immutable after New, so a Signer is safe for concurrent use.
@@ -61,21 +57,18 @@ func newUninitialized(cfg Config) (*Signer, error) {
 	if !isValidUUID(cfg.WalletID) {
 		return nil, core.NewSignerError(core.CodeConfigError, "walletId must be a valid UUID")
 	}
-	if cfg.APIBaseURL != "" && !strings.HasPrefix(cfg.APIBaseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "apiBaseUrl must use HTTPS")
+	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
 	client := cfg.HTTPClient
 	if client == nil {
 		client = core.NewHTTPClient(cfg.HTTPClientConfig)
 	}
-	baseURL := cfg.APIBaseURL
-	if baseURL == "" {
-		baseURL = DefaultBaseURL
-	}
 	return &Signer{
 		apiKey:   cfg.APIKey,
 		walletID: cfg.WalletID,
-		baseURL:  strings.TrimRight(baseURL, "/"),
+		baseURL:  baseURL,
 		client:   client,
 	}, nil
 }
@@ -121,7 +114,7 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 // timeout and swallows all errors; callers should cache the result if
 // frequent checks are needed.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(ctx, availabilityTimeout)
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
 	defer cancel()
 	wallet, err := s.fetchWallet(ctx)
 	if err != nil {
@@ -156,7 +149,7 @@ func (s *Signer) fetchWallet(ctx context.Context) (*walletResponse, error) {
 // hex-encoded payload, then decodes and verifies the returned signature.
 func (s *Signer) signBytes(ctx context.Context, data []byte) (solana.Signature, error) {
 	if s.pubkey.IsZero() {
-		return solana.Signature{}, core.NewSignerError(core.CodeConfigError, "signer not initialized: call init() first")
+		return solana.Signature{}, core.NewNotInitializedError("para")
 	}
 	request := signRawRequest{Data: hex.EncodeToString(data), Encoding: "hex"}
 	body, err := s.doRequest(ctx, http.MethodPost, s.baseURL+"/v1/wallets/"+s.walletID+"/sign-raw", &request)

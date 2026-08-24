@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gagliardetto/solana-go"
@@ -17,7 +16,6 @@ import (
 // and the IsAvailable readiness check).
 const (
 	vaultVerificationTimeout = 10 * time.Second
-	availabilityTimeout      = 5 * time.Second
 )
 
 // Signer signs with a Solana key held in a Fordefi vault. All fields are
@@ -88,13 +86,9 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		requestSigner = pemSigner
 	}
 
-	apiBaseURL := cfg.APIBaseURL
-	if apiBaseURL == "" {
-		apiBaseURL = DefaultAPIBaseURL
-	}
-	apiBaseURL = strings.TrimRight(apiBaseURL, "/")
-	if !strings.HasPrefix(apiBaseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "fordefi api_base_url must use HTTPS")
+	apiBaseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
 
 	pubkey, err := solana.PublicKeyFromBase58(cfg.PublicKey)
@@ -232,7 +226,7 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 // the request signer can produce an x-signature value. All errors are
 // swallowed and reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
-	actx, cancel := context.WithTimeout(ctx, availabilityTimeout)
+	actx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
 	defer cancel()
 	if _, err := s.fetchVault(actx); err != nil {
 		return false

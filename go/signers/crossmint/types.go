@@ -20,9 +20,6 @@ const (
 	DefaultMaxPollAttempts = 60
 )
 
-// availabilityTimeout bounds the wallet fetch performed by IsAvailable.
-const availabilityTimeout = 5 * time.Second
-
 // walletsAPIVersion is the pinned Crossmint Wallets API version path segment.
 const walletsAPIVersion = "2025-06-09"
 
