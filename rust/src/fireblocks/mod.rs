@@ -17,7 +17,7 @@ use types::{
     TransactionResponse, TransactionSource, VaultAddress, VaultAddressesResponse,
 };
 
-use crate::remote_util::parse_json_response;
+use crate::remote_util::{parse_json_response, poll_until, PollOutcome};
 use crate::signature_util::{signature_from_base58, signature_from_hex, verify_or_reject};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -318,42 +318,46 @@ impl FireblocksSigner {
         tx_id: &str,
         mode: SigningMode,
     ) -> Result<TransactionResponse, SignerError> {
-        for _attempt in 0..self.max_poll_attempts {
-            let response = self.get_transaction(tx_id).await?;
+        poll_until(
+            self.max_poll_attempts,
+            self.poll_interval_ms,
+            || {
+                SignerError::RemoteApiError(format!(
+                    "Transaction polling timeout after {} attempts - signing request may still complete",
+                    self.max_poll_attempts
+                ))
+            },
+            || async {
+                let response = self.get_transaction(tx_id).await?;
 
-            match response.status.as_str() {
-                "SIGNED" if mode == SigningMode::ProgramCall => return Ok(response),
-                "COMPLETED" if mode == SigningMode::Raw => return Ok(response),
-                "BROADCASTING" | "CONFIRMING" | "COMPLETED" if mode == SigningMode::ProgramCall => {
-                    return Err(SignerError::BroadcastUnconfirmed {
-                        provider_tx_id: Some(tx_id.to_string()),
-                        provider_status: None,
-                        detail: format!(
-                            "Fireblocks broadcast the PROGRAM_CALL despite signOnly (status {}); the transaction may already be executing",
-                            response.status
-                        ),
-                    });
-                }
-                "FAILED" | "CANCELLED" | "REJECTED" | "BLOCKED" => {
-                    #[cfg(feature = "unsafe-debug")]
-                    log::error!("Transaction failed: {:?}", response);
+                match (mode, response.status.as_str()) {
+                    (SigningMode::ProgramCall, "SIGNED") | (SigningMode::Raw, "COMPLETED") => {
+                        Ok(PollOutcome::Done(response))
+                    }
+                    (SigningMode::ProgramCall, "BROADCASTING" | "CONFIRMING" | "COMPLETED") => {
+                        Err(SignerError::BroadcastUnconfirmed {
+                            provider_tx_id: Some(tx_id.to_string()),
+                            provider_status: None,
+                            detail: format!(
+                                "Fireblocks broadcast the PROGRAM_CALL despite signOnly (status {}); the transaction may already be executing",
+                                response.status
+                            ),
+                        })
+                    }
+                    (_, "FAILED" | "CANCELLED" | "REJECTED" | "BLOCKED") => {
+                        #[cfg(feature = "unsafe-debug")]
+                        log::error!("Transaction failed: {:?}", response);
 
-                    return Err(SignerError::SigningFailed(format!(
-                        "Transaction {}: {}",
-                        response.status, tx_id
-                    )));
+                        Err(SignerError::SigningFailed(format!(
+                            "Transaction {}: {}",
+                            response.status, tx_id
+                        )))
+                    }
+                    _ => Ok(PollOutcome::Pending),
                 }
-                _ => {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(self.poll_interval_ms))
-                        .await;
-                }
-            }
-        }
-
-        Err(SignerError::RemoteApiError(format!(
-            "Transaction polling timeout after {} attempts - signing request may still complete",
-            self.max_poll_attempts
-        )))
+            },
+        )
+        .await
     }
 
     /// Get transaction status

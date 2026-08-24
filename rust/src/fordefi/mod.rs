@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::SignerError;
 use crate::http_client_config::HttpClientConfig;
-use crate::remote_util::{extract_api_error, parse_json_response};
+use crate::remote_util::{extract_api_error, parse_json_response, poll_until, PollOutcome};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::signature_from_base64;
 use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
@@ -378,57 +378,60 @@ impl FordefiSigner {
         tx_id: &str,
         pushable: bool,
     ) -> Result<TransactionStatusResponse, SignerError> {
-        for attempt in 0..self.max_poll_attempts {
-            let url = format!("{}/api/v1/transactions/{}", self.api_base_url, tx_id);
-            let response = self
-                .client
-                .get(&url)
-                .header("Authorization", format!("Bearer {}", self.access_token))
-                .send()
-                .await?;
+        let url = format!("{}/api/v1/transactions/{}", self.api_base_url, tx_id);
+        poll_until(
+            self.max_poll_attempts,
+            self.poll_interval_ms,
+            || {
+                SignerError::RemoteApiError(format!(
+                    "Polling timeout after {} attempts",
+                    self.max_poll_attempts
+                ))
+            },
+            || async {
+                let response = self
+                    .client
+                    .get(&url)
+                    .header("Authorization", format!("Bearer {}", self.access_token))
+                    .send()
+                    .await?;
 
-            let tx_data: TransactionStatusResponse =
-                parse_json_response(response, "Fordefi API poll_result").await?;
+                let tx_data: TransactionStatusResponse =
+                    parse_json_response(response, "Fordefi API poll_result").await?;
 
-            let is_success = if pushable {
-                matches!(tx_data.state.as_str(), "completed")
-            } else {
-                matches!(tx_data.state.as_str(), "signed" | "completed")
-            };
+                let is_success = if pushable {
+                    matches!(tx_data.state.as_str(), "completed")
+                } else {
+                    matches!(tx_data.state.as_str(), "signed" | "completed")
+                };
 
-            if is_success {
-                return Ok(tx_data);
-            }
+                if is_success {
+                    return Ok(PollOutcome::Done(tx_data));
+                }
 
-            let is_error = matches!(
-                tx_data.state.as_str(),
-                "aborted"
-                    | "cancelled"
-                    | "dropped"
-                    | "completed_reverted"
-                    | "error_pushing_to_blockchain"
-                    | "error_signing"
-                    | "insufficient_funds"
-                    | "mined_reverted"
-            );
+                let is_error = matches!(
+                    tx_data.state.as_str(),
+                    "aborted"
+                        | "cancelled"
+                        | "dropped"
+                        | "completed_reverted"
+                        | "error_pushing_to_blockchain"
+                        | "error_signing"
+                        | "insufficient_funds"
+                        | "mined_reverted"
+                );
 
-            if is_error {
-                return Err(SignerError::SigningFailed(format!(
-                    "Transaction {} reached terminal state: {}",
-                    tx_id, tx_data.state
-                )));
-            }
+                if is_error {
+                    return Err(SignerError::SigningFailed(format!(
+                        "Transaction {} reached terminal state: {}",
+                        tx_id, tx_data.state
+                    )));
+                }
 
-            // Skip the sleep on the final attempt so we don't delay the timeout error.
-            if attempt + 1 < self.max_poll_attempts {
-                tokio::time::sleep(tokio::time::Duration::from_millis(self.poll_interval_ms)).await;
-            }
-        }
-
-        Err(SignerError::RemoteApiError(format!(
-            "Polling timeout after {} attempts",
-            self.max_poll_attempts
-        )))
+                Ok(PollOutcome::Pending)
+            },
+        )
+        .await
     }
 
     /// Extract and validate a 64-byte Ed25519 signature from a poll response.

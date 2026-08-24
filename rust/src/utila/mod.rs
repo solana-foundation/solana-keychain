@@ -281,7 +281,12 @@ impl UtilaSigner {
         &self,
         mut transaction: UtilaTransaction,
     ) -> Result<UtilaTransaction, SignerError> {
-        for _ in 0..self.max_poll_attempts {
+        let transaction_id = extract_transaction_id(&transaction.name)?;
+        for attempt in 0..=self.max_poll_attempts {
+            if attempt > 0 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(self.poll_interval_ms)).await;
+                transaction = self.get_transaction(&transaction_id).await?;
+            }
             match transaction.state {
                 TransactionState::Signed => return Ok(transaction),
                 state if state.is_terminal_failure() => {
@@ -289,28 +294,14 @@ impl UtilaSigner {
                         "Utila transaction reached terminal state {state:?}"
                     )));
                 }
-                _ => {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(self.poll_interval_ms))
-                        .await;
-                    let transaction_id = extract_transaction_id(&transaction.name)?;
-                    transaction = self.get_transaction(&transaction_id).await?;
-                }
+                _ => {}
             }
         }
 
-        if transaction.state == TransactionState::Signed {
-            Ok(transaction)
-        } else if transaction.state.is_terminal_failure() {
-            Err(SignerError::SigningFailed(format!(
-                "Utila transaction reached terminal state {:?}",
-                transaction.state
-            )))
-        } else {
-            Err(SignerError::RemoteApiError(format!(
-                "Utila transaction polling timed out after {} attempts",
-                self.max_poll_attempts
-            )))
-        }
+        Err(SignerError::RemoteApiError(format!(
+            "Utila transaction polling timed out after {} attempts",
+            self.max_poll_attempts
+        )))
     }
 
     fn extract_signature_from_raw_transaction(

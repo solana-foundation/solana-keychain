@@ -2,6 +2,39 @@
 
 use crate::error::SignerError;
 
+#[cfg(any(feature = "fireblocks", feature = "fordefi"))]
+pub(crate) enum PollOutcome<T> {
+    Done(T),
+    Pending,
+}
+
+/// Run `attempt` up to `max_attempts` times, sleeping `interval_ms` between
+/// tries (never after the last, so the timeout error is not delayed).
+/// `attempt` classifies each response itself: `Done` returns, `Pending`
+/// retries, and a terminal failure is any `Err`.
+#[cfg(any(feature = "fireblocks", feature = "fordefi"))]
+pub(crate) async fn poll_until<T, F, Fut>(
+    max_attempts: u32,
+    interval_ms: u64,
+    timeout_error: impl FnOnce() -> SignerError,
+    mut attempt: F,
+) -> Result<T, SignerError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<PollOutcome<T>, SignerError>>,
+{
+    for i in 0..max_attempts {
+        if i > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
+        }
+        match attempt().await? {
+            PollOutcome::Done(value) => return Ok(value),
+            PollOutcome::Pending => {}
+        }
+    }
+    Err(timeout_error())
+}
+
 /// Consume a failed response into a [`SignerError::RemoteApiError`], logging
 /// the status (and, under `unsafe-debug` only, the response body).
 pub(crate) async fn extract_api_error(response: reqwest::Response, context: &str) -> SignerError {

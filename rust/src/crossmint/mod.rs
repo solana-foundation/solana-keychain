@@ -370,6 +370,15 @@ impl CrossmintSigner {
         None
     }
 
+    fn transaction_failure(response: &TransactionResponse) -> SignerError {
+        let detail = response
+            .error
+            .as_ref()
+            .map(serde_json::Value::to_string)
+            .unwrap_or_else(|| "unknown error".to_string());
+        SignerError::SigningFailed(format!("Crossmint transaction failed: {detail}"))
+    }
+
     async fn poll_transaction(
         &self,
         mut response: TransactionResponse,
@@ -379,14 +388,7 @@ impl CrossmintSigner {
             match response.status.as_str() {
                 "success" => return Ok(response),
                 "failed" => {
-                    let detail = response
-                        .error
-                        .as_ref()
-                        .map(serde_json::Value::to_string)
-                        .unwrap_or_else(|| "unknown error".to_string());
-                    return Err(SignerError::SigningFailed(format!(
-                        "Crossmint transaction failed: {detail}"
-                    )));
+                    return Err(Self::transaction_failure(&response));
                 }
                 // Submit our approval at most once; Crossmint may register it
                 // asynchronously, so afterwards awaiting-approval is treated
@@ -405,16 +407,7 @@ impl CrossmintSigner {
 
         match response.status.as_str() {
             "success" => Ok(response),
-            "failed" => {
-                let detail = response
-                    .error
-                    .as_ref()
-                    .map(serde_json::Value::to_string)
-                    .unwrap_or_else(|| "unknown error".to_string());
-                Err(SignerError::SigningFailed(format!(
-                    "Crossmint transaction failed: {detail}"
-                )))
-            }
+            "failed" => Err(Self::transaction_failure(&response)),
             "awaiting-approval" if !approval_submitted => Err(SignerError::SigningFailed(
                 "Crossmint transaction is awaiting approval; additional signer approvals are required"
                     .to_string(),
