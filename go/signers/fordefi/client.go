@@ -197,7 +197,8 @@ func (s *Signer) getTransaction(ctx context.Context, txID string) (transactionSt
 // attempt budget is exhausted. When pushable is true (native Solana
 // transactions, auto-broadcast) the only success state is "completed"; when
 // false (black box / messages) "signed" succeeds, with "completed" accepted
-// defensively. Cancellation of ctx aborts the wait.
+// defensively. Cancellation of ctx aborts the wait, reported as
+// CodeBroadcastUnconfirmed when pushable because Fordefi may already have executed it.
 func (s *Signer) pollForResult(ctx context.Context, txID string, pushable bool) (transactionStatusResponse, error) {
 	for attempt := 0; attempt < s.maxPollAttempts; attempt++ {
 		response, err := s.getTransaction(ctx, txID)
@@ -215,7 +216,13 @@ func (s *Signer) pollForResult(ctx context.Context, txID string, pushable bool) 
 		}
 
 		if attempt+1 < s.maxPollAttempts {
-			if err := core.SleepContext(ctx, s.pollInterval); err != nil {
+			var err error
+			if pushable {
+				err = core.SleepContextUnconfirmed(ctx, s.pollInterval, txID)
+			} else {
+				err = core.SleepContext(ctx, s.pollInterval)
+			}
+			if err != nil {
 				return transactionStatusResponse{}, err
 			}
 		}

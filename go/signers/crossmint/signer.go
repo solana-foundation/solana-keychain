@@ -274,7 +274,7 @@ func (s *Signer) pollTransaction(ctx context.Context, response transactionRespon
 			response = next
 			approvalSubmitted = true
 		default:
-			if err := core.SleepContext(ctx, s.pollInterval); err != nil {
+			if err := core.SleepContextUnconfirmed(ctx, s.pollInterval, response.ID); err != nil {
 				return transactionResponse{}, err
 			}
 			next, err := s.getTransaction(ctx, response.ID)

@@ -72,6 +72,22 @@ func SleepContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// SleepContextUnconfirmed is SleepContext for a poll loop the provider may already
+// be executing: cancellation cannot rule the broadcast out, so it reports
+// CodeBroadcastUnconfirmed with providerTxID rather than a plain failure the
+// caller would be free to retry.
+func SleepContextUnconfirmed(ctx context.Context, d time.Duration, providerTxID string) error {
+	if err := SleepContext(ctx, d); err == nil {
+		return nil
+	}
+	return &SignerError{
+		Code:         CodeBroadcastUnconfirmed,
+		ProviderTxID: providerTxID,
+		detail:       "transaction polling cancelled after the provider accepted the transaction",
+		cause:        ctx.Err(),
+	}
+}
+
 // ResolvePollBounds validates a backend's poll configuration, substituting the
 // backend defaults for zero values and rejecting negative ones.
 func ResolvePollBounds(interval, defaultInterval time.Duration, attempts, defaultAttempts int) (time.Duration, int, error) {
