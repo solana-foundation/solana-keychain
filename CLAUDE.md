@@ -49,7 +49,7 @@ This repo ships Claude Code skills in [.claude/skills/](.claude/skills/) — inv
 
 | Skill | When to use |
 | --- | --- |
-| [`add-signer`](.claude/skills/add-signer/SKILL.md) | Adding a new signing backend (Rust + TS + CI). Pair with [docs/ADDING_SIGNERS.md](docs/ADDING_SIGNERS.md). |
+| [`add-signer-ci`](.claude/skills/add-signer-ci/SKILL.md) | Wiring CI workflows for a new signing backend contributed via a fork PR. For the code itself see [docs/ADDING_SIGNERS.md](docs/ADDING_SIGNERS.md). |
 | [`release`](.claude/skills/release/SKILL.md) | Cutting a new Rust and/or TS release (PR-based flow, version bumps). |
 | [`complete-release`](.claude/skills/complete-release/SKILL.md) | Finalizing an approved release PR — merge, then trigger publish workflows from `main`. |
 

@@ -1,5 +1,10 @@
 ---
-description: Prepare CI for a new fork-contributed signer backend
+name: add-signer-ci
+description: >
+  Prepare CI workflows for a new signer backend contributed via a fork PR. Use
+  when asked to "add a signer to CI", "wire up CI for a new signer", "prepare
+  the fork external live tests", or when a new signing backend needs its
+  workflow matrices, env vars, and publish entries added.
 allowed-tools: Read, Edit, Glob, Grep
 ---
 
@@ -7,7 +12,7 @@ allowed-tools: Read, Edit, Glob, Grep
 
 Prepare CI workflows for a new signer being added via a fork PR. This is a two-phase process because fork PRs can't use repository secrets, so `fork-external-live-manual.yml` (which runs from `main`'s YAML) must be updated on `main` first.
 
-If arguments are missing from `$ARGUMENTS`, ask the user for: signer display name, Rust feature name, Rust integration test function name, TypeScript package name (if any), and required environment variable names.
+If any of these are unknown, ask the user for: signer display name, Rust feature name, Rust integration test function name, TypeScript package name (if any), and required environment variable names.
 
 ## Phase 1 — Our Preparatory PR (merged to `main`)
 
