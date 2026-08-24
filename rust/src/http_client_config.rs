@@ -35,19 +35,7 @@ impl HttpClientConfig {
     /// provider-specific credential headers (X-Vault-Token, X-Stamp,
     /// X-API-KEY, ...) to the redirect target: reqwest only strips the four
     /// standard sensitive headers on a cross-host hop.
-    #[cfg(any(
-        feature = "vault",
-        feature = "privy",
-        feature = "turnkey",
-        feature = "fireblocks",
-        feature = "cdp",
-        feature = "dfns",
-        feature = "para",
-        feature = "crossmint",
-        feature = "openfort",
-        feature = "utila",
-        feature = "fordefi"
-    ))]
+    #[cfg(feature = "_remote")]
     pub(crate) fn client_builder(&self) -> reqwest::ClientBuilder {
         reqwest::Client::builder()
             .timeout(self.resolved_request_timeout())
@@ -58,19 +46,7 @@ impl HttpClientConfig {
 
     /// `client_builder()` finished into a client, with the error mapped to
     /// [`SignerError::ConfigError`].
-    #[cfg(any(
-        feature = "vault",
-        feature = "privy",
-        feature = "turnkey",
-        feature = "fireblocks",
-        feature = "cdp",
-        feature = "dfns",
-        feature = "para",
-        feature = "crossmint",
-        feature = "openfort",
-        feature = "utila",
-        feature = "fordefi"
-    ))]
+    #[cfg(feature = "_remote")]
     pub(crate) fn build_client(&self) -> Result<reqwest::Client, crate::error::SignerError> {
         self.client_builder().build().map_err(|e| {
             crate::error::SignerError::ConfigError(format!("Failed to build HTTP client: {e}"))
@@ -83,19 +59,7 @@ impl HttpClientConfig {
 /// Deliberately an error rather than `Policy::none()`: with `none()` the 3xx
 /// comes back as a normal response and status-code branches would try to parse
 /// its body, reporting a misleading error.
-#[cfg(any(
-    feature = "vault",
-    feature = "privy",
-    feature = "turnkey",
-    feature = "fireblocks",
-    feature = "cdp",
-    feature = "dfns",
-    feature = "para",
-    feature = "crossmint",
-    feature = "openfort",
-    feature = "utila",
-    feature = "fordefi"
-))]
+#[cfg(feature = "_remote")]
 pub(crate) fn no_redirect_policy() -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(|attempt| {
         attempt.error("redirects are not followed: a signer request carries provider credentials")

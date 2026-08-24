@@ -1,17 +1,5 @@
 use super::*;
-#[cfg(any(
-    feature = "vault",
-    feature = "privy",
-    feature = "turnkey",
-    feature = "fireblocks",
-    feature = "cdp",
-    feature = "dfns",
-    feature = "para",
-    feature = "crossmint",
-    feature = "openfort",
-    feature = "utila",
-    feature = "fordefi"
-))]
+#[cfg(feature = "_remote")]
 use wiremock::{
     matchers::{method, path},
     Mock, MockServer, ResponseTemplate,
@@ -44,19 +32,7 @@ fn test_custom_values_override_defaults() {
 // under test carries only the redirect policy; https_only is covered by
 // the production builder and would reject the mock URL before any
 // redirect could happen.
-#[cfg(any(
-    feature = "vault",
-    feature = "privy",
-    feature = "turnkey",
-    feature = "fireblocks",
-    feature = "cdp",
-    feature = "dfns",
-    feature = "para",
-    feature = "crossmint",
-    feature = "openfort",
-    feature = "utila",
-    feature = "fordefi"
-))]
+#[cfg(feature = "_remote")]
 #[tokio::test]
 async fn test_no_redirect_policy_fails_instead_of_following() {
     let target = MockServer::start().await;

@@ -12,9 +12,9 @@ default = ["memory", "sdk-v2"]
 
 # Signer backends
 memory = []
-vault = ["dep:reqwest"]
-privy = ["dep:reqwest", "dep:p256"]
-turnkey = ["dep:reqwest", "dep:p256", "dep:hex", "dep:chrono"]
+vault = ["dep:reqwest", "_remote"]
+privy = ["dep:reqwest", "dep:p256", "_remote"]
+turnkey = ["dep:reqwest", "dep:p256", "dep:hex", "dep:chrono", "_remote"]
 aws_kms = ["dep:aws-sdk-kms", "dep:aws-config", "dep:reqwest"]
 fireblocks = [
     "dep:reqwest",
@@ -24,9 +24,10 @@ fireblocks = [
     "dep:hex",
     "dep:chrono",
     "dep:tokio",
+    "_remote",
 ]
-para = ["dep:reqwest", "dep:hex", "dep:tokio"]
-crossmint = ["dep:reqwest", "dep:hkdf", "dep:sha2", "dep:ed25519-dalek", "dep:tokio"]
+para = ["dep:reqwest", "dep:hex", "dep:tokio", "_remote"]
+crossmint = ["dep:reqwest", "dep:hkdf", "dep:sha2", "dep:ed25519-dalek", "dep:tokio", "_remote"]
 gcp_kms = ["dep:google-cloud-kms-v1", "dep:google-cloud-auth", "dep:reqwest"]
 cdp = [
     "dep:reqwest",
@@ -35,8 +36,9 @@ cdp = [
     "dep:chrono",
     "dep:sha2",
     "dep:hex",
+    "_remote",
 ]
-dfns = ["dep:reqwest", "dep:hex", "dep:ed25519-dalek", "dep:p256", "dep:sha2", "dep:rsa"]
+dfns = ["dep:reqwest", "dep:hex", "dep:ed25519-dalek", "dep:p256", "dep:sha2", "dep:rsa", "_remote"]
 openfort = [
     "dep:reqwest",
     "dep:jsonwebtoken",
@@ -44,9 +46,10 @@ openfort = [
     "dep:chrono",
     "dep:sha2",
     "dep:hex",
+    "_remote",
 ]
-utila = ["dep:reqwest", "dep:jsonwebtoken", "dep:chrono", "dep:tokio"]
-fordefi = ["dep:reqwest", "dep:p256", "dep:sha2", "dep:tokio"]
+utila = ["dep:reqwest", "dep:jsonwebtoken", "dep:chrono", "dep:tokio", "_remote"]
+fordefi = ["dep:reqwest", "dep:p256", "dep:sha2", "dep:tokio", "_remote"]
 all = [
     "memory",
     "vault",
@@ -63,6 +66,10 @@ all = [
     "utila",
     "fordefi",
 ]
+
+# Internal marker enabled by every remote (reqwest-based) backend; never
+# enable directly.
+_remote = []
 
 # SDK version selection (mutually exclusive)
 sdk-v2 = ["dep:solana-sdk"]
