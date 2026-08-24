@@ -31,14 +31,14 @@ class VaultSignerConfig:
     """Configuration for a Vault transit-engine signer.
 
     The Vault key must be an ed25519 key created in the transit engine, e.g.
-    ``vault write transit/keys/my-key type=ed25519``. ``pubkey`` is the base58
+    ``vault write transit/keys/my-key type=ed25519``. ``public_key`` is the base58
     Solana public key corresponding to that transit key.
     """
 
-    vault_addr: str
+    api_base_url: str
     token: str = field(repr=False)
     key_name: str
-    pubkey: str
+    public_key: str
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
 
 
@@ -57,14 +57,14 @@ class VaultSigner(SolanaSigner):
 
     def __init__(self, config: VaultSignerConfig) -> None:
         try:
-            self._pubkey = Pubkey.from_string(config.pubkey)
+            self._pubkey = Pubkey.from_string(config.public_key)
         except Exception:
             raise SignerError(
                 SignerErrorCode.INVALID_PUBLIC_KEY, "Failed to decode base58 public key"
             ) from None
-        vault_addr = normalize_base_url(config.vault_addr)
-        assert_https_url(vault_addr, "vault_addr", allow_http_loopback_in_tests=True)
-        self._vault_addr = vault_addr
+        api_base_url = normalize_base_url(config.api_base_url)
+        assert_https_url(api_base_url, "api_base_url", allow_http_loopback_in_tests=True)
+        self._api_base_url = api_base_url
         self._token = config.token
         self._key_name = config.key_name
         self._http_client = config.http_client
@@ -77,7 +77,7 @@ class VaultSigner(SolanaSigner):
         return self._pubkey
 
     async def _sign_bytes(self, payload: bytes) -> Signature:
-        url = f"{self._vault_addr}/v1/transit/sign/{quote(self._key_name, safe='')}"
+        url = f"{self._api_base_url}/v1/transit/sign/{quote(self._key_name, safe='')}"
         result = await fetch_signer_json(
             url=url,
             provider_name="Vault",
@@ -115,7 +115,7 @@ class VaultSigner(SolanaSigner):
         return await self._sign_bytes(message)
 
     async def is_available(self) -> bool:
-        url = f"{self._vault_addr}/v1/transit/keys/{quote(self._key_name, safe='')}"
+        url = f"{self._api_base_url}/v1/transit/keys/{quote(self._key_name, safe='')}"
 
         async def probe() -> bool:
             result = await fetch_signer_json(

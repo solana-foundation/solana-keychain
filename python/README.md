@@ -97,10 +97,10 @@ from solana_keychain import VaultSignerConfig, create_vault_signer
 
 signer = await create_vault_signer(
     VaultSignerConfig(
-        vault_addr="https://vault.example.com",
+        api_base_url="https://vault.example.com",
         token=os.environ["VAULT_TOKEN"],
         key_name="my-solana-key",
-        pubkey="4BuiY9QUUfPoAGNJBja3JapAuVWMc9c7in6UCgyC2zPR",
+        public_key="4BuiY9QUUfPoAGNJBja3JapAuVWMc9c7in6UCgyC2zPR",
     )
 )
 ```
