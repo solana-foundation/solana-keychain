@@ -32,6 +32,19 @@
 
 pub mod error;
 pub mod http_client_config;
+#[cfg(any(
+    feature = "vault",
+    feature = "privy",
+    feature = "turnkey",
+    feature = "fireblocks",
+    feature = "cdp",
+    feature = "dfns",
+    feature = "para",
+    feature = "openfort",
+    feature = "utila",
+    feature = "fordefi"
+))]
+mod remote_util;
 mod sdk_adapter;
 pub mod signature_util;
 #[cfg(test)]

@@ -16,6 +16,7 @@ use std::str::FromStr;
 use self::jwt::{create_auth_jwt, create_wallet_jwt, extract_host};
 use self::types::{SignMessageResponse, SignTransactionResponse};
 
+use crate::remote_util::parse_json_response;
 use crate::signature_util::{signature_from_base58, verify_or_reject};
 
 const CDP_API_HOST: &str = "api.cdp.coinbase.com";
@@ -239,33 +240,7 @@ impl CdpSigner {
             .await
             .map_err(|e| SignerError::HttpError(format!("CDP HTTP request failed: {e}")))?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let _error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("CDP sign_transaction error - status: {status}, response: {_error_text}");
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("CDP sign_transaction error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!(
-                "CDP API error {status}"
-            )));
-        }
-
-        response
-            .json::<SignTransactionResponse>()
-            .await
-            .map_err(|_e| {
-                #[cfg(feature = "unsafe-debug")]
-                log::error!("Failed to parse CDP sign_transaction response: {_e}");
-                SignerError::SerializationError(
-                    "Failed to parse CDP sign_transaction response".to_string(),
-                )
-            })
+        parse_json_response(response, "CDP sign_transaction").await
     }
 
     /// Sign a message via the CDP API.
@@ -285,28 +260,7 @@ impl CdpSigner {
             .await
             .map_err(|e| SignerError::HttpError(format!("CDP HTTP request failed: {e}")))?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let _error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("CDP sign_message error - status: {status}, response: {_error_text}");
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("CDP sign_message error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!(
-                "CDP API error {status}"
-            )));
-        }
-
-        response.json::<SignMessageResponse>().await.map_err(|_e| {
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Failed to parse CDP sign_message response: {_e}");
-            SignerError::SerializationError("Failed to parse CDP sign_message response".to_string())
-        })
+        parse_json_response(response, "CDP sign_message").await
     }
 
     /// Sign message bytes using the CDP API.

@@ -8,6 +8,7 @@ use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{
     error::SignerError,
     http_client_config::HttpClientConfig,
+    remote_util::parse_json_response,
     signature_util::{signature_from_bytes, verify_or_reject},
     traits::SolanaSigner,
 };
@@ -134,24 +135,7 @@ impl DfnsSigner {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-
-            #[cfg(feature = "unsafe-debug")]
-            {
-                let _error_text = response.text().await.unwrap_or_default();
-                log::error!("Dfns get_wallet error - status: {status}, response: {_error_text}");
-            }
-
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Dfns get_wallet error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!("API error {status}")));
-        }
-
-        response.json().await.map_err(|e| {
-            SignerError::SerializationError(format!("Failed to parse wallet response: {e}"))
-        })
+        parse_json_response(response, "Dfns get_wallet").await
     }
 
     /// Send a signature request to the Dfns Keys API
@@ -185,26 +169,8 @@ impl DfnsSigner {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-
-            #[cfg(feature = "unsafe-debug")]
-            {
-                let _error_text = response.text().await.unwrap_or_default();
-                log::error!(
-                    "Dfns generate_signature error - status: {status}, response: {_error_text}"
-                );
-            }
-
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Dfns generate_signature error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!("API error {status}")));
-        }
-
-        let sig_response: GenerateSignatureResponse = response.json().await.map_err(|e| {
-            SignerError::SerializationError(format!("Failed to parse signature response: {e}"))
-        })?;
+        let sig_response: GenerateSignatureResponse =
+            parse_json_response(response, "Dfns generate_signature").await?;
 
         if sig_response.status == "Failed" {
             return Err(SignerError::SigningFailed(

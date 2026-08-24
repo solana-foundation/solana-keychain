@@ -7,6 +7,7 @@
 /// their own `Cargo.toml`.
 pub use reqwest;
 
+use crate::remote_util::parse_json_response;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_base64, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction};
@@ -173,29 +174,7 @@ impl VaultSigner {
                 SignerError::RemoteApiError(format!("Failed to send request to Vault: {e}"))
             })?;
 
-        if !response.status().is_success() {
-            let status = response.status();
-
-            let _error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Vault API error - status: {status}, response: {_error_text}");
-
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Vault API error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!(
-                "Vault API error {}",
-                status
-            )));
-        }
-
-        let result: serde_json::Value = response.json().await.map_err(|_| {
-            SignerError::SerializationError("Failed to parse Vault response".to_string())
-        })?;
+        let result: serde_json::Value = parse_json_response(response, "Vault API").await?;
 
         let signature_b64 = result["data"]["signature"].as_str().ok_or_else(|| {
             SignerError::RemoteApiError("No signature in Vault response".to_string())

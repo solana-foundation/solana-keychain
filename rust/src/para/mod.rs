@@ -2,6 +2,7 @@
 
 mod types;
 
+use crate::remote_util::parse_json_response;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_hex, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction};
@@ -154,11 +155,7 @@ impl ParaSigner {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            return Err(Self::extract_api_error(response, "fetch_wallet").await);
-        }
-
-        Ok(response.json().await?)
+        parse_json_response(response, "Para API fetch_wallet").await
     }
 
     /// Sign raw bytes using Para API (hex-encoded)
@@ -187,11 +184,8 @@ impl ParaSigner {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            return Err(Self::extract_api_error(response, "sign_bytes").await);
-        }
-
-        let sign_response: SignRawResponse = response.json().await?;
+        let sign_response: SignRawResponse =
+            parse_json_response(response, "Para API sign_bytes").await?;
 
         let hex_sig = sign_response.signature.ok_or_else(|| {
             SignerError::SigningFailed("Missing signature in response".to_string())
@@ -229,29 +223,6 @@ impl ParaSigner {
             TransactionUtil::serialize_transaction(transaction)?,
             signature,
         ))
-    }
-
-    /// Extract error from a Para API error response.
-    /// Logs details but returns only status code in the error (matches other signers).
-    async fn extract_api_error(response: reqwest::Response, context: &str) -> SignerError {
-        let status = response.status().as_u16();
-
-        #[cfg(feature = "unsafe-debug")]
-        {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-            log::error!("Para API {context} error - status: {status}, response: {error_text}");
-        }
-
-        #[cfg(not(feature = "unsafe-debug"))]
-        {
-            let _ = response;
-            log::error!("Para API {context} error - status: {status}");
-        }
-
-        SignerError::RemoteApiError(format!("API error {status}"))
     }
 
     /// Validate UUID format (matches TS UUID_REGEX)

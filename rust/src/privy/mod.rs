@@ -3,6 +3,7 @@
 mod authorization;
 mod types;
 
+use crate::remote_util::{extract_api_error, parse_json_response};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_base64, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction};
@@ -163,25 +164,8 @@ impl PrivySigner {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let _error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-
-            #[cfg(feature = "unsafe-debug")]
-            log::error!(
-                "Privy API fetch_public_key error - status: {status}, response: {_error_text}"
-            );
-
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Privy API fetch_public_key error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!("API error {status}")));
-        }
-
-        let wallet_info: WalletResponse = response.json().await?;
+        let wallet_info: WalletResponse =
+            parse_json_response(response, "Privy API fetch_public_key").await?;
 
         // For Solana wallets, the address is the public key
         Pubkey::from_str(&wallet_info.address).map_err(|_| {
@@ -220,19 +204,7 @@ impl PrivySigner {
         let response = request_builder.json(request).send().await?;
 
         if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let _error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Privy API rpc error - status: {status}, response: {_error_text}");
-
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Privy API rpc error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!("API error {status}")));
+            return Err(extract_api_error(response, "Privy API rpc").await);
         }
 
         Ok(response.text().await?)

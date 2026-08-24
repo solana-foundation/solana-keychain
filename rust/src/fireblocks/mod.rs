@@ -17,6 +17,7 @@ use types::{
     TransactionResponse, TransactionSource, VaultAddress, VaultAddressesResponse,
 };
 
+use crate::remote_util::parse_json_response;
 use crate::signature_util::{signature_from_base58, signature_from_hex, verify_or_reject};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -157,36 +158,8 @@ impl FireblocksSigner {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let _error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-
-            #[cfg(feature = "unsafe-debug")]
-            log::error!(
-                "Fireblocks API fetch_public_key error - status: {status}, response: {_error_text}"
-            );
-
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Fireblocks API fetch_public_key error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!("API error {status}")));
-        }
-
-        let response_text = response.text().await?;
-
-        let addresses_response: VaultAddressesResponse = serde_json::from_str(&response_text)
-            .map_err(|_e| {
-                #[cfg(feature = "unsafe-debug")]
-                log::error!("Failed to parse Fireblocks response: {_e}");
-
-                #[cfg(not(feature = "unsafe-debug"))]
-                log::error!("Failed to parse Fireblocks response");
-
-                SignerError::SerializationError("Failed to parse Fireblocks response".to_string())
-            })?;
+        let addresses_response: VaultAddressesResponse =
+            parse_json_response(response, "Fireblocks API fetch_public_key").await?;
 
         let address = self.select_vault_address(&addresses_response.addresses)?;
 
@@ -336,32 +309,7 @@ impl FireblocksSigner {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let _error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-
-            #[cfg(feature = "unsafe-debug")]
-            log::error!(
-                "Fireblocks API create_transaction error - status: {status}, response: {_error_text}"
-            );
-
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Fireblocks API create_transaction error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!("API error {status}")));
-        }
-
-        let response_text = response.text().await?;
-
-        serde_json::from_str(&response_text).map_err(|_e| {
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Failed to parse create_transaction response: {_e}, body: {response_text}");
-
-            SignerError::SerializationError("Failed to parse response".to_string())
-        })
+        parse_json_response(response, "Fireblocks API create_transaction").await
     }
 
     /// Poll for transaction completion
@@ -422,37 +370,7 @@ impl FireblocksSigner {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let _error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-
-            #[cfg(feature = "unsafe-debug")]
-            log::error!(
-                "Fireblocks API get_transaction error - status: {status}, response: {_error_text}"
-            );
-
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Fireblocks API get_transaction error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!(
-                "Fireblocks API error {status}"
-            )));
-        }
-
-        let response_text = response.text().await?;
-
-        serde_json::from_str(&response_text).map_err(|e| {
-            #[cfg(feature = "unsafe-debug")]
-            log::error!(
-                "Failed to parse get_transaction response: {}, body: {}",
-                e,
-                response_text
-            );
-            SignerError::SerializationError(format!("Failed to parse response: {e}"))
-        })
+        parse_json_response(response, "Fireblocks API get_transaction").await
     }
 
     /// Extract the signer-bound signature from a signing response.

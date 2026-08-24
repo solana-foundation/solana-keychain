@@ -2,6 +2,7 @@
 
 mod types;
 
+use crate::remote_util::parse_json_response;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::verify_or_reject;
 use crate::traits::SignTransactionResult;
@@ -118,24 +119,7 @@ impl TurnkeySigner {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let _error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Turnkey API error - status: {status}, response: {_error_text}");
-
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Turnkey API error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!("API error {status}")));
-        }
-
-        let response_text = response.text().await?;
-        let response: ActivityResponse = serde_json::from_str(&response_text)?;
+        let response: ActivityResponse = parse_json_response(response, "Turnkey API").await?;
 
         let status = response.activity.status.as_deref().unwrap_or("<missing>");
         if status != "ACTIVITY_STATUS_COMPLETED" {

@@ -5,6 +5,7 @@ use crate::dfns::types::{
     UserActionResponse, UserActionSignRequest,
 };
 use crate::error::SignerError;
+use crate::remote_util::parse_json_response;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ed25519_dalek::pkcs8::DecodePrivateKey as _;
 use ed25519_dalek::Signer as _;
@@ -43,26 +44,8 @@ pub async fn sign_user_action(
         .send()
         .await?;
 
-    if !response.status().is_success() {
-        let status = response.status().as_u16();
-
-        #[cfg(feature = "unsafe-debug")]
-        {
-            let error_text = response.text().await.unwrap_or_default();
-            log::error!("Dfns auth/action/init error - status: {status}, response: {error_text}");
-        }
-
-        #[cfg(not(feature = "unsafe-debug"))]
-        log::error!("Dfns auth/action/init error - status: {status}");
-
-        return Err(SignerError::RemoteApiError(format!(
-            "User action init failed with status {status}"
-        )));
-    }
-
-    let challenge: UserActionInitResponse = response.json().await.map_err(|e| {
-        SignerError::SerializationError(format!("Failed to parse action init response: {e}"))
-    })?;
+    let challenge: UserActionInitResponse =
+        parse_json_response(response, "Dfns auth/action/init").await?;
 
     // Verify credential is allowed
     let allowed = challenge
@@ -110,26 +93,8 @@ pub async fn sign_user_action(
         .send()
         .await?;
 
-    if !response.status().is_success() {
-        let status = response.status().as_u16();
-
-        #[cfg(feature = "unsafe-debug")]
-        {
-            let error_text = response.text().await.unwrap_or_default();
-            log::error!("Dfns auth/action error - status: {status}, response: {error_text}");
-        }
-
-        #[cfg(not(feature = "unsafe-debug"))]
-        log::error!("Dfns auth/action error - status: {status}");
-
-        return Err(SignerError::RemoteApiError(format!(
-            "User action sign failed with status {status}"
-        )));
-    }
-
-    let action_response: UserActionResponse = response.json().await.map_err(|e| {
-        SignerError::SerializationError(format!("Failed to parse action response: {e}"))
-    })?;
+    let action_response: UserActionResponse =
+        parse_json_response(response, "Dfns auth/action").await?;
 
     Ok(action_response.user_action)
 }

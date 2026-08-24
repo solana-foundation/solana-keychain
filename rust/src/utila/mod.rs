@@ -2,6 +2,7 @@
 
 mod types;
 
+use crate::remote_util::parse_json_response;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::{
@@ -240,7 +241,7 @@ impl UtilaSigner {
             .send()
             .await?;
 
-        parse_response(response, context).await
+        parse_json_response(response, &format!("Utila API {context}")).await
     }
 
     async fn post_json<T, B>(&self, path: &str, body: &B, context: &str) -> Result<T, SignerError>
@@ -257,7 +258,7 @@ impl UtilaSigner {
             .send()
             .await?;
 
-        parse_response(response, context).await
+        parse_json_response(response, &format!("Utila API {context}")).await
     }
 
     fn build_url(&self, path: &str) -> Result<String, SignerError> {
@@ -420,30 +421,6 @@ impl SolanaSigner for UtilaSigner {
     async fn is_available(&self) -> bool {
         self.check_availability().await
     }
-}
-
-async fn parse_response<T>(response: reqwest::Response, context: &str) -> Result<T, SignerError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    let status = response.status().as_u16();
-    let text = response.text().await.unwrap_or_default();
-
-    if status >= 400 {
-        #[cfg(feature = "unsafe-debug")]
-        log::error!("Utila API {context} error - status: {status}, response: {text}");
-
-        #[cfg(not(feature = "unsafe-debug"))]
-        log::error!("Utila API {context} error - status: {status}");
-
-        return Err(SignerError::RemoteApiError(format!(
-            "Utila API {context} error {status}"
-        )));
-    }
-
-    serde_json::from_str(&text).map_err(|_| {
-        SignerError::SerializationError(format!("Failed to parse Utila {context} response"))
-    })
 }
 
 fn validate_required(field: &str, value: &str) -> Result<(), SignerError> {

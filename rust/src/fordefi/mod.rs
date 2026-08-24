@@ -14,6 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::SignerError;
 use crate::http_client_config::HttpClientConfig;
+use crate::remote_util::{extract_api_error, parse_json_response};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::signature_from_base64;
 use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
@@ -282,7 +283,7 @@ impl FordefiSigner {
 
         let status = response.status().as_u16();
         if !response.status().is_success() {
-            let error = Self::extract_api_error(response, "submit_request").await;
+            let error = extract_api_error(response, "Fordefi API submit_request").await;
             return Err(classify(Some(status), error));
         }
 
@@ -386,11 +387,8 @@ impl FordefiSigner {
                 .send()
                 .await?;
 
-            if !response.status().is_success() {
-                return Err(Self::extract_api_error(response, "poll_result").await);
-            }
-
-            let tx_data: TransactionStatusResponse = response.json().await?;
+            let tx_data: TransactionStatusResponse =
+                parse_json_response(response, "Fordefi API poll_result").await?;
 
             let is_success = if pushable {
                 matches!(tx_data.state.as_str(), "completed")
@@ -623,11 +621,7 @@ impl FordefiSigner {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            return Err(Self::extract_api_error(response, "fetch_vault").await);
-        }
-
-        Ok(response.json().await?)
+        parse_json_response(response, "Fordefi API fetch_vault").await
     }
 
     /// Resolve the authoritative Solana public key returned for a Fordefi vault.
@@ -692,27 +686,6 @@ impl FordefiSigner {
                     VAULT_VERIFICATION_TIMEOUT.as_secs()
                 ))
             })?
-    }
-
-    async fn extract_api_error(response: reqwest::Response, context: &str) -> SignerError {
-        let status = response.status().as_u16();
-
-        #[cfg(feature = "unsafe-debug")]
-        {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-            log::error!("Fordefi API {context} error - status: {status}, response: {error_text}");
-        }
-
-        #[cfg(not(feature = "unsafe-debug"))]
-        {
-            let _ = response;
-            log::error!("Fordefi API {context} error - status: {status}");
-        }
-
-        SignerError::RemoteApiError(format!("API error {status}"))
     }
 }
 

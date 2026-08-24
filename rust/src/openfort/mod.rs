@@ -30,6 +30,7 @@
 
 mod types;
 
+use crate::remote_util::parse_json_response;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_hex, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction};
@@ -309,30 +310,8 @@ impl OpenfortSigner {
             .await
             .map_err(|e| SignerError::HttpError(format!("Openfort HTTP request failed: {e}")))?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let _error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-
-            #[cfg(feature = "unsafe-debug")]
-            log::error!(
-                "Openfort fetch_public_key error - status: {status}, response: {_error_text}"
-            );
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Openfort fetch_public_key error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!(
-                "Openfort API error {status}"
-            )));
-        }
-
-        let info: types::AccountInfo = response.json().await.map_err(|_e| {
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Failed to parse Openfort account response: {_e}");
-            SignerError::SerializationError("Failed to parse Openfort account response".to_string())
-        })?;
+        let info: types::AccountInfo =
+            parse_json_response(response, "Openfort fetch_public_key").await?;
 
         Pubkey::from_str(&info.address).map_err(|_| {
             SignerError::InvalidPublicKey(format!(
@@ -400,28 +379,7 @@ impl OpenfortSigner {
             .await
             .map_err(|e| SignerError::HttpError(format!("Openfort HTTP request failed: {e}")))?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let _error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Openfort sign error - status: {status}, response: {_error_text}");
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Openfort sign error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!(
-                "Openfort API error {status}"
-            )));
-        }
-
-        response.json::<SignResponse>().await.map_err(|_e| {
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Failed to parse Openfort sign response: {_e}");
-            SignerError::SerializationError("Failed to parse Openfort sign response".to_string())
-        })
+        parse_json_response(response, "Openfort sign").await
     }
 
     /// Sign arbitrary bytes via the Openfort API and verify the returned ed25519 signature.
