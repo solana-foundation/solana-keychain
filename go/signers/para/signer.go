@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -19,9 +18,6 @@ import (
 
 // availabilityTimeout bounds the IsAvailable health check.
 const availabilityTimeout = 5 * time.Second
-
-// maxResponseBytes caps how much of a Para response body is read.
-const maxResponseBytes = 1 << 20
 
 // Signer signs Solana transactions and messages via Para's wallet API. All
 // fields are immutable after New, so a Signer is safe for concurrent use.
@@ -204,23 +200,12 @@ func (s *Signer) doRequest(ctx context.Context, method, url string, requestBody 
 	if requestBody != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := s.client.Do(req)
+	status, body, err := core.SendRequest(s.client, req, "para")
 	if err != nil {
-		// Preserve SignerError codes raised inside the transport (e.g. the
-		// HTTPS-only guard's CodeConfigError).
-		var se *core.SignerError
-		if errors.As(err, &se) {
-			return nil, se
-		}
-		return nil, core.WrapSignerError(core.CodeHTTPError, "para request failed", err)
+		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return nil, core.WrapSignerError(core.CodeHTTPError, "failed to read para response", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, core.NewSignerError(core.CodeRemoteAPIError, "API error "+strconv.Itoa(resp.StatusCode))
+	if !core.IsSuccess(status) {
+		return nil, core.NewSignerError(core.CodeRemoteAPIError, "API error "+strconv.Itoa(status))
 	}
 	return body, nil
 }

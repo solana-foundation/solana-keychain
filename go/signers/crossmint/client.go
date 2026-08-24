@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -157,32 +156,12 @@ func (s *Signer) buildWalletsAPIURL(segments ...string) (string, error) {
 	var b strings.Builder
 	b.WriteString(strings.TrimRight(s.apiBaseURL, "/"))
 	b.WriteString("/" + walletsAPIVersion + "/wallets/")
-	b.WriteString(encodeURIComponent(s.walletLocator))
+	b.WriteString(core.EncodeURIComponent(s.walletLocator))
 	for _, segment := range segments {
 		b.WriteByte('/')
-		b.WriteString(encodeURIComponent(segment))
+		b.WriteString(core.EncodeURIComponent(segment))
 	}
 	return b.String(), nil
-}
-
-// encodeURIComponent percent-encodes every byte except the JavaScript
-// encodeURIComponent unreserved set (A-Z a-z 0-9 - _ . ! ~ * ' ( )).
-func encodeURIComponent(input string) string {
-	var b strings.Builder
-	b.Grow(len(input))
-	for i := 0; i < len(input); i++ {
-		c := input[i]
-		switch {
-		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9':
-			b.WriteByte(c)
-		case c == '-' || c == '_' || c == '.' || c == '!' || c == '~' ||
-			c == '*' || c == '\'' || c == '(' || c == ')':
-			b.WriteByte(c)
-		default:
-			fmt.Fprintf(&b, "%%%02X", c)
-		}
-	}
-	return b.String()
 }
 
 // doRequest issues an authenticated request and returns the status code and
@@ -211,21 +190,7 @@ func (s *Signer) doRequest(ctx context.Context, method, u string, body any, idem
 		req.Header.Set("x-idempotency-key", idempotencyKey)
 	}
 
-	resp, err := s.client.Do(req)
-	if err != nil {
-		var se *core.SignerError
-		if errors.As(err, &se) {
-			return 0, nil, se
-		}
-		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "request failed", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "failed to read response body", err)
-	}
-	return resp.StatusCode, data, nil
+	return core.SendRequest(s.client, req, "crossmint")
 }
 
 // parseResponseWithRequiredField turns non-2xx statuses into RemoteApiError

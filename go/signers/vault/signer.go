@@ -5,18 +5,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gagliardetto/solana-go"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
-
-// maxResponseBytes caps how much of a Vault response body is read (1 MiB).
-const maxResponseBytes = 1 << 20
 
 // signRequest is the transit sign request body: the base64-encoded payload.
 type signRequest struct {
@@ -106,17 +102,13 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 	}
 	req.Header.Set("X-Vault-Token", s.token)
 
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	status, body, err := core.SendRequest(s.client, req, "vault")
+	if err != nil || !core.IsSuccess(status) {
 		return false
 	}
 
 	var parsed keyReadResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&parsed); err != nil {
+	if err := json.Unmarshal(body, &parsed); err != nil {
 		return false
 	}
 	return parsed.Data.SupportsSigning && parsed.Data.Type == "ed25519"
@@ -138,26 +130,13 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Vault-Token", s.token)
 
-	resp, err := s.client.Do(req)
+	status, body, err := core.SendRequest(s.client, req, "vault")
 	if err != nil {
-		// Preserve SignerError codes raised inside the transport (e.g. the
-		// HTTPS-only guard's CodeConfigError); everything else is a remote API
-		// failure.
-		var se *core.SignerError
-		if errors.As(err, &se) {
-			return solana.Signature{}, se
-		}
-		return solana.Signature{}, core.WrapSignerError(core.CodeRemoteAPIError, "failed to send request to vault", err)
+		return solana.Signature{}, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeRemoteAPIError, "failed to read vault response", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !core.IsSuccess(status) {
 		return solana.Signature{}, core.NewSignerError(core.CodeRemoteAPIError,
-			"vault API error "+resp.Status+": "+core.SanitizeRemoteResponse(string(body)))
+			"vault API error "+strconv.Itoa(status)+": "+core.SanitizeRemoteResponse(string(body)))
 	}
 
 	var parsed signResponse

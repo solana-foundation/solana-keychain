@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,9 +38,6 @@ var terminalFailureStates = map[string]bool{
 	"insufficient_funds":          true,
 	"mined_reverted":              true,
 }
-
-// maxResponseBytes caps how much of a Fordefi response body is read.
-const maxResponseBytes = 1 << 20
 
 // Wire types for the Fordefi REST API.
 
@@ -111,21 +107,7 @@ func (s *Signer) newRequest(ctx context.Context, method, path, body string) (*ht
 }
 
 func (s *Signer) send(req *http.Request) (int, []byte, error) {
-	resp, err := s.client.Do(req)
-	if err != nil {
-		var se *core.SignerError
-		if errors.As(err, &se) {
-			return 0, nil, se
-		}
-		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "request to fordefi api failed", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "failed to read fordefi response body", err)
-	}
-	return resp.StatusCode, data, nil
+	return core.SendRequest(s.client, req, "fordefi")
 }
 
 // doGet sends an authenticated GET and returns the status code and body.
@@ -183,7 +165,7 @@ func (s *Signer) submitTransaction(ctx context.Context, request transactionReque
 	if err != nil {
 		return "", classify(status, err)
 	}
-	if !is2xx(status) {
+	if !core.IsSuccess(status) {
 		return "", classify(status, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status)))
 	}
 
@@ -200,7 +182,7 @@ func (s *Signer) getTransaction(ctx context.Context, txID string) (transactionSt
 	if err != nil {
 		return transactionStatusResponse{}, err
 	}
-	if !is2xx(status) {
+	if !core.IsSuccess(status) {
 		return transactionStatusResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status))
 	}
 
@@ -271,7 +253,7 @@ func (s *Signer) fetchVault(ctx context.Context) (vaultResponse, error) {
 	if err != nil {
 		return vaultResponse{}, err
 	}
-	if !is2xx(status) {
+	if !core.IsSuccess(status) {
 		return vaultResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status))
 	}
 
@@ -309,6 +291,3 @@ func vaultPublicKey(vault vaultResponse) (solana.PublicKey, error) {
 	}
 	return solana.PublicKeyFromBytes(keyBytes), nil
 }
-
-// is2xx reports whether status is a success status.
-func is2xx(status int) bool { return status >= 200 && status <= 299 }

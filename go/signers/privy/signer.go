@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,9 +13,6 @@ import (
 
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
-
-// maxResponseBytes caps how much of a Privy response body is read.
-const maxResponseBytes = 1 << 20 // 1 MiB
 
 // Signer signs with a Privy wallet via Privy's REST API. All fields are
 // immutable after New, so a Signer is safe for concurrent use.
@@ -262,27 +257,15 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 // failures to CodeHTTPError and non-2xx statuses to CodeRemoteAPIError whose
 // detail carries only the status code ("API error {status}").
 func (s *Signer) do(req *http.Request, what string) ([]byte, error) {
-	resp, err := s.client.Do(req)
+	status, body, err := core.SendRequest(s.client, req, "privy")
 	if err != nil {
-		// Preserve an already-classified error (e.g. the HTTPS-only transport's
-		// CodeConfigError) instead of reclassifying it as a transport failure.
-		var se *core.SignerError
-		if errors.As(err, &se) {
-			return nil, se
-		}
-		return nil, core.WrapSignerError(core.CodeHTTPError, what+" request failed", err)
+		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return nil, core.WrapSignerError(core.CodeHTTPError, "failed to read "+what+" response", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !core.IsSuccess(status) {
 		// Only the status code goes into the detail; the response body is
 		// deliberately discarded since it may echo request material.
 		return nil, core.NewSignerError(core.CodeRemoteAPIError,
-			what+" failed: API error "+strconv.Itoa(resp.StatusCode))
+			what+" failed: API error "+strconv.Itoa(status))
 	}
 	return body, nil
 }

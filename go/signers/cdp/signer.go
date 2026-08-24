@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,8 +21,6 @@ const (
 	defaultBaseURL = "https://api.cdp.coinbase.com"
 	// basePath is the CDP Solana accounts base path.
 	basePath = "/platform/v2/solana/accounts"
-	// maxResponseBytes caps how much of a CDP response body is read.
-	maxResponseBytes = 1 << 20
 )
 
 // Signer signs Solana transactions and messages with CDP's managed key
@@ -219,12 +215,8 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 	}
 	req.Header.Set("Authorization", "Bearer "+authToken)
 
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = resp.Body.Close() }()
-	return resp.StatusCode >= 200 && resp.StatusCode < 300
+	status, _, err := core.SendRequest(s.client, req, "cdp")
+	return err == nil && core.IsSuccess(status)
 }
 
 // doPost sends an authenticated POST to a CDP signing endpoint (bearer auth JWT
@@ -252,36 +244,19 @@ func (s *Signer) doPost(ctx context.Context, path string, body map[string]any, o
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Wallet-Auth", walletToken)
 
-	resp, err := s.client.Do(req)
+	status, respBody, err := core.SendRequest(s.client, req, "cdp")
 	if err != nil {
-		return requestError(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return core.WrapSignerError(core.CodeHTTPError, "failed to read CDP response", err)
+		return err
 	}
 
 	// Only the status code goes into the error; the response body is never
 	// attached.
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return core.NewSignerError(core.CodeRemoteAPIError, "CDP API error "+strconv.Itoa(resp.StatusCode))
+	if !core.IsSuccess(status) {
+		return core.NewSignerError(core.CodeRemoteAPIError, "CDP API error "+strconv.Itoa(status))
 	}
 
 	if err := json.Unmarshal(respBody, out); err != nil {
 		return core.WrapSignerError(core.CodeSerializationError, "failed to parse CDP "+what+" response", err)
 	}
 	return nil
-}
-
-// requestError maps a transport-level failure to CodeHTTPError, but propagates a
-// *core.SignerError raised inside the client unchanged (e.g. the HTTPS-only
-// transport's CodeConfigError) so its code survives to the caller.
-func requestError(err error) error {
-	var se *core.SignerError
-	if errors.As(err, &se) {
-		return se
-	}
-	return core.WrapSignerError(core.CodeHTTPError, "CDP HTTP request failed", err)
 }

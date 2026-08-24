@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -214,24 +212,12 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 // CodeRemoteAPIError with only the status code (the remote body is never
 // included).
 func (s *Signer) do(req *http.Request) ([]byte, error) {
-	resp, err := s.client.Do(req)
+	status, body, err := core.SendRequest(s.client, req, "openfort")
 	if err != nil {
-		// Preserve SignerError codes raised inside the transport (e.g. the
-		// HTTPS-only guard's CodeConfigError).
-		var se *core.SignerError
-		if errors.As(err, &se) {
-			return nil, se
-		}
-		return nil, core.WrapSignerError(core.CodeHTTPError, "openfort HTTP request failed", err)
+		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, core.WrapSignerError(core.CodeHTTPError, "failed to read openfort response", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, core.NewSignerError(core.CodeRemoteAPIError, "openfort API error "+strconv.Itoa(resp.StatusCode))
+	if !core.IsSuccess(status) {
+		return nil, core.NewSignerError(core.CodeRemoteAPIError, "openfort API error "+strconv.Itoa(status))
 	}
 	return body, nil
 }

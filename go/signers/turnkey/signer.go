@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -261,24 +259,12 @@ func (s *Signer) post(ctx context.Context, path string, body []byte) ([]byte, er
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Stamp", stamp)
 
-	resp, err := s.client.Do(req)
+	status, respBody, err := core.SendRequest(s.client, req, "turnkey")
 	if err != nil {
-		// Preserve SignerError codes surfaced by the transport (e.g. the
-		// HTTPS-only guard's CodeConfigError).
-		var se *core.SignerError
-		if errors.As(err, &se) {
-			return nil, se
-		}
-		return nil, core.WrapSignerError(core.CodeHTTPError, "request failed", err)
+		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, core.WrapSignerError(core.CodeHTTPError, "failed to read response body", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, core.NewSignerError(core.CodeRemoteAPIError, "API error "+strconv.Itoa(resp.StatusCode))
+	if !core.IsSuccess(status) {
+		return nil, core.NewSignerError(core.CodeRemoteAPIError, "API error "+strconv.Itoa(status))
 	}
 	return respBody, nil
 }

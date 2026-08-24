@@ -3,7 +3,6 @@ package fireblocks
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,9 +31,6 @@ const (
 	statusRejected     = "REJECTED"
 	statusBlocked      = "BLOCKED"
 )
-
-// maxResponseBytes caps how much of a Fireblocks response body is read.
-const maxResponseBytes = 1 << 20
 
 // Wire types for the Fireblocks REST API.
 
@@ -126,21 +122,7 @@ func (s *Signer) doRequest(ctx context.Context, method, uri, body string) (int, 
 	req.Header.Set("X-API-Key", s.apiKey)
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := s.client.Do(req)
-	if err != nil {
-		var se *core.SignerError
-		if errors.As(err, &se) {
-			return 0, nil, se
-		}
-		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "request to fireblocks api failed", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "failed to read fireblocks response body", err)
-	}
-	return resp.StatusCode, data, nil
+	return core.SendRequest(s.client, req, "fireblocks")
 }
 
 // fetchPublicKey retrieves the vault account's Solana address. A non-2xx
@@ -151,7 +133,7 @@ func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 	if err != nil {
 		return solana.PublicKey{}, err
 	}
-	if !is2xx(status) {
+	if !core.IsSuccess(status) {
 		return solana.PublicKey{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status))
 	}
 
@@ -210,7 +192,7 @@ func (s *Signer) createTransaction(ctx context.Context, request createTransactio
 	if err != nil {
 		return createTransactionResponse{}, err
 	}
-	if !is2xx(status) {
+	if !core.IsSuccess(status) {
 		return createTransactionResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status))
 	}
 
@@ -227,7 +209,7 @@ func (s *Signer) getTransaction(ctx context.Context, txID string) (transactionRe
 	if err != nil {
 		return transactionResponse{}, err
 	}
-	if !is2xx(status) {
+	if !core.IsSuccess(status) {
 		return transactionResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("Fireblocks API error %d", status))
 	}
 
@@ -282,6 +264,3 @@ func (s *Signer) pollForSignature(ctx context.Context, txID string, programCall 
 	return transactionResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf(
 		"transaction polling timeout after %d attempts - signing request may still complete", s.maxPollAttempts))
 }
-
-// is2xx reports whether status is a success status.
-func is2xx(status int) bool { return status >= 200 && status <= 299 }
