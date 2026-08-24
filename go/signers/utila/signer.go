@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rsa"
 	"encoding/base64"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -58,20 +57,10 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, err
 	}
 
-	pollInterval := cfg.PollInterval
-	if pollInterval == 0 {
-		pollInterval = DefaultPollInterval
-	}
-	if pollInterval < 0 {
-		return nil, core.NewSignerError(core.CodeConfigError, "poll_interval must be greater than 0")
-	}
-
-	maxPollAttempts := cfg.MaxPollAttempts
-	if maxPollAttempts == 0 {
-		maxPollAttempts = DefaultMaxPollAttempts
-	}
-	if maxPollAttempts < 0 {
-		return nil, core.NewSignerError(core.CodeConfigError, "max_poll_attempts must be greater than 0")
+	pollInterval, maxPollAttempts, err := core.ResolvePollBounds(
+		cfg.PollInterval, DefaultPollInterval, cfg.MaxPollAttempts, DefaultMaxPollAttempts)
+	if err != nil {
+		return nil, err
 	}
 
 	signingKey, err := parseSigningKey(cfg.ServiceAccountPrivateKeyPEM)
@@ -201,7 +190,7 @@ func (s *Signer) pollSignedTransaction(ctx context.Context, transaction utilaTra
 		case transaction.State.isTerminalFailure():
 			return utilaTransaction{}, terminalStateError(transaction.State)
 		default:
-			if err := sleepContext(ctx, s.pollInterval); err != nil {
+			if err := core.SleepContext(ctx, s.pollInterval); err != nil {
 				return utilaTransaction{}, err
 			}
 			transactionID, err := extractTransactionID(transaction.Name)
@@ -221,8 +210,7 @@ func (s *Signer) pollSignedTransaction(ctx context.Context, transaction utilaTra
 	case transaction.State.isTerminalFailure():
 		return utilaTransaction{}, terminalStateError(transaction.State)
 	default:
-		return utilaTransaction{}, core.NewSignerError(core.CodeRemoteAPIError,
-			fmt.Sprintf("Utila transaction polling timed out after %d attempts", s.maxPollAttempts))
+		return utilaTransaction{}, core.PollTimeoutError("utila", s.maxPollAttempts)
 	}
 }
 
@@ -297,16 +285,4 @@ func trimWalletID(value string) string {
 		return value[idx+len(marker):]
 	}
 	return value
-}
-
-// sleepContext waits for d or until ctx is cancelled.
-func sleepContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return core.WrapSignerError(core.CodeHTTPError, "transaction polling cancelled", ctx.Err())
-	case <-timer.C:
-		return nil
-	}
 }

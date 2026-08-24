@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gagliardetto/solana-go"
 
@@ -251,16 +250,13 @@ func (s *Signer) pollForSignature(ctx context.Context, txID string, programCall 
 			return transactionResponse{}, core.NewSignerError(core.CodeSigningFailed,
 				"transaction "+response.Status+": "+txID)
 		default:
-			timer := time.NewTimer(s.pollInterval)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return transactionResponse{}, core.WrapSignerError(core.CodeHTTPError, "polling cancelled", ctx.Err())
-			case <-timer.C:
+			if attempt+1 < s.maxPollAttempts {
+				if err := core.SleepContext(ctx, s.pollInterval); err != nil {
+					return transactionResponse{}, err
+				}
 			}
 		}
 	}
 
-	return transactionResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf(
-		"transaction polling timeout after %d attempts - signing request may still complete", s.maxPollAttempts))
+	return transactionResponse{}, core.PollTimeoutError("fireblocks", s.maxPollAttempts)
 }

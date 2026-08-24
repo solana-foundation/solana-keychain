@@ -56,13 +56,10 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 	if !strings.HasPrefix(apiBaseURL, "https://") {
 		return nil, core.NewSignerError(core.CodeConfigError, "fireblocks api_base_url must use HTTPS")
 	}
-	pollInterval := cfg.PollInterval
-	if pollInterval <= 0 {
-		pollInterval = DefaultPollInterval
-	}
-	maxPollAttempts := cfg.MaxPollAttempts
-	if maxPollAttempts <= 0 {
-		maxPollAttempts = DefaultMaxPollAttempts
+	pollInterval, maxPollAttempts, err := core.ResolvePollBounds(
+		cfg.PollInterval, DefaultPollInterval, cfg.MaxPollAttempts, DefaultMaxPollAttempts)
+	if err != nil {
+		return nil, err
 	}
 
 	s := &Signer{

@@ -215,18 +215,13 @@ func (s *Signer) pollForResult(ctx context.Context, txID string, pushable bool) 
 		}
 
 		if attempt+1 < s.maxPollAttempts {
-			timer := time.NewTimer(s.pollInterval)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return transactionStatusResponse{}, core.WrapSignerError(core.CodeHTTPError, "polling cancelled", ctx.Err())
-			case <-timer.C:
+			if err := core.SleepContext(ctx, s.pollInterval); err != nil {
+				return transactionStatusResponse{}, err
 			}
 		}
 	}
 
-	return transactionStatusResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf(
-		"Polling timeout after %d attempts", s.maxPollAttempts))
+	return transactionStatusResponse{}, core.PollTimeoutError("fordefi", s.maxPollAttempts)
 }
 
 // extractSignature pulls the 64-byte Ed25519 signature out of a completed poll

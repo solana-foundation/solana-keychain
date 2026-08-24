@@ -1,11 +1,14 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // MaxResponseBytes caps how much of a remote API response a signer reads.
@@ -55,4 +58,42 @@ func EncodeURIComponent(input string) string {
 		}
 	}
 	return b.String()
+}
+
+// SleepContext waits for d, returning a cancellation error if ctx ends first.
+func SleepContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return WrapSignerError(CodeHTTPError, "transaction polling cancelled", ctx.Err())
+	case <-timer.C:
+		return nil
+	}
+}
+
+// ResolvePollBounds validates a backend's poll configuration, substituting the
+// backend defaults for zero values and rejecting negative ones.
+func ResolvePollBounds(interval, defaultInterval time.Duration, attempts, defaultAttempts int) (time.Duration, int, error) {
+	if interval < 0 {
+		return 0, 0, NewSignerError(CodeConfigError, "poll_interval must be greater than 0")
+	}
+	if attempts < 0 {
+		return 0, 0, NewSignerError(CodeConfigError, "max_poll_attempts must be greater than 0")
+	}
+	if interval == 0 {
+		interval = defaultInterval
+	}
+	if attempts == 0 {
+		attempts = defaultAttempts
+	}
+	return interval, attempts, nil
+}
+
+// PollTimeoutError reports that a transaction never reached a terminal state
+// within the attempt budget; the signing request may still complete remotely.
+func PollTimeoutError(provider string, attempts int) error {
+	return NewSignerError(CodeRemoteAPIError,
+		provider+" transaction polling timed out after "+strconv.Itoa(attempts)+
+			" attempts; the signing request may still complete")
 }

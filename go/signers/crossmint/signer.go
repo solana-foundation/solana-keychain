@@ -6,7 +6,6 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -73,20 +72,10 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, core.NewSignerError(core.CodeConfigError, "api_base_url must use HTTPS")
 	}
 
-	pollInterval := cfg.PollInterval
-	if pollInterval == 0 {
-		pollInterval = DefaultPollInterval
-	}
-	if pollInterval < 0 {
-		return nil, core.NewSignerError(core.CodeConfigError, "poll_interval must be greater than 0")
-	}
-
-	maxPollAttempts := cfg.MaxPollAttempts
-	if maxPollAttempts == 0 {
-		maxPollAttempts = DefaultMaxPollAttempts
-	}
-	if maxPollAttempts < 0 {
-		return nil, core.NewSignerError(core.CodeConfigError, "max_poll_attempts must be greater than 0")
+	pollInterval, maxPollAttempts, err := core.ResolvePollBounds(
+		cfg.PollInterval, DefaultPollInterval, cfg.MaxPollAttempts, DefaultMaxPollAttempts)
+	if err != nil {
+		return nil, err
 	}
 
 	client := cfg.HTTPClient
@@ -293,7 +282,7 @@ func (s *Signer) pollTransaction(ctx context.Context, response transactionRespon
 			response = next
 			approvalSubmitted = true
 		default:
-			if err := sleepContext(ctx, s.pollInterval); err != nil {
+			if err := core.SleepContext(ctx, s.pollInterval); err != nil {
 				return transactionResponse{}, err
 			}
 			next, err := s.getTransaction(ctx, response.ID)
@@ -312,8 +301,7 @@ func (s *Signer) pollTransaction(ctx context.Context, response transactionRespon
 	case response.Status == "awaiting-approval" && !approvalSubmitted:
 		return transactionResponse{}, core.NewSignerError(core.CodeSigningFailed, awaitingApprovalDetail)
 	default:
-		return transactionResponse{}, core.NewSignerError(core.CodeRemoteAPIError,
-			fmt.Sprintf("Crossmint transaction polling timed out after %d attempts", s.maxPollAttempts))
+		return transactionResponse{}, core.PollTimeoutError("crossmint", s.maxPollAttempts)
 	}
 }
 
@@ -571,16 +559,4 @@ func decodeBase58Signature(signatureStr string) (solana.Signature, bool) {
 	var sig solana.Signature
 	copy(sig[:], raw)
 	return sig, true
-}
-
-// sleepContext waits for d or until ctx is cancelled.
-func sleepContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return core.WrapSignerError(core.CodeHTTPError, "transaction polling cancelled", ctx.Err())
-	case <-timer.C:
-		return nil
-	}
 }

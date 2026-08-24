@@ -630,7 +630,7 @@ func TestSignMessagePollingTimeout(t *testing.T) {
 		t.Errorf("got %s, want REMOTE_API_ERROR", code)
 	}
 	var se *core.SignerError
-	if errors.As(err, &se) && !strings.Contains(se.Detail(), "polling timeout") {
+	if errors.As(err, &se) && !strings.Contains(se.Detail(), "polling timed out") {
 		t.Errorf("detail = %q, want polling timeout message", se.Detail())
 	}
 }
