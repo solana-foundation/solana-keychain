@@ -290,18 +290,24 @@ class CrossmintSigner(SolanaSigner):
         error = response.get("error")
         return json.dumps(error) if error is not None else "unknown error"
 
+    def _settled_or_none(self, response: dict[str, Any]) -> dict[str, Any] | None:
+        status = response.get("status")
+        if status == "success":
+            return response
+        if status == "failed":
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                f"Crossmint transaction failed: {self._failure_detail(response)}",
+            )
+        return None
+
     async def _poll_transaction(self, response: dict[str, Any]) -> dict[str, Any]:
         approval_submitted = False
         for _ in range(self._max_poll_attempts):
-            status = response.get("status")
-            if status == "success":
-                return response
-            if status == "failed":
-                raise SignerError(
-                    SignerErrorCode.SIGNING_FAILED,
-                    f"Crossmint transaction failed: {self._failure_detail(response)}",
-                )
-            if status == "awaiting-approval" and not approval_submitted:
+            settled = self._settled_or_none(response)
+            if settled is not None:
+                return settled
+            if response.get("status") == "awaiting-approval" and not approval_submitted:
                 # Approve at most once; the approval may register asynchronously,
                 # so afterwards awaiting-approval re-polls like any other
                 # in-flight status.
@@ -311,15 +317,10 @@ class CrossmintSigner(SolanaSigner):
             await asyncio.sleep(self._poll_interval_ms / 1000)
             response = await self._get_transaction(str(response.get("id")))
 
-        status = response.get("status")
-        if status == "success":
-            return response
-        if status == "failed":
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                f"Crossmint transaction failed: {self._failure_detail(response)}",
-            )
-        if status == "awaiting-approval" and not approval_submitted:
+        settled = self._settled_or_none(response)
+        if settled is not None:
+            return settled
+        if response.get("status") == "awaiting-approval" and not approval_submitted:
             raise SignerError(SignerErrorCode.SIGNING_FAILED, _AWAITING_APPROVAL_ERROR)
         raise SignerError(
             SignerErrorCode.REMOTE_API_ERROR,

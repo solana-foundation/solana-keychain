@@ -27,6 +27,7 @@ from solana_keychain.core.http import (
     normalize_base_url,
     provider_may_have_accepted,
 )
+from solana_keychain.core.poll import poll_attempts
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
@@ -280,7 +281,7 @@ class FordefiSigner(SolanaSigner):
 
     async def _poll_for_result(self, transaction_id: str, *, pushable: bool) -> dict[str, Any]:
         success_states = _PUSHABLE_SUCCESS_STATES if pushable else _NON_PUSHABLE_SUCCESS_STATES
-        for attempt in range(self._max_poll_attempts):
+        async for _ in poll_attempts(self._max_poll_attempts, self._poll_interval_ms):
             response = await self._get_json(
                 f"/api/v1/transactions/{quote(transaction_id, safe='')}"
             )
@@ -294,8 +295,6 @@ class FordefiSigner(SolanaSigner):
                     SignerErrorCode.SIGNING_FAILED,
                     f"Transaction {transaction_id} reached terminal state: {state}",
                 )
-            if attempt + 1 < self._max_poll_attempts:
-                await asyncio.sleep(self._poll_interval_ms / 1000)
         raise SignerError(
             SignerErrorCode.REMOTE_API_ERROR,
             f"Polling timeout after {self._max_poll_attempts} attempts",

@@ -24,6 +24,7 @@ from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.poll import poll_attempts
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import (
     SignedTransaction,
@@ -267,7 +268,10 @@ class UtilaSigner(SolanaSigner):
         return transaction_id
 
     async def _poll_signed_transaction(self, transaction: dict[str, Any]) -> dict[str, Any]:
-        for _ in range(self._max_poll_attempts):
+        async for attempt in poll_attempts(self._max_poll_attempts, self._poll_interval_ms):
+            if attempt:
+                transaction_id = self._extract_transaction_id(str(transaction.get("name", "")))
+                transaction = await self._get_transaction(transaction_id)
             state = transaction.get("state")
             if state == "SIGNED":
                 return transaction
@@ -276,18 +280,6 @@ class UtilaSigner(SolanaSigner):
                     SignerErrorCode.SIGNING_FAILED,
                     f"Utila transaction reached terminal state {state}",
                 )
-            await asyncio.sleep(self._poll_interval_ms / 1000)
-            transaction_id = self._extract_transaction_id(str(transaction.get("name", "")))
-            transaction = await self._get_transaction(transaction_id)
-
-        state = transaction.get("state")
-        if state == "SIGNED":
-            return transaction
-        if state in _TERMINAL_FAILURE_STATES:
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                f"Utila transaction reached terminal state {state}",
-            )
         raise SignerError(
             SignerErrorCode.REMOTE_API_ERROR,
             f"Utila transaction polling timed out after {self._max_poll_attempts} attempts",

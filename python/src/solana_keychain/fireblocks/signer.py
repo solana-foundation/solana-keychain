@@ -1,6 +1,5 @@
 """Fireblocks API signer integration."""
 
-import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -14,6 +13,7 @@ from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.poll import poll_attempts
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import (
     SignedTransaction,
@@ -194,7 +194,7 @@ class FireblocksSigner(SolanaSigner):
     async def _poll_for_signature(
         self, transaction_id: str, *, program_call: bool = False
     ) -> dict[str, Any]:
-        for _ in range(self._max_poll_attempts):
+        async for _ in poll_attempts(self._max_poll_attempts, self._poll_interval_ms):
             response = await self._get_json(f"/v1/transactions/{quote(transaction_id, safe='')}")
             if not isinstance(response, dict):
                 raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
@@ -215,7 +215,6 @@ class FireblocksSigner(SolanaSigner):
                 raise SignerError(
                     SignerErrorCode.SIGNING_FAILED, f"Transaction {status}: {transaction_id}"
                 )
-            await asyncio.sleep(self._poll_interval_ms / 1000)
         raise SignerError(
             SignerErrorCode.REMOTE_API_ERROR,
             f"Transaction polling timeout after {self._max_poll_attempts} attempts - "
