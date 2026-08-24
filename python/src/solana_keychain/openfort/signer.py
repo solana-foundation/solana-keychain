@@ -25,7 +25,8 @@ from solana_keychain.core.transaction_util import (
     serialize_transaction,
     signed_message_bytes,
 )
-from solana_keychain.openfort.jwt import create_wallet_jwt, extract_host
+from solana_keychain.core.wallet_jwt import extract_host
+from solana_keychain.openfort.jwt import create_wallet_jwt
 
 DEFAULT_API_BASE_URL = "https://api.openfort.io"
 ACCOUNTS_PATH = "/v2/accounts"
@@ -67,7 +68,7 @@ class OpenfortSigner(SolanaSigner):
         api_base_url = normalize_base_url(config.api_base_url)
         assert_https_url(api_base_url, "api_base_url")
         self._api_base_url = api_base_url
-        self._api_host = extract_host(api_base_url)
+        self._api_host = extract_host(api_base_url, "Openfort")
         self._secret_key = config.secret_key
         self._account_id = config.account_id
         self._wallet_secret = config.wallet_secret

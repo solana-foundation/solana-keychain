@@ -16,7 +16,7 @@ from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
-from solana_keychain.cdp.jwt import create_auth_jwt, create_wallet_jwt, extract_host
+from solana_keychain.cdp.jwt import create_auth_jwt, create_wallet_jwt
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
 from solana_keychain.core.signature_util import verify_returned_signature
@@ -29,6 +29,7 @@ from solana_keychain.core.transaction_util import (
     serialize_transaction,
     signed_message_bytes,
 )
+from solana_keychain.core.wallet_jwt import extract_host
 
 DEFAULT_API_BASE_URL = "https://api.cdp.coinbase.com"
 BASE_PATH = "/platform/v2/solana/accounts"
@@ -77,7 +78,7 @@ class CdpSigner(SolanaSigner):
         api_base_url = normalize_base_url(config.api_base_url)
         assert_https_url(api_base_url, "api_base_url")
         self._api_base_url = api_base_url
-        self._api_host = extract_host(api_base_url)
+        self._api_host = extract_host(api_base_url, "CDP")
         self._api_key_id = config.api_key_id
         self._api_key_secret = config.api_key_secret
         self._wallet_secret = config.wallet_secret
