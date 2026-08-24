@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://api.openfort.io"
-	accountsPath   = "/v2/accounts"
-	backendPath    = "/v2/accounts/backend"
+	// DefaultAPIBaseURL is the production Openfort API endpoint.
+	DefaultAPIBaseURL = "https://api.openfort.io"
+	accountsPath      = "/v2/accounts"
+	backendPath       = "/v2/accounts/backend"
 )
 
 // Signer signs Solana transactions and messages with an Openfort backend
@@ -50,7 +51,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, core.NewSignerError(core.CodeConfigError, "wallet_secret must not be empty")
 	}
 
-	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, defaultBaseURL, "api_base_url")
+	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
 	if err != nil {
 		return nil, err
 	}
@@ -59,10 +60,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, err
 	}
 
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 
 	s := &Signer{
 		secretKey:    cfg.SecretKey,

@@ -95,3 +95,12 @@ func NormalizeHTTPSBaseURL(raw, defaultURL, field string) (string, error) {
 	}
 	return normalized, nil
 }
+
+// ResolveHTTPClient returns the caller-supplied client, or a new one built from
+// cfg when none was supplied.
+func ResolveHTTPClient(client *http.Client, cfg HTTPClientConfig) *http.Client {
+	if client != nil {
+		return client
+	}
+	return NewHTTPClient(cfg)
+}

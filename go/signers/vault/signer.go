@@ -55,10 +55,7 @@ func New(cfg Config) (*Signer, error) {
 	if err != nil {
 		return nil, core.WrapSignerError(core.CodeInvalidPublicKey, "failed to decode base58 public key", err)
 	}
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 	return &Signer{
 		client:    client,
 		vaultAddr: cfg.VaultAddr,

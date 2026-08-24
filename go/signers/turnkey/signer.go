@@ -43,10 +43,7 @@ func New(cfg Config) (*Signer, error) {
 	if err != nil {
 		return nil, core.WrapSignerError(core.CodeInvalidPublicKey, "invalid public key", err)
 	}
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
 	if err != nil {
 		return nil, err

@@ -61,10 +61,7 @@ func newUninitialized(cfg Config) (*Signer, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 	return &Signer{
 		apiKey:   cfg.APIKey,
 		walletID: cfg.WalletID,

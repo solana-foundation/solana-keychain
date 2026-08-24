@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	// defaultBaseURL is the production CDP API endpoint.
-	defaultBaseURL = "https://api.cdp.coinbase.com"
+	// DefaultAPIBaseURL is the production CDP API endpoint.
+	DefaultAPIBaseURL = "https://api.cdp.coinbase.com"
 	// basePath is the CDP Solana accounts base path.
 	basePath = "/platform/v2/solana/accounts"
 )
@@ -59,7 +59,7 @@ func New(cfg Config) (*Signer, error) {
 		return nil, core.WrapSignerError(core.CodeInvalidPublicKey, "invalid Solana address: "+cfg.Address, err)
 	}
 
-	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, defaultBaseURL, "api_base_url")
+	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
 	if err != nil {
 		return nil, err
 	}
@@ -68,10 +68,7 @@ func New(cfg Config) (*Signer, error) {
 		return nil, err
 	}
 
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 
 	return &Signer{
 		apiKeyID:     cfg.APIKeyID,

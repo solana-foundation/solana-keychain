@@ -96,10 +96,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, core.WrapSignerError(core.CodeInvalidPublicKey, "invalid Solana public key format", err)
 	}
 
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 	pollInterval, maxPollAttempts, err := core.ResolvePollBounds(
 		cfg.PollInterval, DefaultPollInterval, cfg.MaxPollAttempts, DefaultMaxPollAttempts)
 	if err != nil {
