@@ -12,3 +12,4 @@
 
 - verify versioned-message signatures against `0x80`-prefixed bytes, which `solders` omits from `bytes(message)` (#222)
 - scope the integration require-run guard to the requested flow so a configured backend cannot mask a skipped one (#222)
+- Fireblocks no longer waits one extra poll interval before reporting a polling timeout
