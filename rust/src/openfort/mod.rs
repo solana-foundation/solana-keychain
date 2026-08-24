@@ -35,76 +35,13 @@ use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_hex, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
+use crate::wallet_jwt;
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-use serde::Serialize;
+use jsonwebtoken::EncodingKey;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::str::FromStr;
-use uuid::Uuid;
 
 use self::types::SignResponse;
-
-const JWT_LIFETIME_SECS: i64 = 120;
-
-#[derive(Serialize)]
-struct WalletClaims {
-    uris: Vec<String>,
-    iat: i64,
-    nbf: i64,
-    exp: i64,
-    jti: String,
-    #[serde(rename = "reqHash", skip_serializing_if = "Option::is_none")]
-    req_hash: Option<String>,
-}
-
-/// Format the URI claim as `<METHOD> <HOST><PATH>`.
-fn jwt_uri(host: &str, method: &str, path: &str) -> String {
-    format!("{method} {host}{path}")
-}
-
-/// Extract host (with port if present) from a base URL.
-fn extract_host(base_url: &str) -> Result<String, SignerError> {
-    let url = reqwest::Url::parse(base_url)
-        .map_err(|_| SignerError::ConfigError(format!("Invalid Openfort base URL: {base_url}")))?;
-
-    let host = url.host_str().ok_or_else(|| {
-        SignerError::ConfigError(format!("Missing host in Openfort base URL: {base_url}"))
-    })?;
-
-    Ok(match url.port() {
-        Some(port) => format!("{host}:{port}"),
-        None => host.to_string(),
-    })
-}
-
-/// Recursively sort JSON object keys so the request hash is deterministic.
-fn sort_json(value: &Value) -> Value {
-    match value {
-        Value::Object(map) => {
-            let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort();
-            let mut sorted = serde_json::Map::with_capacity(map.len());
-            for key in keys {
-                if let Some(value) = map.get(key) {
-                    sorted.insert(key.clone(), sort_json(value));
-                }
-            }
-            Value::Object(sorted)
-        }
-        Value::Array(values) => Value::Array(values.iter().map(sort_json).collect()),
-        _ => value.clone(),
-    }
-}
-
-/// Compute hex(sha256(sorted-JSON(body))).
-fn compute_req_hash(body: &Value) -> Result<String, SignerError> {
-    let sorted = sort_json(body);
-    let json = serde_json::to_string(&sorted).map_err(|e| {
-        SignerError::SerializationError(format!("Failed to serialize request body: {e}"))
-    })?;
-    Ok(hex::encode(Sha256::digest(json.as_bytes())))
-}
 
 /// Normalize the wallet secret to a PEM string `jsonwebtoken` can parse.
 /// Accepts either a full PEM (passed through verbatim) or a bare base64
@@ -122,42 +59,17 @@ fn wallet_secret_to_pem(wallet_secret: &str) -> String {
     format!("-----BEGIN PRIVATE KEY-----\n{stripped}\n-----END PRIVATE KEY-----\n")
 }
 
-/// Build the X-Wallet-Auth JWT for an Openfort backend wallet request.
-fn create_wallet_jwt(
-    wallet_secret: &str,
-    host: &str,
-    method: &str,
-    path: &str,
-    request_body: &Value,
-) -> Result<String, SignerError> {
-    let now = chrono::Utc::now().timestamp();
-
-    let claims = WalletClaims {
-        uris: vec![jwt_uri(host, method, path)],
-        iat: now,
-        nbf: now,
-        exp: now + JWT_LIFETIME_SECS,
-        jti: Uuid::new_v4().to_string(),
-        req_hash: Some(compute_req_hash(request_body)?),
-    };
-
+/// Parse the wallet secret into the ES256 signing key for the
+/// `x-wallet-auth` JWT.
+fn wallet_secret_encoding_key(wallet_secret: &str) -> Result<EncodingKey, SignerError> {
     let pem = wallet_secret_to_pem(wallet_secret);
-    let key = EncodingKey::from_ec_pem(pem.as_bytes()).map_err(|_e| {
+    EncodingKey::from_ec_pem(pem.as_bytes()).map_err(|_e| {
         #[cfg(feature = "unsafe-debug")]
         log::error!("Failed to parse Openfort wallet secret as EC key: {_e}");
         SignerError::InvalidPrivateKey(
             "Failed to parse Openfort wallet secret as EC P-256 private key (expected base64 PKCS#8 DER or PEM)"
                 .to_string(),
         )
-    })?;
-
-    let mut header = Header::new(Algorithm::ES256);
-    header.typ = Some("JWT".to_string());
-
-    encode(&header, &claims, &key).map_err(|_e| {
-        #[cfg(feature = "unsafe-debug")]
-        log::error!("Failed to encode Openfort wallet JWT: {_e}");
-        SignerError::SigningFailed("Failed to create Openfort wallet JWT".to_string())
     })
 }
 
@@ -251,7 +163,7 @@ impl OpenfortSigner {
                 "Openfort base URL must use HTTPS".to_string(),
             ));
         }
-        let api_host = extract_host(&base_url)?;
+        let api_host = wallet_jwt::extract_host(&base_url, "Openfort")?;
         let http_client_config = config.http_client_config.unwrap_or_default();
         let client = http_client_config
             .client_builder()
@@ -327,12 +239,14 @@ impl OpenfortSigner {
         path: &str,
         request_body: &Value,
     ) -> Result<reqwest::header::HeaderMap, SignerError> {
-        let wallet_token = create_wallet_jwt(
-            &self.wallet_secret,
+        let key = wallet_secret_encoding_key(&self.wallet_secret)?;
+        let wallet_token = wallet_jwt::create_wallet_jwt(
+            "Openfort",
+            &key,
             &self.api_host,
             method,
             path,
-            request_body,
+            Some(request_body),
         )?;
 
         let mut headers = reqwest::header::HeaderMap::new();

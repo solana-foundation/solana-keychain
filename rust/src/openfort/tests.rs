@@ -49,7 +49,8 @@ fn test_wallet_secret() -> String {
 /// Build a signer pointing at the mock server, with `public_key` pre-set
 /// so individual tests can skip exercising `init()`.
 fn create_test_signer(base_url: &str) -> OpenfortSigner {
-    let api_host = extract_host(base_url).expect("failed to parse test base URL");
+    let api_host =
+        wallet_jwt::extract_host(base_url, "Openfort").expect("failed to parse test base URL");
     OpenfortSigner {
         secret_key: "sk_test_secret".to_string(),
         account_id: TEST_ACCOUNT_ID.to_string(),
@@ -103,7 +104,8 @@ fn test_debug_does_not_leak_secrets() {
 /// Build an uninitialized signer pointing at the wiremock server with a
 /// plain HTTP client (the production builder forces https_only).
 fn create_uninitialized_test_signer(base_url: &str) -> OpenfortSigner {
-    let api_host = extract_host(base_url).expect("failed to parse test base URL");
+    let api_host =
+        wallet_jwt::extract_host(base_url, "Openfort").expect("failed to parse test base URL");
     OpenfortSigner {
         secret_key: "sk_test_secret".to_string(),
         account_id: TEST_ACCOUNT_ID.to_string(),
@@ -418,16 +420,6 @@ async fn test_clone() {
 }
 
 #[test]
-fn test_jwt_uri_format() {
-    let uri = jwt_uri(
-        "api.openfort.io",
-        "POST",
-        "/v2/accounts/backend/acc_abc/sign",
-    );
-    assert_eq!(uri, "POST api.openfort.io/v2/accounts/backend/acc_abc/sign");
-}
-
-#[test]
 fn test_wallet_secret_to_pem_passthrough_for_pem_input() {
     let pem = test_wallet_secret_pem();
     assert_eq!(wallet_secret_to_pem(&pem), pem);
@@ -480,13 +472,4 @@ fn test_from_config_rejects_non_https_base_url() {
         }
         other => panic!("expected ConfigError for non-HTTPS base URL, got {other:?}"),
     }
-}
-
-#[test]
-fn test_compute_req_hash_sorted_is_key_order_invariant() {
-    let body_a = serde_json::json!({ "a": 1, "b": 2 });
-    let body_b = serde_json::json!({ "b": 2, "a": 1 });
-    let h1 = compute_req_hash(&body_a).unwrap();
-    let h2 = compute_req_hash(&body_b).unwrap();
-    assert_eq!(h1, h2);
 }

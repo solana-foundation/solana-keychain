@@ -13,8 +13,9 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::Value;
 use std::str::FromStr;
 
-use self::jwt::{create_auth_jwt, create_wallet_jwt, extract_host};
+use self::jwt::{create_auth_jwt, create_wallet_jwt};
 use self::types::{SignMessageResponse, SignTransactionResponse};
+use crate::wallet_jwt::extract_host;
 
 use crate::remote_util::parse_json_response;
 use crate::signature_util::{signature_from_base58, verify_or_reject};
@@ -137,7 +138,7 @@ impl CdpSigner {
         let base_url = config
             .api_base_url
             .unwrap_or_else(|| format!("https://{CDP_API_HOST}"));
-        let api_host = extract_host(&base_url)?;
+        let api_host = extract_host(&base_url, "CDP")?;
         let http_client_config = config.http_client_config.unwrap_or_default();
         let client = http_client_config.build_client()?;
 

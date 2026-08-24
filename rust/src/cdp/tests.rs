@@ -61,7 +61,7 @@ fn test_wallet_secret() -> String {
 }
 
 fn create_test_signer(base_url: &str) -> CdpSigner {
-    let api_host = extract_host(base_url).expect("failed to parse test base URL");
+    let api_host = extract_host(base_url, "CDP").expect("failed to parse test base URL");
     CdpSigner {
         api_key_id: "test-api-key".to_string(),
         api_key_secret: test_ed25519_key(),
@@ -436,19 +436,6 @@ fn test_der_to_pkcs8_pem() {
 }
 
 #[test]
-fn test_jwt_uri_format() {
-    let uri = jwt::jwt_uri(
-        "api.cdp.coinbase.com",
-        "POST",
-        "/platform/v2/solana/accounts/abc/sign/transaction",
-    );
-    assert_eq!(
-        uri,
-        "POST api.cdp.coinbase.com/platform/v2/solana/accounts/abc/sign/transaction"
-    );
-}
-
-#[test]
 fn test_wallet_jwt_includes_req_hash() {
     let request_body = serde_json::json!({
         "b": 2,
@@ -458,8 +445,8 @@ fn test_wallet_jwt_includes_req_hash() {
         }
     });
 
-    let expected_hash =
-        jwt::compute_req_hash(Some(&request_body)).expect("failed to compute reqHash");
+    let expected_hash = crate::wallet_jwt::compute_req_hash(Some(&request_body))
+        .expect("failed to compute reqHash");
 
     let token = create_wallet_jwt(
         &test_wallet_secret(),

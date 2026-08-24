@@ -53,6 +53,8 @@ pub mod test_util;
 pub mod tests;
 pub mod traits;
 pub mod transaction_util;
+#[cfg(any(feature = "cdp", feature = "openfort"))]
+mod wallet_jwt;
 
 #[cfg(feature = "memory")]
 pub mod memory;
