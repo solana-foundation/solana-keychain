@@ -149,7 +149,7 @@ class ParaSigner(SolanaSigner):
             signature_bytes = bytes.fromhex(stripped)
         except ValueError:
             raise SignerError(
-                SignerErrorCode.SIGNING_FAILED, "Failed to decode hex signature"
+                SignerErrorCode.SERIALIZATION_ERROR, "Failed to decode hex signature"
             ) from None
         try:
             return Signature.from_bytes(signature_bytes)

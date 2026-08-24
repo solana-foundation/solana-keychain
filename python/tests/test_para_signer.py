@@ -204,7 +204,7 @@ async def test_sign_message_undecodable_signature() -> None:
     mock_sign_response("zz" * 64)
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_message(b"hello")
-    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert excinfo.value.code == SignerErrorCode.SERIALIZATION_ERROR
 
 
 @respx.mock
