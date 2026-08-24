@@ -53,22 +53,7 @@ func (s *Signer) SignMessage(_ context.Context, message []byte) (solana.Signatur
 // at this signer's required-signer position, returning the encoded transaction and
 // its completeness.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
-	msg, err := tx.Message.MarshalBinary()
-	if err != nil {
-		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction message", err)
-	}
-	sig, err := s.SignMessage(ctx, msg)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	if err := core.AddSignature(tx, s.pub, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.SignTransactionWith(ctx, tx, s.pub, s.SignMessage)
 }
 
 // IsAvailable always reports true for an in-memory signer.

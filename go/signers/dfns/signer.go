@@ -226,9 +226,8 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 	if err != nil {
 		return solana.Signature{}, err
 	}
-	if !core.VerifyEd25519(s.pubkey, message, sig) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed — the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
+		return solana.Signature{}, err
 	}
 	return sig, nil
 }
@@ -256,19 +255,11 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 	if err != nil {
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction message", err)
 	}
-	if !core.VerifyEd25519(s.pubkey, msgBytes, sig) {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed — the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, msgBytes, sig); err != nil {
+		return core.SignedTransaction{}, err
 	}
 
-	if err := core.AddSignature(tx, s.pubkey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.AttachSignature(tx, s.pubkey, sig)
 }
 
 // IsAvailable reports whether the Dfns wallet is available and healthy:

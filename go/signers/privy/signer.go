@@ -137,19 +137,11 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 			"privy signature slot missing from returned transaction")
 	}
 	sig := returned.Signatures[position]
-	if !core.VerifyEd25519(s.pubkey, msg, sig) {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed: the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, msg, sig); err != nil {
+		return core.SignedTransaction{}, err
 	}
 
-	if err := core.AddSignature(tx, s.pubkey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.AttachSignature(tx, s.pubkey, sig)
 }
 
 // postRPC sends a wallet RPC request with Privy auth and
@@ -260,9 +252,8 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 	var sig solana.Signature
 	copy(sig[:], raw)
 
-	if !core.VerifyEd25519(s.pubkey, message, sig) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed: the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
+		return solana.Signature{}, err
 	}
 	return sig, nil
 }

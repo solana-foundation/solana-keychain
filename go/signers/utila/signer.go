@@ -177,14 +177,7 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, err
 	}
 
-	if err := core.AddSignature(tx, s.pubkey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.AttachSignature(tx, s.pubkey, sig)
 }
 
 // IsAvailable reports whether the Utila wallet can be fetched within the

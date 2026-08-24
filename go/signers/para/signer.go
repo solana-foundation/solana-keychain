@@ -117,22 +117,7 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 // endpoint, inserts the signature at this signer's required-signer position,
 // and returns the encoded transaction with its completeness.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
-	msg, err := tx.Message.MarshalBinary()
-	if err != nil {
-		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction message", err)
-	}
-	sig, err := s.signBytes(ctx, msg)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	if err := core.AddSignature(tx, s.pubkey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.SignTransactionWith(ctx, tx, s.pubkey, s.signBytes)
 }
 
 // IsAvailable reports whether the wallet is a SOLANA wallet in ACTIVE or READY
@@ -193,9 +178,8 @@ func (s *Signer) signBytes(ctx context.Context, data []byte) (solana.Signature, 
 	if err != nil {
 		return solana.Signature{}, err
 	}
-	if !core.VerifyEd25519(s.pubkey, data, sig) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed: the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, data, sig); err != nil {
+		return solana.Signature{}, err
 	}
 	return sig, nil
 }

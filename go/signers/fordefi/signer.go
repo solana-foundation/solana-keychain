@@ -184,9 +184,8 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 	if err != nil {
 		return solana.Signature{}, err
 	}
-	if !core.VerifyEd25519(s.pubkey, message, signature) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed - the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, message, signature); err != nil {
+		return solana.Signature{}, err
 	}
 	return signature, nil
 }
@@ -226,18 +225,10 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}
-	if !core.VerifyEd25519(s.pubkey, messageBytes, signature) {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed - the returned signature does not match the public key")
-	}
-	if err := core.AddSignature(tx, s.pubkey, signature); err != nil {
+	if err := core.VerifySignature(s.pubkey, messageBytes, signature); err != nil {
 		return core.SignedTransaction{}, err
 	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, signature), nil
+	return core.AttachSignature(tx, s.pubkey, signature)
 }
 
 // IsAvailable reports whether the vault is reachable with the bearer token and

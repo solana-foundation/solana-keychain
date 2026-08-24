@@ -258,14 +258,7 @@ func (s *Signer) finishManagedTransaction(ctx context.Context, tx *solana.Transa
 		return core.SignedTransaction{Signature: sig, Completeness: core.Complete}, nil
 	}
 
-	if err := core.AddSignature(tx, s.publicKey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.AttachSignature(tx, s.publicKey, sig)
 }
 
 // IsAvailable reports whether the Crossmint wallet can be fetched within the

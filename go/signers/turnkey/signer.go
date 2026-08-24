@@ -141,19 +141,11 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 			"Turnkey signature slot missing from returned transaction")
 	}
 	sig := returned.Signatures[position]
-	if !core.VerifyEd25519(s.publicKey, msg, sig) {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed — the returned signature does not match the public key")
+	if err := core.VerifySignature(s.publicKey, msg, sig); err != nil {
+		return core.SignedTransaction{}, err
 	}
 
-	if err := core.AddSignature(tx, s.publicKey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.AttachSignature(tx, s.publicKey, sig)
 }
 
 // postActivity sends a stamped activity request and returns the result.
@@ -224,8 +216,8 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 	if err != nil {
 		return solana.Signature{}, err
 	}
-	if !core.VerifyEd25519(s.publicKey, message, sig) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "signature verification failed — the returned signature does not match the public key")
+	if err := core.VerifySignature(s.publicKey, message, sig); err != nil {
+		return solana.Signature{}, err
 	}
 	return sig, nil
 }

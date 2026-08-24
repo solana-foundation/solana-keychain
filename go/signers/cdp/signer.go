@@ -134,9 +134,8 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 	}
 	copy(sig[:], sigBytes)
 
-	if !core.VerifyEd25519(s.pubkey, message, sig) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed — the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
+		return solana.Signature{}, err
 	}
 	return sig, nil
 }
@@ -198,19 +197,11 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 			"signature not found at expected position in CDP response")
 	}
 	sig := signedTx.Signatures[pos]
-	if !core.VerifyEd25519(s.pubkey, msgBytes, sig) {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed — the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, msgBytes, sig); err != nil {
+		return core.SignedTransaction{}, err
 	}
 
-	if err := core.AddSignature(tx, s.pubkey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.AttachSignature(tx, s.pubkey, sig)
 }
 
 // IsAvailable checks that the CDP API is reachable and this account is
