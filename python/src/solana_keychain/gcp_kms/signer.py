@@ -17,6 +17,7 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
+from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
@@ -90,13 +91,7 @@ class GcpKmsSigner(SolanaSigner):
                 f"got {len(signature_bytes)}",
             )
         signature = Signature.from_bytes(signature_bytes)
-        if not signature.verify(self._pubkey, message):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
-        return signature
+        return verify_returned_signature(signature, self._pubkey, message)
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         signature = await self._sign_bytes(signed_message_bytes(transaction.message))

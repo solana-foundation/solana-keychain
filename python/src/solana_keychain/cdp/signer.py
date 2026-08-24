@@ -19,6 +19,7 @@ from solders.transaction import VersionedTransaction
 from solana_keychain.cdp.jwt import create_auth_jwt, create_wallet_jwt, extract_host
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
@@ -135,13 +136,7 @@ class CdpSigner(SolanaSigner):
                 f"Invalid signature length from CDP (expected {ED25519_SIGNATURE_LENGTH} bytes)",
             )
         signature = Signature.from_bytes(signature_bytes)
-        if not signature.verify(self._pubkey, message):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
-        return signature
+        return verify_returned_signature(signature, self._pubkey, message)
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         message_data = signed_message_bytes(transaction.message)
@@ -179,12 +174,7 @@ class CdpSigner(SolanaSigner):
                 "Signature not found at expected position in CDP response",
             )
         signature = signatures[position]
-        if not signature.verify(self._pubkey, message_data):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
+        verify_returned_signature(signature, self._pubkey, message_data)
 
         add_signature_to_transaction(transaction, self._pubkey, signature)
         return classify_signed_transaction(

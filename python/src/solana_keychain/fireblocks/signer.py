@@ -14,6 +14,7 @@ from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
@@ -270,7 +271,7 @@ class FireblocksSigner(SolanaSigner):
         )
         response = await self._poll_for_signature(transaction_id)
         signature = self._extract_signature(response)
-        self._assert_signature_matches(signature, public_key, message)
+        verify_returned_signature(signature, public_key, message)
         return signature
 
     async def _sign_program_call(
@@ -303,17 +304,8 @@ class FireblocksSigner(SolanaSigner):
         )
         response = await self._poll_for_signature(transaction_id, program_call=True)
         signature = self._extract_signature(response, allow_tx_hash_carrier=True)
-        self._assert_signature_matches(signature, public_key, message)
+        verify_returned_signature(signature, public_key, message)
         return signature
-
-    @staticmethod
-    def _assert_signature_matches(signature: Signature, public_key: Pubkey, message: bytes) -> None:
-        if not signature.verify(public_key, message):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         message = signed_message_bytes(transaction.message)

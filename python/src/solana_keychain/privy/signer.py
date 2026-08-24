@@ -12,6 +12,7 @@ from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
@@ -163,13 +164,7 @@ class PrivySigner(SolanaSigner):
             signature = Signature.from_bytes(signature_bytes)
         except Exception:
             raise SignerError(SignerErrorCode.SIGNING_FAILED, "Failed to parse signature") from None
-        if not signature.verify(public_key, message):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
-        return signature
+        return verify_returned_signature(signature, public_key, message)
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         """Sign via Privy's ``signTransaction`` RPC, submitting the full wire
@@ -208,12 +203,7 @@ class PrivySigner(SolanaSigner):
                 "Privy signature slot missing from returned transaction",
             )
         signature = signatures[position]
-        if not signature.verify(public_key, signed_message_bytes(transaction.message)):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
+        verify_returned_signature(signature, public_key, signed_message_bytes(transaction.message))
         add_signature_to_transaction(transaction, public_key, signature)
         return classify_signed_transaction(
             transaction, serialize_transaction(transaction), signature

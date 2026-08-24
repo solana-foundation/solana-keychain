@@ -27,6 +27,7 @@ from solana_keychain.core.http import (
     normalize_base_url,
     provider_may_have_accepted,
 )
+from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
@@ -329,14 +330,6 @@ class FordefiSigner(SolanaSigner):
         result = await self._poll_for_result(transaction_id, pushable=False)
         return self._extract_signature(result)
 
-    def _verify_signature(self, signature: Signature, message: bytes) -> None:
-        if not signature.verify(self._public_key, message):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
-
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         """Sign ``transaction`` via Fordefi MPC.
 
@@ -367,7 +360,7 @@ class FordefiSigner(SolanaSigner):
             return await self._sign_transaction_native(transaction)
         message_data = signed_message_bytes(transaction.message)
         signature = await self._sign_black_box(message_data)
-        self._verify_signature(signature, message_data)
+        verify_returned_signature(signature, self._public_key, message_data)
         add_signature_to_transaction(transaction, self._public_key, signature)
         return classify_signed_transaction(
             transaction, serialize_transaction(transaction), signature
@@ -462,7 +455,9 @@ class FordefiSigner(SolanaSigner):
                 "Fordefi signature slot missing from returned transaction",
             )
         signature = signatures[position]
-        self._verify_signature(signature, signed_message_bytes(returned.message))
+        verify_returned_signature(
+            signature, self._public_key, signed_message_bytes(returned.message)
+        )
         return classify_signed_transaction(returned, "", signature)
 
     async def sign_message(self, message: bytes) -> Signature:
@@ -472,7 +467,7 @@ class FordefiSigner(SolanaSigner):
             signature = self._extract_signature(result)
         else:
             signature = await self._sign_black_box(message)
-        self._verify_signature(signature, message)
+        verify_returned_signature(signature, self._public_key, message)
         return signature
 
     async def _fetch_vault(self, timeout_seconds: float) -> dict[str, Any]:

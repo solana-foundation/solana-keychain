@@ -11,6 +11,7 @@ from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
@@ -96,13 +97,7 @@ class VaultSigner(SolanaSigner):
             signature = Signature.from_bytes(signature_bytes)
         except Exception:
             raise SignerError(SignerErrorCode.SIGNING_FAILED, "Invalid signature format") from None
-        if not signature.verify(self._pubkey, payload):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
-        return signature
+        return verify_returned_signature(signature, self._pubkey, payload)
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         signature = await self._sign_bytes(signed_message_bytes(transaction.message))
