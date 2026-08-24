@@ -99,16 +99,6 @@ func signServerAt(t *testing.T, wantPath string, status int, body string, calls 
 	}))
 }
 
-// otherKeypair returns a deterministic Ed25519 keypair distinct from the
-// testutils fixture, for negative verification tests.
-func otherKeypair() (ed25519.PrivateKey, solana.PublicKey) {
-	seed := bytes.Repeat([]byte{7}, ed25519.SeedSize)
-	priv := ed25519.NewKeyFromSeed(seed)
-	var pub solana.PublicKey
-	copy(pub[:], priv.Public().(ed25519.PublicKey))
-	return priv, pub
-}
-
 func TestNew(t *testing.T) {
 	want := testutils.TestPublicKey()
 	s, err := New(testConfig(t, want.String(), nil))
@@ -229,7 +219,7 @@ func TestSignMessageVerificationFailure(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	message := []byte("test message")
 	sig := ed25519.Sign(priv, message)
-	_, differentPub := otherKeypair()
+	_, differentPub := testutils.KeyFromSeed(7)
 
 	var calls int32
 	srv := signServer(t, http.StatusOK, signResultBody(sig), &calls)

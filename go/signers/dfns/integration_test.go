@@ -21,25 +21,16 @@ import (
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	s, err := New(context.Background(), Config{
-		AuthToken:     requireEnv(t, "DFNS_AUTH_TOKEN"),
-		CredID:        requireEnv(t, "DFNS_CRED_ID"),
-		PrivateKeyPEM: requireEnv(t, "DFNS_PRIVATE_KEY_PEM"),
-		WalletID:      requireEnv(t, "DFNS_WALLET_ID"),
+		AuthToken:     testutils.RequireEnv(t, "DFNS_AUTH_TOKEN"),
+		CredID:        testutils.RequireEnv(t, "DFNS_CRED_ID"),
+		PrivateKeyPEM: testutils.RequireEnv(t, "DFNS_PRIVATE_KEY_PEM"),
+		WalletID:      testutils.RequireEnv(t, "DFNS_WALLET_ID"),
 		APIBaseURL:    os.Getenv("DFNS_API_BASE_URL"),
 	})
 	if err != nil {
 		t.Fatalf("failed to create dfns signer: %v", err)
 	}
 	return s
-}
-
-func requireEnv(t *testing.T, key string) string {
-	t.Helper()
-	v := os.Getenv(key)
-	if v == "" {
-		t.Fatalf("%s must be set for integration tests", key)
-	}
-	return v
 }
 
 func TestIntegrationSignMessage(t *testing.T) {

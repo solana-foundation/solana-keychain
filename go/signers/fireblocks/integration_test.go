@@ -25,9 +25,9 @@ func integrationSigner(t *testing.T) *Signer {
 		assetID = "SOL_TEST"
 	}
 	s, err := New(context.Background(), Config{
-		APIKey:         requireEnv(t, "FIREBLOCKS_API_KEY"),
-		PrivateKeyPEM:  requireEnv(t, "FIREBLOCKS_PRIVATE_KEY_PEM"),
-		VaultAccountID: requireEnv(t, "FIREBLOCKS_VAULT_ACCOUNT_ID"),
+		APIKey:         testutils.RequireEnv(t, "FIREBLOCKS_API_KEY"),
+		PrivateKeyPEM:  testutils.RequireEnv(t, "FIREBLOCKS_PRIVATE_KEY_PEM"),
+		VaultAccountID: testutils.RequireEnv(t, "FIREBLOCKS_VAULT_ACCOUNT_ID"),
 		AssetID:        assetID,
 		APIBaseURL:     os.Getenv("FIREBLOCKS_API_BASE_URL"),
 	})
@@ -35,15 +35,6 @@ func integrationSigner(t *testing.T) *Signer {
 		t.Fatalf("failed to create fireblocks signer: %v", err)
 	}
 	return s
-}
-
-func requireEnv(t *testing.T, key string) string {
-	t.Helper()
-	v := os.Getenv(key)
-	if v == "" {
-		t.Fatalf("%s must be set for integration tests", key)
-	}
-	return v
 }
 
 func TestIntegrationSignMessage(t *testing.T) {

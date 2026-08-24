@@ -2,7 +2,6 @@ package vault
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -28,27 +27,6 @@ const (
 	signPath = "/v1/transit/sign/test-key"
 	keysPath = "/v1/transit/keys/test-key"
 )
-
-// otherPrivateKey returns a deterministic key different from testutils.TestPrivateKey.
-func otherPrivateKey() ed25519.PrivateKey {
-	var seed [ed25519.SeedSize]byte
-	for i := range seed {
-		seed[i] = 0xAB
-	}
-	return ed25519.NewKeyFromSeed(seed[:])
-}
-
-func pubkeyOf(priv ed25519.PrivateKey) solana.PublicKey {
-	var pub solana.PublicKey
-	copy(pub[:], priv.Public().(ed25519.PublicKey))
-	return pub
-}
-
-func signatureOf(priv ed25519.PrivateKey, message []byte) solana.Signature {
-	var sig solana.Signature
-	copy(sig[:], ed25519.Sign(priv, message))
-	return sig
-}
 
 func newTestSigner(t *testing.T, vaultAddr, pubkey string, client *http.Client) *Signer {
 	t.Helper()
@@ -170,14 +148,14 @@ func TestStripVaultSignaturePrefix(t *testing.T) {
 func TestSuppliedHTTPClientIsUsed(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	message := []byte("with-client-message")
-	sig := signatureOf(priv, message)
+	sig := testutils.SignWith(priv, message)
 	wantInput := base64.StdEncoding.EncodeToString(message)
 
 	var calls int32
 	srv := httptest.NewServer(signHandler(t, wantInput, http.StatusOK, signSuccessBody("vault:v1:", sig), &calls))
 	defer srv.Close()
 
-	s := newTestSigner(t, srv.URL, pubkeyOf(priv).String(), srv.Client())
+	s := newTestSigner(t, srv.URL, testutils.PubkeyOf(priv).String(), srv.Client())
 	got, err := s.SignMessage(context.Background(), message)
 	if err != nil {
 		t.Fatalf("SignMessage: %v", err)
@@ -193,14 +171,14 @@ func TestSuppliedHTTPClientIsUsed(t *testing.T) {
 func TestSignMessageSuccess(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	message := []byte("vault-message")
-	sig := signatureOf(priv, message)
+	sig := testutils.SignWith(priv, message)
 	wantInput := base64.StdEncoding.EncodeToString(message)
 
 	var calls int32
 	srv := httptest.NewServer(signHandler(t, wantInput, http.StatusOK, signSuccessBody("vault:v1:", sig), &calls))
 	defer srv.Close()
 
-	s := newTestSigner(t, srv.URL, pubkeyOf(priv).String(), srv.Client())
+	s := newTestSigner(t, srv.URL, testutils.PubkeyOf(priv).String(), srv.Client())
 	got, err := s.SignMessage(context.Background(), message)
 	if err != nil {
 		t.Fatalf("SignMessage: %v", err)
@@ -220,16 +198,16 @@ func TestSignMessageSuccess(t *testing.T) {
 // configured pubkey must fail with CodeSigningFailed.
 func TestSignMessageSignatureVerificationFailure(t *testing.T) {
 	signingPriv := testutils.TestPrivateKey()
-	differentPriv := otherPrivateKey()
+	differentPriv, _ := testutils.KeyFromSeed(0xAB)
 	message := []byte("vault-message")
-	sig := signatureOf(signingPriv, message)
+	sig := testutils.SignWith(signingPriv, message)
 	wantInput := base64.StdEncoding.EncodeToString(message)
 
 	var calls int32
 	srv := httptest.NewServer(signHandler(t, wantInput, http.StatusOK, signSuccessBody("vault:v1:", sig), &calls))
 	defer srv.Close()
 
-	s := newTestSigner(t, srv.URL, pubkeyOf(differentPriv).String(), srv.Client())
+	s := newTestSigner(t, srv.URL, testutils.PubkeyOf(differentPriv).String(), srv.Client())
 	_, err := s.SignMessage(context.Background(), message)
 	if err == nil {
 		t.Fatal("expected verification failure")
@@ -287,7 +265,7 @@ func TestSignMessageErrorBodySanitized(t *testing.T) {
 
 func TestSignTransactionSuccess(t *testing.T) {
 	priv := testutils.TestPrivateKey()
-	pub := pubkeyOf(priv)
+	pub := testutils.PubkeyOf(priv)
 
 	tx, err := testutils.CreateTestTransaction(pub)
 	if err != nil {
@@ -297,7 +275,7 @@ func TestSignTransactionSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sig := signatureOf(priv, msg)
+	sig := testutils.SignWith(priv, msg)
 	wantInput := base64.StdEncoding.EncodeToString(msg)
 
 	var calls int32

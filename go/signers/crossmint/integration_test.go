@@ -21,8 +21,8 @@ import (
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	s, err := New(context.Background(), Config{
-		APIKey:        requireEnv(t, "CROSSMINT_API_KEY"),
-		WalletLocator: requireEnv(t, "CROSSMINT_WALLET_LOCATOR"),
+		APIKey:        testutils.RequireEnv(t, "CROSSMINT_API_KEY"),
+		WalletLocator: testutils.RequireEnv(t, "CROSSMINT_WALLET_LOCATOR"),
 		SignerSecret:  os.Getenv("CROSSMINT_SIGNER_SECRET"),
 		Signer:        os.Getenv("CROSSMINT_SIGNER"),
 		APIBaseURL:    os.Getenv("CROSSMINT_API_BASE_URL"),
@@ -31,15 +31,6 @@ func integrationSigner(t *testing.T) *Signer {
 		t.Fatalf("failed to create crossmint signer: %v", err)
 	}
 	return s
-}
-
-func requireEnv(t *testing.T, key string) string {
-	t.Helper()
-	v := os.Getenv(key)
-	if v == "" {
-		t.Fatalf("%s must be set for integration tests", key)
-	}
-	return v
 }
 
 func TestIntegrationSignMessageNotSupported(t *testing.T) {

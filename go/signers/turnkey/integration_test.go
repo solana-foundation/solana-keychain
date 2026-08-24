@@ -21,25 +21,16 @@ import (
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	s, err := New(Config{
-		APIPublicKey:   requireEnv(t, "TURNKEY_API_PUBLIC_KEY"),
-		APIPrivateKey:  requireEnv(t, "TURNKEY_API_PRIVATE_KEY"),
-		OrganizationID: requireEnv(t, "TURNKEY_ORGANIZATION_ID"),
-		PrivateKeyID:   requireEnv(t, "TURNKEY_PRIVATE_KEY_ID"),
-		PublicKey:      requireEnv(t, "TURNKEY_PUBLIC_KEY"),
+		APIPublicKey:   testutils.RequireEnv(t, "TURNKEY_API_PUBLIC_KEY"),
+		APIPrivateKey:  testutils.RequireEnv(t, "TURNKEY_API_PRIVATE_KEY"),
+		OrganizationID: testutils.RequireEnv(t, "TURNKEY_ORGANIZATION_ID"),
+		PrivateKeyID:   testutils.RequireEnv(t, "TURNKEY_PRIVATE_KEY_ID"),
+		PublicKey:      testutils.RequireEnv(t, "TURNKEY_PUBLIC_KEY"),
 	})
 	if err != nil {
 		t.Fatalf("failed to create turnkey signer: %v", err)
 	}
 	return s
-}
-
-func requireEnv(t *testing.T, key string) string {
-	t.Helper()
-	v := os.Getenv(key)
-	if v == "" {
-		t.Fatalf("%s must be set for integration tests", key)
-	}
-	return v
 }
 
 func TestIntegrationSignMessage(t *testing.T) {

@@ -21,11 +21,11 @@ import (
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	cfg := Config{
-		ServiceAccountEmail:         requireEnv(t, "UTILA_SERVICE_ACCOUNT_EMAIL"),
-		ServiceAccountPrivateKeyPEM: requireEnv(t, "UTILA_SERVICE_ACCOUNT_PRIVATE_KEY"),
-		VaultID:                     requireEnv(t, "UTILA_VAULT_ID"),
-		WalletID:                    requireEnv(t, "UTILA_WALLET_ID"),
-		Network:                     requireEnv(t, "UTILA_NETWORK"),
+		ServiceAccountEmail:         testutils.RequireEnv(t, "UTILA_SERVICE_ACCOUNT_EMAIL"),
+		ServiceAccountPrivateKeyPEM: testutils.RequireEnv(t, "UTILA_SERVICE_ACCOUNT_PRIVATE_KEY"),
+		VaultID:                     testutils.RequireEnv(t, "UTILA_VAULT_ID"),
+		WalletID:                    testutils.RequireEnv(t, "UTILA_WALLET_ID"),
+		Network:                     testutils.RequireEnv(t, "UTILA_NETWORK"),
 		APIBaseURL:                  os.Getenv("UTILA_API_BASE_URL"),
 	}
 	if ms, err := strconv.Atoi(os.Getenv("UTILA_POLL_INTERVAL_MS")); err == nil {
@@ -39,15 +39,6 @@ func integrationSigner(t *testing.T) *Signer {
 		t.Fatalf("failed to create utila signer: %v", err)
 	}
 	return s
-}
-
-func requireEnv(t *testing.T, key string) string {
-	t.Helper()
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		t.Fatalf("%s must be set for integration tests", key)
-	}
-	return v
 }
 
 func TestIntegrationSignMessageNotSupported(t *testing.T) {

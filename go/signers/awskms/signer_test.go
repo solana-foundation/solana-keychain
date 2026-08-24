@@ -24,16 +24,6 @@ const (
 	testRegion = "us-east-1"
 )
 
-// otherPrivateKey is a second deterministic keypair, distinct from
-// testutils.TestPrivateKey, for signature-mismatch cases.
-func otherPrivateKey() ed25519.PrivateKey {
-	seed := make([]byte, ed25519.SeedSize)
-	for i := range seed {
-		seed[i] = 7
-	}
-	return ed25519.NewKeyFromSeed(seed)
-}
-
 // fakeKMS stubs the API interface so unit tests never touch the network.
 type fakeKMS struct {
 	signOut *kms.SignOutput
@@ -249,7 +239,8 @@ func TestSignMessageSuccess(t *testing.T) {
 // SIGNING_FAILED.
 func TestSignMessageVerificationFailure(t *testing.T) {
 	message := []byte("test message")
-	wrongSig := ed25519.Sign(otherPrivateKey(), message)
+	otherPriv, _ := testutils.KeyFromSeed(7)
+	wrongSig := ed25519.Sign(otherPriv, message)
 
 	s := newStubSigner(t, &fakeKMS{signOut: &kms.SignOutput{Signature: wrongSig}})
 

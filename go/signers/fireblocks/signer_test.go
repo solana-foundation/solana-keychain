@@ -29,24 +29,6 @@ const (
 	addressesPath = "/v1/vault/accounts/test-vault-id/SOL/addresses_paginated"
 )
 
-// keyFromSeed derives a deterministic throwaway Ed25519 keypair from a single
-// seed byte.
-func keyFromSeed(seedByte byte) (ed25519.PrivateKey, solana.PublicKey) {
-	var seed [ed25519.SeedSize]byte
-	for i := range seed {
-		seed[i] = seedByte
-	}
-	priv := ed25519.NewKeyFromSeed(seed[:])
-	var pub solana.PublicKey
-	copy(pub[:], priv.Public().(ed25519.PublicKey))
-	return priv, pub
-}
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
-}
-
 // newTestSigner starts an httptest server serving addressesPath (returning
 // address) plus any handlers registered by configure, and constructs an
 // initialized signer against it.
@@ -60,7 +42,7 @@ func newTestSignerWithProgramCall(t *testing.T, address string, useProgramCall b
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc(addressesPath, func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, map[string]any{"addresses": []map[string]string{{"address": address}}})
+		testutils.WriteJSON(w, http.StatusOK, map[string]any{"addresses": []map[string]string{{"address": address}}})
 	})
 	if configure != nil {
 		configure(mux)
@@ -112,7 +94,7 @@ func newSignerWithAssetAddresses(t *testing.T, assetID, path string, entries []m
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc(path, func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, map[string]any{"addresses": entries})
+		testutils.WriteJSON(w, http.StatusOK, map[string]any{"addresses": entries})
 	})
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
@@ -215,10 +197,10 @@ func programCallSigner(t *testing.T, address string, poll map[string]any) (*Sign
 				t.Error(err)
 			}
 			created.Store(&decoded)
-			writeJSON(w, map[string]any{"id": "tx-789", "status": "SUBMITTED"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-789", "status": "SUBMITTED"})
 		})
 		mux.HandleFunc("/v1/transactions/tx-789", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, poll)
+			testutils.WriteJSON(w, http.StatusOK, poll)
 		})
 	})
 	return s, created
@@ -313,7 +295,7 @@ func TestSignTransactionProgramCallTxHashCarrier(t *testing.T) {
 // reach the transaction.
 func TestSignTransactionProgramCallRejectsForeignTxHash(t *testing.T) {
 	pub := testutils.TestPublicKey()
-	foreignPriv, _ := keyFromSeed(9)
+	foreignPriv, _ := testutils.KeyFromSeed(9)
 
 	tx, err := testutils.CreateTestTransaction(pub)
 	if err != nil {
@@ -386,7 +368,7 @@ func TestSignTransactionProgramCallRejectsV1(t *testing.T) {
 	s := newTestSignerWithProgramCall(t, pub.String(), true, func(mux *http.ServeMux) {
 		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
 			requests.Add(1)
-			writeJSON(w, map[string]any{"id": "tx-789", "status": "SUBMITTED"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-789", "status": "SUBMITTED"})
 		})
 	})
 
@@ -538,10 +520,10 @@ func TestSignMessageSuccess(t *testing.T) {
 				t.Error("RAW request should carry the hex-encoded message content")
 			}
 
-			writeJSON(w, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
 		})
 		mux.HandleFunc("/v1/transactions/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
 				"id":     "tx-123",
 				"status": "COMPLETED",
 				"signedMessages": []map[string]any{
@@ -562,17 +544,17 @@ func TestSignMessageSuccess(t *testing.T) {
 
 // A signature that does not verify against the signer's pubkey is rejected.
 func TestSignMessageVerificationFailure(t *testing.T) {
-	signingPriv, _ := keyFromSeed(0x24)
-	_, differentPub := keyFromSeed(0x25)
+	signingPriv, _ := testutils.KeyFromSeed(0x24)
+	_, differentPub := testutils.KeyFromSeed(0x25)
 	message := []byte("test message")
 	signature := ed25519.Sign(signingPriv, message)
 
 	s := newTestSigner(t, differentPub.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
 		})
 		mux.HandleFunc("/v1/transactions/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
 				"id":     "tx-123",
 				"status": "COMPLETED",
 				"signedMessages": []map[string]any{
@@ -612,10 +594,10 @@ func TestSignMessageAPIError(t *testing.T) {
 func TestSignMessageTransactionFailed(t *testing.T) {
 	s := newTestSigner(t, testutils.TestPublicKey().String(), func(mux *http.ServeMux) {
 		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
 		})
 		mux.HandleFunc("/v1/transactions/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{"id": "tx-123", "status": "FAILED", "signedMessages": []any{}})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123", "status": "FAILED", "signedMessages": []any{}})
 		})
 	})
 
@@ -633,10 +615,10 @@ func TestSignMessageTransactionFailed(t *testing.T) {
 func TestSignMessagePollingTimeout(t *testing.T) {
 	s := newTestSigner(t, testutils.TestPublicKey().String(), func(mux *http.ServeMux) {
 		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
 		})
 		mux.HandleFunc("/v1/transactions/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
 		})
 	})
 
@@ -695,7 +677,7 @@ func TestIsAvailable(t *testing.T) {
 				mux.HandleFunc("/v1/vault/accounts/"+testVaultID, func(w http.ResponseWriter, _ *http.Request) {
 					w.WriteHeader(tc.status)
 					if tc.status == http.StatusOK {
-						writeJSON(w, map[string]string{"id": testVaultID, "name": "Test Vault"})
+						testutils.WriteJSON(w, http.StatusOK, map[string]string{"id": testVaultID, "name": "Test Vault"})
 					}
 				})
 			})
@@ -734,10 +716,10 @@ func TestSignTransactionRawComplete(t *testing.T) {
 
 	s := newTestSigner(t, pub.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
 		})
 		mux.HandleFunc("/v1/transactions/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
 				"id":     "tx-123",
 				"status": "COMPLETED",
 				"signedMessages": []map[string]any{
@@ -774,10 +756,10 @@ func TestSignTransactionRawComplete(t *testing.T) {
 func TestSignMessageNoSignedMessages(t *testing.T) {
 	s := newTestSigner(t, testutils.TestPublicKey().String(), func(mux *http.ServeMux) {
 		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123", "status": "SUBMITTED"})
 		})
 		mux.HandleFunc("/v1/transactions/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{"id": "tx-123", "status": "COMPLETED"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123", "status": "COMPLETED"})
 		})
 	})
 

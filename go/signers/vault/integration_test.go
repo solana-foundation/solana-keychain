@@ -19,12 +19,12 @@ import (
 // `vault server -dev` with the shared transit test key restored.
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
-	addr := requireEnv(t, "VAULT_ADDR")
+	addr := testutils.RequireEnv(t, "VAULT_ADDR")
 	cfg := Config{
 		VaultAddr: addr,
-		Token:     requireEnv(t, "VAULT_TOKEN"),
-		KeyName:   requireEnv(t, "VAULT_KEY_NAME"),
-		Pubkey:    requireEnv(t, "VAULT_SIGNER_PUBKEY"),
+		Token:     testutils.RequireEnv(t, "VAULT_TOKEN"),
+		KeyName:   testutils.RequireEnv(t, "VAULT_KEY_NAME"),
+		Pubkey:    testutils.RequireEnv(t, "VAULT_SIGNER_PUBKEY"),
 	}
 	// The local dev Vault listens on plain HTTP, so the HTTPS-enforcing default
 	// client cannot reach it; supply a plain client (the documented escape hatch).
@@ -34,15 +34,6 @@ func integrationSigner(t *testing.T) *Signer {
 		t.Fatalf("failed to create vault signer: %v", err)
 	}
 	return s
-}
-
-func requireEnv(t *testing.T, key string) string {
-	t.Helper()
-	v := os.Getenv(key)
-	if v == "" {
-		t.Fatalf("%s must be set for integration tests", key)
-	}
-	return v
 }
 
 func TestIntegrationSignMessage(t *testing.T) {
