@@ -22,7 +22,7 @@ pub struct ParaSigner {
     wallet_id: String,
     api_base_url: String,
     client: reqwest::Client,
-    public_key: Pubkey,
+    public_key: Option<Pubkey>,
 }
 
 /// Configuration for creating a ParaSigner.
@@ -103,7 +103,7 @@ impl ParaSigner {
                 .trim_end_matches('/')
                 .to_string(),
             client,
-            public_key: Pubkey::default(),
+            public_key: None,
         })
     }
 
@@ -133,9 +133,9 @@ impl ParaSigner {
             )
         })?;
 
-        self.public_key = Pubkey::from_str(&address).map_err(|_| {
+        self.public_key = Some(Pubkey::from_str(&address).map_err(|_| {
             SignerError::InvalidPublicKey("Invalid Solana public key from Para API".to_string())
-        })?;
+        })?);
 
         Ok(())
     }
@@ -154,13 +154,17 @@ impl ParaSigner {
         parse_json_response(response, "Para API fetch_wallet").await
     }
 
+    fn initialized_pubkey(&self) -> Result<Pubkey, SignerError> {
+        self.public_key.ok_or_else(|| {
+            SignerError::ConfigError(
+                "ParaSigner is not initialized; call init() before signing".to_string(),
+            )
+        })
+    }
+
     /// Sign raw bytes using Para API (hex-encoded)
     async fn sign_bytes(&self, data: &[u8]) -> Result<Signature, SignerError> {
-        if self.public_key == Pubkey::default() {
-            return Err(SignerError::ConfigError(
-                "ParaSigner is not initialized; call init() before signing".to_string(),
-            ));
-        }
+        let public_key = self.initialized_pubkey()?;
 
         let url = format!(
             "{}/v1/wallets/{}/sign-raw",
@@ -188,7 +192,7 @@ impl ParaSigner {
         })?;
 
         let sig = signature_from_hex(&hex_sig)?;
-        verify_or_reject(&sig, &self.public_key, data)?;
+        verify_or_reject(&sig, &public_key, data)?;
 
         Ok(sig)
     }
@@ -240,6 +244,7 @@ impl ParaSigner {
 impl SolanaSigner for ParaSigner {
     fn pubkey(&self) -> Pubkey {
         self.public_key
+            .expect("ParaSigner is not initialized; call init() first")
     }
 
     async fn sign_transaction(

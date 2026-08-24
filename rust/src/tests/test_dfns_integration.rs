@@ -37,7 +37,8 @@ mod tests {
             wallet_id,
             api_base_url,
             http_client_config: None,
-        });
+        })
+        .expect("Failed to construct DfnsSigner");
 
         signer.init().await.expect("Failed to init DfnsSigner");
         signer

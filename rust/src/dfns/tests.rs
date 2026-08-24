@@ -20,7 +20,7 @@ fn create_test_signer_uninit(base_url: &str) -> DfnsSigner {
         private_key_pem: TEST_ED25519_PEM.to_string(),
         wallet_id: "test-wallet-id".to_string(),
         key_id: String::new(),
-        public_key: Pubkey::default(),
+        public_key: None,
         api_base_url: base_url.to_string(),
         client: reqwest::Client::new(),
     }
@@ -33,7 +33,7 @@ fn create_test_signer(base_url: &str) -> DfnsSigner {
         private_key_pem: TEST_ED25519_PEM.to_string(),
         wallet_id: "test-wallet-id".to_string(),
         key_id: TEST_KEY_ID.to_string(),
-        public_key: Pubkey::from_str(TEST_PUBKEY).unwrap(),
+        public_key: Some(Pubkey::from_str(TEST_PUBKEY).unwrap()),
         api_base_url: base_url.to_string(),
         client: reqwest::Client::new(),
     }
@@ -62,9 +62,10 @@ fn test_new_valid() {
         wallet_id: "wallet".to_string(),
         api_base_url: None,
         http_client_config: None,
-    });
+    })
+    .unwrap();
     assert_eq!(signer.api_base_url, "https://api.dfns.io");
-    assert_eq!(signer.public_key, Pubkey::default());
+    assert!(signer.public_key.is_none());
 }
 
 #[tokio::test]
@@ -138,7 +139,7 @@ async fn test_sign_message_success() {
     let s_hex = hex::encode(&sig_bytes[32..64]);
 
     let mut signer = create_test_signer(&mock_server.uri());
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     // Mock user action init
     Mock::given(method("POST"))
@@ -197,7 +198,7 @@ async fn test_sign_message_signature_verification_failure() {
     let s_hex = hex::encode(&sig_bytes[32..64]);
 
     let mut signer = create_test_signer(&mock_server.uri());
-    signer.public_key = keypair_pubkey(&different_keypair);
+    signer.public_key = Some(keypair_pubkey(&different_keypair));
 
     Mock::given(method("POST"))
         .and(path("/auth/action/init"))
@@ -285,7 +286,7 @@ async fn test_sign_transaction_success() {
     let keypair = Keypair::new();
 
     let mut signer = create_test_signer(&mock_server.uri());
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     let mut transaction = create_test_transaction(&signer.pubkey());
     let signature = keypair.sign_message(&transaction.message.serialize());
@@ -341,7 +342,7 @@ async fn test_sign_transaction_signature_verification_failure() {
     let different_keypair = Keypair::new();
 
     let mut signer = create_test_signer(&mock_server.uri());
-    signer.public_key = keypair_pubkey(&different_keypair);
+    signer.public_key = Some(keypair_pubkey(&different_keypair));
 
     let mut transaction = create_test_transaction(&signer.pubkey());
     let signature = signing_keypair.sign_message(&transaction.message.serialize());

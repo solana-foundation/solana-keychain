@@ -17,7 +17,8 @@ async fn test_privy_new() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
 
     assert_eq!(signer.app_id, "test-app-id");
     assert_eq!(signer.wallet_id, "test-wallet-id");
@@ -51,7 +52,8 @@ async fn test_privy_fetch_public_key() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
     signer.client = reqwest::Client::new();
     signer.api_base_url = mock_server.uri();
 
@@ -90,7 +92,8 @@ async fn test_privy_sign_message() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
     signer.client = reqwest::Client::new();
     signer.api_base_url = mock_server.uri();
     signer.public_key = Some(keypair.pubkey());
@@ -143,7 +146,8 @@ async fn test_privy_sign_message_authorization_context_headers() {
             ..Default::default()
         })),
         authorization_request_expiry: PrivyAuthorizationRequestExpiry::Omit,
-    });
+    })
+    .unwrap();
     signer.client = reqwest::Client::new();
     signer.public_key = Some(keypair.pubkey());
 
@@ -177,7 +181,8 @@ async fn test_privy_sign_message_signature_verification_failure() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
     signer.client = reqwest::Client::new();
     signer.api_base_url = mock_server.uri();
     signer.public_key = Some(different_keypair.pubkey());
@@ -211,7 +216,8 @@ async fn test_privy_sign_message_invalid_base64_signature() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
     signer.client = reqwest::Client::new();
     signer.api_base_url = mock_server.uri();
     signer.public_key = Some(keypair.pubkey());
@@ -230,7 +236,8 @@ async fn test_privy_sign_message_requires_init() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
 
     let result = signer.sign_message(b"test").await;
     assert!(result.is_err());
@@ -269,7 +276,8 @@ async fn test_privy_sign_transaction() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
     signer.client = reqwest::Client::new();
     signer.api_base_url = mock_server.uri();
     signer.public_key = Some(keypair.pubkey());
@@ -312,7 +320,8 @@ async fn test_privy_sign_transaction_rejects_signature_over_different_bytes() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
     signer.client = reqwest::Client::new();
     signer.api_base_url = mock_server.uri();
     signer.public_key = Some(keypair.pubkey());
@@ -338,7 +347,8 @@ async fn test_privy_sign_transaction_requires_init() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
 
     let result = signer.sign_transaction(&mut tx).await;
     assert!(result.is_err());
@@ -351,7 +361,8 @@ async fn test_privy_pubkey_requires_init() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
 
     let result = panic::catch_unwind(AssertUnwindSafe(|| signer.pubkey()));
     assert!(result.is_err());
@@ -364,7 +375,8 @@ async fn test_privy_pubkey() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
     signer.public_key = Some(keypair.pubkey());
 
     assert_eq!(signer.pubkey(), keypair.pubkey());
@@ -388,7 +400,8 @@ async fn test_privy_fetch_public_key_unauthorized() {
         "bad-app-id".to_string(),
         "bad-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
     signer.client = reqwest::Client::new();
     signer.api_base_url = mock_server.uri();
 
@@ -420,7 +433,8 @@ async fn test_privy_fetch_public_key_invalid() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
     signer.client = reqwest::Client::new();
     signer.api_base_url = mock_server.uri();
 
@@ -451,7 +465,8 @@ async fn test_privy_sign_unauthorized() {
         "bad-app-id".to_string(),
         "bad-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
     signer.client = reqwest::Client::new();
     signer.api_base_url = mock_server.uri();
     signer.public_key = Some(keypair.pubkey());
@@ -474,7 +489,8 @@ async fn test_privy_is_available() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
     assert!(!signer.is_available().await);
 
     // Initialized and remote API is reachable.
@@ -498,7 +514,8 @@ async fn test_privy_is_available() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
     signer.client = reqwest::Client::new();
     signer.api_base_url = mock_server.uri();
     signer.public_key = Some(keypair.pubkey());
@@ -523,7 +540,8 @@ async fn test_privy_is_available_remote_failure() {
         "test-app-id".to_string(),
         "test-app-secret".to_string(),
         "test-wallet-id".to_string(),
-    );
+    )
+    .unwrap();
     signer.client = reqwest::Client::new();
     signer.api_base_url = mock_server.uri();
     signer.public_key = Some(keypair.pubkey());

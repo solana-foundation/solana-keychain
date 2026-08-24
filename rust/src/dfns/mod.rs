@@ -2,8 +2,7 @@ mod auth;
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
-use crate::traits::SignTransactionResult;
-pub use crate::traits::SignedTransaction;
+use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{
     error::SignerError,
@@ -22,7 +21,7 @@ pub struct DfnsSigner {
     private_key_pem: String,
     wallet_id: String,
     key_id: String,
-    public_key: Pubkey,
+    public_key: Option<Pubkey>,
     api_base_url: String,
     client: reqwest::Client,
 }
@@ -58,31 +57,39 @@ impl DfnsSigner {
     /// Create a new DfnsSigner.
     ///
     /// You must call `init()` after construction to fetch the public key from Dfns.
-    pub fn new(config: DfnsSignerConfig) -> Self {
+    pub fn new(config: DfnsSignerConfig) -> Result<Self, SignerError> {
         Self::from_config(config)
     }
 
     /// Create a new DfnsSigner from a configuration object.
-    pub fn from_config(config: DfnsSignerConfig) -> Self {
+    pub fn from_config(config: DfnsSignerConfig) -> Result<Self, SignerError> {
         let http_client_config = config.http_client_config.unwrap_or_default();
         let client = http_client_config
             .client_builder()
             .user_agent("solana-keychain")
             .build()
-            .expect("Failed to build HTTP client");
+            .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
 
-        Self {
+        Ok(Self {
             auth_token: config.auth_token,
             cred_id: config.cred_id,
             private_key_pem: config.private_key_pem,
             wallet_id: config.wallet_id,
             key_id: String::new(),
-            public_key: Pubkey::default(),
+            public_key: None,
             api_base_url: config
                 .api_base_url
                 .unwrap_or_else(|| "https://api.dfns.io".to_string()),
             client,
-        }
+        })
+    }
+
+    fn initialized_pubkey(&self) -> Result<Pubkey, SignerError> {
+        self.public_key.ok_or_else(|| {
+            SignerError::ConfigError(
+                "DfnsSigner is not initialized; call init() before signing".to_string(),
+            )
+        })
     }
 
     /// Initialize the signer by fetching the wallet and extracting key details from Dfns
@@ -114,11 +121,11 @@ impl DfnsSigner {
             SignerError::InvalidPublicKey(format!("Failed to decode hex public key: {e}"))
         })?;
 
-        self.public_key = Pubkey::try_from(pubkey_bytes.as_slice()).map_err(|_| {
+        self.public_key = Some(Pubkey::try_from(pubkey_bytes.as_slice()).map_err(|_| {
             SignerError::InvalidPublicKey(
                 "Invalid public key length (expected 32 bytes)".to_string(),
             )
-        })?;
+        })?);
 
         self.key_id = wallet.signing_key.id;
 
@@ -196,8 +203,9 @@ impl DfnsSigner {
         let request = GenerateSignatureRequest::Message {
             message: format!("0x{}", hex::encode(message)),
         };
+        let public_key = self.initialized_pubkey()?;
         let sig = self.send_signature_request(request).await?;
-        verify_or_reject(&sig, &self.public_key, message)?;
+        verify_or_reject(&sig, &public_key, message)?;
 
         Ok(sig)
     }
@@ -211,8 +219,9 @@ impl DfnsSigner {
             transaction: format!("0x{}", hex::encode(&tx_bytes)),
             blockchain_kind: "Solana".to_string(),
         };
+        let public_key = self.initialized_pubkey()?;
         let sig = self.send_signature_request(request).await?;
-        verify_or_reject(&sig, &self.public_key, &transaction.message.serialize())?;
+        verify_or_reject(&sig, &public_key, &transaction.message.serialize())?;
 
         Ok(sig)
     }
@@ -235,7 +244,11 @@ impl DfnsSigner {
     ) -> Result<SignedTransaction, SignerError> {
         let signature = self.sign_transaction_bytes(transaction).await?;
 
-        TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
+        TransactionUtil::add_signature_to_transaction(
+            transaction,
+            &self.initialized_pubkey()?,
+            signature,
+        )?;
 
         Ok((
             TransactionUtil::serialize_transaction(transaction)?,
@@ -261,6 +274,7 @@ impl DfnsSigner {
 impl SolanaSigner for DfnsSigner {
     fn pubkey(&self) -> Pubkey {
         self.public_key
+            .expect("DfnsSigner is not initialized; call init() first")
     }
 
     async fn sign_transaction(

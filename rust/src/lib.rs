@@ -225,10 +225,10 @@ impl Signer {
         http_client_config: Option<HttpClientConfig>,
     ) -> Result<Self, SignerError> {
         Ok(Self::Vault(VaultSigner::from_config(VaultSignerConfig {
-            vault_addr,
+            api_base_url: vault_addr,
             token: vault_token,
             key_name,
-            pubkey,
+            public_key: pubkey,
             http_client_config,
         })?))
     }
@@ -251,7 +251,7 @@ impl Signer {
             http_client_config,
             authorization_context: None,
             authorization_request_expiry: PrivyAuthorizationRequestExpiry::Default,
-        });
+        })?;
         signer.init().await?;
         Ok(Self::Privy(signer))
     }
@@ -301,7 +301,7 @@ impl Signer {
     /// Create a Fireblocks signer (requires initialization)
     #[cfg(feature = "fireblocks")]
     pub async fn from_fireblocks(config: FireblocksSignerConfig) -> Result<Self, SignerError> {
-        let mut signer = FireblocksSigner::new(config);
+        let mut signer = FireblocksSigner::new(config)?;
         signer.init().await?;
         Ok(Self::Fireblocks(signer))
     }
@@ -358,7 +358,7 @@ impl Signer {
     /// Create a Dfns signer (requires initialization)
     #[cfg(feature = "dfns")]
     pub async fn from_dfns(config: DfnsSignerConfig) -> Result<Self, SignerError> {
-        let mut signer = DfnsSigner::new(config);
+        let mut signer = DfnsSigner::new(config)?;
         signer.init().await?;
         Ok(Self::Dfns(signer))
     }

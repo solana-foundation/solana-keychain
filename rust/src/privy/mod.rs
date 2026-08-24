@@ -66,7 +66,7 @@ impl PrivySigner {
     /// * `app_id` - Privy application ID
     /// * `app_secret` - Privy application secret
     /// * `wallet_id` - Privy wallet ID
-    pub fn new(app_id: String, app_secret: String, wallet_id: String) -> Self {
+    pub fn new(app_id: String, app_secret: String, wallet_id: String) -> Result<Self, SignerError> {
         Self::from_config(PrivySignerConfig {
             app_id,
             app_secret,
@@ -79,11 +79,9 @@ impl PrivySigner {
     }
 
     /// Create a new PrivySigner from a configuration object.
-    pub fn from_config(config: PrivySignerConfig) -> Self {
+    pub fn from_config(config: PrivySignerConfig) -> Result<Self, SignerError> {
         let http_client_config = config.http_client_config.unwrap_or_default();
-        let client = http_client_config
-            .build_client()
-            .expect("Failed to build HTTP client");
+        let client = http_client_config.build_client()?;
 
         let authorization_request_expiry_ms = match config.authorization_request_expiry {
             PrivyAuthorizationRequestExpiry::Default => {
@@ -95,7 +93,7 @@ impl PrivySigner {
             PrivyAuthorizationRequestExpiry::Omit => None,
         };
 
-        Self {
+        Ok(Self {
             app_id: config.app_id,
             app_secret: config.app_secret,
             wallet_id: config.wallet_id,
@@ -107,7 +105,7 @@ impl PrivySigner {
             public_key: None,
             authorization_context: config.authorization_context,
             authorization_request_expiry_ms,
-        }
+        })
     }
 
     /// Configure Privy wallet authorization context for signing requests.

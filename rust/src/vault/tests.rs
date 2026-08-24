@@ -117,7 +117,7 @@ fn test_debug_impl() {
     let signer = create_test_signer();
     let debug_str = format!("{:?}", signer);
     assert!(debug_str.contains("VaultSigner"));
-    assert!(debug_str.contains("pubkey"));
+    assert!(debug_str.contains("public_key"));
 }
 
 #[test]

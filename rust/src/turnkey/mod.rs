@@ -5,8 +5,7 @@ mod types;
 use crate::remote_util::parse_json_response;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::verify_or_reject;
-use crate::traits::SignTransactionResult;
-pub use crate::traits::SignedTransaction;
+use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::{
     deserialize_wire_transaction, serialize_wire_transaction, TransactionUtil,
 };

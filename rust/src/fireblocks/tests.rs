@@ -46,7 +46,7 @@ fn test_signing_key() -> Arc<jsonwebtoken::EncodingKey> {
 fn create_test_signer_uninit(base_url: &str) -> FireblocksSigner {
     FireblocksSigner {
         api_key: "test-api-key".to_string(),
-        signing_key: Some(test_signing_key()),
+        signing_key: test_signing_key(),
         vault_account_id: "test-vault-id".to_string(),
         asset_id: "SOL".to_string(),
         public_key: None,
@@ -61,7 +61,7 @@ fn create_test_signer_uninit(base_url: &str) -> FireblocksSigner {
 fn create_test_signer(base_url: &str) -> FireblocksSigner {
     FireblocksSigner {
         api_key: "test-api-key".to_string(),
-        signing_key: Some(test_signing_key()),
+        signing_key: test_signing_key(),
         vault_account_id: "test-vault-id".to_string(),
         asset_id: "SOL".to_string(),
         public_key: Some(Pubkey::from_str(TEST_PUBKEY).unwrap()),
@@ -76,7 +76,7 @@ fn create_test_signer(base_url: &str) -> FireblocksSigner {
 fn create_test_signer_program_call(base_url: &str, public_key: Pubkey) -> FireblocksSigner {
     FireblocksSigner {
         api_key: "test-api-key".to_string(),
-        signing_key: Some(test_signing_key()),
+        signing_key: test_signing_key(),
         vault_account_id: "test-vault-id".to_string(),
         asset_id: "SOL".to_string(),
         public_key: Some(public_key),
@@ -130,7 +130,8 @@ fn test_new_valid() {
         max_poll_attempts: None,
         use_program_call: None,
         http_client_config: None,
-    });
+    })
+    .unwrap();
     assert_eq!(signer.asset_id, "SOL");
     assert_eq!(signer.public_key, None);
     assert!(!signer.use_program_call); // Default is RAW (matching other signers)
@@ -628,9 +629,7 @@ async fn test_sign_transaction_requires_init() {
 }
 
 #[test]
-fn test_use_program_call_config_carried_but_constructor_is_infallible() {
-    // Construction never fails; the unsupported PROGRAM_CALL flag is carried
-    // through and rejected later at init() (see the init rejection test).
+fn test_use_program_call_config_carried_through_construction() {
     let signer_program_call = FireblocksSigner::new(FireblocksSignerConfig {
         api_key: "test-key".to_string(),
         private_key_pem: TEST_RSA_KEY.to_string(),
@@ -641,7 +640,8 @@ fn test_use_program_call_config_carried_but_constructor_is_infallible() {
         max_poll_attempts: None,
         use_program_call: Some(true),
         http_client_config: None,
-    });
+    })
+    .unwrap();
     assert!(signer_program_call.use_program_call);
 
     // Explicit RAW mode (the only supported mode).
@@ -655,6 +655,7 @@ fn test_use_program_call_config_carried_but_constructor_is_infallible() {
         max_poll_attempts: None,
         use_program_call: Some(false),
         http_client_config: None,
-    });
+    })
+    .unwrap();
     assert!(!signer_raw.use_program_call);
 }

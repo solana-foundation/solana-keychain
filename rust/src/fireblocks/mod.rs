@@ -4,8 +4,7 @@ mod jwt;
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
-use crate::traits::SignTransactionResult;
-pub use crate::traits::SignedTransaction;
+use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::{
     error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner,
     transaction_util, transaction_util::TransactionUtil,
@@ -34,7 +33,7 @@ enum SigningMode {
 #[derive(Clone)]
 pub struct FireblocksSigner {
     api_key: String,
-    signing_key: Option<Arc<jsonwebtoken::EncodingKey>>,
+    signing_key: Arc<jsonwebtoken::EncodingKey>,
     vault_account_id: String,
     asset_id: String,
     public_key: Option<Pubkey>,
@@ -92,21 +91,33 @@ impl FireblocksSigner {
     /// # Arguments
     ///
     /// * `config` - Configuration for the signer
-    pub fn new(config: FireblocksSignerConfig) -> Self {
+    pub fn new(config: FireblocksSignerConfig) -> Result<Self, SignerError> {
         Self::from_config(config)
     }
 
     /// Create a new FireblocksSigner from a configuration object.
-    pub fn from_config(config: FireblocksSignerConfig) -> Self {
+    pub fn from_config(config: FireblocksSignerConfig) -> Result<Self, SignerError> {
         let http_client_config = config.http_client_config.unwrap_or_default();
-        let client = http_client_config
-            .build_client()
-            .expect("Failed to build HTTP client");
-        let signing_key = jwt::parse_encoding_key(&config.private_key_pem)
-            .ok()
-            .map(Arc::new);
+        let client = http_client_config.build_client()?;
+        let signing_key = Arc::new(jwt::parse_encoding_key(&config.private_key_pem)?);
 
-        Self {
+        let poll_interval_ms = config.poll_interval_ms.unwrap_or(DEFAULT_POLL_INTERVAL_MS);
+        if poll_interval_ms == 0 {
+            return Err(SignerError::ConfigError(
+                "poll_interval_ms must be greater than 0".to_string(),
+            ));
+        }
+
+        let max_poll_attempts = config
+            .max_poll_attempts
+            .unwrap_or(DEFAULT_MAX_POLL_ATTEMPTS);
+        if max_poll_attempts == 0 {
+            return Err(SignerError::ConfigError(
+                "max_poll_attempts must be greater than 0".to_string(),
+            ));
+        }
+
+        Ok(Self {
             api_key: config.api_key,
             signing_key,
             vault_account_id: config.vault_account_id,
@@ -116,12 +127,10 @@ impl FireblocksSigner {
                 .api_base_url
                 .unwrap_or_else(|| "https://api.fireblocks.io".to_string()),
             client,
-            poll_interval_ms: config.poll_interval_ms.unwrap_or(DEFAULT_POLL_INTERVAL_MS),
-            max_poll_attempts: config
-                .max_poll_attempts
-                .unwrap_or(DEFAULT_MAX_POLL_ATTEMPTS),
+            poll_interval_ms,
+            max_poll_attempts,
             use_program_call: config.use_program_call.unwrap_or(false),
-        }
+        })
     }
 
     /// Initialize the signer by fetching the public key from Fireblocks
@@ -140,11 +149,7 @@ impl FireblocksSigner {
     }
 
     fn create_auth_token(&self, uri: &str, body: &str) -> Result<String, SignerError> {
-        let signing_key = self
-            .signing_key
-            .as_ref()
-            .ok_or_else(|| SignerError::InvalidPrivateKey("Failed to parse RSA key".to_string()))?;
-        jwt::create_jwt(&self.api_key, signing_key, uri, body)
+        jwt::create_jwt(&self.api_key, &self.signing_key, uri, body)
     }
 
     /// Fetch the public key from Fireblocks vault account addresses

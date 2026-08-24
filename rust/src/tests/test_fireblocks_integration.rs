@@ -52,7 +52,8 @@ mod tests {
             http_client_config: None,
         };
 
-        let mut signer = FireblocksSigner::new(config);
+        let mut signer =
+            FireblocksSigner::new(config).expect("Failed to construct FireblocksSigner");
         signer
             .init()
             .await

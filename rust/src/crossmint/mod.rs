@@ -52,7 +52,7 @@ pub struct CrossmintSigner {
     signer: Option<String>,
     api_base_url: String,
     client: reqwest::Client,
-    public_key: Pubkey,
+    public_key: Option<Pubkey>,
     poll_interval_ms: u64,
     max_poll_attempts: u32,
     signing_key: Option<ed25519_dalek::SigningKey>,
@@ -137,7 +137,7 @@ impl CrossmintSigner {
             signer,
             api_base_url,
             client,
-            public_key: Pubkey::default(),
+            public_key: None,
             poll_interval_ms,
             max_poll_attempts,
             signing_key,
@@ -169,13 +169,21 @@ impl CrossmintSigner {
     /// Keys that may have signed: the wallet address for `mpc`, the delegated signer
     /// for `smart`. The response does not say which, so try both.
     fn verification_candidates(&self) -> Vec<Pubkey> {
-        let mut candidates = vec![self.public_key];
+        let mut candidates: Vec<Pubkey> = self.public_key.into_iter().collect();
         for delegated in &self.delegated_pubkeys {
             if !candidates.contains(delegated) {
                 candidates.push(*delegated);
             }
         }
         candidates
+    }
+
+    fn initialized_pubkey(&self) -> Result<Pubkey, SignerError> {
+        self.public_key.ok_or_else(|| {
+            SignerError::ConfigError(
+                "CrossmintSigner is not initialized; call init() before signing".to_string(),
+            )
+        })
     }
 
     /// Initialize signer by resolving wallet details and signer public key.
@@ -198,11 +206,11 @@ impl CrossmintSigner {
             )));
         }
 
-        self.public_key = Pubkey::from_str(&wallet.address).map_err(|_| {
+        self.public_key = Some(Pubkey::from_str(&wallet.address).map_err(|_| {
             SignerError::InvalidPublicKey(
                 "Invalid Solana public key returned by Crossmint wallet".to_string(),
             )
-        })?;
+        })?);
 
         Ok(())
     }
@@ -772,11 +780,7 @@ impl CrossmintSigner {
         &self,
         transaction: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
-        if self.public_key == Pubkey::default() {
-            return Err(SignerError::ConfigError(
-                "CrossmintSigner is not initialized; call init() before signing".to_string(),
-            ));
-        }
+        let public_key = self.initialized_pubkey()?;
 
         let expected_message = transaction.message.serialize();
         let serialized = serialize_wire_transaction(transaction)?;
@@ -804,7 +808,7 @@ impl CrossmintSigner {
             return Ok(SignTransactionResult::Complete((String::new(), signature)));
         }
 
-        TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
+        TransactionUtil::add_signature_to_transaction(transaction, &public_key, signature)?;
 
         Ok(TransactionUtil::classify_signed_transaction(
             transaction,
@@ -834,6 +838,7 @@ impl CrossmintSigner {
 impl SolanaSigner for CrossmintSigner {
     fn pubkey(&self) -> Pubkey {
         self.public_key
+            .expect("CrossmintSigner is not initialized; call init() first")
     }
 
     fn broadcasts_transactions(&self) -> bool {

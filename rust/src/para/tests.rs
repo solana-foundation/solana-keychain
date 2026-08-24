@@ -20,7 +20,7 @@ fn create_test_signer(api_key: &str, wallet_id: &str, base_url: Option<String>) 
             .timeout(CLIENT_TIMEOUT)
             .build()
             .unwrap(),
-        public_key: Pubkey::default(),
+        public_key: None,
     }
 }
 
@@ -69,7 +69,7 @@ fn test_para_new_valid() {
     assert!(result.is_ok());
     let signer = result.unwrap();
     assert_eq!(signer.api_base_url, "https://api.getpara.com");
-    assert_eq!(signer.public_key, Pubkey::default());
+    assert!(signer.public_key.is_none());
 }
 
 #[test]
@@ -278,7 +278,7 @@ async fn test_para_sign_message() {
         .await;
 
     let mut signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     let result = signer.sign_message(&tx.message.serialize()).await;
     assert!(result.is_ok());
@@ -304,7 +304,7 @@ async fn test_para_sign_message_0x_prefix() {
         .await;
 
     let mut signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     let result = signer.sign_message(&tx.message.serialize()).await;
     assert!(result.is_ok());
@@ -330,7 +330,7 @@ async fn test_para_sign_transaction() {
         .await;
 
     let mut signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     let result = signer.sign_transaction(&mut tx).await;
     assert!(result.is_ok());
@@ -354,7 +354,7 @@ async fn test_para_sign_unauthorized() {
         .await;
 
     let mut signer = create_test_signer("bad-api-key", "test-wallet-id", Some(mock_server.uri()));
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     let result = signer.sign_message(b"test").await;
     assert!(result.is_err());
@@ -377,7 +377,7 @@ async fn test_para_sign_missing_signature() {
         .await;
 
     let mut signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     let result = signer.sign_message(b"test").await;
     assert!(result.is_err());
@@ -399,7 +399,7 @@ async fn test_para_sign_invalid_hex_length() {
         .await;
 
     let mut signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     let result = signer.sign_message(b"test").await;
     assert!(result.is_err());
@@ -427,7 +427,7 @@ async fn test_para_is_available_ready() {
         .await;
 
     let mut signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     assert!(signer.is_available().await);
 }
@@ -451,7 +451,7 @@ async fn test_para_is_available_active() {
         .await;
 
     let mut signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     assert!(signer.is_available().await);
 }
@@ -475,7 +475,7 @@ async fn test_para_is_available_creating() {
         .await;
 
     let mut signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     assert!(!signer.is_available().await);
 }
@@ -535,7 +535,7 @@ async fn test_para_sign_invalid_hex_chars() {
         .await;
 
     let mut signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     let result = signer.sign_message(b"test").await;
     assert!(result.is_err());
@@ -575,7 +575,7 @@ async fn test_para_sign_malformed_json() {
         .await;
 
     let mut signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     let result = signer.sign_message(b"test").await;
     assert!(result.is_err());
@@ -680,7 +680,7 @@ async fn test_para_error_status_code_only() {
         .await;
 
     let mut signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     let result = signer.sign_message(b"test").await;
     assert!(result.is_err());
@@ -719,7 +719,7 @@ async fn test_para_sign_verification_failure() {
         .await;
 
     let mut signer = create_test_signer("test-api-key", "test-wallet-id", Some(mock_server.uri()));
-    signer.public_key = keypair_pubkey(&keypair);
+    signer.public_key = Some(keypair_pubkey(&keypair));
 
     let result = signer.sign_message(b"test").await;
     assert!(result.is_err());

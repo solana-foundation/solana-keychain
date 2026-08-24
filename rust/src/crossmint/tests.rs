@@ -30,7 +30,7 @@ fn create_test_signer(
             .timeout(CLIENT_TIMEOUT)
             .build()
             .unwrap(),
-        public_key: Pubkey::default(),
+        public_key: None,
         poll_interval_ms,
         max_poll_attempts,
         signing_key: None,

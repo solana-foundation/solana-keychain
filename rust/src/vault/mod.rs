@@ -24,26 +24,26 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct VaultSigner {
     client: Arc<Client>,
-    vault_addr: String,
+    api_base_url: String,
     token: String,
     key_name: String,
-    pubkey: Pubkey,
+    public_key: Pubkey,
 }
 
 /// Configuration for creating a VaultSigner.
 #[derive(Clone)]
 pub struct VaultSignerConfig {
-    pub vault_addr: String,
+    pub api_base_url: String,
     pub token: String,
     pub key_name: String,
-    pub pubkey: String,
+    pub public_key: String,
     pub http_client_config: Option<HttpClientConfig>,
 }
 
 impl std::fmt::Debug for VaultSigner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VaultSigner")
-            .field("pubkey", &self.pubkey)
+            .field("public_key", &self.public_key)
             .finish_non_exhaustive()
     }
 }
@@ -69,21 +69,21 @@ impl VaultSigner {
     ///
     /// # Arguments
     ///
-    /// * `vault_addr` - Vault server address (e.g., "https://vault.example.com")
+    /// * `api_base_url` - Vault server address (e.g., "https://vault.example.com")
     /// * `token` - Vault authentication token
     /// * `key_name` - Vault key name in transit engine
-    /// * `pubkey` - Base58-encoded public key
+    /// * `public_key` - Base58-encoded public key
     pub fn new(
-        vault_addr: String,
+        api_base_url: String,
         token: String,
         key_name: String,
-        pubkey: String,
+        public_key: String,
     ) -> Result<Self, SignerError> {
         Self::from_config(VaultSignerConfig {
-            vault_addr,
+            api_base_url,
             token,
             key_name,
-            pubkey,
+            public_key,
             http_client_config: None,
         })
     }
@@ -95,10 +95,10 @@ impl VaultSigner {
 
         Self::with_client(
             client,
-            config.vault_addr,
+            config.api_base_url,
             config.token,
             config.key_name,
-            config.pubkey,
+            config.public_key,
         )
     }
 
@@ -124,40 +124,31 @@ impl VaultSigner {
     /// # Arguments
     ///
     /// * `client` - A fully-built reqwest `Client`.
-    /// * `vault_addr` - Vault server address (e.g., "https://vault.example.com")
+    /// * `api_base_url` - Vault server address (e.g., "https://vault.example.com")
     /// * `token` - Vault authentication token
     /// * `key_name` - Vault key name in transit engine
-    /// * `pubkey` - Base58-encoded public key
+    /// * `public_key` - Base58-encoded public key
     pub fn with_client(
         client: Client,
-        vault_addr: String,
+        api_base_url: String,
         token: String,
         key_name: String,
-        pubkey: String,
+        public_key: String,
     ) -> Result<Self, SignerError> {
-        let pubkey = Pubkey::try_from(
-            bs58::decode(&pubkey)
-                .into_vec()
-                .map_err(|e| {
-                    SignerError::InvalidPublicKey(format!(
-                        "Failed to decode base58 public key: {e}"
-                    ))
-                })?
-                .as_slice(),
-        )
-        .map_err(|e| SignerError::InvalidPublicKey(format!("Invalid public key bytes: {e}")))?;
+        let public_key = std::str::FromStr::from_str(&public_key)
+            .map_err(|_| SignerError::InvalidPublicKey("Invalid public key".to_string()))?;
 
         Ok(Self {
             client: Arc::new(client),
-            vault_addr,
+            api_base_url,
             token,
             key_name,
-            pubkey,
+            public_key,
         })
     }
 
     async fn sign_bytes(&self, serialized: &[u8]) -> Result<Signature, SignerError> {
-        let url = format!("{}/v1/transit/sign/{}", self.vault_addr, self.key_name);
+        let url = format!("{}/v1/transit/sign/{}", self.api_base_url, self.key_name);
 
         let payload = json!({
             "input": STANDARD.encode(serialized)
@@ -184,7 +175,7 @@ impl VaultSigner {
         let signature_b64 = Self::strip_vault_signature_prefix(signature_b64);
 
         let sig = signature_from_base64(signature_b64)?;
-        verify_or_reject(&sig, &self.pubkey, serialized)?;
+        verify_or_reject(&sig, &self.public_key, serialized)?;
 
         Ok(sig)
     }
@@ -195,7 +186,7 @@ impl VaultSigner {
     ) -> Result<SignedTransaction, SignerError> {
         let signature = self.sign_bytes(&transaction.message.serialize()).await?;
 
-        TransactionUtil::add_signature_to_transaction(transaction, &self.pubkey, signature)?;
+        TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
 
         Ok((
             TransactionUtil::serialize_transaction(transaction)?,
@@ -207,7 +198,7 @@ impl VaultSigner {
 #[async_trait::async_trait]
 impl SolanaSigner for VaultSigner {
     fn pubkey(&self) -> Pubkey {
-        self.pubkey
+        self.public_key
     }
 
     async fn sign_transaction(
@@ -227,7 +218,7 @@ impl SolanaSigner for VaultSigner {
 
     async fn is_available(&self) -> bool {
         // Check if we can read and validate key metadata as a health check.
-        let url = format!("{}/v1/transit/keys/{}", self.vault_addr, self.key_name);
+        let url = format!("{}/v1/transit/keys/{}", self.api_base_url, self.key_name);
 
         let response = match self
             .client
