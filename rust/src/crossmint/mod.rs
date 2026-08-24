@@ -2,6 +2,7 @@
 
 mod types;
 
+use crate::remote_util::validate_https_url;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::signature_from_base58;
 use crate::traits::SignTransactionResult;
@@ -91,11 +92,7 @@ impl CrossmintSigner {
             .trim_end_matches('/')
             .to_string();
 
-        if !api_base_url.starts_with("https://") {
-            return Err(SignerError::ConfigError(
-                "api_base_url must use HTTPS".to_string(),
-            ));
-        }
+        validate_https_url(&api_base_url)?;
 
         let poll_interval_ms = config.poll_interval_ms.unwrap_or(DEFAULT_POLL_INTERVAL_MS);
         if poll_interval_ms == 0 {
@@ -777,7 +774,7 @@ impl CrossmintSigner {
     ) -> Result<SignTransactionResult, SignerError> {
         if self.public_key == Pubkey::default() {
             return Err(SignerError::ConfigError(
-                "Signer not initialized. Call init() first.".to_string(),
+                "CrossmintSigner is not initialized; call init() before signing".to_string(),
             ));
         }
 

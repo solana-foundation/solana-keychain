@@ -20,6 +20,10 @@ use types::{
 use crate::remote_util::{parse_json_response, poll_until, PollOutcome};
 use crate::signature_util::{signature_from_base58, signature_from_hex, verify_or_reject};
 
+const DEFAULT_POLL_INTERVAL_MS: u64 = 1000;
+const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 300;
+const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SigningMode {
     Raw,
@@ -112,8 +116,10 @@ impl FireblocksSigner {
                 .api_base_url
                 .unwrap_or_else(|| "https://api.fireblocks.io".to_string()),
             client,
-            poll_interval_ms: config.poll_interval_ms.unwrap_or(1000),
-            max_poll_attempts: config.max_poll_attempts.unwrap_or(300),
+            poll_interval_ms: config.poll_interval_ms.unwrap_or(DEFAULT_POLL_INTERVAL_MS),
+            max_poll_attempts: config
+                .max_poll_attempts
+                .unwrap_or(DEFAULT_MAX_POLL_ATTEMPTS),
             use_program_call: config.use_program_call.unwrap_or(false),
         }
     }
@@ -461,7 +467,9 @@ impl SolanaSigner for FireblocksSigner {
     }
 
     async fn is_available(&self) -> bool {
-        self.check_availability().await
+        tokio::time::timeout(AVAILABILITY_TIMEOUT, self.check_availability())
+            .await
+            .unwrap_or(false)
     }
 }
 

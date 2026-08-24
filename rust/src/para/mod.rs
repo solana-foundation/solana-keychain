@@ -2,7 +2,7 @@
 
 mod types;
 
-use crate::remote_util::parse_json_response;
+use crate::remote_util::{parse_json_response, validate_https_url};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_hex, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction};
@@ -85,11 +85,7 @@ impl ParaSigner {
         }
 
         if let Some(ref url) = config.api_base_url {
-            if !url.starts_with("https://") {
-                return Err(SignerError::ConfigError(
-                    "apiBaseUrl must use HTTPS".to_string(),
-                ));
-            }
+            validate_https_url(url)?;
         }
 
         let client = HttpClientConfig {
@@ -162,7 +158,7 @@ impl ParaSigner {
     async fn sign_bytes(&self, data: &[u8]) -> Result<Signature, SignerError> {
         if self.public_key == Pubkey::default() {
             return Err(SignerError::ConfigError(
-                "Signer not initialized. Call init() first.".to_string(),
+                "ParaSigner is not initialized; call init() before signing".to_string(),
             ));
         }
 

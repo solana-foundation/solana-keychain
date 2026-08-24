@@ -2,6 +2,21 @@
 
 use crate::error::SignerError;
 
+/// Reject an API base URL that is not valid HTTPS, parsing it rather than
+/// string-matching so `HTTPS://`, whitespace, and malformed URLs are all
+/// caught.
+#[cfg(any(feature = "crossmint", feature = "para"))]
+pub(crate) fn validate_https_url(url: &str) -> Result<(), SignerError> {
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|_| SignerError::ConfigError("api_base_url is not a valid URL".to_string()))?;
+    if parsed.scheme() != "https" {
+        return Err(SignerError::ConfigError(
+            "api_base_url must use HTTPS".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(any(feature = "fireblocks", feature = "fordefi"))]
 pub(crate) enum PollOutcome<T> {
     Done(T),

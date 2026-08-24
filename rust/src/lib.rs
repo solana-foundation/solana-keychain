@@ -40,6 +40,7 @@ pub mod http_client_config;
     feature = "cdp",
     feature = "dfns",
     feature = "para",
+    feature = "crossmint",
     feature = "openfort",
     feature = "utila",
     feature = "fordefi"
