@@ -10,7 +10,12 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
@@ -111,7 +116,8 @@ class VaultSigner(SolanaSigner):
 
     async def is_available(self) -> bool:
         url = f"{self._vault_addr}/v1/transit/keys/{quote(self._key_name, safe='')}"
-        try:
+
+        async def probe() -> bool:
             result = await fetch_signer_json(
                 url=url,
                 provider_name="Vault",
@@ -119,12 +125,12 @@ class VaultSigner(SolanaSigner):
                 headers={"X-Vault-Token": self._token},
                 client=self._http_client,
             )
-        except SignerError:
-            return False
-        data = result.get("data") if isinstance(result, dict) else None
-        if not isinstance(data, dict):
-            return False
-        return data.get("supports_signing") is True and data.get("type") == "ed25519"
+            data = result.get("data") if isinstance(result, dict) else None
+            if not isinstance(data, dict):
+                return False
+            return data.get("supports_signing") is True and data.get("type") == "ed25519"
+
+        return await probe_availability(probe)
 
 
 async def create_vault_signer(config: VaultSignerConfig) -> VaultSigner:

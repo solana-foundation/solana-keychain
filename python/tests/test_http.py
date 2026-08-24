@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 import pytest
 import respx
@@ -9,6 +11,7 @@ from solana_keychain.core import (
     normalize_base_url,
     sanitize_remote_error_response,
 )
+from solana_keychain.core.http import probe_availability
 
 
 def test_normalize_base_url_strips_whitespace_and_trailing_slashes() -> None:
@@ -109,3 +112,35 @@ async def test_caller_supplied_client_is_used_and_not_closed() -> None:
             url=URL, provider_name="Test", method="POST", json_body={"a": 1}, client=client
         ) == {"ok": 1}
         assert not client.is_closed
+
+
+async def test_probe_availability_returns_the_probe_result() -> None:
+    async def healthy() -> bool:
+        return True
+
+    async def unhealthy() -> bool:
+        return False
+
+    assert await probe_availability(healthy)
+    assert not await probe_availability(unhealthy)
+
+
+async def test_probe_availability_reports_unavailable_on_any_failure() -> None:
+    async def signer_error() -> bool:
+        raise SignerError(SignerErrorCode.HTTP_ERROR, "unreachable")
+
+    async def credential_error() -> bool:
+        raise RuntimeError("kms unavailable")
+
+    assert not await probe_availability(signer_error)
+    assert not await probe_availability(credential_error)
+
+
+async def test_probe_availability_bounds_a_slow_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("solana_keychain.core.http.AVAILABILITY_TIMEOUT_SECONDS", 0.01)
+
+    async def slow() -> bool:
+        await asyncio.sleep(5)
+        return True
+
+    assert not await probe_availability(slow)

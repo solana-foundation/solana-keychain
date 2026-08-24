@@ -1,6 +1,5 @@
 """Para API signer integration."""
 
-import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -12,7 +11,12 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import (
     SignedTransaction,
@@ -28,7 +32,6 @@ from solana_keychain.core.transaction_util import (
 
 DEFAULT_API_BASE_URL = "https://api.getpara.com"
 REQUEST_TIMEOUT_SECONDS = 30.0
-AVAILABILITY_TIMEOUT_SECONDS = 5.0
 
 SIGNATURE_HEX_LENGTH = 128
 
@@ -184,15 +187,14 @@ class ParaSigner(SolanaSigner):
     async def is_available(self) -> bool:
         """Availability makes a network call bounded to 5 seconds; cache the result
         if frequent checks are needed."""
-        try:
-            wallet = await asyncio.wait_for(self._fetch_wallet(), AVAILABILITY_TIMEOUT_SECONDS)
-        except (SignerError, asyncio.TimeoutError):
-            # asyncio.TimeoutError: on 3.10 wait_for raises this distinct class;
-            # from 3.11 it aliases the builtin, so one except covers both.
-            return False
-        wallet_type = str(wallet.get("type", ""))
-        status = str(wallet.get("status", ""))
-        return wallet_type.upper() == "SOLANA" and status.upper() in ("ACTIVE", "READY")
+
+        async def probe() -> bool:
+            wallet = await self._fetch_wallet()
+            wallet_type = str(wallet.get("type", ""))
+            status = str(wallet.get("status", ""))
+            return wallet_type.upper() == "SOLANA" and status.upper() in ("ACTIVE", "READY")
+
+        return await probe_availability(probe)
 
 
 async def create_para_signer(config: ParaSignerConfig) -> ParaSigner:

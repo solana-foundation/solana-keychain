@@ -20,7 +20,12 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
@@ -251,13 +256,13 @@ class TurnkeySigner(SolanaSigner):
         return await self._sign_bytes(message)
 
     async def is_available(self) -> bool:
-        try:
+        async def probe() -> bool:
             await self._post_stamped(
                 "/public/v1/query/whoami", {"organizationId": self._organization_id}
             )
-        except SignerError:
-            return False
-        return True
+            return True
+
+        return await probe_availability(probe)
 
 
 async def create_turnkey_signer(config: TurnkeySignerConfig) -> TurnkeySigner:

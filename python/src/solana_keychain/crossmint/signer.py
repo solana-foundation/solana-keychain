@@ -20,6 +20,7 @@ from solana_keychain.core.http import (
     assert_https_url,
     fetch_signer_json,
     normalize_base_url,
+    probe_availability,
     provider_may_have_accepted,
 )
 from solana_keychain.core.signer import (
@@ -43,7 +44,6 @@ DEFAULT_API_BASE_URL = "https://www.crossmint.com/api"
 API_VERSION_PATH = "2025-06-09"
 DEFAULT_POLL_INTERVAL_MS = 1000
 DEFAULT_MAX_POLL_ATTEMPTS = 60
-AVAILABILITY_TIMEOUT_SECONDS = 5.0
 
 
 _AWAITING_APPROVAL_ERROR = (
@@ -654,11 +654,11 @@ class CrossmintSigner(SolanaSigner):
         )
 
     async def is_available(self) -> bool:
-        try:
-            await asyncio.wait_for(self._fetch_wallet(), AVAILABILITY_TIMEOUT_SECONDS)
-        except (SignerError, asyncio.TimeoutError):
-            return False
-        return True
+        async def probe() -> bool:
+            await self._fetch_wallet()
+            return True
+
+        return await probe_availability(probe)
 
 
 async def create_crossmint_signer(config: CrossmintSignerConfig) -> CrossmintSigner:

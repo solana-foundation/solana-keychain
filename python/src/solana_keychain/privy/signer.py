@@ -11,7 +11,12 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import (
     SignedTransaction,
@@ -214,10 +219,11 @@ class PrivySigner(SolanaSigner):
     async def is_available(self) -> bool:
         if self._public_key is None:
             return False
-        try:
+
+        async def probe() -> bool:
             return await self._fetch_public_key() == self._public_key
-        except SignerError:
-            return False
+
+        return await probe_availability(probe)
 
 
 async def create_privy_signer(config: PrivySignerConfig) -> PrivySigner:

@@ -276,7 +276,7 @@ async def test_is_available_false_on_api_error() -> None:
 async def test_is_available_false_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
-    monkeypatch.setattr("solana_keychain.para.signer.AVAILABILITY_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr("solana_keychain.core.http.AVAILABILITY_TIMEOUT_SECONDS", 0.05)
 
     async def slow_response(_request: httpx.Request) -> httpx.Response:
         await asyncio.sleep(0.5)

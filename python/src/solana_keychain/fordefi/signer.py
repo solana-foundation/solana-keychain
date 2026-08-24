@@ -21,10 +21,12 @@ from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import (
+    AVAILABILITY_TIMEOUT_SECONDS,
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
     assert_https_url,
     fetch_signer_json,
     normalize_base_url,
+    probe_availability,
     provider_may_have_accepted,
 )
 from solana_keychain.core.poll import poll_attempts
@@ -48,7 +50,6 @@ DEFAULT_POLL_INTERVAL_MS = 2000
 DEFAULT_MAX_POLL_ATTEMPTS = 50
 SUPPORTED_CHAINS = ("solana_devnet", "solana_mainnet")
 
-_AVAILABILITY_TIMEOUT_SECONDS = 5.0
 _VAULT_VERIFICATION_TIMEOUT_SECONDS = 10.0
 
 _PUSHABLE_SUCCESS_STATES = frozenset({"completed"})
@@ -518,15 +519,12 @@ class FordefiSigner(SolanaSigner):
         """Readiness probe: the vault is reachable with the bearer token and the
         request signer can produce an ``x-signature`` value."""
 
-        async def probe() -> None:
-            await self._fetch_vault(_AVAILABILITY_TIMEOUT_SECONDS)
+        async def probe() -> bool:
+            await self._fetch_vault(AVAILABILITY_TIMEOUT_SECONDS)
             await self._sign_request("/api/v1/vaults", _timestamp_ms(), "")
+            return True
 
-        try:
-            await asyncio.wait_for(probe(), timeout=_AVAILABILITY_TIMEOUT_SECONDS)
-        except Exception:
-            return False
-        return True
+        return await probe_availability(probe)
 
 
 async def create_fordefi_signer(config: FordefiSignerConfig) -> FordefiSigner:

@@ -1,6 +1,5 @@
 """Utila API signer integration."""
 
-import asyncio
 import base64
 import time
 from dataclasses import dataclass, field
@@ -23,7 +22,12 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
 from solana_keychain.core.poll import poll_attempts
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import (
@@ -43,7 +47,6 @@ API_AUDIENCE = "https://api.utila.io/"
 TOKEN_TTL_SECONDS = 55 * 60
 DEFAULT_POLL_INTERVAL_MS = 1000
 DEFAULT_MAX_POLL_ATTEMPTS = 60
-AVAILABILITY_TIMEOUT_SECONDS = 5.0
 
 _TERMINAL_FAILURE_STATES = frozenset(
     {
@@ -372,11 +375,11 @@ class UtilaSigner(SolanaSigner):
         )
 
     async def is_available(self) -> bool:
-        try:
-            await asyncio.wait_for(self._fetch_wallet(), AVAILABILITY_TIMEOUT_SECONDS)
-        except (SignerError, asyncio.TimeoutError):
-            return False
-        return True
+        async def probe() -> bool:
+            await self._fetch_wallet()
+            return True
+
+        return await probe_availability(probe)
 
 
 async def create_utila_signer(config: UtilaSignerConfig) -> UtilaSigner:

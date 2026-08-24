@@ -12,7 +12,12 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
 from solana_keychain.core.poll import poll_attempts
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import (
@@ -323,11 +328,12 @@ class FireblocksSigner(SolanaSigner):
     async def is_available(self) -> bool:
         if self._public_key is None:
             return False
-        try:
+
+        async def probe() -> bool:
             await self._get_json(f"/v1/vault/accounts/{quote(self._vault_account_id, safe='')}")
-        except SignerError:
-            return False
-        return True
+            return True
+
+        return await probe_availability(probe)
 
 
 async def create_fireblocks_signer(config: FireblocksSignerConfig) -> FireblocksSigner:

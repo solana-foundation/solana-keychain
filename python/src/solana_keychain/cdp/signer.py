@@ -18,7 +18,12 @@ from solders.transaction import VersionedTransaction
 
 from solana_keychain.cdp.jwt import create_auth_jwt, create_wallet_jwt
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
@@ -184,7 +189,8 @@ class CdpSigner(SolanaSigner):
 
     async def is_available(self) -> bool:
         path = f"{BASE_PATH}/{self._pubkey}"
-        try:
+
+        async def probe() -> bool:
             auth_token = create_auth_jwt(
                 self._api_key_id, self._api_key_secret, self._api_host, "GET", path
             )
@@ -194,9 +200,9 @@ class CdpSigner(SolanaSigner):
                 headers={"Authorization": f"Bearer {auth_token}"},
                 client=self._http_client,
             )
-        except SignerError:
-            return False
-        return True
+            return True
+
+        return await probe_availability(probe)
 
 
 async def create_cdp_signer(config: CdpSignerConfig) -> CdpSigner:

@@ -10,7 +10,12 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import (
     SignedTransaction,
@@ -234,14 +239,16 @@ class DfnsSigner(SolanaSigner):
         )
 
     async def is_available(self) -> bool:
-        try:
+        async def probe() -> bool:
             wallet = await self._get_wallet()
             _, scheme, curve, _ = self._signing_key_fields(wallet)
-        except SignerError:
-            return False
-        return (
-            str(wallet.get("status", "")) == "Active" and scheme == "EdDSA" and curve == "ed25519"
-        )
+            return (
+                str(wallet.get("status", "")) == "Active"
+                and scheme == "EdDSA"
+                and curve == "ed25519"
+            )
+
+        return await probe_availability(probe)
 
 
 async def create_dfns_signer(config: DfnsSignerConfig) -> DfnsSigner:
