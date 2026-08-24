@@ -449,7 +449,7 @@ func TestSignMessageInvalidHexChars(t *testing.T) {
 	s.pubkey = pub
 
 	_, err := s.SignMessage(context.Background(), []byte("test"))
-	testutils.AssertCode(t, err, core.CodeSigningFailed)
+	testutils.AssertCode(t, err, core.CodeSerializationError)
 }
 
 func TestSignMessageMalformedJSON(t *testing.T) {

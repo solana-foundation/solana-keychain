@@ -147,15 +147,10 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 		return solana.Signature{}, core.NewSignerError(core.CodeRemoteAPIError, "no signature in vault response")
 	}
 
-	sigBytes, err := base64.StdEncoding.DecodeString(stripVaultSignaturePrefix(parsed.Data.Signature))
+	sig, err := core.DecodeSignatureBase64(stripVaultSignaturePrefix(parsed.Data.Signature), "vault")
 	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode signature", err)
+		return solana.Signature{}, err
 	}
-	if len(sigBytes) != core.SignatureLength {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "invalid signature format")
-	}
-	var sig solana.Signature
-	copy(sig[:], sigBytes)
 
 	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
 		return solana.Signature{}, err

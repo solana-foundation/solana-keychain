@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rsa"
 	"encoding/hex"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -213,15 +212,7 @@ func (s *Signer) requestAndPollSignature(ctx context.Context, request createTran
 // carries no signedMessages for a sign-only PROGRAM_CALL.
 func extractSignature(response transactionResponse, allowTxHashCarrier bool) (solana.Signature, error) {
 	if len(response.SignedMessages) > 0 {
-		sigBytes, err := hex.DecodeString(response.SignedMessages[0].Signature.FullSig)
-		if err != nil {
-			return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode hex signature", err)
-		}
-		if len(sigBytes) != core.SignatureLength {
-			return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-				fmt.Sprintf("invalid signature length (expected %d bytes)", core.SignatureLength))
-		}
-		return solana.SignatureFromBytes(sigBytes), nil
+		return core.DecodeSignatureHex(response.SignedMessages[0].Signature.FullSig, "fireblocks")
 	}
 
 	if allowTxHashCarrier && response.TxHash != "" {

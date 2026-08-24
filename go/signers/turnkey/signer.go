@@ -226,21 +226,7 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 // exactly 32 bytes before concatenation. Components longer than 32 bytes are
 // rejected.
 func assembleSignature(rHex, sHex string) (solana.Signature, error) {
-	rBytes, err := hex.DecodeString(rHex)
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode r", err)
-	}
-	sBytes, err := hex.DecodeString(sHex)
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode s", err)
-	}
-	if len(rBytes) > 32 || len(sBytes) > 32 {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "invalid signature component length")
-	}
-	var sig solana.Signature
-	copy(sig[32-len(rBytes):32], rBytes)
-	copy(sig[64-len(sBytes):64], sBytes)
-	return sig, nil
+	return core.SignatureFromHexComponents(rHex, sHex, "turnkey", true)
 }
 
 // post sends a stamped JSON POST to the Turnkey API and returns the response

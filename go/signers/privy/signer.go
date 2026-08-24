@@ -237,15 +237,10 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse privy signing response", err)
 	}
 
-	raw, err := base64.StdEncoding.DecodeString(signResp.Data.Signature)
+	sig, err := core.DecodeSignatureBase64(signResp.Data.Signature, "privy")
 	if err != nil {
-		return solana.Signature{}, core.NewSignerError(core.CodeSerializationError, "failed to decode base64 signature from privy")
+		return solana.Signature{}, err
 	}
-	if len(raw) != core.SignatureLength {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "failed to parse signature")
-	}
-	var sig solana.Signature
-	copy(sig[:], raw)
 
 	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
 		return solana.Signature{}, err

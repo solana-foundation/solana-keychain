@@ -184,23 +184,7 @@ func (s *Signer) sendSignatureRequest(ctx context.Context, request generateSigna
 // misaligned split could never verify anyway, and rejecting it here yields an
 // accurate error instead of a downstream verification failure.
 func combineSignature(r, s string) (solana.Signature, error) {
-	rBytes, err := hex.DecodeString(strings.TrimPrefix(r, "0x"))
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode signature r", err)
-	}
-	sBytes, err := hex.DecodeString(strings.TrimPrefix(s, "0x"))
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode signature s", err)
-	}
-	const componentLength = solana.SignatureLength / 2
-	if len(rBytes) != componentLength || len(sBytes) != componentLength {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"invalid signature component length (expected 32-byte r and s)")
-	}
-	var sig solana.Signature
-	copy(sig[:], rBytes)
-	copy(sig[componentLength:], sBytes)
-	return sig, nil
+	return core.SignatureFromHexComponents(r, s, "dfns", false)
 }
 
 // Pubkey returns the Dfns wallet's public key resolved during New.

@@ -190,16 +190,10 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 		return solana.Signature{}, err
 	}
 
-	sigBytes, err := hex.DecodeString(strings.TrimPrefix(resp.Signature, "0x"))
+	sig, err := core.DecodeSignatureHex(resp.Signature, "openfort")
 	if err != nil {
-		return solana.Signature{}, core.NewSignerError(core.CodeSerializationError, "failed to hex-decode openfort signature")
+		return solana.Signature{}, err
 	}
-	if len(sigBytes) != core.SignatureLength {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"invalid signature length from openfort (expected "+strconv.Itoa(core.SignatureLength)+" bytes)")
-	}
-	var sig solana.Signature
-	copy(sig[:], sigBytes)
 
 	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
 		return solana.Signature{}, err

@@ -11,7 +11,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/base58"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
@@ -106,29 +105,21 @@ func (s Signer) GoString() string { return s.String() }
 // Quirk: the CDP signMessage API takes a UTF-8 string, so non-UTF-8 payloads
 // are rejected with CodeSerializationError.
 func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
-	var sig solana.Signature
 	if !utf8.Valid(message) {
-		return sig, core.NewSignerError(core.CodeSerializationError,
+		return solana.Signature{}, core.NewSignerError(core.CodeSerializationError,
 			"CDP signMessage requires UTF-8; non-UTF-8 bytes are not supported")
 	}
 
 	path := basePath + "/" + s.pubkey.String() + "/sign/message"
 	var resp signMessageResponse
 	if err := s.doPost(ctx, path, map[string]any{"message": string(message)}, &resp, "sign_message"); err != nil {
-		return sig, err
+		return solana.Signature{}, err
 	}
 
-	// CDP returns a base58-encoded signature.
-	sigBytes, err := base58.Decode(resp.Signature)
+	sig, err := core.DecodeSignatureBase58(resp.Signature, "cdp")
 	if err != nil {
-		return sig, core.WrapSignerError(core.CodeSerializationError,
-			"failed to decode base58 signature from CDP", err)
+		return solana.Signature{}, err
 	}
-	if len(sigBytes) != core.SignatureLength {
-		return sig, core.NewSignerError(core.CodeSigningFailed,
-			"invalid signature length from CDP (expected 64 bytes)")
-	}
-	copy(sig[:], sigBytes)
 
 	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
 		return solana.Signature{}, err

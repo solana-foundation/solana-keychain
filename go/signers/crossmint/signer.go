@@ -552,11 +552,6 @@ func (s *Signer) extractSignatureFromSerializedTransaction(serializedTransaction
 
 // decodeBase58Signature decodes a base58 string into a 64-byte signature.
 func decodeBase58Signature(signatureStr string) (solana.Signature, bool) {
-	raw, err := base58.Decode(signatureStr)
-	if err != nil || len(raw) != core.SignatureLength {
-		return solana.Signature{}, false
-	}
-	var sig solana.Signature
-	copy(sig[:], raw)
-	return sig, true
+	sig, err := core.DecodeSignatureBase58(signatureStr, "crossmint")
+	return sig, err == nil
 }

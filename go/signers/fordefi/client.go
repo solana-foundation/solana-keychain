@@ -231,15 +231,7 @@ func extractSignature(response transactionStatusResponse) (solana.Signature, err
 		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
 			"transaction signed but no signatures in response")
 	}
-	sigBytes, err := base64.StdEncoding.DecodeString(response.Signatures[0].Data)
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode signature base64", err)
-	}
-	if len(sigBytes) != core.SignatureLength {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			fmt.Sprintf("expected %d-byte Ed25519 signature, got %d", core.SignatureLength, len(sigBytes)))
-	}
-	return solana.SignatureFromBytes(sigBytes), nil
+	return core.DecodeSignatureBase64(response.Signatures[0].Data, "fordefi")
 }
 
 // fetchVault fetches the configured vault from Fordefi.

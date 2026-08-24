@@ -2,7 +2,6 @@ package gcpkms
 
 import (
 	"context"
-	"strconv"
 
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
@@ -82,13 +81,10 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 	if len(sigBytes) == 0 {
 		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "no signature in GCP KMS response")
 	}
-	if len(sigBytes) != core.SignatureLength {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"invalid signature length: expected 64 bytes, got "+strconv.Itoa(len(sigBytes)))
+	sig, err := core.SignatureFromBytes(sigBytes, "gcp kms")
+	if err != nil {
+		return solana.Signature{}, err
 	}
-
-	var sig solana.Signature
-	copy(sig[:], sigBytes)
 
 	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
 		return solana.Signature{}, err

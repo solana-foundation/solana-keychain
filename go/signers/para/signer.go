@@ -170,7 +170,7 @@ func (s *Signer) signBytes(ctx context.Context, data []byte) (solana.Signature, 
 	if response.Signature == nil {
 		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "missing signature in response")
 	}
-	sig, err := decodeHexSignature(*response.Signature)
+	sig, err := core.DecodeSignatureHex(*response.Signature, "para")
 	if err != nil {
 		return solana.Signature{}, err
 	}
@@ -208,23 +208,6 @@ func (s *Signer) doRequest(ctx context.Context, method, url string, requestBody 
 		return nil, core.NewSignerError(core.CodeRemoteAPIError, "API error "+strconv.Itoa(status))
 	}
 	return body, nil
-}
-
-// decodeHexSignature decodes a hex-encoded signature string (optionally
-// 0x-prefixed) into a 64-byte signature.
-func decodeHexSignature(hexStr string) (solana.Signature, error) {
-	hexStr = strings.TrimPrefix(hexStr, "0x")
-	if len(hexStr) != 2*core.SignatureLength {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"expected 128 hex chars (64 bytes), got "+strconv.Itoa(len(hexStr))+" chars")
-	}
-	raw, err := hex.DecodeString(hexStr)
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSigningFailed, "failed to decode hex signature", err)
-	}
-	var sig solana.Signature
-	copy(sig[:], raw)
-	return sig, nil
 }
 
 // isValidUUID reports whether s is a UUID in 8-4-4-4-12 form with hex digits.

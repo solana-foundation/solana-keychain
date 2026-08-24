@@ -3,7 +3,6 @@ package awskms
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -125,13 +124,10 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 	if len(out.Signature) == 0 {
 		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "no signature in aws kms response")
 	}
-	if len(out.Signature) != core.SignatureLength {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			fmt.Sprintf("invalid signature length: expected %d bytes, got %d", core.SignatureLength, len(out.Signature)))
+	sig, err := core.SignatureFromBytes(out.Signature, "aws kms")
+	if err != nil {
+		return solana.Signature{}, err
 	}
-
-	var sig solana.Signature
-	copy(sig[:], out.Signature)
 
 	if err := core.VerifySignature(s.pub, message, sig); err != nil {
 		return solana.Signature{}, err
