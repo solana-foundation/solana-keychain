@@ -22,7 +22,11 @@ from solana_keychain.core.http import (
     normalize_base_url,
     provider_may_have_accepted,
 )
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.signer import (
+    SignedTransaction,
+    SolanaSigner,
+    require_initialized,
+)
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
@@ -228,12 +232,7 @@ class CrossmintSigner(SolanaSigner):
             ) from None
 
     def _initialized_pubkey(self) -> Pubkey:
-        if self._public_key is None:
-            raise SignerError(
-                SignerErrorCode.NOT_INITIALIZED,
-                "CrossmintSigner is not initialized; call init() before signing",
-            )
-        return self._public_key
+        return require_initialized(self._public_key, "CrossmintSigner")
 
     @property
     def pubkey(self) -> Pubkey:

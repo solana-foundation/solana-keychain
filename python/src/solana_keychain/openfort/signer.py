@@ -13,7 +13,11 @@ from solders.transaction import VersionedTransaction
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
 from solana_keychain.core.signature_util import verify_returned_signature
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.signer import (
+    SignedTransaction,
+    SolanaSigner,
+    require_initialized,
+)
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
@@ -108,12 +112,7 @@ class OpenfortSigner(SolanaSigner):
         self._public_key = await self._fetch_public_key()
 
     def _initialized_pubkey(self) -> Pubkey:
-        if self._public_key is None:
-            raise SignerError(
-                SignerErrorCode.NOT_INITIALIZED,
-                "OpenfortSigner is not initialized; call init() before signing",
-            )
-        return self._public_key
+        return require_initialized(self._public_key, "OpenfortSigner")
 
     @property
     def pubkey(self) -> Pubkey:

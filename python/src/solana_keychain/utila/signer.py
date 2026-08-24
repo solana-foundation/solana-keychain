@@ -25,7 +25,11 @@ from solders.transaction import VersionedTransaction
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
 from solana_keychain.core.signature_util import verify_returned_signature
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.signer import (
+    SignedTransaction,
+    SolanaSigner,
+    require_initialized,
+)
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
@@ -211,12 +215,7 @@ class UtilaSigner(SolanaSigner):
             ) from None
 
     def _initialized_pubkey(self) -> Pubkey:
-        if self._public_key is None:
-            raise SignerError(
-                SignerErrorCode.NOT_INITIALIZED,
-                "UtilaSigner is not initialized; call init() before signing",
-            )
-        return self._public_key
+        return require_initialized(self._public_key, "UtilaSigner")
 
     @property
     def pubkey(self) -> Pubkey:
