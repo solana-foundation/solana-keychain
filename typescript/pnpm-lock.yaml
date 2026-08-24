@@ -311,6 +311,9 @@ importers:
       '@solana/addresses':
         specifier: 8.0.0
         version: 8.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/codecs-strings':
+        specifier: 8.0.0
+        version: 8.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/keychain-test-utils':
         specifier: workspace:*
         version: link:../test-utils

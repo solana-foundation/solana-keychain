@@ -1,4 +1,7 @@
-import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
+import { getBase64Decoder } from '@solana/codecs-strings';
+import { base64UrlEncoder, normalizePrivateKeyPem, SignerErrorCode, throwSignerError } from '@solana/keychain-core';
+
+let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
 
 export type PrivyAuthorizationSignFn = (payload: Uint8Array) => Promise<string> | string;
 
@@ -149,7 +152,8 @@ async function generatePrivyAuthorizationSignature(
             dsaEncoding: 'der',
             key: privateKey,
         });
-        return Buffer.from(signature).toString('base64');
+        base64Decoder ||= getBase64Decoder();
+        return base64Decoder.decode(signature);
     } catch (error) {
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
             cause: error,
@@ -177,12 +181,14 @@ function parseP256PrivateKey(
     const normalized = unprefixed.replace(/\s+/g, '');
 
     if (unprefixed.includes('-----BEGIN')) {
-        return nodeCrypto.createPrivateKey(unprefixed.replace(/\\n/g, '\n').trim());
+        return nodeCrypto.createPrivateKey(normalizePrivateKeyPem(unprefixed));
     }
 
+    // Keys exported through URL-safe tooling arrive base64url;
+    // base64UrlEncoder accepts both alphabets and optional padding.
     return nodeCrypto.createPrivateKey({
         format: 'der',
-        key: Buffer.from(normalized, 'base64'),
+        key: base64UrlEncoder(normalized),
         type: 'pkcs8',
     });
 }

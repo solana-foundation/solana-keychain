@@ -4,6 +4,7 @@ import {
     assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
+    ED25519_SIGNATURE_LENGTH,
     extractSignatureFromTransactionBytes,
     fetchSignerJson,
     signBatchStaggered,
@@ -202,14 +203,12 @@ class TurnkeySigner<TAddress extends string = string> implements SolanaSigner<TA
             });
         }
 
-        // Pad r and s components to exactly 32 bytes each
         const rPadded = this.padSignatureComponent(signResult.r);
         const sPadded = this.padSignatureComponent(signResult.s);
 
-        // Combine into 64-byte signature
-        const signature = new Uint8Array(64);
+        const signature = new Uint8Array(ED25519_SIGNATURE_LENGTH);
         signature.set(rPadded, 0);
-        signature.set(sPadded, 32);
+        signature.set(sPadded, ED25519_SIGNATURE_LENGTH / 2);
 
         return signature as SignatureBytes;
     }
@@ -224,7 +223,6 @@ class TurnkeySigner<TAddress extends string = string> implements SolanaSigner<TA
         return await signBatchStaggered(
             messages,
             async message => {
-                // Convert message bytes to hex for Turnkey
                 const bytesToHex = getBase16Decoder().decode;
                 const hexMessage = bytesToHex(message.content);
                 const signatureBytes = await this.sign(hexMessage, config?.abortSignal);
@@ -306,16 +304,13 @@ class TurnkeySigner<TAddress extends string = string> implements SolanaSigner<TA
             async transaction => {
                 const wireTransaction = getBase64EncodedWireTransaction(transaction);
 
-                // Convert base64 wire transaction to bytes, then to hex for Turnkey
                 const base64ToBytes = getBase64Encoder().encode;
                 const txBytes = base64ToBytes(wireTransaction);
                 const bytesToHex = getBase16Decoder().decode;
                 const hexTx = bytesToHex(txBytes);
 
-                // Use Turnkey's sign_transaction endpoint which returns the full signed transaction
                 const signedTransactionHex = await this.signTransaction(hexTx, config?.abortSignal);
 
-                // Convert signed transaction hex back to bytes for signature extraction
                 const hexToBytes = getBase16Encoder().encode;
                 const signedTxBytes = hexToBytes(signedTransactionHex);
                 const sigDict = extractSignatureFromTransactionBytes({

@@ -179,7 +179,6 @@ class OpenfortSigner<TAddress extends string = string> implements SolanaSigner<T
             });
         }
 
-        // Hex-decode signature (`0x` prefix optional).
         const sigHex = data.signature.startsWith('0x') ? data.signature.slice(2) : data.signature;
         let signatureBytes: SignatureBytes;
         try {

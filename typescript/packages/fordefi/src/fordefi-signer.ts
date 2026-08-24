@@ -1,12 +1,13 @@
 import { createPrivateKey, createSign, type KeyObject } from 'node:crypto';
 
 import { Address, assertIsAddress } from '@solana/addresses';
-import { getBase58Decoder, getBase58Encoder, getBase64Encoder } from '@solana/codecs-strings';
+import { getBase58Decoder, getBase58Encoder, getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
     abortableDelay,
     assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
+    ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
     idempotencyKeyFromMessage,
     normalizeBaseUrl,
@@ -52,6 +53,11 @@ import type {
 
 const DEFAULT_BASE_URL = 'https://api.fordefi.com';
 const DEFAULT_POLL_INTERVAL_MS = 2000;
+
+let base58Decoder: ReturnType<typeof getBase58Decoder> | undefined;
+let base58Encoder: ReturnType<typeof getBase58Encoder> | undefined;
+let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
+let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
 const DEFAULT_MAX_POLL_ATTEMPTS = 50;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -355,8 +361,10 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
         let remoteAddress = vault.address;
         if (!remoteAddress && vault.public_key_compressed) {
             try {
-                const keyBytes = new Uint8Array(Buffer.from(vault.public_key_compressed, 'base64'));
-                remoteAddress = getBase58Decoder().decode(keyBytes);
+                base64Encoder ||= getBase64Encoder();
+                base58Decoder ||= getBase58Decoder();
+                const keyBytes = base64Encoder.encode(vault.public_key_compressed);
+                remoteAddress = base58Decoder.decode(keyBytes);
             } catch (error) {
                 return throwSignerError(SignerErrorCode.PARSING_ERROR, {
                     cause: error,
@@ -484,15 +492,25 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
         abortSignal?: AbortSignal,
     ): Promise<{ sigDict: SignatureDictionary; verificationData: Uint8Array }> {
         const bytes = messageBytes instanceof Uint8Array ? messageBytes : new Uint8Array(Array.from(messageBytes));
-        const base64Data = Buffer.from(bytes).toString('base64');
+        base64Decoder ||= getBase64Decoder();
+        const base64Data = base64Decoder.decode(bytes);
 
         const txId = await this.submitBlackBoxSignature(base64Data, abortSignal);
         const result = await this.pollForResult(txId, { pushable: false }, abortSignal);
         const sigBase64 = this.extractSignatureData(result);
-        const sigBytes = new Uint8Array(Buffer.from(sigBase64, 'base64'));
-        if (sigBytes.length !== 64) {
+        let sigBytes: Uint8Array;
+        try {
+            base64Encoder ||= getBase64Encoder();
+            sigBytes = new Uint8Array(base64Encoder.encode(sigBase64));
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                cause: error,
+                message: 'Failed to decode Fordefi signature base64',
+            });
+        }
+        if (sigBytes.length !== ED25519_SIGNATURE_LENGTH) {
             return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                message: `Expected 64-byte Ed25519 signature, got ${sigBytes.length}`,
+                message: `Expected ${ED25519_SIGNATURE_LENGTH}-byte Ed25519 signature, got ${sigBytes.length}`,
             });
         }
         return {
@@ -527,7 +545,8 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
                 config?.abortSignal?.throwIfAborted();
                 this.assertNativeAutoTransactionSupported(transaction);
 
-                const base64Data = Buffer.from(transaction.messageBytes).toString('base64');
+                base64Decoder ||= getBase64Decoder();
+                const base64Data = base64Decoder.decode(transaction.messageBytes);
                 let txId: string;
                 try {
                     txId = await this.submitSolanaTransaction(base64Data, config?.abortSignal);
@@ -580,7 +599,8 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
         }
 
         const signedWireTx = result.raw_transaction as Base64EncodedWireTransaction;
-        const decodedTransaction = getTransactionDecoder().decode(getBase64Encoder().encode(signedWireTx));
+        base64Encoder ||= getBase64Encoder();
+        const decodedTransaction = getTransactionDecoder().decode(base64Encoder.encode(signedWireTx));
 
         const signerSignature = decodedTransaction.signatures[this.address];
         if (!signerSignature) {
@@ -593,7 +613,8 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
         // Kit resolves the fee payer's signature, whichever slot the version puts it in.
         let transactionSignature: SignatureBytes;
         try {
-            transactionSignature = getBase58Encoder().encode(
+            base58Encoder ||= getBase58Encoder();
+            transactionSignature = base58Encoder.encode(
                 getSignatureFromTransaction(decodedTransaction),
             ) as SignatureBytes;
         } catch (error) {
@@ -683,9 +704,10 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
             type: 'solana_transaction',
             vault_id: this.vaultId,
         };
+        base64Encoder ||= getBase64Encoder();
         return await this.submitTransaction(
             requestBody,
-            await idempotencyKeyFromMessage(Buffer.from(base64Data, 'base64')),
+            await idempotencyKeyFromMessage(base64Encoder.encode(base64Data)),
             abortSignal,
         );
     }
@@ -713,7 +735,8 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
      * Submits the message, polls for completion, and returns the raw 64-byte Ed25519 signature.
      */
     private async signMessage(messageBytes: Uint8Array, abortSignal?: AbortSignal): Promise<SignatureBytes> {
-        const base64Data = Buffer.from(messageBytes).toString('base64');
+        base64Decoder ||= getBase64Decoder();
+        const base64Data = base64Decoder.decode(messageBytes);
 
         const txId = this.chain
             ? await this.submitSolanaMessage(base64Data, abortSignal)
@@ -723,7 +746,8 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
 
         let sigBytes: Uint8Array;
         try {
-            sigBytes = new Uint8Array(Buffer.from(sigBase64, 'base64'));
+            base64Encoder ||= getBase64Encoder();
+            sigBytes = new Uint8Array(base64Encoder.encode(sigBase64));
         } catch (error) {
             return throwSignerError(SignerErrorCode.PARSING_ERROR, {
                 cause: error,
@@ -731,9 +755,9 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
             });
         }
 
-        if (sigBytes.length !== 64) {
+        if (sigBytes.length !== ED25519_SIGNATURE_LENGTH) {
             return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                message: `Expected 64-byte Ed25519 signature, got ${sigBytes.length}`,
+                message: `Expected ${ED25519_SIGNATURE_LENGTH}-byte Ed25519 signature, got ${sigBytes.length}`,
             });
         }
 

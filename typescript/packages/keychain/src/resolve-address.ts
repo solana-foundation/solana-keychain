@@ -36,7 +36,6 @@ export async function resolveAddress(config: KeychainSignerConfig): Promise<Addr
             assertIsAddress(config.publicKey);
             return config.publicKey;
 
-        // CDP provides address directly in config
         case 'cdp':
             assertIsAddress(config.address);
             return config.address;

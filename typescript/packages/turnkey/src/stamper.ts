@@ -90,7 +90,6 @@ export class ApiKeyStamper {
      */
     stamp(message: string): StampResult {
         try {
-            // Sign with P-256 ECDSA + SHA-256 and encode as DER hex.
             const messageBytes = new TextEncoder().encode(message);
             const privateKeyBytes = hexToBytes(this.apiPrivateKey);
             const signatureDerBytes = p256.sign(messageBytes, privateKeyBytes, {
@@ -99,7 +98,7 @@ export class ApiKeyStamper {
             });
             const signatureHex = bytesToHex(signatureDerBytes);
 
-            // Create stamp object (same structure as Turnkey SDK)
+            // Same structure as the Turnkey SDK stamp.
             const stamp = {
                 publicKey: this.apiPublicKey,
                 scheme: 'SIGNATURE_SCHEME_TK_API_P256',

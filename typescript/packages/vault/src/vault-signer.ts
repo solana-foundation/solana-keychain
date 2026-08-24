@@ -4,6 +4,7 @@ import {
     assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
+    ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
     normalizeBaseUrl,
     signBatchStaggered,
@@ -22,6 +23,9 @@ import {
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
 
 import type { VaultKeyReadResponse, VaultPayloadBase64, VaultSignRequest, VaultSignResponse } from './types.js';
+
+let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
+let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
 
 /**
  * Create a Vault-backed signer.
@@ -103,7 +107,6 @@ class VaultSigner<TAddress extends string = string> implements SolanaSigner<TAdd
      * Vault returns signatures in format: "vault:vN:base64_signature"
      */
     private extractSignatureFromVaultFormat(vaultSignature: string): SignatureBytes {
-        // Remove any Vault version prefix (vault:v1:, vault:v2:, ...)
         const base64Signature = vaultSignature.replace(/^vault:v\d+:/, '');
 
         if (!base64Signature) {
@@ -112,9 +115,22 @@ class VaultSigner<TAddress extends string = string> implements SolanaSigner<TAdd
             });
         }
 
-        // Decode base64 string to Uint8Array (SignatureBytes)
-        const encoder = getBase64Encoder();
-        return encoder.encode(base64Signature) as SignatureBytes;
+        let sigBytes: Uint8Array;
+        try {
+            base64Encoder ||= getBase64Encoder();
+            sigBytes = new Uint8Array(base64Encoder.encode(base64Signature));
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                cause: error,
+                message: 'Failed to decode Vault signature base64',
+            });
+        }
+        if (sigBytes.length !== ED25519_SIGNATURE_LENGTH) {
+            return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message: `Invalid signature length: expected ${ED25519_SIGNATURE_LENGTH} bytes, got ${sigBytes.length}`,
+            });
+        }
+        return sigBytes as SignatureBytes;
     }
 
     /**
@@ -157,10 +173,9 @@ class VaultSigner<TAddress extends string = string> implements SolanaSigner<TAdd
         messageBytes: ArrayLike<number>,
         abortSignal?: AbortSignal,
     ): Promise<SignatureBytes> {
-        // Encode message bytes to base64 string for Vault
-        const decoder = getBase64Decoder();
+        base64Decoder ||= getBase64Decoder();
         const bytes = messageBytes instanceof Uint8Array ? messageBytes : new Uint8Array(Array.from(messageBytes));
-        const base64EncodedMessage = decoder.decode(bytes);
+        const base64EncodedMessage = base64Decoder.decode(bytes);
         return await this.signWithVault(base64EncodedMessage, abortSignal);
     }
 
@@ -200,7 +215,6 @@ class VaultSigner<TAddress extends string = string> implements SolanaSigner<TAdd
         return await signBatchStaggered(
             transactions,
             async transaction => {
-                // Sign the transaction message bytes
                 const signatureBytes = await this.signMessageBytes(transaction.messageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: transaction.messageBytes,

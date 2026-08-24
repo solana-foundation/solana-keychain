@@ -349,14 +349,12 @@ class FireblocksSigner<TAddress extends string = string> implements SolanaSigner
                 return this.extractSignature(txResponse, false);
             }
 
-            // Check for terminal failure statuses
             if (isTerminalStatus(status)) {
                 throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                     message: `Transaction failed with status: ${txResponse.status}`,
                 });
             }
 
-            // Wait before next poll
             await abortableDelay(this.pollIntervalMs, abortSignal);
         }
 

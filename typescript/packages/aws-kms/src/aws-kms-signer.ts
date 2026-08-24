@@ -84,7 +84,6 @@ class AwsKmsSigner<TAddress extends string = string> implements SolanaSigner<TAd
         this.requestDelayMs = config.requestDelayMs || 0;
         validateRequestDelayMs(this.requestDelayMs);
 
-        // Create AWS KMS client
         const clientConfig: {
             credentials?: AwsCredentials;
             region?: string;
@@ -130,12 +129,11 @@ class AwsKmsSigner<TAddress extends string = string> implements SolanaSigner<TAd
 
             return signature as SignatureBytes;
         } catch (error: unknown) {
-            // Re-throw SignerError as-is
+            abortSignal?.throwIfAborted();
             if (error instanceof Error && error.name === 'SignerError') {
                 throw error;
             }
             if (error instanceof Error) {
-                // AWS SDK errors
                 const awsError = error as { $metadata?: { httpStatusCode?: number }; message?: string; name?: string };
                 throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
                     cause: error,
@@ -190,7 +188,6 @@ class AwsKmsSigner<TAddress extends string = string> implements SolanaSigner<TAd
         return await signBatchStaggered(
             transactions,
             async transaction => {
-                // Sign the transaction message bytes
                 const txMessageBytes = new Uint8Array(transaction.messageBytes);
                 const signatureBytes = await this.signBytes(txMessageBytes, config?.abortSignal);
                 await assertSignatureValid({
@@ -223,7 +220,6 @@ class AwsKmsSigner<TAddress extends string = string> implements SolanaSigner<TAd
                 return false;
             }
 
-            // Verify the key spec is ECC_NIST_EDWARDS25519
             const keySpec = response.KeyMetadata.KeySpec;
             const keyUsage = response.KeyMetadata.KeyUsage;
             const keyState = response.KeyMetadata.KeyState;
