@@ -11,6 +11,7 @@ use crate::transaction_util::{
     unconfirmed_unless_rejected, TransactionUtil,
 };
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
+use std::fmt::Write;
 use std::str::FromStr;
 use types::{
     CreateTransactionParams, CreateTransactionRequest, TransactionResponse, WalletResponse,
@@ -315,7 +316,6 @@ impl CrossmintSigner {
             ) {
                 encoded.push(byte as char);
             } else {
-                use std::fmt::Write;
                 let _ = write!(encoded, "%{byte:02X}");
             }
         }

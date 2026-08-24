@@ -10,6 +10,7 @@ use crate::transaction_util::{
 };
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::{engine::general_purpose::STANDARD, Engine};
+use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::Value;
 use std::str::FromStr;
 
@@ -184,10 +185,10 @@ impl CdpSigner {
         );
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            reqwest::header::HeaderValue::from_static("application/json"),
+            HeaderValue::from_static("application/json"),
         );
         headers.insert(
-            reqwest::header::HeaderName::from_static("x-wallet-auth"),
+            HeaderName::from_static("x-wallet-auth"),
             wallet_token
                 .parse()
                 .map_err(|_| SignerError::SigningFailed("Invalid wallet token".to_string()))?,

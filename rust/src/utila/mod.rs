@@ -13,7 +13,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::Serialize;
-use std::{str::FromStr, sync::Arc};
+use std::{fmt::Write, str::FromStr, sync::Arc};
 use types::{
     InitiateTransactionDetails, InitiateTransactionRequest, SolanaSerializedTransaction,
     TransactionEnvelope, TransactionState, UtilaTransaction, WalletResponse,
@@ -472,7 +472,6 @@ fn encode_uri_component(input: &str) -> String {
         ) {
             encoded.push(byte as char);
         } else {
-            use std::fmt::Write;
             let _ = write!(encoded, "%{byte:02X}");
         }
     }

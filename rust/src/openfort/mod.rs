@@ -38,6 +38,7 @@ use crate::transaction_util::TransactionUtil;
 use crate::wallet_jwt;
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use jsonwebtoken::EncodingKey;
+use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::Value;
 use std::str::FromStr;
 
@@ -257,10 +258,10 @@ impl OpenfortSigner {
         );
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            reqwest::header::HeaderValue::from_static("application/json"),
+            HeaderValue::from_static("application/json"),
         );
         headers.insert(
-            reqwest::header::HeaderName::from_static("x-wallet-auth"),
+            HeaderName::from_static("x-wallet-auth"),
             wallet_token
                 .parse()
                 .map_err(|_| SignerError::SigningFailed("Invalid wallet token".to_string()))?,
