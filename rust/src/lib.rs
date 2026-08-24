@@ -32,6 +32,8 @@
 
 pub mod error;
 pub mod http_client_config;
+#[cfg(feature = "_remote")]
+mod remote_util;
 mod sdk_adapter;
 pub mod signature_util;
 #[cfg(test)]
@@ -40,6 +42,8 @@ pub mod test_util;
 pub mod tests;
 pub mod traits;
 pub mod transaction_util;
+#[cfg(any(feature = "cdp", feature = "openfort"))]
+mod wallet_jwt;
 
 #[cfg(feature = "memory")]
 pub mod memory;
@@ -209,10 +213,10 @@ impl Signer {
         http_client_config: Option<HttpClientConfig>,
     ) -> Result<Self, SignerError> {
         Ok(Self::Vault(VaultSigner::from_config(VaultSignerConfig {
-            vault_addr,
+            api_base_url: vault_addr,
             token: vault_token,
             key_name,
-            pubkey,
+            public_key: pubkey,
             http_client_config,
         })?))
     }
@@ -235,7 +239,7 @@ impl Signer {
             http_client_config,
             authorization_context: None,
             authorization_request_expiry: PrivyAuthorizationRequestExpiry::Default,
-        });
+        })?;
         signer.init().await?;
         Ok(Self::Privy(signer))
     }
@@ -285,7 +289,7 @@ impl Signer {
     /// Create a Fireblocks signer (requires initialization)
     #[cfg(feature = "fireblocks")]
     pub async fn from_fireblocks(config: FireblocksSignerConfig) -> Result<Self, SignerError> {
-        let mut signer = FireblocksSigner::new(config);
+        let mut signer = FireblocksSigner::new(config)?;
         signer.init().await?;
         Ok(Self::Fireblocks(signer))
     }
@@ -342,7 +346,7 @@ impl Signer {
     /// Create a Dfns signer (requires initialization)
     #[cfg(feature = "dfns")]
     pub async fn from_dfns(config: DfnsSignerConfig) -> Result<Self, SignerError> {
-        let mut signer = DfnsSigner::new(config);
+        let mut signer = DfnsSigner::new(config)?;
         signer.init().await?;
         Ok(Self::Dfns(signer))
     }
@@ -401,209 +405,64 @@ impl Signer {
     }
 }
 
+macro_rules! dispatch_signer {
+    ($self:ident, $signer:pat => $body:expr) => {
+        match $self {
+            #[cfg(feature = "memory")]
+            Signer::Memory($signer) => $body,
+            #[cfg(feature = "vault")]
+            Signer::Vault($signer) => $body,
+            #[cfg(feature = "privy")]
+            Signer::Privy($signer) => $body,
+            #[cfg(feature = "turnkey")]
+            Signer::Turnkey($signer) => $body,
+            #[cfg(feature = "aws_kms")]
+            Signer::AwsKms($signer) => $body,
+            #[cfg(feature = "fireblocks")]
+            Signer::Fireblocks($signer) => $body,
+            #[cfg(feature = "gcp_kms")]
+            Signer::GcpKms($signer) => $body,
+            #[cfg(feature = "cdp")]
+            Signer::Cdp($signer) => $body,
+            #[cfg(feature = "dfns")]
+            Signer::Dfns($signer) => $body,
+            #[cfg(feature = "openfort")]
+            Signer::Openfort($signer) => $body,
+            #[cfg(feature = "para")]
+            Signer::Para($signer) => $body,
+            #[cfg(feature = "crossmint")]
+            Signer::Crossmint($signer) => $body,
+            #[cfg(feature = "utila")]
+            Signer::Utila($signer) => $body,
+            #[cfg(feature = "fordefi")]
+            Signer::Fordefi($signer) => $body,
+        }
+    };
+}
+
 #[async_trait::async_trait]
 impl SolanaSigner for Signer {
     fn pubkey(&self) -> sdk_adapter::Pubkey {
-        match self {
-            #[cfg(feature = "memory")]
-            Signer::Memory(s) => s.pubkey(),
-
-            #[cfg(feature = "vault")]
-            Signer::Vault(s) => s.pubkey(),
-
-            #[cfg(feature = "privy")]
-            Signer::Privy(s) => s.pubkey(),
-
-            #[cfg(feature = "turnkey")]
-            Signer::Turnkey(s) => s.pubkey(),
-
-            #[cfg(feature = "aws_kms")]
-            Signer::AwsKms(s) => s.pubkey(),
-
-            #[cfg(feature = "fireblocks")]
-            Signer::Fireblocks(s) => s.pubkey(),
-
-            #[cfg(feature = "gcp_kms")]
-            Signer::GcpKms(s) => s.pubkey(),
-
-            #[cfg(feature = "cdp")]
-            Signer::Cdp(s) => s.pubkey(),
-            #[cfg(feature = "dfns")]
-            Signer::Dfns(s) => s.pubkey(),
-            #[cfg(feature = "openfort")]
-            Signer::Openfort(s) => s.pubkey(),
-            #[cfg(feature = "para")]
-            Signer::Para(s) => s.pubkey(),
-            #[cfg(feature = "crossmint")]
-            Signer::Crossmint(s) => s.pubkey(),
-            #[cfg(feature = "utila")]
-            Signer::Utila(s) => s.pubkey(),
-            #[cfg(feature = "fordefi")]
-            Signer::Fordefi(s) => s.pubkey(),
-        }
+        dispatch_signer!(self, s => s.pubkey())
     }
 
     fn broadcasts_transactions(&self) -> bool {
-        match self {
-            #[cfg(feature = "memory")]
-            Signer::Memory(s) => s.broadcasts_transactions(),
-
-            #[cfg(feature = "vault")]
-            Signer::Vault(s) => s.broadcasts_transactions(),
-
-            #[cfg(feature = "privy")]
-            Signer::Privy(s) => s.broadcasts_transactions(),
-
-            #[cfg(feature = "turnkey")]
-            Signer::Turnkey(s) => s.broadcasts_transactions(),
-
-            #[cfg(feature = "aws_kms")]
-            Signer::AwsKms(s) => s.broadcasts_transactions(),
-
-            #[cfg(feature = "fireblocks")]
-            Signer::Fireblocks(s) => s.broadcasts_transactions(),
-
-            #[cfg(feature = "gcp_kms")]
-            Signer::GcpKms(s) => s.broadcasts_transactions(),
-
-            #[cfg(feature = "cdp")]
-            Signer::Cdp(s) => s.broadcasts_transactions(),
-            #[cfg(feature = "dfns")]
-            Signer::Dfns(s) => s.broadcasts_transactions(),
-            #[cfg(feature = "openfort")]
-            Signer::Openfort(s) => s.broadcasts_transactions(),
-            #[cfg(feature = "para")]
-            Signer::Para(s) => s.broadcasts_transactions(),
-            #[cfg(feature = "crossmint")]
-            Signer::Crossmint(s) => s.broadcasts_transactions(),
-            #[cfg(feature = "utila")]
-            Signer::Utila(s) => s.broadcasts_transactions(),
-            #[cfg(feature = "fordefi")]
-            Signer::Fordefi(s) => s.broadcasts_transactions(),
-        }
+        dispatch_signer!(self, s => s.broadcasts_transactions())
     }
 
     async fn sign_transaction(
         &self,
         tx: &mut sdk_adapter::VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
-        match self {
-            #[cfg(feature = "memory")]
-            Signer::Memory(s) => s.sign_transaction(tx).await,
-
-            #[cfg(feature = "vault")]
-            Signer::Vault(s) => s.sign_transaction(tx).await,
-
-            #[cfg(feature = "privy")]
-            Signer::Privy(s) => s.sign_transaction(tx).await,
-
-            #[cfg(feature = "turnkey")]
-            Signer::Turnkey(s) => s.sign_transaction(tx).await,
-
-            #[cfg(feature = "aws_kms")]
-            Signer::AwsKms(s) => s.sign_transaction(tx).await,
-
-            #[cfg(feature = "fireblocks")]
-            Signer::Fireblocks(s) => s.sign_transaction(tx).await,
-
-            #[cfg(feature = "gcp_kms")]
-            Signer::GcpKms(s) => s.sign_transaction(tx).await,
-
-            #[cfg(feature = "cdp")]
-            Signer::Cdp(s) => s.sign_transaction(tx).await,
-            #[cfg(feature = "dfns")]
-            Signer::Dfns(s) => s.sign_transaction(tx).await,
-            #[cfg(feature = "openfort")]
-            Signer::Openfort(s) => s.sign_transaction(tx).await,
-            #[cfg(feature = "para")]
-            Signer::Para(s) => s.sign_transaction(tx).await,
-            #[cfg(feature = "crossmint")]
-            Signer::Crossmint(s) => s.sign_transaction(tx).await,
-            #[cfg(feature = "utila")]
-            Signer::Utila(s) => s.sign_transaction(tx).await,
-            #[cfg(feature = "fordefi")]
-            Signer::Fordefi(s) => s.sign_transaction(tx).await,
-        }
+        dispatch_signer!(self, s => s.sign_transaction(tx).await)
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<sdk_adapter::Signature, SignerError> {
-        match self {
-            #[cfg(feature = "memory")]
-            Signer::Memory(s) => s.sign_message(message).await,
-
-            #[cfg(feature = "vault")]
-            Signer::Vault(s) => s.sign_message(message).await,
-
-            #[cfg(feature = "privy")]
-            Signer::Privy(s) => s.sign_message(message).await,
-
-            #[cfg(feature = "turnkey")]
-            Signer::Turnkey(s) => s.sign_message(message).await,
-
-            #[cfg(feature = "aws_kms")]
-            Signer::AwsKms(s) => s.sign_message(message).await,
-
-            #[cfg(feature = "fireblocks")]
-            Signer::Fireblocks(s) => s.sign_message(message).await,
-
-            #[cfg(feature = "gcp_kms")]
-            Signer::GcpKms(s) => s.sign_message(message).await,
-
-            #[cfg(feature = "cdp")]
-            Signer::Cdp(s) => s.sign_message(message).await,
-            #[cfg(feature = "dfns")]
-            Signer::Dfns(s) => s.sign_message(message).await,
-            #[cfg(feature = "openfort")]
-            Signer::Openfort(s) => s.sign_message(message).await,
-            #[cfg(feature = "para")]
-            Signer::Para(s) => s.sign_message(message).await,
-            #[cfg(feature = "crossmint")]
-            Signer::Crossmint(s) => s.sign_message(message).await,
-            #[cfg(feature = "utila")]
-            Signer::Utila(s) => s.sign_message(message).await,
-            #[cfg(feature = "fordefi")]
-            Signer::Fordefi(s) => s.sign_message(message).await,
-        }
+        dispatch_signer!(self, s => s.sign_message(message).await)
     }
 
     async fn is_available(&self) -> bool {
-        match self {
-            #[cfg(feature = "memory")]
-            Signer::Memory(s) => s.is_available().await,
-
-            #[cfg(feature = "vault")]
-            Signer::Vault(s) => s.is_available().await,
-
-            #[cfg(feature = "privy")]
-            Signer::Privy(s) => s.is_available().await,
-
-            #[cfg(feature = "turnkey")]
-            Signer::Turnkey(s) => s.is_available().await,
-
-            #[cfg(feature = "aws_kms")]
-            Signer::AwsKms(s) => s.is_available().await,
-
-            #[cfg(feature = "fireblocks")]
-            Signer::Fireblocks(s) => s.is_available().await,
-
-            #[cfg(feature = "gcp_kms")]
-            Signer::GcpKms(s) => s.is_available().await,
-
-            #[cfg(feature = "cdp")]
-            Signer::Cdp(s) => s.is_available().await,
-            #[cfg(feature = "dfns")]
-            Signer::Dfns(s) => s.is_available().await,
-            #[cfg(feature = "openfort")]
-            Signer::Openfort(s) => s.is_available().await,
-            #[cfg(feature = "para")]
-            Signer::Para(s) => s.is_available().await,
-            #[cfg(feature = "crossmint")]
-            Signer::Crossmint(s) => s.is_available().await,
-            #[cfg(feature = "utila")]
-            Signer::Utila(s) => s.is_available().await,
-            #[cfg(feature = "fordefi")]
-            Signer::Fordefi(s) => s.is_available().await,
-        }
+        dispatch_signer!(self, s => s.is_available().await)
     }
 }
 

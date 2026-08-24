@@ -3,7 +3,9 @@
 mod authorization;
 mod types;
 
+use crate::remote_util::{extract_api_error, parse_json_response};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
+use crate::signature_util::{signature_from_base64, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::{
     deserialize_wire_transaction, serialize_wire_transaction, TransactionUtil,
@@ -64,7 +66,7 @@ impl PrivySigner {
     /// * `app_id` - Privy application ID
     /// * `app_secret` - Privy application secret
     /// * `wallet_id` - Privy wallet ID
-    pub fn new(app_id: String, app_secret: String, wallet_id: String) -> Self {
+    pub fn new(app_id: String, app_secret: String, wallet_id: String) -> Result<Self, SignerError> {
         Self::from_config(PrivySignerConfig {
             app_id,
             app_secret,
@@ -77,11 +79,9 @@ impl PrivySigner {
     }
 
     /// Create a new PrivySigner from a configuration object.
-    pub fn from_config(config: PrivySignerConfig) -> Self {
+    pub fn from_config(config: PrivySignerConfig) -> Result<Self, SignerError> {
         let http_client_config = config.http_client_config.unwrap_or_default();
-        let client = http_client_config
-            .build_client()
-            .expect("Failed to build HTTP client");
+        let client = http_client_config.build_client()?;
 
         let authorization_request_expiry_ms = match config.authorization_request_expiry {
             PrivyAuthorizationRequestExpiry::Default => {
@@ -93,7 +93,7 @@ impl PrivySigner {
             PrivyAuthorizationRequestExpiry::Omit => None,
         };
 
-        Self {
+        Ok(Self {
             app_id: config.app_id,
             app_secret: config.app_secret,
             wallet_id: config.wallet_id,
@@ -105,7 +105,7 @@ impl PrivySigner {
             public_key: None,
             authorization_context: config.authorization_context,
             authorization_request_expiry_ms,
-        }
+        })
     }
 
     /// Configure Privy wallet authorization context for signing requests.
@@ -162,25 +162,8 @@ impl PrivySigner {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let _error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-
-            #[cfg(feature = "unsafe-debug")]
-            log::error!(
-                "Privy API fetch_public_key error - status: {status}, response: {_error_text}"
-            );
-
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Privy API fetch_public_key error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!("API error {status}")));
-        }
-
-        let wallet_info: WalletResponse = response.json().await?;
+        let wallet_info: WalletResponse =
+            parse_json_response(response, "Privy API fetch_public_key").await?;
 
         // For Solana wallets, the address is the public key
         Pubkey::from_str(&wallet_info.address).map_err(|_| {
@@ -219,19 +202,7 @@ impl PrivySigner {
         let response = request_builder.json(request).send().await?;
 
         if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let _error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error response".to_string());
-
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Privy API rpc error - status: {status}, response: {_error_text}");
-
-            #[cfg(not(feature = "unsafe-debug"))]
-            log::error!("Privy API rpc error - status: {status}");
-
-            return Err(SignerError::RemoteApiError(format!("API error {status}")));
+            return Err(extract_api_error(response, "Privy API rpc").await);
         }
 
         Ok(response.text().await?)
@@ -253,24 +224,8 @@ impl PrivySigner {
         let response_text = self.post_rpc(&request).await?;
         let sign_response: SignMessageResponse = serde_json::from_str(&response_text)?;
 
-        let decoded_response = STANDARD
-            .decode(&sign_response.data.signature)
-            .map_err(|_e| {
-                #[cfg(feature = "unsafe-debug")]
-                log::error!("Failed to decode Privy response signature: {_e}");
-                SignerError::SerializationError(
-                    "Failed to decode base64 signature from Privy".to_string(),
-                )
-            })?;
-
-        let sig = Signature::try_from(decoded_response.as_slice())
-            .map_err(|_| SignerError::SigningFailed("Failed to parse signature".to_string()))?;
-
-        if !sig.verify(&public_key.to_bytes(), serialized) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        let sig = signature_from_base64(&sign_response.data.signature)?;
+        verify_or_reject(&sig, &public_key, serialized)?;
 
         Ok(sig)
     }
@@ -318,11 +273,7 @@ impl PrivySigner {
             )
         })?;
 
-        if !signature.verify(&public_key.to_bytes(), &transaction.message.serialize()) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        verify_or_reject(&signature, &public_key, &transaction.message.serialize())?;
 
         TransactionUtil::add_signature_to_transaction(transaction, &public_key, signature)?;
 
@@ -368,539 +319,4 @@ impl SolanaSigner for PrivySigner {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sdk_adapter::{keypair_pubkey, Keypair, Signer};
-    use crate::test_util::create_test_transaction;
-    use std::panic::{self, AssertUnwindSafe};
-    use wiremock::{
-        matchers::{body_json, header, method, path},
-        Mock, MockServer, ResponseTemplate,
-    };
-
-    fn create_test_keypair() -> Keypair {
-        Keypair::new()
-    }
-
-    #[tokio::test]
-    async fn test_privy_new() {
-        let signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-
-        assert_eq!(signer.app_id, "test-app-id");
-        assert_eq!(signer.wallet_id, "test-wallet-id");
-        assert_eq!(signer.public_key, None);
-    }
-
-    #[tokio::test]
-    async fn test_privy_fetch_public_key() {
-        let mock_server = MockServer::start().await;
-        let keypair = create_test_keypair();
-        let pubkey_str = keypair.pubkey().to_string();
-
-        // Mock the wallet GET endpoint
-        Mock::given(method("GET"))
-            .and(path("/wallets/test-wallet-id"))
-            .and(header(
-                "Authorization",
-                "Basic dGVzdC1hcHAtaWQ6dGVzdC1hcHAtc2VjcmV0",
-            )) // base64("test-app-id:test-app-secret")
-            .and(header("privy-app-id", "test-app-id"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "id": "test-wallet-id",
-                "address": pubkey_str,
-                "chain_type": "solana"
-            })))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
-
-        let mut signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-        signer.client = reqwest::Client::new();
-        signer.api_base_url = mock_server.uri();
-
-        let result = signer.init().await;
-        assert!(result.is_ok());
-        assert_eq!(signer.pubkey(), keypair.pubkey());
-    }
-
-    #[tokio::test]
-    async fn test_privy_sign_message() {
-        let mock_server = MockServer::start().await;
-        let keypair = create_test_keypair();
-
-        // Create a signed transaction
-        let tx = create_test_transaction(&keypair_pubkey(&keypair));
-        let signature = keypair.sign_message(&tx.message.serialize());
-
-        let mut signed_tx = tx.clone();
-        signed_tx.signatures = vec![signature];
-
-        // Mock the RPC signing endpoint
-        Mock::given(method("POST"))
-            .and(path("/wallets/test-wallet-id/rpc"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "method": "signMessage",
-                "data": {
-                    "signature": STANDARD.encode(signature),
-                    "encoding": "base64"
-                }
-            })))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
-
-        let mut signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-        signer.client = reqwest::Client::new();
-        signer.api_base_url = mock_server.uri();
-        signer.public_key = Some(keypair.pubkey());
-
-        let result = signer.sign_message(&tx.message.serialize()).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), signature);
-    }
-
-    #[tokio::test]
-    async fn test_privy_sign_message_authorization_context_headers() {
-        let mock_server = MockServer::start().await;
-        let keypair = create_test_keypair();
-        let message = [1, 2, 3, 4];
-        let signature = keypair.sign_message(&message);
-
-        Mock::given(method("POST"))
-            .and(path("/wallets/test-wallet-id/rpc"))
-            .and(header(
-                "privy-authorization-signature",
-                "authorization-signature",
-            ))
-            .and(body_json(serde_json::json!({
-                "method": "signMessage",
-                "chain_type": "solana",
-                "params": {
-                    "message": "AQIDBA==",
-                    "encoding": "base64"
-                }
-            })))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "method": "signMessage",
-                "data": {
-                    "signature": STANDARD.encode(signature),
-                    "encoding": "base64"
-                }
-            })))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
-
-        let mut signer = PrivySigner::from_config(PrivySignerConfig {
-            app_id: "test-app-id".to_string(),
-            app_secret: "test-app-secret".to_string(),
-            wallet_id: "test-wallet-id".to_string(),
-            api_base_url: Some(mock_server.uri()),
-            http_client_config: None,
-            authorization_context: Some(PrivyAuthorizationConfig::from(
-                PrivyAuthorizationContext {
-                    signatures: vec!["authorization-signature".to_string()],
-                    ..Default::default()
-                },
-            )),
-            authorization_request_expiry: PrivyAuthorizationRequestExpiry::Omit,
-        });
-        signer.client = reqwest::Client::new();
-        signer.public_key = Some(keypair.pubkey());
-
-        let result = signer.sign_message(&message).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), signature);
-    }
-
-    #[tokio::test]
-    async fn test_privy_sign_message_signature_verification_failure() {
-        let mock_server = MockServer::start().await;
-        let signing_keypair = create_test_keypair();
-        let different_keypair = create_test_keypair();
-        let message = b"test message";
-        let signature = signing_keypair.sign_message(message);
-
-        Mock::given(method("POST"))
-            .and(path("/wallets/test-wallet-id/rpc"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "method": "signMessage",
-                "data": {
-                    "signature": STANDARD.encode(signature),
-                    "encoding": "base64"
-                }
-            })))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
-
-        let mut signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-        signer.client = reqwest::Client::new();
-        signer.api_base_url = mock_server.uri();
-        signer.public_key = Some(different_keypair.pubkey());
-
-        let result = signer.sign_message(message).await;
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
-    }
-
-    #[tokio::test]
-    async fn test_privy_sign_message_invalid_base64_signature() {
-        let mock_server = MockServer::start().await;
-        let keypair = create_test_keypair();
-
-        let tx = create_test_transaction(&keypair_pubkey(&keypair));
-
-        Mock::given(method("POST"))
-            .and(path("/wallets/test-wallet-id/rpc"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "method": "signMessage",
-                "data": {
-                    "signature": "not-base64###",
-                    "encoding": "base64"
-                }
-            })))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
-
-        let mut signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-        signer.client = reqwest::Client::new();
-        signer.api_base_url = mock_server.uri();
-        signer.public_key = Some(keypair.pubkey());
-
-        let result = signer.sign_message(&tx.message.serialize()).await;
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SignerError::SerializationError(_)
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_privy_sign_message_requires_init() {
-        let signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-
-        let result = signer.sign_message(b"test").await;
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
-    }
-
-    #[tokio::test]
-    async fn test_privy_sign_transaction() {
-        let mock_server = MockServer::start().await;
-        let keypair = create_test_keypair();
-
-        let mut tx = create_test_transaction(&keypair_pubkey(&keypair));
-
-        // The signature that Privy API will return (signing the message_data)
-        let signature = keypair.sign_message(&tx.message.serialize());
-
-        // Create a signed transaction to return from the mock
-        let mut signed_tx = tx.clone();
-        signed_tx.signatures = vec![signature];
-
-        // Mock the RPC signing endpoint - it returns the signed transaction
-        Mock::given(method("POST"))
-            .and(path("/wallets/test-wallet-id/rpc"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "method": "signTransaction",
-                "data": {
-                    "signed_transaction": STANDARD.encode(bincode::serialize(&signed_tx).unwrap()),
-                    "encoding": "base64"
-                }
-            })))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
-
-        let mut signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-        signer.client = reqwest::Client::new();
-        signer.api_base_url = mock_server.uri();
-        signer.public_key = Some(keypair.pubkey());
-
-        let result = signer.sign_transaction(&mut tx).await;
-        assert!(result.is_ok());
-        let (serialized_tx, returned_sig) = result.unwrap().into_signed_transaction();
-
-        // Verify the signature matches
-        assert_eq!(returned_sig, signature);
-
-        // Verify the transaction is properly serialized
-        assert!(!serialized_tx.is_empty());
-        assert_eq!(tx.signatures, vec![signature]);
-    }
-
-    #[tokio::test]
-    async fn test_privy_sign_transaction_rejects_signature_over_different_bytes() {
-        let mock_server = MockServer::start().await;
-        let keypair = create_test_keypair();
-
-        let mut tx = create_test_transaction(&keypair_pubkey(&keypair));
-        let mut other_tx = create_test_transaction(&keypair_pubkey(&keypair));
-        other_tx.signatures = vec![keypair.sign_message(&other_tx.message.serialize())];
-
-        Mock::given(method("POST"))
-            .and(path("/wallets/test-wallet-id/rpc"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "method": "signTransaction",
-                "data": {
-                    "signed_transaction": STANDARD.encode(bincode::serialize(&other_tx).unwrap()),
-                    "encoding": "base64"
-                }
-            })))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
-
-        let mut signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-        signer.client = reqwest::Client::new();
-        signer.api_base_url = mock_server.uri();
-        signer.public_key = Some(keypair.pubkey());
-
-        let result = signer.sign_transaction(&mut tx).await;
-        match result.unwrap_err() {
-            SignerError::SigningFailed(message) => {
-                assert!(
-                    message.contains("verification failed"),
-                    "expected a verification failure, got: {message}"
-                );
-            }
-            other => panic!("Expected SigningFailed, got: {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_privy_sign_transaction_requires_init() {
-        let keypair = create_test_keypair();
-        let mut tx = create_test_transaction(&keypair_pubkey(&keypair));
-
-        let signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-
-        let result = signer.sign_transaction(&mut tx).await;
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
-    }
-
-    #[tokio::test]
-    async fn test_privy_pubkey_requires_init() {
-        let signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-
-        let result = panic::catch_unwind(AssertUnwindSafe(|| signer.pubkey()));
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_privy_pubkey() {
-        let keypair = create_test_keypair();
-        let mut signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-        signer.public_key = Some(keypair.pubkey());
-
-        assert_eq!(signer.pubkey(), keypair.pubkey());
-    }
-
-    #[tokio::test]
-    async fn test_privy_fetch_public_key_unauthorized() {
-        let mock_server = MockServer::start().await;
-
-        // Mock 401 Unauthorized response
-        Mock::given(method("GET"))
-            .and(path("/wallets/test-wallet-id"))
-            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
-                "error": "Unauthorized"
-            })))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
-
-        let mut signer = PrivySigner::new(
-            "bad-app-id".to_string(),
-            "bad-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-        signer.client = reqwest::Client::new();
-        signer.api_base_url = mock_server.uri();
-
-        let result = signer.init().await;
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SignerError::RemoteApiError(_)
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_privy_fetch_public_key_invalid() {
-        let mock_server = MockServer::start().await;
-
-        // Mock response with invalid public key
-        Mock::given(method("GET"))
-            .and(path("/wallets/test-wallet-id"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "id": "test-wallet-id",
-                "address": "not-a-valid-pubkey",
-                "chain_type": "solana"
-            })))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
-
-        let mut signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-        signer.client = reqwest::Client::new();
-        signer.api_base_url = mock_server.uri();
-
-        let result = signer.init().await;
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SignerError::InvalidPublicKey(_)
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_privy_sign_unauthorized() {
-        let mock_server = MockServer::start().await;
-        let keypair = create_test_keypair();
-
-        // Mock 401 Unauthorized response
-        Mock::given(method("POST"))
-            .and(path("/wallets/test-wallet-id/rpc"))
-            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
-                "error": "Unauthorized"
-            })))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
-
-        let mut signer = PrivySigner::new(
-            "bad-app-id".to_string(),
-            "bad-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-        signer.client = reqwest::Client::new();
-        signer.api_base_url = mock_server.uri();
-        signer.public_key = Some(keypair.pubkey());
-
-        let result = signer.sign_message(b"test").await;
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SignerError::RemoteApiError(_)
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_privy_is_available() {
-        let mock_server = MockServer::start().await;
-        let keypair = create_test_keypair();
-
-        // Not initialized
-        let signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-        assert!(!signer.is_available().await);
-
-        // Initialized and remote API is reachable.
-        Mock::given(method("GET"))
-            .and(path("/wallets/test-wallet-id"))
-            .and(header(
-                "Authorization",
-                "Basic dGVzdC1hcHAtaWQ6dGVzdC1hcHAtc2VjcmV0",
-            ))
-            .and(header("privy-app-id", "test-app-id"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "id": "test-wallet-id",
-                "address": keypair.pubkey().to_string(),
-                "chain_type": "solana"
-            })))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
-
-        let mut signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-        signer.client = reqwest::Client::new();
-        signer.api_base_url = mock_server.uri();
-        signer.public_key = Some(keypair.pubkey());
-        assert!(signer.is_available().await);
-    }
-
-    #[tokio::test]
-    async fn test_privy_is_available_remote_failure() {
-        let mock_server = MockServer::start().await;
-        let keypair = create_test_keypair();
-
-        Mock::given(method("GET"))
-            .and(path("/wallets/test-wallet-id"))
-            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
-                "error": "Unauthorized"
-            })))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
-
-        let mut signer = PrivySigner::new(
-            "test-app-id".to_string(),
-            "test-app-secret".to_string(),
-            "test-wallet-id".to_string(),
-        );
-        signer.client = reqwest::Client::new();
-        signer.api_base_url = mock_server.uri();
-        signer.public_key = Some(keypair.pubkey());
-
-        assert!(!signer.is_available().await);
-    }
-}
+mod tests;

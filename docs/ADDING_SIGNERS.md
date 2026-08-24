@@ -6,7 +6,7 @@ This guide is for wallet service providers and developers who want to integrate 
 
 We strongly prefer PRs that include the [Rust](#rust), [TypeScript](#typescript), and [Python](#python) implementations — the library maintains parity across all three. If you can only contribute one, that's fine, but expect the others to be required before the signer ships in a release.
 
-> **Using Claude Code?** This repo includes an `add-signer` skill (`.claude/skills/add-signer/`) that orchestrates the full workflow below — including gotchas and file ordering that this guide doesn't cover.
+> **Using Claude Code?** This repo includes an `add-signer-ci` skill (`.claude/skills/add-signer-ci/`) that wires up the CI workflows for a new signer contributed via a fork PR.
 
 ---
 

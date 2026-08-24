@@ -48,7 +48,8 @@ mod tests {
             http_client_config: None,
             authorization_context,
             authorization_request_expiry: PrivyAuthorizationRequestExpiry::Default,
-        });
+        })
+        .expect("Failed to construct PrivySigner");
 
         signer
             .init()
