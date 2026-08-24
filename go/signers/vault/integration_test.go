@@ -5,7 +5,6 @@ package vault
 import (
 	"context"
 	"net/http"
-	"os"
 	"testing"
 
 	"github.com/gagliardetto/solana-go"

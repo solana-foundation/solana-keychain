@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"os"
 	"testing"
 
 	"github.com/gagliardetto/solana-go"

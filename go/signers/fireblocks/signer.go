@@ -118,6 +118,8 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 // IsAvailable reports whether the Fireblocks vault account is reachable
 // (GET /v1/vault/accounts/{id}). All errors are swallowed and reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	status, _, err := s.doRequest(ctx, http.MethodGet, "/v1/vault/accounts/"+s.vaultAccountID, "")
 	return err == nil && core.IsSuccess(status)
 }
