@@ -65,7 +65,6 @@ async fn test_kms_new_valid_pubkey() {
     if let Ok(signer) = result {
         assert_eq!(signer.public_key, keypair.pubkey());
         assert_eq!(signer.key_id, TEST_KEY_ID);
-        assert_eq!(signer.region, Some(TEST_REGION.to_string()));
     }
 }
 
@@ -79,7 +78,6 @@ async fn test_kms_new_without_region() {
     if let Ok(signer) = result {
         assert_eq!(signer.public_key, keypair.pubkey());
         assert_eq!(signer.key_id, TEST_KEY_ID);
-        assert_eq!(signer.region, None);
     }
 }
 
@@ -137,7 +135,6 @@ async fn test_kms_debug_impl() {
         assert!(debug_str.contains("AwsKmsSigner"));
         assert!(debug_str.contains("key_id"));
         assert!(debug_str.contains("public_key"));
-        assert!(debug_str.contains("region"));
         // Verify it doesn't leak sensitive info (no client details)
         assert!(!debug_str.contains("client"));
     }
@@ -201,28 +198,6 @@ async fn test_kms_clone() {
 
         assert_eq!(signer.pubkey(), cloned.pubkey());
         assert_eq!(signer.key_id, cloned.key_id);
-        assert_eq!(signer.region, cloned.region);
-    }
-}
-
-#[tokio::test]
-async fn test_kms_different_regions() {
-    let keypair = create_test_keypair();
-    let pubkey_str = keypair.pubkey().to_string();
-
-    let regions = vec!["us-east-1", "us-west-2", "eu-west-1"];
-
-    for region in regions {
-        let result = AwsKmsSigner::new(
-            TEST_KEY_ID.to_string(),
-            pubkey_str.clone(),
-            Some(region.to_string()),
-        )
-        .await;
-
-        if let Ok(signer) = result {
-            assert_eq!(signer.region, Some(region.to_string()));
-        }
     }
 }
 

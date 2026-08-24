@@ -24,7 +24,7 @@ pub struct TurnkeySigner {
     organization_id: String,
     private_key_id: String,
     api_public_key: String,
-    api_private_key: String,
+    api_signing_key: p256::ecdsa::SigningKey,
     public_key: Pubkey,
     api_base_url: String,
     client: reqwest::Client,
@@ -84,10 +84,11 @@ impl TurnkeySigner {
         let pubkey = Pubkey::from_str(&config.public_key)
             .map_err(|e| SignerError::InvalidPublicKey(format!("Invalid public key: {e}")))?;
         let client = http_client_config.build_client()?;
+        let api_signing_key = Self::parse_api_private_key(&config.api_private_key)?;
 
         Ok(Self {
             api_public_key: config.api_public_key,
-            api_private_key: config.api_private_key,
+            api_signing_key,
             organization_id: config.organization_id,
             private_key_id: config.private_key_id,
             public_key: pubkey,
@@ -250,20 +251,18 @@ impl TurnkeySigner {
         ))
     }
 
-    /// Create X-Stamp header for Turnkey API authentication
-    fn create_stamp(&self, message: &str) -> Result<String, SignerError> {
-        let private_key_bytes = hex::decode(&self.api_private_key).map_err(|e| {
+    fn parse_api_private_key(hex_key: &str) -> Result<p256::ecdsa::SigningKey, SignerError> {
+        let private_key_bytes = hex::decode(hex_key).map_err(|e| {
             SignerError::InvalidPrivateKey(format!("Failed to decode private key: {e}"))
         })?;
 
-        let private_key_array: [u8; 32] = private_key_bytes.try_into().map_err(|_| {
-            SignerError::InvalidPrivateKey("Invalid private key length".to_string())
-        })?;
+        p256::ecdsa::SigningKey::from_slice(&private_key_bytes)
+            .map_err(|e| SignerError::InvalidPrivateKey(format!("Invalid signing key: {e}")))
+    }
 
-        let signing_key = p256::ecdsa::SigningKey::from_slice(&private_key_array)
-            .map_err(|e| SignerError::InvalidPrivateKey(format!("Invalid signing key: {e}")))?;
-
-        let signature: p256::ecdsa::Signature = signing_key.sign(message.as_bytes());
+    /// Create X-Stamp header for Turnkey API authentication
+    fn create_stamp(&self, message: &str) -> Result<String, SignerError> {
+        let signature: p256::ecdsa::Signature = self.api_signing_key.sign(message.as_bytes());
         let signature_der = signature.to_der().to_bytes();
         let signature_hex = hex::encode(signature_der);
 

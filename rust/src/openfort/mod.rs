@@ -235,7 +235,6 @@ impl OpenfortSigner {
 
     fn build_sign_headers(
         &self,
-        method: &str,
         path: &str,
         request_body: &Value,
     ) -> Result<reqwest::header::HeaderMap, SignerError> {
@@ -244,7 +243,7 @@ impl OpenfortSigner {
             "Openfort",
             &key,
             &self.api_host,
-            method,
+            "POST",
             path,
             Some(request_body),
         )?;
@@ -258,14 +257,10 @@ impl OpenfortSigner {
         );
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            "application/json"
-                .parse()
-                .expect("valid content-type header"),
+            reqwest::header::HeaderValue::from_static("application/json"),
         );
         headers.insert(
-            "x-wallet-auth"
-                .parse::<reqwest::header::HeaderName>()
-                .expect("valid header name"),
+            reqwest::header::HeaderName::from_static("x-wallet-auth"),
             wallet_token
                 .parse()
                 .map_err(|_| SignerError::SigningFailed("Invalid wallet token".to_string()))?,
@@ -282,7 +277,7 @@ impl OpenfortSigner {
 
         // Body shape exactly matches what the JWT's reqHash will be computed over.
         let body = serde_json::json!({ "data": data_hex });
-        let headers = self.build_sign_headers("POST", &path, &body)?;
+        let headers = self.build_sign_headers(&path, &body)?;
 
         let response = self
             .client

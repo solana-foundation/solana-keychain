@@ -69,8 +69,8 @@ impl MemorySigner {
         Ok(Self::new(keypair))
     }
 
-    async fn sign_bytes(&self, serialized: &[u8]) -> Result<Signature, SignerError> {
-        Ok(keypair_sign_message(&self.keypair, serialized))
+    fn sign_bytes(&self, serialized: &[u8]) -> Signature {
+        keypair_sign_message(&self.keypair, serialized)
     }
 }
 
@@ -84,7 +84,7 @@ impl SolanaSigner for MemorySigner {
         &self,
         tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
-        let signature = self.sign_bytes(&tx.message.serialize()).await?;
+        let signature = self.sign_bytes(&tx.message.serialize());
         TransactionUtil::add_signature_to_transaction(tx, &self.pubkey(), signature)?;
 
         let signed_transaction = (TransactionUtil::serialize_transaction(tx)?, signature);
@@ -95,7 +95,7 @@ impl SolanaSigner for MemorySigner {
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        self.sign_bytes(message).await
+        Ok(self.sign_bytes(message))
     }
 
     async fn is_available(&self) -> bool {

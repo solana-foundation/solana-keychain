@@ -236,7 +236,7 @@ impl UtilaSigner {
         let token = self.create_access_token()?;
         let response = self
             .client
-            .get(self.build_url(path)?)
+            .get(self.build_url(path))
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await?;
@@ -252,7 +252,7 @@ impl UtilaSigner {
         let token = self.create_access_token()?;
         let response = self
             .client
-            .post(self.build_url(path)?)
+            .post(self.build_url(path))
             .header("Authorization", format!("Bearer {token}"))
             .json(body)
             .send()
@@ -261,20 +261,8 @@ impl UtilaSigner {
         parse_json_response(response, &format!("Utila API {context}")).await
     }
 
-    fn build_url(&self, path: &str) -> Result<String, SignerError> {
-        let base = reqwest::Url::parse(&self.api_base_url)
-            .map_err(|e| SignerError::ConfigError(format!("Invalid api_base_url: {e}")))?;
-        if base.cannot_be_a_base() {
-            return Err(SignerError::ConfigError(
-                "api_base_url cannot be used as a base URL".to_string(),
-            ));
-        }
-
-        Ok(format!(
-            "{}{}",
-            self.api_base_url.trim_end_matches('/'),
-            path
-        ))
+    fn build_url(&self, path: &str) -> String {
+        format!("{}{}", self.api_base_url, path)
     }
 
     async fn poll_signed_transaction(
@@ -484,7 +472,8 @@ fn encode_uri_component(input: &str) -> String {
         ) {
             encoded.push(byte as char);
         } else {
-            encoded.push_str(&format!("%{:02X}", byte));
+            use std::fmt::Write;
+            let _ = write!(encoded, "%{byte:02X}");
         }
     }
     encoded

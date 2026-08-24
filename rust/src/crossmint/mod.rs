@@ -315,7 +315,8 @@ impl CrossmintSigner {
             ) {
                 encoded.push(byte as char);
             } else {
-                encoded.push_str(&format!("%{:02X}", byte));
+                use std::fmt::Write;
+                let _ = write!(encoded, "%{byte:02X}");
             }
         }
         encoded

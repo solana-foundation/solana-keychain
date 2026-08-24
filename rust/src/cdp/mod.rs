@@ -184,14 +184,10 @@ impl CdpSigner {
         );
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            "application/json"
-                .parse()
-                .expect("valid content-type header"),
+            reqwest::header::HeaderValue::from_static("application/json"),
         );
         headers.insert(
-            "X-Wallet-Auth"
-                .parse::<reqwest::header::HeaderName>()
-                .expect("valid header name"),
+            reqwest::header::HeaderName::from_static("x-wallet-auth"),
             wallet_token
                 .parse()
                 .map_err(|_| SignerError::SigningFailed("Invalid wallet token".to_string()))?,

@@ -35,7 +35,6 @@ pub struct AwsKmsSigner {
     client: KmsClient,
     key_id: String,
     public_key: Pubkey,
-    region: Option<String>,
 }
 
 /// Configuration for creating an AwsKmsSigner.
@@ -51,7 +50,6 @@ impl std::fmt::Debug for AwsKmsSigner {
         f.debug_struct("AwsKmsSigner")
             .field("key_id", &self.key_id)
             .field("public_key", &self.public_key)
-            .field("region", &self.region)
             .finish_non_exhaustive()
     }
 }
@@ -100,7 +98,6 @@ impl AwsKmsSigner {
             client,
             key_id: config.key_id,
             public_key: pubkey,
-            region: config.region,
         })
     }
 
@@ -125,7 +122,6 @@ impl AwsKmsSigner {
             client,
             key_id,
             public_key: pubkey,
-            region: None,
         })
     }
 

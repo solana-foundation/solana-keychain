@@ -196,7 +196,7 @@ impl DfnsSigner {
             SignerError::SigningFailed("Signature components missing from response".to_string())
         })?;
 
-        self.combine_signature(&components.r, &components.s)
+        Self::combine_signature(&components.r, &components.s)
     }
 
     async fn sign_bytes(&self, message: &[u8]) -> Result<Signature, SignerError> {
@@ -226,7 +226,7 @@ impl DfnsSigner {
         Ok(sig)
     }
 
-    fn combine_signature(&self, r: &str, s: &str) -> Result<Signature, SignerError> {
+    fn combine_signature(r: &str, s: &str) -> Result<Signature, SignerError> {
         let r_bytes = hex::decode(r.strip_prefix("0x").unwrap_or(r)).map_err(|e| {
             SignerError::SerializationError(format!("Failed to decode signature r: {e}"))
         })?;
