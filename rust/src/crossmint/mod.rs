@@ -3,6 +3,7 @@
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
+use crate::signature_util::signature_from_base58;
 use crate::traits::SignTransactionResult;
 use crate::transaction_util::{
     deserialize_wire_transaction, idempotency_key_from_message, serialize_wire_transaction,
@@ -563,12 +564,6 @@ impl CrossmintSigner {
         Ok((project_id, environment))
     }
 
-    fn decode_base58_signature(signature_str: &str) -> Option<Signature> {
-        let bytes = bs58::decode(signature_str).into_vec().ok()?;
-        let sig_bytes: [u8; 64] = bytes.try_into().ok()?;
-        Some(Signature::from(sig_bytes))
-    }
-
     /// The landed transaction's fee-payer (slot 0) signature, the value RPC
     /// transaction lookups accept.
     fn broadcast_transaction_id(
@@ -685,7 +680,7 @@ impl CrossmintSigner {
             let Ok(approver) = Pubkey::from_str(address) else {
                 continue;
             };
-            let Some(signature) = Self::decode_base58_signature(encoded) else {
+            let Ok(signature) = signature_from_base58(encoded) else {
                 continue;
             };
             if candidates.contains(&approver)
@@ -739,7 +734,7 @@ impl CrossmintSigner {
             }
 
             if let Some(tx_id) = &on_chain.tx_id {
-                let signature = Self::decode_base58_signature(tx_id).ok_or_else(|| {
+                let signature = signature_from_base58(tx_id).map_err(|_| {
                     SignerError::SigningFailed(
                         "Crossmint onChain.txId was not a valid Solana signature".to_string(),
                     )

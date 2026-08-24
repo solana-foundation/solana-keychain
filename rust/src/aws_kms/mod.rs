@@ -11,7 +11,7 @@ use aws_sdk_kms::{
 };
 use std::str::FromStr;
 
-use crate::signature_util::EXPECTED_SIGNATURE_LENGTH;
+use crate::signature_util::{signature_from_bytes, verify_or_reject};
 
 const AWS_KMS_SIGNING_ALGORITHM: &str = "ED25519_SHA_512";
 const AWS_KMS_KEY_SPEC: &str = "ECC_NIST_EDWARDS25519";
@@ -164,30 +164,8 @@ impl AwsKmsSigner {
             SignerError::SigningFailed("No signature in AWS KMS response".to_string())
         })?;
 
-        let signature_bytes = signature_blob.as_ref();
-
-        // Ed25519 signatures are 64 bytes
-        if signature_bytes.len() != EXPECTED_SIGNATURE_LENGTH {
-            return Err(SignerError::SigningFailed(format!(
-                "Invalid signature length: expected {} bytes, got {}",
-                EXPECTED_SIGNATURE_LENGTH,
-                signature_bytes.len()
-            )));
-        }
-
-        // Convert to Signature type
-        let sig_bytes: [u8; EXPECTED_SIGNATURE_LENGTH] =
-            signature_bytes.try_into().map_err(|_| {
-                SignerError::SigningFailed("Failed to convert signature bytes".to_string())
-            })?;
-
-        let sig = Signature::from(sig_bytes);
-
-        if !sig.verify(&self.public_key.to_bytes(), message) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        let sig = signature_from_bytes(signature_blob.as_ref())?;
+        verify_or_reject(&sig, &self.public_key, message)?;
 
         Ok(sig)
     }

@@ -1,4 +1,3 @@
-
 use super::VaultResponse;
 
 #[test]

@@ -8,6 +8,7 @@
 pub use reqwest;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
+use crate::signature_util::{signature_from_base64, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::{
     error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner,
@@ -203,18 +204,8 @@ impl VaultSigner {
         // Remove a versioned Vault transit prefix (e.g., "vault:v1:", "vault:v2:", ...).
         let signature_b64 = Self::strip_vault_signature_prefix(signature_b64);
 
-        let sig_bytes = STANDARD.decode(signature_b64).map_err(|_| {
-            SignerError::SerializationError("Failed to decode signature".to_string())
-        })?;
-
-        let sig = Signature::try_from(sig_bytes.as_slice())
-            .map_err(|_| SignerError::SigningFailed("Invalid signature format".to_string()))?;
-
-        if !sig.verify(&self.pubkey.to_bytes(), serialized) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        let sig = signature_from_base64(signature_b64)?;
+        verify_or_reject(&sig, &self.pubkey, serialized)?;
 
         Ok(sig)
     }

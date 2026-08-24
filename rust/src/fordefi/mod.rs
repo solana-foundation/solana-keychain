@@ -15,6 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::error::SignerError;
 use crate::http_client_config::HttpClientConfig;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
+use crate::signature_util::signature_from_base64;
 use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
 use crate::transaction_util::{
     deserialize_wire_transaction, idempotency_key_from_message, unconfirmed_unless_rejected,
@@ -446,20 +447,7 @@ impl FordefiSigner {
                 )
             })?;
 
-        let sig_bytes = STANDARD.decode(&entry.data).map_err(|e| {
-            SignerError::SerializationError(format!("Failed to decode signature base64: {e}"))
-        })?;
-
-        if sig_bytes.len() != 64 {
-            return Err(SignerError::SigningFailed(format!(
-                "Expected 64-byte Ed25519 signature, got {}",
-                sig_bytes.len()
-            )));
-        }
-
-        let mut sig_array = [0u8; 64];
-        sig_array.copy_from_slice(&sig_bytes);
-        Ok(Signature::from(sig_array))
+        signature_from_base64(&entry.data)
     }
 
     /// Poll for a non-pushable result and extract the 64-byte signature.

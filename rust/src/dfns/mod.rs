@@ -6,8 +6,10 @@ use crate::traits::SignTransactionResult;
 pub use crate::traits::SignedTransaction;
 use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{
-    error::SignerError, http_client_config::HttpClientConfig,
-    signature_util::EXPECTED_SIGNATURE_LENGTH, traits::SolanaSigner,
+    error::SignerError,
+    http_client_config::HttpClientConfig,
+    signature_util::{signature_from_bytes, verify_or_reject},
+    traits::SolanaSigner,
 };
 use types::{GenerateSignatureRequest, GenerateSignatureResponse, GetWalletResponse};
 
@@ -229,12 +231,7 @@ impl DfnsSigner {
             message: format!("0x{}", hex::encode(message)),
         };
         let sig = self.send_signature_request(request).await?;
-
-        if !sig.verify(&self.public_key.to_bytes(), message) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        verify_or_reject(&sig, &self.public_key, message)?;
 
         Ok(sig)
     }
@@ -249,15 +246,7 @@ impl DfnsSigner {
             blockchain_kind: "Solana".to_string(),
         };
         let sig = self.send_signature_request(request).await?;
-
-        if !sig.verify(
-            &self.public_key.to_bytes(),
-            &transaction.message.serialize(),
-        ) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        verify_or_reject(&sig, &self.public_key, &transaction.message.serialize())?;
 
         Ok(sig)
     }
@@ -270,18 +259,7 @@ impl DfnsSigner {
             SignerError::SerializationError(format!("Failed to decode signature s: {e}"))
         })?;
 
-        let mut sig_bytes = Vec::with_capacity(EXPECTED_SIGNATURE_LENGTH);
-        sig_bytes.extend_from_slice(&r_bytes);
-        sig_bytes.extend_from_slice(&s_bytes);
-
-        let sig_array: [u8; EXPECTED_SIGNATURE_LENGTH] = sig_bytes.try_into().map_err(|_| {
-            SignerError::SigningFailed(format!(
-                "Invalid signature length (expected {} bytes)",
-                EXPECTED_SIGNATURE_LENGTH
-            ))
-        })?;
-
-        Ok(Signature::from(sig_array))
+        signature_from_bytes(&[r_bytes, s_bytes].concat())
     }
 
     /// Sign and serialize a transaction

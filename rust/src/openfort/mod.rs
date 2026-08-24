@@ -31,7 +31,7 @@
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
-use crate::signature_util::EXPECTED_SIGNATURE_LENGTH;
+use crate::signature_util::{signature_from_hex, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
@@ -429,27 +429,8 @@ impl OpenfortSigner {
         let public_key = self.initialized_pubkey()?;
         let response = self.call_sign(message).await?;
 
-        // Signature is hex-encoded with a leading `0x`.
-        let sig_hex = response.signature.trim_start_matches("0x");
-        let sig_bytes = hex::decode(sig_hex).map_err(|_e| {
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Failed to hex-decode Openfort signature: {_e}");
-            SignerError::SerializationError("Failed to hex-decode Openfort signature".to_string())
-        })?;
-
-        let sig_array: [u8; EXPECTED_SIGNATURE_LENGTH] = sig_bytes.try_into().map_err(|_| {
-            SignerError::SigningFailed(format!(
-                "Invalid signature length from Openfort (expected {EXPECTED_SIGNATURE_LENGTH} bytes)"
-            ))
-        })?;
-
-        let signature = Signature::from(sig_array);
-
-        if !signature.verify(&public_key.to_bytes(), message) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        let signature = signature_from_hex(&response.signature)?;
+        verify_or_reject(&signature, &public_key, message)?;
 
         Ok(signature)
     }

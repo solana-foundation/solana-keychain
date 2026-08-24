@@ -1,4 +1,3 @@
-
 use super::SignerError;
 
 #[test]

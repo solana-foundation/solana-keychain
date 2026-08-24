@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::sdk_adapter::{keypair_pubkey, Keypair, Signer};
 use crate::test_util::create_test_transaction;
@@ -540,7 +539,10 @@ async fn test_para_sign_invalid_hex_chars() {
 
     let result = signer.sign_message(b"test").await;
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        SignerError::SerializationError(_)
+    ));
 }
 
 #[tokio::test]

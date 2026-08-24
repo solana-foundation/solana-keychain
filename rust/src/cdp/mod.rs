@@ -16,7 +16,7 @@ use std::str::FromStr;
 use self::jwt::{create_auth_jwt, create_wallet_jwt, extract_host};
 use self::types::{SignMessageResponse, SignTransactionResponse};
 
-use crate::signature_util::EXPECTED_SIGNATURE_LENGTH;
+use crate::signature_util::{signature_from_base58, verify_or_reject};
 
 const CDP_API_HOST: &str = "api.cdp.coinbase.com";
 const CDP_BASE_PATH: &str = "/platform/v2/solana/accounts";
@@ -320,27 +320,8 @@ impl CdpSigner {
         let response = self.call_sign_message(message_str).await?;
 
         // CDP returns a base58-encoded signature
-        let sig_bytes = bs58::decode(&response.signature).into_vec().map_err(|_e| {
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Failed to decode base58 signature: {_e}");
-            SignerError::SerializationError(
-                "Failed to decode base58 signature from CDP".to_string(),
-            )
-        })?;
-
-        let sig_array: [u8; EXPECTED_SIGNATURE_LENGTH] = sig_bytes.try_into().map_err(|_| {
-            SignerError::SigningFailed(format!(
-                "Invalid signature length from CDP (expected {EXPECTED_SIGNATURE_LENGTH} bytes)"
-            ))
-        })?;
-
-        let sig = Signature::from(sig_array);
-
-        if !sig.verify(&self.public_key.to_bytes(), message) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        let sig = signature_from_base58(&response.signature)?;
+        verify_or_reject(&sig, &self.public_key, message)?;
 
         Ok(sig)
     }
@@ -387,11 +368,7 @@ impl CdpSigner {
             )
         })?;
 
-        if !signature.verify(&self.public_key.to_bytes(), &message_data) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        verify_or_reject(&signature, &self.public_key, &message_data)?;
 
         TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
 

@@ -3,6 +3,7 @@
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
+use crate::signature_util::{signature_from_hex, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::TransactionUtil;
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
@@ -196,34 +197,10 @@ impl ParaSigner {
             SignerError::SigningFailed("Missing signature in response".to_string())
         })?;
 
-        let sig = Self::decode_hex_signature(&hex_sig)?;
-
-        if !sig.verify(&self.public_key.to_bytes(), data) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        let sig = signature_from_hex(&hex_sig)?;
+        verify_or_reject(&sig, &self.public_key, data)?;
 
         Ok(sig)
-    }
-
-    /// Decode a hex-encoded signature string into a 64-byte Signature
-    fn decode_hex_signature(hex_str: &str) -> Result<Signature, SignerError> {
-        let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
-
-        if hex_str.len() != 128 {
-            return Err(SignerError::SigningFailed(format!(
-                "Expected 128 hex chars (64 bytes), got {} chars",
-                hex_str.len()
-            )));
-        }
-
-        let bytes = hex::decode(hex_str).map_err(|e| {
-            SignerError::SigningFailed(format!("Failed to decode hex signature: {e}"))
-        })?;
-
-        Signature::try_from(bytes.as_slice())
-            .map_err(|_| SignerError::SigningFailed("Failed to parse signature".to_string()))
     }
 
     /// Check wallet availability with a timeout

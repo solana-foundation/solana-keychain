@@ -2,6 +2,7 @@
 
 use crate::error::SignerError;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
+use crate::signature_util::{signature_from_bytes, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
 use crate::transaction_util::TransactionUtil;
 use google_cloud_kms_v1::client::KeyManagementService;
@@ -106,34 +107,8 @@ impl GcpKmsSigner {
                 SignerError::RemoteApiError("GCP KMS Sign operation failed".to_string())
             })?;
 
-        // Extract signature from response
-        let signature_bytes = response.signature.as_ref();
-
-        if signature_bytes.is_empty() {
-            return Err(SignerError::SigningFailed(
-                "No signature in GCP KMS response".to_string(),
-            ));
-        }
-
-        // Ed25519 signatures are 64 bytes
-        if signature_bytes.len() != 64 {
-            return Err(SignerError::SigningFailed(format!(
-                "Invalid signature length: expected 64 bytes, got {}",
-                signature_bytes.len()
-            )));
-        }
-
-        let sig_bytes: [u8; 64] = signature_bytes.try_into().map_err(|_| {
-            SignerError::SigningFailed("Failed to convert signature bytes".to_string())
-        })?;
-
-        let sig = Signature::from(sig_bytes);
-
-        if !sig.verify(&self.public_key.to_bytes(), message) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        let sig = signature_from_bytes(response.signature.as_ref())?;
+        verify_or_reject(&sig, &self.public_key, message)?;
 
         Ok(sig)
     }

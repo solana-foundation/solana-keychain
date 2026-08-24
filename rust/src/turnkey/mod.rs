@@ -3,6 +3,7 @@
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
+use crate::signature_util::verify_or_reject;
 use crate::traits::SignTransactionResult;
 pub use crate::traits::SignedTransaction;
 use crate::transaction_util::{
@@ -183,30 +184,13 @@ impl TurnkeySigner {
                     ));
                 }
 
-                // Create properly padded 32-byte arrays
-                let mut final_r = [0u8; 32];
-                let mut final_s = [0u8; 32];
-
-                // Copy bytes with proper padding (right-aligned)
-                final_r[32 - r_bytes.len()..].copy_from_slice(&r_bytes);
-                final_s[32 - s_bytes.len()..].copy_from_slice(&s_bytes);
-
-                // Combine r and s into final 64-byte signature
-                let mut signature = Vec::with_capacity(64);
-                signature.extend_from_slice(&final_r);
-                signature.extend_from_slice(&final_s);
-
-                let sig_bytes: [u8; 64] = signature.try_into().map_err(|_| {
-                    SignerError::SigningFailed("Invalid signature length".to_string())
-                })?;
+                // Combine r and s into a 64-byte signature, left-padded (right-aligned)
+                let mut sig_bytes = [0u8; 64];
+                sig_bytes[32 - r_bytes.len()..32].copy_from_slice(&r_bytes);
+                sig_bytes[64 - s_bytes.len()..].copy_from_slice(&s_bytes);
 
                 let sig = Signature::from(sig_bytes);
-
-                if !sig.verify(&self.public_key.to_bytes(), message) {
-                    return Err(SignerError::SigningFailed(
-                        "Signature verification failed — the returned signature does not match the public key".to_string(),
-                    ));
-                }
+                verify_or_reject(&sig, &self.public_key, message)?;
 
                 return Ok(sig);
             }
@@ -269,14 +253,11 @@ impl TurnkeySigner {
             )
         })?;
 
-        if !signature.verify(
-            &self.public_key.to_bytes(),
+        verify_or_reject(
+            &signature,
+            &self.public_key,
             &transaction.message.serialize(),
-        ) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        )?;
 
         TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
 

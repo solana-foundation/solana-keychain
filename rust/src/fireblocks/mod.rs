@@ -17,26 +17,12 @@ use types::{
     TransactionResponse, TransactionSource, VaultAddress, VaultAddressesResponse,
 };
 
-use crate::signature_util::EXPECTED_SIGNATURE_LENGTH;
+use crate::signature_util::{signature_from_base58, signature_from_hex, verify_or_reject};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SigningMode {
     Raw,
     ProgramCall,
-}
-
-fn signature_from_base58(encoded: &str) -> Result<Signature, SignerError> {
-    let bytes = bs58::decode(encoded)
-        .into_vec()
-        .map_err(|_| SignerError::SigningFailed("Failed to decode base58 signature".to_string()))?;
-
-    let sig_array: [u8; EXPECTED_SIGNATURE_LENGTH] = bytes.try_into().map_err(|_| {
-        SignerError::SigningFailed(format!(
-            "Invalid signature length (expected {EXPECTED_SIGNATURE_LENGTH} bytes)"
-        ))
-    })?;
-
-    Ok(Signature::from(sig_array))
 }
 
 /// Fireblocks-based signer using Fireblocks' API
@@ -270,12 +256,7 @@ impl FireblocksSigner {
             .poll_for_completion(&create_response.id, SigningMode::Raw)
             .await?;
         let sig = self.signature_from_signed_messages(&tx_response)?;
-
-        if !sig.verify(&public_key.to_bytes(), message) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        verify_or_reject(&sig, &public_key, message)?;
 
         Ok(sig)
     }
@@ -480,26 +461,7 @@ impl FireblocksSigner {
         response: &TransactionResponse,
     ) -> Result<Signature, SignerError> {
         if let Some(signed_message) = response.signed_messages.first() {
-            let sig_hex = &signed_message.signature.full_sig;
-            let sig_bytes = hex::decode(sig_hex).map_err(|_e| {
-                #[cfg(feature = "unsafe-debug")]
-                log::error!("Failed to decode hex signature: {_e}");
-
-                #[cfg(not(feature = "unsafe-debug"))]
-                log::error!("Failed to decode hex signature");
-
-                SignerError::SerializationError("Failed to decode hex signature".to_string())
-            })?;
-
-            let sig_array: [u8; EXPECTED_SIGNATURE_LENGTH] =
-                sig_bytes.try_into().map_err(|_| {
-                    SignerError::SigningFailed(format!(
-                        "Invalid signature length (expected {} bytes)",
-                        EXPECTED_SIGNATURE_LENGTH
-                    ))
-                })?;
-
-            return Ok(Signature::from(sig_array));
+            return signature_from_hex(&signed_message.signature.full_sig);
         }
 
         Err(SignerError::SigningFailed(

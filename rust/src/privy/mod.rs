@@ -4,6 +4,7 @@ mod authorization;
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
+use crate::signature_util::{signature_from_base64, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use crate::transaction_util::{
     deserialize_wire_transaction, serialize_wire_transaction, TransactionUtil,
@@ -253,24 +254,8 @@ impl PrivySigner {
         let response_text = self.post_rpc(&request).await?;
         let sign_response: SignMessageResponse = serde_json::from_str(&response_text)?;
 
-        let decoded_response = STANDARD
-            .decode(&sign_response.data.signature)
-            .map_err(|_e| {
-                #[cfg(feature = "unsafe-debug")]
-                log::error!("Failed to decode Privy response signature: {_e}");
-                SignerError::SerializationError(
-                    "Failed to decode base64 signature from Privy".to_string(),
-                )
-            })?;
-
-        let sig = Signature::try_from(decoded_response.as_slice())
-            .map_err(|_| SignerError::SigningFailed("Failed to parse signature".to_string()))?;
-
-        if !sig.verify(&public_key.to_bytes(), serialized) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        let sig = signature_from_base64(&sign_response.data.signature)?;
+        verify_or_reject(&sig, &public_key, serialized)?;
 
         Ok(sig)
     }
@@ -318,11 +303,7 @@ impl PrivySigner {
             )
         })?;
 
-        if !signature.verify(&public_key.to_bytes(), &transaction.message.serialize()) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed — the returned signature does not match the public key".to_string(),
-            ));
-        }
+        verify_or_reject(&signature, &public_key, &transaction.message.serialize())?;
 
         TransactionUtil::add_signature_to_transaction(transaction, &public_key, signature)?;
 
