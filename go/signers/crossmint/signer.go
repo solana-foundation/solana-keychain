@@ -190,6 +190,10 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 // replaying these exact bytes cannot create a second transaction; a rebuilt
 // transaction derives a different key and executes as a new transfer.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
+	return s.executeManagedTransaction(ctx, tx)
+}
+
+func (s *Signer) executeManagedTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.publicKey.IsZero() {
 		return core.SignedTransaction{}, core.NewNotInitializedError("crossmint")
 	}
@@ -244,7 +248,7 @@ func (s *Signer) finishManagedTransaction(ctx context.Context, tx *solana.Transa
 
 // SignAndSendTransaction signs tx and lets Crossmint execute it.
 func (s *Signer) SignAndSendTransaction(ctx context.Context, tx *solana.Transaction) (solana.Signature, error) {
-	signed, err := s.SignTransaction(ctx, tx)
+	signed, err := s.executeManagedTransaction(ctx, tx)
 	if err != nil {
 		return solana.Signature{}, err
 	}
