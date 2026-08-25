@@ -80,7 +80,6 @@ export async function signUserAction(
     body: string,
     abortSignal?: AbortSignal,
 ): Promise<string> {
-    // Request a challenge
     const rawChallenge = await fetchSignerJson<unknown>({
         abortSignal,
         init: {
@@ -102,7 +101,6 @@ export async function signUserAction(
 
     const challenge = parseUserActionInitResponse(rawChallenge);
 
-    // Verify credential is allowed
     const allowed = challenge.allowCredentials.key.some(
         c => isObject(c) && typeof c.id === 'string' && c.id === credId,
     );
@@ -112,7 +110,6 @@ export async function signUserAction(
         });
     }
 
-    // Sign the challenge
     const clientData = new TextEncoder().encode(
         JSON.stringify({
             challenge: challenge.challenge,
@@ -123,7 +120,6 @@ export async function signUserAction(
     const clientDataB64 = base64UrlDecoder(clientData);
     const signatureB64 = base64UrlDecoder(await credentialKey.sign(clientData));
 
-    // Submit the signed challenge
     const rawActionResponse = await fetchSignerJson<unknown>({
         abortSignal,
         init: {

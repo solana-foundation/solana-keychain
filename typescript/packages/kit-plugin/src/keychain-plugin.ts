@@ -1,5 +1,5 @@
 import type { FordefiSignerConfig, KeychainSignerConfig } from '@solana/keychain';
-import { createKeychainSigner } from '@solana/keychain';
+import { assertIsSolanaSigner, createKeychainSigner, SignerErrorCode, throwSignerError } from '@solana/keychain';
 import { extendClient } from '@solana/kit';
 
 /**
@@ -15,6 +15,25 @@ import { extendClient } from '@solana/kit';
 export type KeychainKitPluginConfig =
     | Exclude<KeychainSignerConfig, { backend: 'crossmint' | 'fordefi' }>
     | (FordefiSignerConfig & { backend: 'fordefi'; chain?: undefined });
+
+/**
+ * The managed-broadcast exclusion above only protects TypeScript callers, so
+ * the config is also rejected at runtime — before `createKeychainSigner`
+ * runs, since the excluded backends authenticate against their provider
+ * during construction. The signer-shape assertion afterwards is the backstop
+ * for any future backend whose factory returns a sending signer.
+ */
+async function createPartialSigner(config: KeychainKitPluginConfig) {
+    const { backend } = config as KeychainSignerConfig;
+    if (backend === 'crossmint' || (backend === 'fordefi' && (config as { chain?: unknown }).chain !== undefined)) {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: `The '${backend}' backend broadcasts transactions server-side and cannot serve as a Kit client payer/identity. Create it with createKeychainSigner() and use signAndSendTransaction() instead.`,
+        });
+    }
+    const signer = await createKeychainSigner(config);
+    assertIsSolanaSigner(signer);
+    return signer;
+}
 
 /**
  * Creates a keychain signer from a backend-tagged configuration and sets it
@@ -45,7 +64,7 @@ export type KeychainKitPluginConfig =
  */
 export function keychainSigner(config: KeychainKitPluginConfig) {
     return async <TClient extends object>(client: TClient) => {
-        const signer = await createKeychainSigner(config);
+        const signer = await createPartialSigner(config);
         return extendClient(client, { identity: signer, payer: signer });
     };
 }
@@ -74,7 +93,7 @@ export function keychainSigner(config: KeychainKitPluginConfig) {
  */
 export function keychainPayer(config: KeychainKitPluginConfig) {
     return async <TClient extends object>(client: TClient) => {
-        const payer = await createKeychainSigner(config);
+        const payer = await createPartialSigner(config);
         return extendClient(client, { payer });
     };
 }
@@ -104,7 +123,7 @@ export function keychainPayer(config: KeychainKitPluginConfig) {
  */
 export function keychainIdentity(config: KeychainKitPluginConfig) {
     return async <TClient extends object>(client: TClient) => {
-        const identity = await createKeychainSigner(config);
+        const identity = await createPartialSigner(config);
         return extendClient(client, { identity });
     };
 }

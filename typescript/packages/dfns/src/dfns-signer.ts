@@ -4,6 +4,7 @@ import {
     assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
+    ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
     signBatchStaggered,
     SignerErrorCode,
@@ -445,8 +446,8 @@ function padSignatureComponent(hex: string): Uint8Array {
 function combineSignature(r: string, s: string): SignatureBytes {
     const rBytes = padSignatureComponent(r);
     const sBytes = padSignatureComponent(s);
-    const combined = new Uint8Array(64);
+    const combined = new Uint8Array(ED25519_SIGNATURE_LENGTH);
     combined.set(rBytes, 0);
-    combined.set(sBytes, 32);
+    combined.set(sBytes, ED25519_SIGNATURE_LENGTH / 2);
     return combined as SignatureBytes;
 }

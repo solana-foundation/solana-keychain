@@ -47,12 +47,14 @@
     },
     "peerDependencies": {
         "@solana/addresses": ">=8.0.0",
+        "@solana/codecs-strings": ">=8.0.0",
         "@solana/keys": ">=8.0.0",
         "@solana/signers": ">=8.0.0",
         "@solana/transactions": ">=8.0.0"
     },
     "devDependencies": {
         "@solana/addresses": "8.0.0",
+        "@solana/codecs-strings": "8.0.0",
         "@solana/keychain-test-utils": "workspace:*",
         "@solana/keys": "8.0.0",
         "@solana/signers": "8.0.0",

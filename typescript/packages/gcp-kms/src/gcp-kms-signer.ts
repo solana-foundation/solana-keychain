@@ -1,4 +1,5 @@
 import { Address, assertIsAddress } from '@solana/addresses';
+import { getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
     assertSignatureValid,
     createSignatureDictionary,
@@ -21,6 +22,9 @@ import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from
 import { GoogleAuth } from 'google-auth-library';
 
 import type { GcpKmsSignerConfig } from './types.js';
+
+let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
+let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
 
 /**
  * Create a Google Cloud KMS-backed signer.
@@ -156,12 +160,13 @@ class GcpKmsSigner<TAddress extends string = string> implements SolanaSigner<TAd
      * Sign message bytes using GCP KMS EdDSA signing
      */
     private async signBytes(messageBytes: Uint8Array, abortSignal?: AbortSignal): Promise<SignatureBytes> {
+        base64Decoder ||= getBase64Decoder();
         try {
             const response = await this.request<AsymmetricSignResponse>(
                 this.buildResourceUrl(':asymmetricSign'),
                 {
                     body: JSON.stringify({
-                        data: Buffer.from(messageBytes).toString('base64'),
+                        data: base64Decoder.decode(messageBytes),
                     }),
                     method: 'POST',
                 },
@@ -174,8 +179,8 @@ class GcpKmsSigner<TAddress extends string = string> implements SolanaSigner<TAd
                 });
             }
 
-            // Ed25519 signatures are 64 bytes
-            const signature = new Uint8Array(Buffer.from(response.signature, 'base64'));
+            base64Encoder ||= getBase64Encoder();
+            const signature = new Uint8Array(base64Encoder.encode(response.signature));
             if (signature.length !== ED25519_SIGNATURE_LENGTH) {
                 throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                     message: `Invalid signature length: expected ${ED25519_SIGNATURE_LENGTH} bytes, got ${signature.length}`,
@@ -184,7 +189,7 @@ class GcpKmsSigner<TAddress extends string = string> implements SolanaSigner<TAd
 
             return signature as SignatureBytes;
         } catch (error: unknown) {
-            // Re-throw SignerError as-is (from request())
+            abortSignal?.throwIfAborted();
             if (error instanceof Error && error.name === 'SignerError') {
                 throw error;
             }
@@ -235,7 +240,6 @@ class GcpKmsSigner<TAddress extends string = string> implements SolanaSigner<TAd
         return await signBatchStaggered(
             transactions,
             async transaction => {
-                // Sign the transaction message bytes
                 const txMessageBytes = new Uint8Array(transaction.messageBytes);
                 const signatureBytes = await this.signBytes(txMessageBytes, config?.abortSignal);
                 await assertSignatureValid({
@@ -266,7 +270,6 @@ class GcpKmsSigner<TAddress extends string = string> implements SolanaSigner<TAd
                 return false;
             }
 
-            // Verify the algorithm is EC_SIGN_ED25519
             return publicKey.algorithm === 'EC_SIGN_ED25519';
         } catch {
             return false;

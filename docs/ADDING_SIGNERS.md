@@ -555,6 +555,8 @@ CI is a two-phase process. Coordinate with maintainers to prepare `main` before 
 - [ ] Unit tests with vitest + mocks
 - [ ] Integration tests using `runSignerIntegrationTest` + `setup.ts`
 - [ ] Update umbrella package `typescript/packages/keychain/` (see [Umbrella Package](#umbrella-package) — 7 files)
+- [ ] Honor `config?.abortSignal` in every signing method (thread it into `fetchSignerJson` and `signBatchStaggered`)
+- [ ] Add your backend to the capability matrix in `typescript/README.md` ("Signer capabilities")
 - [ ] README with `createXSigner()` as primary usage
 - [ ] `.env.example` with required env vars
 - [ ] CI updates (`typescript-ci.yml`, `typescript-publish.yml`)
@@ -583,9 +585,11 @@ See [`typescript/packages/para/`](../typescript/packages/para/) for a complete r
 Every signer must implement `SolanaSigner<TAddress>` from `@solana/keychain-core`. The interface requires:
 
 - `readonly address: Address<TAddress>`
-- `signMessages(messages): Promise<readonly SignatureDictionary[]>`
-- `signTransactions(transactions): Promise<readonly SignatureDictionary[]>`
+- `signMessages(messages, config?): Promise<readonly SignatureDictionary[]>`
+- `signTransactions(transactions, config?): Promise<readonly SignatureDictionary[]>`
 - `isAvailable(): Promise<boolean>` — health check for the signing backend
+
+The `config` parameter is Kit's optional partial-signer config. Every signing method must honor `config?.abortSignal` — see the abort-support rule under [Key rules](#factory-function--class).
 
 #### Config Interface
 
@@ -691,6 +695,7 @@ class YourSigner<TAddress extends string = string> implements SolanaSigner<TAddr
   ```
   Validate provider-specific response shape (with optional chaining) after the call.
 - **Batch staggering**: support the `requestDelayMs` config field for rate-limited APIs. Validate it with `validateRequestDelayMs()` and implement `signMessages`/`signTransactions` with `signBatchStaggered()` from `@solana/keychain-core` (see any existing signer).
+- **Abort support**: thread `config?.abortSignal` from every signing method into `fetchSignerJson({ abortSignal, ... })` and `signBatchStaggered(items, fn, delayMs, config?.abortSignal)`. `fetchSignerJson` composes the signal with its timeout and rethrows the caller's abort reason unwrapped, so cancellation stays distinguishable from failure — never catch and rewrap it as a signer error.
 - **One-time crypto at construction**: import/validate static key material (PEM parsing, `importPKCS8`, point decompression) once in `create()`/`init()` and store the imported key — only genuinely request-bound work (e.g. minting a per-request JWT) belongs in the request path.
 - Add `cause` to catch blocks to preserve stack traces
 - Add `@throws` JSDoc to factory functions listing the error codes they can throw
@@ -715,6 +720,7 @@ Use vitest with mocked `fetch`. Test:
 - `isAvailable` success + failure
 - Network errors (`fetch` throws — `HTTP_ERROR` code)
 - `requestDelayMs` validation and behavior
+- Abort: an already-aborted `config.abortSignal` rejects with the abort reason (not a `SignerError`) without issuing a request
 
 Run your package's tests during development:
 
@@ -853,6 +859,7 @@ export { createYourSigner } from '@solana/keychain-your-signer';
 **h) Managed-broadcast (sending-signer) backends only** — if your backend rewrites the transaction message and/or broadcasts server-side, its signature cannot be applied to the caller's transaction, so it must be a `SolanaSendingSigner` (see `@solana/keychain-core`) instead of a `SolanaSigner`. That changes the checklist:
 
 - The signer class implements `signAndSendTransactions()` and exposes **no** `signTransactions` (nor `signMessages`, unless the backend genuinely signs messages) — Kit classifies signers by duck-typed method presence, so throwing methods are not enough. See Crossmint, or Fordefi's own-property pattern for a package serving both shapes.
+- `signAndSendTransactions(transactions, config?)` takes Kit's sending-signer config and must honor `config?.abortSignal` like every other signing method. A correctly shaped sending signer is picked up automatically by core's `signAndSendTransaction()` helper and reported by `signerCapabilities()` — no extra registration needed.
 - Add a typed `createKeychainSigner` overload in `keychain/src/create-keychain-signer.ts` returning your sending-signer type (Crossmint and Fordefi-native have precedents), in addition to the switch case.
 - Add your backend to the exclusions in `KeychainKitPluginConfig` (`typescript/packages/kit-plugin/src/keychain-plugin.ts`) — sending signers cannot serve as a Kit client `payer`/`identity` — and mention it in the kit-plugin README.
 - Assert the guard directions in unit tests: `isTransactionPartialSigner()` false and `isTransactionSendingSigner()` true for your instances.

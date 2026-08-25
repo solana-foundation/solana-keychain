@@ -1,5 +1,5 @@
 import { getBase16Decoder } from '@solana/codecs-strings';
-import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
+import { normalizePrivateKeyPem, SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 import { importPKCS8, SignJWT } from 'jose';
 
 let base16Decoder: ReturnType<typeof getBase16Decoder> | undefined;
@@ -18,7 +18,7 @@ const JWT_SKEW_LEEWAY_SECS = 60;
  */
 export async function importFireblocksPrivateKey(privateKeyPem: string): Promise<CryptoKey> {
     try {
-        return await importPKCS8(privateKeyPem, 'RS256');
+        return await importPKCS8(normalizePrivateKeyPem(privateKeyPem), 'RS256');
     } catch (error) {
         throwSignerError(SignerErrorCode.INVALID_PRIVATE_KEY, {
             cause: error,
@@ -38,10 +38,8 @@ export async function importFireblocksPrivateKey(privateKeyPem: string): Promise
  */
 export async function createJwt(apiKey: string, privateKey: CryptoKey, uri: string, body: string): Promise<string> {
     try {
-        // SHA256 hash of body
         const bodyHash = await sha256Hex(body);
 
-        // Generate nonce (UUID v4)
         const nonce = crypto.randomUUID();
 
         const now = Math.floor(Date.now() / 1000);

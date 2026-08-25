@@ -42,7 +42,6 @@ export async function runSignerIntegrationTest<T extends TestSigner>(
 ): Promise<void> {
     const opts = { ...DEFAULT_OPTIONS, ...options };
 
-    // Validate environment
     validateEnvironment(config.requiredEnvVars);
 
     // Minimal SVM: sysvars + builtins + sigverify + precompiles. No SPL programs (unused) — keeps startup small.
@@ -54,7 +53,6 @@ export async function runSignerIntegrationTest<T extends TestSigner>(
         .withSigverify(true)
         .withPrecompiles();
 
-    // Create signer
     const signer = await config.createSigner();
 
     if (opts.verbose) {
@@ -75,7 +73,6 @@ export async function runSignerIntegrationTest<T extends TestSigner>(
         signer,
     };
 
-    // Run test scenarios
     const scenarios = config.testScenarios ?? ALL_SCENARIOS;
 
     for (const scenario of scenarios) {
@@ -145,12 +142,10 @@ async function testSignTransaction<T extends TestSigner>(context: TestContext<T>
 
     const signedTransaction = await signTransactionMessageWithSigners(transaction);
 
-    // Verify transaction has signatures
     if (!signedTransaction.signatures || Object.keys(signedTransaction.signatures).length === 0) {
         throw new Error('Transaction was not signed - no signatures present');
     }
 
-    // Verify signer's signature is present
     if (!signedTransaction.signatures[signer.address]) {
         throw new Error(`Missing signature for signer address ${signer.address}`);
     }
@@ -270,7 +265,6 @@ async function testBadSignature<T extends TestSigner>(context: TestContext<T>): 
 
     const signedTransaction = await signTransactionMessageWithSigners(transaction);
 
-    // Replace with a known bad signature
     const badSignature: SignaturesMap = {
         [signer.address]: new Uint8Array([
             214, 77, 129, 89, 164, 235, 121, 219, 146, 31, 168, 106, 229, 87, 42, 167, 124, 94, 122, 181, 174, 123, 29,
