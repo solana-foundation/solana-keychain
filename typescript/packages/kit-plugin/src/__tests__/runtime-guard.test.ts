@@ -87,6 +87,16 @@ describe('runtime guard against managed-broadcast signers', () => {
         expect(createKeychainSigner).not.toHaveBeenCalled();
     });
 
+    it('keychainIdentity rejects a fordefi native manual-mode config before constructing the signer', async () => {
+        const { createKeychainSigner } = await import('@solana/keychain');
+        vi.mocked(createKeychainSigner).mockClear();
+
+        await expect(createClient().use(keychainIdentity(FORDEFI_MANUAL_CONFIG))).rejects.toMatchObject({
+            code: 'SIGNER_CONFIG_ERROR',
+        });
+        expect(createKeychainSigner).not.toHaveBeenCalled();
+    });
+
     it('lets a fordefi native manual-mode config through to the factory', async () => {
         const { createKeychainSigner } = await import('@solana/keychain');
         vi.mocked(createKeychainSigner).mockClear();

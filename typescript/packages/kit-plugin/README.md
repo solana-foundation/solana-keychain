@@ -33,7 +33,7 @@ Only the backend a configuration dispatches to is bundled — backend packages a
 
 ## Managed-broadcast backends are excluded
 
-Crossmint, and Fordefi in native mode (`chain` set), rewrite and broadcast transactions server-side. They are Kit `TransactionSendingSigner`s with no `signTransactions`, so they cannot serve as a client `payer` or `identity` — client send flows build, sign, and broadcast themselves, and Kit routes a sending signer only through `signAndSendTransactionMessageWithSigners()`. These plugins reject such configs at compile time (`KeychainKitPluginConfig`). Use the signer directly instead:
+Crossmint, and Fordefi in native *auto* mode (`chain` set, `pushMode` left at `auto`), rewrite and broadcast transactions server-side. They are Kit `TransactionSendingSigner`s with no `signTransactions`, so they cannot serve as a client `payer` or `identity` — client send flows build, sign, and broadcast themselves, and Kit routes a sending signer only through `signAndSendTransactionMessageWithSigners()`. These plugins reject such configs at compile time (`KeychainKitPluginConfig`). Use the signer directly instead:
 
 ```ts
 import { signAndSendTransactionMessageWithSigners } from '@solana/signers';
@@ -44,6 +44,12 @@ const signature = await signAndSendTransactionMessageWithSigners(transactionMess
 ```
 
 Fordefi in black-box mode (no `chain`) is a regular partial signer and remains supported.
+
+## Fordefi native manual mode is accepted
+
+Fordefi with `chain` set and `pushMode: 'manual'` rewrites the transaction (fresh blockhash, managed Compute Budget fee instructions) but leaves broadcasting to the caller, making it a Kit `TransactionModifyingSigner`. Kit runs modifying signers ahead of the partial signers in its normal signing pipeline, so `keychainSigner()` and `keychainPayer()` accept the config, and `client.payer` is then typed `SolanaModifyingSigner` instead of `SolanaSigner`.
+
+`keychainIdentity()` rejects it, at compile time and at runtime: manual mode requires the Fordefi vault to be the transaction fee payer, which an identity-only installation cannot guarantee.
 
 ## Plugin variants
 

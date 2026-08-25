@@ -35,7 +35,7 @@ import type {
 } from './types.js';
 
 /**
- * Crossmint signer shape.
+ * Create and initialize a Crossmint-backed signer.
  *
  * Crossmint rewrites transactions to sponsor gas, so the message it signs
  * generally differs from the caller's and its signatures cannot be applied to the
@@ -44,11 +44,9 @@ import type {
  * not support message signing for Solana wallets, and Kit classifies signers by
  * method presence.
  */
-export type CrossmintSendingSigner<TAddress extends string = string> = SolanaSendingSigner<TAddress>;
-
 export async function createCrossmintSigner<TAddress extends string = string>(
     config: CrossmintSignerConfig,
-): Promise<CrossmintSendingSigner<TAddress>> {
+): Promise<SolanaSendingSigner<TAddress>> {
     return await CrossmintSigner.create(config);
 }
 
@@ -81,7 +79,7 @@ let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
  * replaying these exact bytes cannot create a second transaction; a rebuilt
  * transaction derives a different key and executes as a new transfer.
  */
-class CrossmintSigner<TAddress extends string = string> implements CrossmintSendingSigner<TAddress> {
+class CrossmintSigner<TAddress extends string = string> implements SolanaSendingSigner<TAddress> {
     // No signTransactions/signMessages: Kit classifies signers by duck-typed
     // method presence, so a present-but-throwing method would make Kit
     // partial-sign transactions (or collect message signatures) and fail at

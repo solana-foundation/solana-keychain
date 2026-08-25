@@ -25,8 +25,26 @@ export interface FordefiBlackBoxSignatureRequest {
     vault_id: string;
 }
 
+/**
+ * Fee configuration for a native Solana transaction request, mapping onto the
+ * Compute Budget instructions Fordefi places in the message.
+ *
+ * The `custom` amounts are decimal integer strings because both are u64 values
+ * that a JSON number cannot represent exactly.
+ */
 export type FordefiSolanaFee =
-    | { priority_fee?: string; type: 'custom'; unit_price?: string }
+    | {
+          /**
+           * Total priority fee in lamports — the compute-unit price multiplied
+           * by the compute-unit limit, divided by 1e6 and rounded up. Bounds
+           * the fee Fordefi may introduce; excludes the 5000-lamport-per-
+           * signature base fee.
+           */
+          priority_fee?: string;
+          type: 'custom';
+          /** Compute-unit price in micro-lamports per compute unit (`SetComputeUnitPrice`). */
+          unit_price?: string;
+      }
     | { priority_level: 'high' | 'low' | 'medium'; type: 'priority' };
 
 /**

@@ -1,13 +1,8 @@
 import type { SolanaModifyingSigner, SolanaSendingSigner, SolanaSigner } from '@solana/keychain-core';
 import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
-import type { CrossmintSendingSigner, CrossmintSignerConfig } from '@solana/keychain-crossmint';
-import type {
-    FordefiManualSignerConfig,
-    FordefiNativeManualSigner,
-    FordefiNativeSigner,
-    FordefiSignerConfig,
-    SolanaChainUniqueId,
-} from '@solana/keychain-fordefi';
+import type { CrossmintSignerConfig } from '@solana/keychain-crossmint';
+import type { FordefiManualSignerConfig, FordefiSignerConfig, SolanaChainUniqueId } from '@solana/keychain-fordefi';
+import type { MessagePartialSigner } from '@solana/signers';
 
 import type { KeychainSignerConfig } from './types.js';
 
@@ -42,13 +37,13 @@ function stripBackend<T extends { backend: string }>({ backend: _, ...rest }: T)
  */
 export function createKeychainSigner(
     config: CrossmintSignerConfig & { backend: 'crossmint' },
-): Promise<CrossmintSendingSigner>;
+): Promise<SolanaSendingSigner>;
 export function createKeychainSigner(
     config: FordefiManualSignerConfig & { backend: 'fordefi' },
-): Promise<FordefiNativeManualSigner>;
+): Promise<MessagePartialSigner & SolanaModifyingSigner>;
 export function createKeychainSigner(
     config: FordefiSignerConfig & { backend: 'fordefi'; chain: SolanaChainUniqueId },
-): Promise<FordefiNativeSigner>;
+): Promise<MessagePartialSigner & SolanaSendingSigner>;
 export function createKeychainSigner(
     config:
         | Exclude<KeychainSignerConfig, { backend: 'crossmint' | 'fordefi' }>

@@ -16,7 +16,7 @@ The signer supports three modes determined by `chain` and `pushMode`:
 
 Set `chain` to use Fordefi's native Solana transaction type. Fordefi may modify the transaction (e.g. updating the blockhash or adding compute budget instructions) and broadcasts it on-chain automatically (`push_mode: 'auto'`). Use this with a **Solana vault**.
 
-> **Note:** Native mode is a Kit `TransactionSendingSigner` (`FordefiNativeSigner`, built on `SolanaSendingSigner` from `@solana/keychain-core`), because Fordefi may sign a different message than the one supplied by the caller and broadcasts it itself. Use `signAndSendTransactionMessageWithSigners()` or `signAndSendTransactions()`. Native instances expose **no** `signTransactions` — Kit classifies signers by method presence, so its absence is what routes the signer through Kit's sending flow — but message signing (`signMessages`) still works. Black-box instances are the mirror image: `signTransactions` and no `signAndSendTransactions`.
+> **Note:** Native mode is a Kit `TransactionSendingSigner` (`SolanaSendingSigner` from `@solana/keychain-core`, intersected with `MessagePartialSigner`), because Fordefi may sign a different message than the one supplied by the caller and broadcasts it itself. Use `signAndSendTransactionMessageWithSigners()` or `signAndSendTransactions()`. Native instances expose **no** `signTransactions` — Kit classifies signers by method presence, so its absence is what routes the signer through Kit's sending flow — but message signing (`signMessages`) still works. Black-box instances are the mirror image: `signTransactions` and no `signAndSendTransactions`.
 
 ```typescript
 import { createFordefiSigner } from '@solana/keychain-fordefi';
@@ -38,7 +38,7 @@ Native auto-broadcast currently supports transactions whose only required signer
 
 ### Native manual mode
 
-Set `chain` and `pushMode: 'manual'` to let Fordefi replace the recent blockhash and manage `SetComputeUnitPrice`/`SetComputeUnitLimit`, then sign the transaction while leaving broadcasting to the caller. Every other message field is validated exactly. Custom unit prices must match and custom priority fees cap the effective returned fee. This returns a Kit `TransactionModifyingSigner` (`FordefiNativeManualSigner`) with `modifyAndSignTransactions()` and no `signTransactions()` or `signAndSendTransactions()`.
+Set `chain` and `pushMode: 'manual'` to let Fordefi replace the recent blockhash and manage `SetComputeUnitPrice`/`SetComputeUnitLimit`, then sign the transaction while leaving broadcasting to the caller. Every other message field is validated exactly. Custom unit prices must match and custom priority fees cap the effective returned fee. This returns a Kit `TransactionModifyingSigner` (`SolanaModifyingSigner` from `@solana/keychain-core`, intersected with `MessagePartialSigner`) with `modifyAndSignTransactions()` and no `signTransactions()` or `signAndSendTransactions()`.
 
 A priority fee Fordefi introduces on its own initiative is capped at `DEFAULT_MAX_PRIORITY_FEE_LAMPORTS` (0.1 SOL), so a compromised or malfunctioning response cannot drain the fee payer. Set `maxPriorityFeeLamports` to raise or lower that ceiling; a custom `priority_fee` governs instead when set. The ceiling never applies to a compute-unit price the caller placed in the transaction themselves, since those requests are validated byte-for-byte.
 
