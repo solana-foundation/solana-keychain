@@ -321,6 +321,21 @@ pub trait SolanaSigner: Send + Sync {
 }
 ```
 
+### Signer capabilities
+
+Backends differ in whether the provider broadcasts the transaction and in whether
+they can sign arbitrary bytes. `broadcasts_transactions()` reports the first at
+runtime; the second is fixed per backend:
+
+| Backend | `broadcasts_transactions()` | `sign_transaction` | `sign_message` |
+|---------|-----------------------------|--------------------|----------------|
+| memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | `false` | yes | yes |
+| cdp | `false` | yes | UTF-8 payloads only, otherwise `SerializationError` |
+| crossmint | `true` | provider broadcasts | `SigningFailed` |
+| utila | `false` | yes | `SigningFailed` |
+| fordefi (black-box mode) | `false` | yes | yes |
+| fordefi (native mode) | `true` | provider broadcasts | yes |
+
 ### Sign and Send
 
 `sign_and_send` gets a transaction on chain with one call. Signers that report

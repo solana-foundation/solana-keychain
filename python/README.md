@@ -135,6 +135,21 @@ Errors are always `SignerError` with a stable `code`
 (`SIGNER_INVALID_PRIVATE_KEY`, `SIGNER_SIGNING_FAILED`, …).
 `str()`/`repr()` of a `SignerError` never include key material or raw remote responses.
 
+### Signer capabilities
+
+Backends differ in whether the provider broadcasts the transaction and in whether
+they can sign arbitrary bytes. `broadcasts_transactions` reports the first at
+runtime; the second is fixed per backend:
+
+| Backend | `broadcasts_transactions` | `sign_transaction` | `sign_message` |
+|---------|---------------------------|--------------------|----------------|
+| memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | False | yes | yes |
+| cdp | False | yes | UTF-8 payloads only, otherwise `SERIALIZATION_ERROR` |
+| crossmint | True | provider broadcasts | `SIGNING_FAILED` |
+| utila | False | yes | `SIGNING_FAILED` |
+| fordefi (black-box mode) | False | yes | yes |
+| fordefi (native mode) | True | provider broadcasts | yes |
+
 ### Sign and Send
 
 `sign_and_send_transaction` gets a transaction on chain with one call. Signers
