@@ -648,12 +648,7 @@ class CrossmintSigner(SolanaSigner):
         )
 
     async def sign_and_send_transaction(self, transaction: VersionedTransaction) -> Signature:
-        """Sign ``transaction`` and let Crossmint execute it.
-
-        Crossmint decides per request whether to rewrite and broadcast the
-        transaction or to sign the caller's exact bytes; ``sign_transaction``
-        exposes that distinction through an empty ``encoded_transaction``.
-        """
+        """Sign ``transaction`` and let Crossmint execute it."""
         signed = await self.sign_transaction(transaction)
         return signed.signature
 

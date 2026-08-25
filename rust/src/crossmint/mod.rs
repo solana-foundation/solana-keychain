@@ -846,9 +846,6 @@ impl SolanaSigner for CrossmintSigner {
         true
     }
 
-    /// Crossmint decides per request whether to rewrite and broadcast the
-    /// transaction or to sign the caller's exact bytes, so both shapes stay
-    /// reachable: an empty encoded transaction means Crossmint broadcast it.
     async fn sign_transaction(
         &self,
         tx: &mut VersionedTransaction,

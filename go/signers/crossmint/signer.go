@@ -242,10 +242,7 @@ func (s *Signer) finishManagedTransaction(ctx context.Context, tx *solana.Transa
 	return core.AttachSignature(tx, s.publicKey, sig)
 }
 
-// SignAndSendTransaction signs tx and lets Crossmint execute it. Crossmint
-// decides per request whether to rewrite and broadcast the transaction or to
-// sign the caller's exact bytes; SignTransaction exposes that distinction
-// through an empty EncodedTransaction.
+// SignAndSendTransaction signs tx and lets Crossmint execute it.
 func (s *Signer) SignAndSendTransaction(ctx context.Context, tx *solana.Transaction) (solana.Signature, error) {
 	signed, err := s.SignTransaction(ctx, tx)
 	if err != nil {
