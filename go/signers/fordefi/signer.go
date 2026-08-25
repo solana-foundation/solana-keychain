@@ -24,9 +24,10 @@ const (
 // Two signing modes are supported, selected by Config.Chain:
 //   - Black box (default, Chain empty): signs the caller's exact message bytes
 //     via black_box_signature; the caller broadcasts the signed transaction.
+//     See SignTransaction.
 //   - Native Solana (Chain set): submits solana_transaction requests with
-//     push_mode "auto" — Fordefi may replace the blockhash and fees, signs,
-//     and broadcasts the transaction itself. See SignTransaction.
+//     push_mode "auto"; Fordefi may replace the blockhash and fees, signs,
+//     and broadcasts the transaction itself. See SignAndSendTransaction.
 type Signer struct {
 	accessToken     string
 	vaultID         string

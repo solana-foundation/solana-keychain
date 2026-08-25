@@ -249,7 +249,7 @@ mod tests {
 
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
-    async fn test_fordefi_native_sign_transaction() {
+    async fn test_fordefi_native_sign_and_send_transaction() {
         let signer = get_native_signer().await;
         let from = signer.pubkey();
 
@@ -281,18 +281,12 @@ mod tests {
         message.recent_blockhash = blockhash;
         let mut transaction: VersionedTransaction = Transaction::new_unsigned(message).into();
 
-        let (serialized_tx, signature) = signer
-            .sign_transaction(&mut transaction)
+        let signature = signer
+            .sign_and_send_transaction(&mut transaction)
             .await
-            .expect("Failed to sign transaction with Fordefi native mode")
-            .into_signed_transaction();
+            .expect("Failed to sign and send transaction with Fordefi native mode");
 
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
-        // Native mode auto-broadcasts via Fordefi, so no re-sendable wire tx is returned.
-        assert!(
-            serialized_tx.is_empty(),
-            "native mode should return an empty serialized transaction"
-        );
 
         // Fordefi already pushed the transaction; its signature is the Solana txid.
         // Confirm that on-chain rather than re-broadcasting.
