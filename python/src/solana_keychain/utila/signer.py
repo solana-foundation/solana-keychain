@@ -1,6 +1,5 @@
 """Utila API signer integration."""
 
-import asyncio
 import base64
 import time
 from dataclasses import dataclass, field
@@ -23,8 +22,19 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
+from solana_keychain.core.poll import poll_attempts
+from solana_keychain.core.signature_util import verify_returned_signature
+from solana_keychain.core.signer import (
+    SignedTransaction,
+    SolanaSigner,
+    require_initialized,
+)
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
@@ -37,7 +47,6 @@ API_AUDIENCE = "https://api.utila.io/"
 TOKEN_TTL_SECONDS = 55 * 60
 DEFAULT_POLL_INTERVAL_MS = 1000
 DEFAULT_MAX_POLL_ATTEMPTS = 60
-AVAILABILITY_TIMEOUT_SECONDS = 5.0
 
 _TERMINAL_FAILURE_STATES = frozenset(
     {
@@ -210,12 +219,7 @@ class UtilaSigner(SolanaSigner):
             ) from None
 
     def _initialized_pubkey(self) -> Pubkey:
-        if self._public_key is None:
-            raise SignerError(
-                SignerErrorCode.NOT_INITIALIZED,
-                "UtilaSigner is not initialized; call init() before signing",
-            )
-        return self._public_key
+        return require_initialized(self._public_key, "UtilaSigner")
 
     @property
     def pubkey(self) -> Pubkey:
@@ -267,7 +271,10 @@ class UtilaSigner(SolanaSigner):
         return transaction_id
 
     async def _poll_signed_transaction(self, transaction: dict[str, Any]) -> dict[str, Any]:
-        for _ in range(self._max_poll_attempts):
+        async for attempt in poll_attempts(self._max_poll_attempts, self._poll_interval_ms):
+            if attempt:
+                transaction_id = self._extract_transaction_id(str(transaction.get("name", "")))
+                transaction = await self._get_transaction(transaction_id)
             state = transaction.get("state")
             if state == "SIGNED":
                 return transaction
@@ -276,18 +283,6 @@ class UtilaSigner(SolanaSigner):
                     SignerErrorCode.SIGNING_FAILED,
                     f"Utila transaction reached terminal state {state}",
                 )
-            await asyncio.sleep(self._poll_interval_ms / 1000)
-            transaction_id = self._extract_transaction_id(str(transaction.get("name", "")))
-            transaction = await self._get_transaction(transaction_id)
-
-        state = transaction.get("state")
-        if state == "SIGNED":
-            return transaction
-        if state in _TERMINAL_FAILURE_STATES:
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                f"Utila transaction reached terminal state {state}",
-            )
         raise SignerError(
             SignerErrorCode.REMOTE_API_ERROR,
             f"Utila transaction polling timed out after {self._max_poll_attempts} attempts",
@@ -345,12 +340,7 @@ class UtilaSigner(SolanaSigner):
                 "Utila rawTransaction did not contain a signer signature",
             )
         signature = signatures[position]
-        if not signature.verify(public_key, expected_message):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed for Utila rawTransaction",
-            )
-        return signature
+        return verify_returned_signature(signature, public_key, expected_message)
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         public_key = self._initialized_pubkey()
@@ -385,11 +375,11 @@ class UtilaSigner(SolanaSigner):
         )
 
     async def is_available(self) -> bool:
-        try:
-            await asyncio.wait_for(self._fetch_wallet(), AVAILABILITY_TIMEOUT_SECONDS)
-        except (SignerError, asyncio.TimeoutError):
-            return False
-        return True
+        async def probe() -> bool:
+            await self._fetch_wallet()
+            return True
+
+        return await probe_availability(probe)
 
 
 async def create_utila_signer(config: UtilaSignerConfig) -> UtilaSigner:

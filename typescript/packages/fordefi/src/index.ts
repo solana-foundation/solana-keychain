@@ -1,4 +1,4 @@
-export { DEFAULT_MAX_PRIORITY_FEE_LAMPORTS, FordefiSigner, createFordefiSigner } from './fordefi-signer.js';
+export { DEFAULT_MAX_PRIORITY_FEE_LAMPORTS, createFordefiSigner } from './fordefi-signer.js';
 export type {
     FordefiManualSignerConfig,
     FordefiNativeManualSigner,

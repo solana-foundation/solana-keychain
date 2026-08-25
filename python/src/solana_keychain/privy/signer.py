@@ -11,8 +11,18 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
+from solana_keychain.core.signature_util import verify_returned_signature
+from solana_keychain.core.signer import (
+    SignedTransaction,
+    SolanaSigner,
+    require_initialized,
+)
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
@@ -73,12 +83,7 @@ class PrivySigner(SolanaSigner):
         self._public_key = await self._fetch_public_key()
 
     def _initialized_pubkey(self) -> Pubkey:
-        if self._public_key is None:
-            raise SignerError(
-                SignerErrorCode.NOT_INITIALIZED,
-                "PrivySigner is not initialized; call init() before signing",
-            )
-        return self._public_key
+        return require_initialized(self._public_key, "PrivySigner")
 
     @property
     def pubkey(self) -> Pubkey:
@@ -163,13 +168,7 @@ class PrivySigner(SolanaSigner):
             signature = Signature.from_bytes(signature_bytes)
         except Exception:
             raise SignerError(SignerErrorCode.SIGNING_FAILED, "Failed to parse signature") from None
-        if not signature.verify(public_key, message):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
-        return signature
+        return verify_returned_signature(signature, public_key, message)
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         """Sign via Privy's ``signTransaction`` RPC, submitting the full wire
@@ -208,12 +207,7 @@ class PrivySigner(SolanaSigner):
                 "Privy signature slot missing from returned transaction",
             )
         signature = signatures[position]
-        if not signature.verify(public_key, signed_message_bytes(transaction.message)):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
+        verify_returned_signature(signature, public_key, signed_message_bytes(transaction.message))
         add_signature_to_transaction(transaction, public_key, signature)
         return classify_signed_transaction(
             transaction, serialize_transaction(transaction), signature
@@ -225,10 +219,11 @@ class PrivySigner(SolanaSigner):
     async def is_available(self) -> bool:
         if self._public_key is None:
             return False
-        try:
+
+        async def probe() -> bool:
             return await self._fetch_public_key() == self._public_key
-        except SignerError:
-            return False
+
+        return await probe_availability(probe)
 
 
 async def create_privy_signer(config: PrivySignerConfig) -> PrivySigner:

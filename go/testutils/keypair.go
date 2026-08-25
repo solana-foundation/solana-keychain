@@ -24,22 +24,30 @@ func TestPrivateKey() ed25519.PrivateKey {
 
 // TestPublicKey returns the Solana public key corresponding to TestPrivateKey.
 func TestPublicKey() solana.PublicKey {
-	return pubkeyFromPriv(TestPrivateKey())
+	return PubkeyOf(TestPrivateKey())
 }
 
-// pubkeyFromPriv extracts the Solana public key from an Ed25519 private key.
-func pubkeyFromPriv(priv ed25519.PrivateKey) solana.PublicKey {
+// PubkeyOf extracts the Solana public key from an Ed25519 private key.
+func PubkeyOf(priv ed25519.PrivateKey) solana.PublicKey {
 	var pub solana.PublicKey
 	copy(pub[:], priv.Public().(ed25519.PublicKey))
 	return pub
 }
 
-// deriveKey returns a deterministic public key from a single seed byte (used for
-// fixed, throwaway addresses like a transfer recipient).
-func deriveKey(seedByte byte) solana.PublicKey {
+// SignWith signs message with priv and returns the Solana signature.
+func SignWith(priv ed25519.PrivateKey, message []byte) solana.Signature {
+	var sig solana.Signature
+	copy(sig[:], ed25519.Sign(priv, message))
+	return sig
+}
+
+// KeyFromSeed returns a deterministic throwaway Ed25519 keypair derived from a
+// single repeated seed byte (used for fixed addresses and mismatch cases).
+func KeyFromSeed(seedByte byte) (ed25519.PrivateKey, solana.PublicKey) {
 	var seed [ed25519.SeedSize]byte
 	for i := range seed {
 		seed[i] = seedByte
 	}
-	return pubkeyFromPriv(ed25519.NewKeyFromSeed(seed[:]))
+	priv := ed25519.NewKeyFromSeed(seed[:])
+	return priv, PubkeyOf(priv)
 }

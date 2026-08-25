@@ -65,7 +65,7 @@ console.log('CDP API available:', available);
 
 ### `createCdpSigner(config)`
 
-Creates and initializes a new CdpSigner instance.
+Creates and initializes a new CDP signer.
 
 **Config options:**
 
@@ -76,7 +76,7 @@ Creates and initializes a new CdpSigner instance.
 - `baseUrl` (string, optional): Custom API base URL (defaults to `https://api.cdp.coinbase.com`)
 - `requestDelayMs` (number, optional): Delay in ms between concurrent signing requests to avoid rate limits (default: 0)
 
-**Returns:** `Promise<CdpSigner>`
+**Returns:** `Promise<SolanaSigner>`
 
 ### Methods
 

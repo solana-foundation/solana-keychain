@@ -11,7 +11,12 @@ import {
     validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
-import { SignableMessage, SignatureDictionary } from '@solana/signers';
+import {
+    MessagePartialSignerConfig,
+    SignableMessage,
+    SignatureDictionary,
+    TransactionPartialSignerConfig,
+} from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
 import { GoogleAuth } from 'google-auth-library';
 
@@ -55,23 +60,19 @@ export function createGcpKmsSigner<TAddress extends string = string>(
  *   --purpose=asymmetric-signing \
  *   --default-algorithm=ec-sign-ed25519
  * ```
- *
- * @deprecated Prefer `createGcpKmsSigner()`. Class export will be removed in a future version.
  */
-export class GcpKmsSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class GcpKmsSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly keyName: string;
     private readonly keyNamePathSegments: readonly string[];
     private readonly auth: GoogleAuth;
     private readonly requestDelayMs: number;
 
-    /** @deprecated Use `createGcpKmsSigner()` instead. */
     static create<TAddress extends string = string>(config: GcpKmsSignerConfig): GcpKmsSigner<TAddress> {
         return new GcpKmsSigner<TAddress>(config);
     }
 
-    /** @deprecated Use `createGcpKmsSigner()` instead. Direct construction will be removed in a future version. */
-    constructor(config: GcpKmsSignerConfig) {
+    private constructor(config: GcpKmsSignerConfig) {
         if (!config.keyName) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
                 message: 'Missing required keyName field',
@@ -141,9 +142,10 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
         return headers;
     }
 
-    private async request<TResponse>(url: string, init: RequestInit): Promise<TResponse> {
+    private async request<TResponse>(url: string, init: RequestInit, abortSignal?: AbortSignal): Promise<TResponse> {
         const headers = await this.buildAuthorizedHeaders(url, init);
         return await fetchSignerJson<TResponse>({
+            abortSignal,
             init: { ...init, headers },
             providerName: 'GCP KMS',
             url,
@@ -153,14 +155,18 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
     /**
      * Sign message bytes using GCP KMS EdDSA signing
      */
-    private async signBytes(messageBytes: Uint8Array): Promise<SignatureBytes> {
+    private async signBytes(messageBytes: Uint8Array, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         try {
-            const response = await this.request<AsymmetricSignResponse>(this.buildResourceUrl(':asymmetricSign'), {
-                body: JSON.stringify({
-                    data: Buffer.from(messageBytes).toString('base64'),
-                }),
-                method: 'POST',
-            });
+            const response = await this.request<AsymmetricSignResponse>(
+                this.buildResourceUrl(':asymmetricSign'),
+                {
+                    body: JSON.stringify({
+                        data: Buffer.from(messageBytes).toString('base64'),
+                    }),
+                    method: 'POST',
+                },
+                abortSignal,
+            );
 
             if (!response.signature) {
                 throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
@@ -192,7 +198,10 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
     /**
      * Sign multiple messages using GCP KMS
      */
-    async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+    async signMessages(
+        messages: readonly SignableMessage[],
+        config?: MessagePartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             messages,
             async message => {
@@ -200,7 +209,7 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
                     message.content instanceof Uint8Array
                         ? message.content
                         : new Uint8Array(Array.from(message.content));
-                const signatureBytes = await this.signBytes(messageBytes);
+                const signatureBytes = await this.signBytes(messageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: messageBytes,
                     signature: signatureBytes,
@@ -212,6 +221,7 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -220,13 +230,14 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
      */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        config?: TransactionPartialSignerConfig,
     ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             transactions,
             async transaction => {
                 // Sign the transaction message bytes
                 const txMessageBytes = new Uint8Array(transaction.messageBytes);
-                const signatureBytes = await this.signBytes(txMessageBytes);
+                const signatureBytes = await this.signBytes(txMessageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: txMessageBytes,
                     signature: signatureBytes,
@@ -238,6 +249,7 @@ export class GcpKmsSigner<TAddress extends string = string> implements SolanaSig
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 

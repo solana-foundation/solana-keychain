@@ -5,12 +5,8 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
-	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/gagliardetto/solana-go"
 
@@ -18,9 +14,10 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://api.openfort.io"
-	accountsPath   = "/v2/accounts"
-	backendPath    = "/v2/accounts/backend"
+	// DefaultAPIBaseURL is the production Openfort API endpoint.
+	DefaultAPIBaseURL = "https://api.openfort.io"
+	accountsPath      = "/v2/accounts"
+	backendPath       = "/v2/accounts/backend"
 )
 
 // Signer signs Solana transactions and messages with an Openfort backend
@@ -54,34 +51,23 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, core.NewSignerError(core.CodeConfigError, "wallet_secret must not be empty")
 	}
 
-	baseURL := cfg.APIBaseURL
-	if baseURL == "" {
-		baseURL = defaultBaseURL
+	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
-	baseURL = strings.TrimRight(baseURL, "/")
-	parsed, err := url.Parse(baseURL)
-	if err != nil || parsed.Scheme == "" {
-		return nil, core.NewSignerError(core.CodeConfigError, "invalid openfort base URL: "+baseURL)
-	}
-	if parsed.Host == "" {
-		return nil, core.NewSignerError(core.CodeConfigError, "missing host in openfort base URL: "+baseURL)
+	apiHost, err := core.HostFromURL(baseURL)
+	if err != nil {
+		return nil, err
 	}
 
-	if parsed.Scheme != "https" {
-		return nil, core.NewSignerError(core.CodeConfigError, "openfort base URL must use HTTPS")
-	}
-
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 
 	s := &Signer{
 		secretKey:    cfg.SecretKey,
 		accountID:    cfg.AccountID,
 		walletSecret: cfg.WalletSecret,
 		baseURL:      baseURL,
-		apiHost:      parsed.Host,
+		apiHost:      apiHost,
 		client:       client,
 	}
 	pubkey, err := s.fetchPublicKey(ctx)
@@ -113,28 +99,15 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 // inserts the signature at this signer's required-signer position, and returns
 // the encoded transaction and its completeness.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
-	msg, err := tx.Message.MarshalBinary()
-	if err != nil {
-		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction message", err)
-	}
-	sig, err := s.signBytes(ctx, msg)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	if err := core.AddSignature(tx, s.pubkey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.SignTransactionWith(ctx, tx, s.pubkey, s.signBytes)
 }
 
 // IsAvailable re-fetches the account and reports whether its address still
 // matches the one resolved during New. All errors are swallowed and reported
 // as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	pubkey, err := s.fetchPublicKey(ctx)
 	return err == nil && pubkey == s.pubkey
 }
@@ -170,7 +143,7 @@ func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 // JWT's reqHash is computed over.
 func (s *Signer) callSign(ctx context.Context, message []byte) (signResponse, error) {
 	path := backendPath + "/" + s.accountID + "/sign"
-	body, err := marshalCanonical(map[string]any{"data": "0x" + hex.EncodeToString(message)})
+	body, err := core.MarshalCanonicalJSON(map[string]any{"data": "0x" + hex.EncodeToString(message)})
 	if err != nil {
 		return signResponse{}, err
 	}
@@ -207,20 +180,13 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 		return solana.Signature{}, err
 	}
 
-	sigBytes, err := hex.DecodeString(strings.TrimPrefix(resp.Signature, "0x"))
+	sig, err := core.DecodeSignatureHex(resp.Signature, "openfort")
 	if err != nil {
-		return solana.Signature{}, core.NewSignerError(core.CodeSerializationError, "failed to hex-decode openfort signature")
+		return solana.Signature{}, err
 	}
-	if len(sigBytes) != core.SignatureLength {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"invalid signature length from openfort (expected "+strconv.Itoa(core.SignatureLength)+" bytes)")
-	}
-	var sig solana.Signature
-	copy(sig[:], sigBytes)
 
-	if !core.VerifyEd25519(s.pubkey, message, sig) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed - the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
+		return solana.Signature{}, err
 	}
 	return sig, nil
 }
@@ -230,24 +196,12 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 // CodeRemoteAPIError with only the status code (the remote body is never
 // included).
 func (s *Signer) do(req *http.Request) ([]byte, error) {
-	resp, err := s.client.Do(req)
+	status, body, err := core.SendRequest(s.client, req, "openfort")
 	if err != nil {
-		// Preserve SignerError codes raised inside the transport (e.g. the
-		// HTTPS-only guard's CodeConfigError).
-		var se *core.SignerError
-		if errors.As(err, &se) {
-			return nil, se
-		}
-		return nil, core.WrapSignerError(core.CodeHTTPError, "openfort HTTP request failed", err)
+		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, core.WrapSignerError(core.CodeHTTPError, "failed to read openfort response", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, core.NewSignerError(core.CodeRemoteAPIError, "openfort API error "+strconv.Itoa(resp.StatusCode))
+	if !core.IsSuccess(status) {
+		return nil, core.NewSignerError(core.CodeRemoteAPIError, "openfort API error "+strconv.Itoa(status))
 	}
 	return body, nil
 }

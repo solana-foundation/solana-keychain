@@ -4,9 +4,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"encoding/hex"
-	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gagliardetto/solana-go"
@@ -40,29 +38,20 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, err
 	}
 
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 
 	assetID := cfg.AssetID
 	if assetID == "" {
 		assetID = DefaultAssetID
 	}
-	apiBaseURL := cfg.APIBaseURL
-	if apiBaseURL == "" {
-		apiBaseURL = DefaultAPIBaseURL
+	apiBaseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
-	if !strings.HasPrefix(apiBaseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "fireblocks api_base_url must use HTTPS")
-	}
-	pollInterval := cfg.PollInterval
-	if pollInterval <= 0 {
-		pollInterval = DefaultPollInterval
-	}
-	maxPollAttempts := cfg.MaxPollAttempts
-	if maxPollAttempts <= 0 {
-		maxPollAttempts = DefaultMaxPollAttempts
+	pollInterval, maxPollAttempts, err := core.ResolvePollBounds(
+		cfg.PollInterval, DefaultPollInterval, cfg.MaxPollAttempts, DefaultMaxPollAttempts)
+	if err != nil {
+		return nil, err
 	}
 
 	s := &Signer{
@@ -123,21 +112,16 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}
-	if err := core.AddSignature(tx, s.pubkey, signature); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, signature), nil
+	return core.AttachSignature(tx, s.pubkey, signature)
 }
 
 // IsAvailable reports whether the Fireblocks vault account is reachable
 // (GET /v1/vault/accounts/{id}). All errors are swallowed and reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	status, _, err := s.doRequest(ctx, http.MethodGet, "/v1/vault/accounts/"+s.vaultAccountID, "")
-	return err == nil && is2xx(status)
+	return err == nil && core.IsSuccess(status)
 }
 
 // signRawBytes signs message with a Fireblocks RAW operation: the message bytes
@@ -161,9 +145,8 @@ func (s *Signer) signRawBytes(ctx context.Context, message []byte) (solana.Signa
 		return solana.Signature{}, err
 	}
 
-	if !core.VerifyEd25519(s.pubkey, message, sig) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed - the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
+		return solana.Signature{}, err
 	}
 	return sig, nil
 }
@@ -224,15 +207,7 @@ func (s *Signer) requestAndPollSignature(ctx context.Context, request createTran
 // carries no signedMessages for a sign-only PROGRAM_CALL.
 func extractSignature(response transactionResponse, allowTxHashCarrier bool) (solana.Signature, error) {
 	if len(response.SignedMessages) > 0 {
-		sigBytes, err := hex.DecodeString(response.SignedMessages[0].Signature.FullSig)
-		if err != nil {
-			return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode hex signature", err)
-		}
-		if len(sigBytes) != core.SignatureLength {
-			return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-				fmt.Sprintf("invalid signature length (expected %d bytes)", core.SignatureLength))
-		}
-		return solana.SignatureFromBytes(sigBytes), nil
+		return core.DecodeSignatureHex(response.SignedMessages[0].Signature.FullSig, "fireblocks")
 	}
 
 	if allowTxHashCarrier && response.TxHash != "" {

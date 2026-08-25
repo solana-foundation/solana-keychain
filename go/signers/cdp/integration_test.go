@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"os"
 	"testing"
 
 	"github.com/gagliardetto/solana-go"
@@ -21,24 +20,15 @@ import (
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	s, err := New(Config{
-		APIKeyID:     requireEnv(t, "CDP_API_KEY_ID"),
-		APIKeySecret: requireEnv(t, "CDP_API_KEY_SECRET"),
-		WalletSecret: requireEnv(t, "CDP_WALLET_SECRET"),
-		Address:      requireEnv(t, "CDP_SOLANA_ADDRESS"),
+		APIKeyID:     testutils.RequireEnv(t, "CDP_API_KEY_ID"),
+		APIKeySecret: testutils.RequireEnv(t, "CDP_API_KEY_SECRET"),
+		WalletSecret: testutils.RequireEnv(t, "CDP_WALLET_SECRET"),
+		Address:      testutils.RequireEnv(t, "CDP_SOLANA_ADDRESS"),
 	})
 	if err != nil {
 		t.Fatalf("failed to create cdp signer: %v", err)
 	}
 	return s
-}
-
-func requireEnv(t *testing.T, key string) string {
-	t.Helper()
-	v := os.Getenv(key)
-	if v == "" {
-		t.Fatalf("%s must be set for integration tests", key)
-	}
-	return v
 }
 
 // CDP's signMessage endpoint only accepts UTF-8 payloads, so this signs a

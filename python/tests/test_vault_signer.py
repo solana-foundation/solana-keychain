@@ -25,10 +25,10 @@ SIGN_URL = f"{VAULT_ADDR}/v1/transit/sign/{KEY_NAME}"
 KEYS_URL = f"{VAULT_ADDR}/v1/transit/keys/{KEY_NAME}"
 
 
-def make_signer(pubkey: str = TEST_PUBKEY) -> VaultSigner:
+def make_signer(public_key: str = TEST_PUBKEY) -> VaultSigner:
     return VaultSigner(
         VaultSignerConfig(
-            vault_addr=VAULT_ADDR, token=VAULT_TOKEN, key_name=KEY_NAME, pubkey=pubkey
+            api_base_url=VAULT_ADDR, token=VAULT_TOKEN, key_name=KEY_NAME, public_key=public_key
         )
     )
 
@@ -42,7 +42,7 @@ def mock_sign_response(signature_b64: str, prefix: str = "vault:v1:") -> None:
 async def test_create_vault_signer_factory() -> None:
     signer = await create_vault_signer(
         VaultSignerConfig(
-            vault_addr=VAULT_ADDR, token=VAULT_TOKEN, key_name=KEY_NAME, pubkey=TEST_PUBKEY
+            api_base_url=VAULT_ADDR, token=VAULT_TOKEN, key_name=KEY_NAME, public_key=TEST_PUBKEY
         )
     )
     assert str(signer.pubkey) == TEST_PUBKEY
@@ -50,18 +50,18 @@ async def test_create_vault_signer_factory() -> None:
 
 def test_invalid_pubkey_rejected() -> None:
     with pytest.raises(SignerError) as excinfo:
-        make_signer(pubkey="invalid-pubkey")
+        make_signer(public_key="invalid-pubkey")
     assert excinfo.value.code == SignerErrorCode.INVALID_PUBLIC_KEY
 
 
-def test_non_https_vault_addr_rejected() -> None:
+def test_non_https_api_base_url_rejected() -> None:
     with pytest.raises(SignerError) as excinfo:
         VaultSigner(
             VaultSignerConfig(
-                vault_addr="http://vault.example.com",
+                api_base_url="http://vault.example.com",
                 token=VAULT_TOKEN,
                 key_name=KEY_NAME,
-                pubkey=TEST_PUBKEY,
+                public_key=TEST_PUBKEY,
             )
         )
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
@@ -75,7 +75,7 @@ def test_repr_shows_pubkey_and_never_token() -> None:
 
 def test_config_repr_never_contains_token() -> None:
     config = VaultSignerConfig(
-        vault_addr=VAULT_ADDR, token=VAULT_TOKEN, key_name=KEY_NAME, pubkey=TEST_PUBKEY
+        api_base_url=VAULT_ADDR, token=VAULT_TOKEN, key_name=KEY_NAME, public_key=TEST_PUBKEY
     )
     assert VAULT_TOKEN not in repr(config)
 
@@ -101,7 +101,7 @@ async def test_sign_message_success() -> None:
     signature = keypair.sign_message(message)
     mock_sign_response(base64.b64encode(bytes(signature)).decode("ascii"))
 
-    signer = make_signer(pubkey=str(keypair.pubkey()))
+    signer = make_signer(public_key=str(keypair.pubkey()))
     result = await signer.sign_message(message)
 
     assert result == signature
@@ -118,7 +118,7 @@ async def test_sign_message_signature_verification_failure() -> None:
     signature = signing_keypair.sign_message(message)
     mock_sign_response(base64.b64encode(bytes(signature)).decode("ascii"))
 
-    signer = make_signer(pubkey=str(other_keypair.pubkey()))
+    signer = make_signer(public_key=str(other_keypair.pubkey()))
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_message(message)
     assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
@@ -157,7 +157,7 @@ async def test_sign_transaction_success() -> None:
     signature = keypair.sign_message(signed_message_bytes(transaction.message))
     mock_sign_response(base64.b64encode(bytes(signature)).decode("ascii"), prefix="vault:v2:")
 
-    signer = make_signer(pubkey=str(keypair.pubkey()))
+    signer = make_signer(public_key=str(keypair.pubkey()))
     result = await signer.sign_transaction(transaction)
 
     assert result.is_complete

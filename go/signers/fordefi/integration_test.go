@@ -23,10 +23,10 @@ import (
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	s, err := New(context.Background(), Config{
-		AccessToken:   requireEnv(t, "FORDEFI_ACCESS_TOKEN"),
-		VaultID:       requireEnv(t, "FORDEFI_BB_VAULT_ID"),
-		PublicKey:     requireEnv(t, "FORDEFI_BB_PUBLIC_KEY"),
-		PrivateKeyPEM: requireEnv(t, "FORDEFI_PRIVATE_KEY_PEM"),
+		AccessToken:   testutils.RequireEnv(t, "FORDEFI_ACCESS_TOKEN"),
+		VaultID:       testutils.RequireEnv(t, "FORDEFI_BB_VAULT_ID"),
+		PublicKey:     testutils.RequireEnv(t, "FORDEFI_BB_PUBLIC_KEY"),
+		PrivateKeyPEM: testutils.RequireEnv(t, "FORDEFI_PRIVATE_KEY_PEM"),
 		APIBaseURL:    os.Getenv("FORDEFI_API_BASE_URL"),
 	})
 	if err != nil {
@@ -74,15 +74,6 @@ func integrationNativeManualSigner(t *testing.T) *Signer {
 		t.Fatalf("failed to create native-manual fordefi signer: %v", err)
 	}
 	return s
-}
-
-func requireEnv(t *testing.T, key string) string {
-	t.Helper()
-	v := os.Getenv(key)
-	if v == "" {
-		t.Fatalf("%s must be set for integration tests", key)
-	}
-	return v
 }
 
 func TestIntegrationSignMessage(t *testing.T) {

@@ -43,7 +43,6 @@ import {
     type FordefiManualSignerConfig,
     type FordefiNativeManualSigner,
     type FordefiNativeSigner,
-    FordefiSigner,
     type FordefiSignerConfig,
 } from '../fordefi-signer.js';
 
@@ -274,7 +273,7 @@ function mockVaultResponse(address: string = MOCK_ADDRESS) {
 }
 
 /**
- * Queue the vault-verification fetch that `FordefiSigner.create()` performs.
+ * Queue the vault-verification fetch that `createFordefiSigner()` performs.
  * Must be called before any additional `mockResolvedValueOnce` chains because
  * mocks are consumed FIFO.
  */
@@ -282,21 +281,21 @@ function setupCreateVaultMock(address: string = MOCK_ADDRESS) {
     vi.mocked(fetch).mockResolvedValueOnce(mockVaultResponse(address));
 }
 
-describe('FordefiSigner', () => {
+describe('createFordefiSigner', () => {
     beforeEach(() => {
         vi.resetAllMocks();
     });
 
-    describe('create', () => {
+    describe('basic construction', () => {
         it('should create a signer with valid config', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             expect(signer.address).toBe(MOCK_ADDRESS);
         });
 
         it('should satisfy the SolanaSigner interface', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             expect(() => assertIsSolanaSigner(signer)).not.toThrow();
         });
 
@@ -319,7 +318,7 @@ describe('FordefiSigner', () => {
 
         it('should reject manual push mode without a chain before any network call', async () => {
             await expect(
-                FordefiSigner.create({
+                createFordefiSigner({
                     ...mockConfig,
                     pushMode: 'manual',
                 } as unknown as FordefiManualSignerConfig),
@@ -334,7 +333,7 @@ describe('FordefiSigner', () => {
             'should reject the unrecognized pushMode %o before any network call',
             async pushMode => {
                 await expect(
-                    FordefiSigner.create({
+                    createFordefiSigner({
                         ...nativeManualConfig,
                         pushMode,
                     } as unknown as FordefiManualSignerConfig),
@@ -347,7 +346,7 @@ describe('FordefiSigner', () => {
             vi.mocked(fetch).mockResolvedValueOnce(
                 new Response(JSON.stringify({ address: MOCK_ADDRESS }), { status: 200 }),
             );
-            const signer = await FordefiSigner.create({
+            const signer = await createFordefiSigner({
                 ...nativeConfig,
                 pushMode: 'auto',
             });
@@ -374,7 +373,7 @@ describe('FordefiSigner', () => {
                     { status: 200 },
                 ),
             );
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             expect(signer.address).toBe(MOCK_ADDRESS);
         });
 
@@ -388,7 +387,7 @@ describe('FordefiSigner', () => {
                     { status: 200 },
                 ),
             );
-            await expect(FordefiSigner.create(mockConfig)).rejects.toMatchObject({
+            await expect(createFordefiSigner(mockConfig)).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
             });
         });
@@ -397,7 +396,7 @@ describe('FordefiSigner', () => {
             vi.mocked(fetch).mockResolvedValueOnce(
                 new Response(JSON.stringify({ id: 'test-vault-id' }), { status: 200 }),
             );
-            await expect(FordefiSigner.create(mockConfig)).rejects.toMatchObject({
+            await expect(createFordefiSigner(mockConfig)).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
             });
         });
@@ -406,46 +405,46 @@ describe('FordefiSigner', () => {
             vi.mocked(fetch).mockResolvedValueOnce(
                 new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 }),
             );
-            await expect(FordefiSigner.create(mockConfig)).rejects.toMatchObject({
+            await expect(createFordefiSigner(mockConfig)).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
             });
         });
 
         it('should reject when vault fetch network-errors', async () => {
             vi.mocked(fetch).mockRejectedValueOnce(new Error('Network down'));
-            await expect(FordefiSigner.create(mockConfig)).rejects.toMatchObject({
+            await expect(createFordefiSigner(mockConfig)).rejects.toMatchObject({
                 code: 'SIGNER_HTTP_ERROR',
             });
         });
 
         it('should throw on empty accessToken', async () => {
-            await expect(FordefiSigner.create({ ...mockConfig, accessToken: '' })).rejects.toThrow();
+            await expect(createFordefiSigner({ ...mockConfig, accessToken: '' })).rejects.toThrow();
         });
 
         it('should throw on empty vaultId', async () => {
-            await expect(FordefiSigner.create({ ...mockConfig, vaultId: '' })).rejects.toThrow();
+            await expect(createFordefiSigner({ ...mockConfig, vaultId: '' })).rejects.toThrow();
         });
 
         it('should throw on empty publicKey', async () => {
-            await expect(FordefiSigner.create({ ...mockConfig, publicKey: '' })).rejects.toThrow();
+            await expect(createFordefiSigner({ ...mockConfig, publicKey: '' })).rejects.toThrow();
         });
 
         it('should throw on HTTP apiBaseUrl', async () => {
-            await expect(FordefiSigner.create({ ...mockConfig, apiBaseUrl: 'http://insecure.com' })).rejects.toThrow();
+            await expect(createFordefiSigner({ ...mockConfig, apiBaseUrl: 'http://insecure.com' })).rejects.toThrow();
         });
 
         it('should throw on invalid PEM', async () => {
-            await expect(FordefiSigner.create({ ...mockConfig, privateKeyPem: 'not-a-pem' })).rejects.toThrow();
+            await expect(createFordefiSigner({ ...mockConfig, privateKeyPem: 'not-a-pem' })).rejects.toThrow();
         });
 
         it('should throw on invalid publicKey format', async () => {
-            await expect(FordefiSigner.create({ ...mockConfig, publicKey: 'not-a-pubkey' })).rejects.toThrow();
+            await expect(createFordefiSigner({ ...mockConfig, publicKey: 'not-a-pubkey' })).rejects.toThrow();
         });
 
         it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
             'should reject invalid maxPollAttempts %s before any network call',
             async maxPollAttempts => {
-                await expect(FordefiSigner.create({ ...mockConfig, maxPollAttempts })).rejects.toMatchObject({
+                await expect(createFordefiSigner({ ...mockConfig, maxPollAttempts })).rejects.toMatchObject({
                     code: 'SIGNER_CONFIG_ERROR',
                 });
                 expect(fetch).not.toHaveBeenCalled();
@@ -455,7 +454,7 @@ describe('FordefiSigner', () => {
         it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
             'should reject invalid pollIntervalMs %s before any network call',
             async pollIntervalMs => {
-                await expect(FordefiSigner.create({ ...mockConfig, pollIntervalMs })).rejects.toMatchObject({
+                await expect(createFordefiSigner({ ...mockConfig, pollIntervalMs })).rejects.toMatchObject({
                     code: 'SIGNER_CONFIG_ERROR',
                 });
                 expect(fetch).not.toHaveBeenCalled();
@@ -479,7 +478,7 @@ describe('FordefiSigner', () => {
                         ),
                     );
 
-                const signer = await FordefiSigner.create(config);
+                const signer = await createFordefiSigner(config);
                 const [result] = await signer.modifyAndSignTransactions([transaction]);
 
                 expect(result?.messageBytes).toStrictEqual(fixture.messageBytes);
@@ -504,7 +503,7 @@ describe('FordefiSigner', () => {
 
         it('exposes only the modifying transaction method', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(nativeManualConfig);
+            const signer = await createFordefiSigner(nativeManualConfig);
             const guardInput = signer as unknown as { [key: string]: unknown; address: typeof signer.address };
 
             expect(isTransactionModifyingSigner(guardInput)).toBe(true);
@@ -522,7 +521,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('msg-manual'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64));
 
-            const signer = await FordefiSigner.create(nativeManualConfig);
+            const signer = await createFordefiSigner(nativeManualConfig);
             await signer.signMessages([{ content: new Uint8Array(32), signatures: {} }]);
 
             const postOpts = vi.mocked(fetch).mock.calls[1]![1] as RequestInit;
@@ -549,7 +548,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-id'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await signer.modifyAndSignTransactions([transaction]);
 
             const postOpts = vi.mocked(fetch).mock.calls[1]![1] as RequestInit;
@@ -572,7 +571,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-new-lifetime'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             const [result] = await signer.modifyAndSignTransactions([originalWithDifferentLifetime]);
 
             expect(result?.messageBytes).toStrictEqual(fixture.messageBytes);
@@ -593,7 +592,7 @@ describe('FordefiSigner', () => {
                     mockPollResponse('signed', MOCK_SIGNATURE_BASE64, alteredWireBytes.toString('base64')),
                 );
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
             });
@@ -619,7 +618,7 @@ describe('FordefiSigner', () => {
                     .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
                     .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-fee-ceiling'))
                     .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
-                const signer = await FordefiSigner.create({ ...config, ...configOverrides });
+                const signer = await createFordefiSigner({ ...config, ...configOverrides });
                 return signer.modifyAndSignTransactions([transaction]);
             }
 
@@ -693,7 +692,7 @@ describe('FordefiSigner', () => {
                     .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
                     .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-caller-price'))
                     .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, original.wireTransaction));
-                const signer = await FordefiSigner.create(config);
+                const signer = await createFordefiSigner(config);
                 await expect(signer.modifyAndSignTransactions([input])).resolves.toHaveLength(1);
             });
         });
@@ -714,7 +713,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-fee-insertion'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             const [result] = await signer.modifyAndSignTransactions([input]);
 
             expect(result?.messageBytes).toStrictEqual(returned.messageBytes);
@@ -735,7 +734,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-limit-adjustment'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, adjusted.wireTransaction));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await expect(signer.modifyAndSignTransactions([input])).resolves.toHaveLength(1);
 
             vi.mocked(fetch)
@@ -757,7 +756,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-changed-price'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await expect(
                 signer.modifyAndSignTransactions([
                     { ...transaction, messageBytes: original.messageBytes } as unknown as Transaction &
@@ -784,7 +783,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-v1-config'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returnedWire));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
             });
@@ -805,7 +804,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse(`tx-manual-${name}`))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
             });
@@ -822,7 +821,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-duplicate-fee'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
             });
@@ -838,7 +837,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-durable-nonce-lifetime'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returnedWire));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await expect(
                 signer.modifyAndSignTransactions([
                     { ...transaction, messageBytes: original.messageBytes } as unknown as Transaction &
@@ -857,7 +856,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-custom-fee'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
-            const matchingSigner = await FordefiSigner.create({
+            const matchingSigner = await createFordefiSigner({
                 ...config,
                 fee: { priority_fee: '2', type: 'custom', unit_price: '10' },
             });
@@ -867,7 +866,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-capped-fee'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
-            const cappedSigner = await FordefiSigner.create({
+            const cappedSigner = await createFordefiSigner({
                 ...config,
                 fee: { priority_fee: '1', type: 'custom' },
             });
@@ -879,7 +878,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-conflicting-existing-price'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
-            const conflictingSigner = await FordefiSigner.create({
+            const conflictingSigner = await createFordefiSigner({
                 ...config,
                 fee: { type: 'custom', unit_price: '11' },
             });
@@ -910,7 +909,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-cosign'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, manualWire));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             const [result] = await signer.modifyAndSignTransactions([transaction]);
 
             expect(result?.signatures[fixture.feePayer]).toStrictEqual(MOCK_SIGNATURE_BYTES);
@@ -926,7 +925,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-2'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
 
-            const signer = await FordefiSigner.create({ ...config, requestDelayMs: 1 });
+            const signer = await createFordefiSigner({ ...config, requestDelayMs: 1 });
             const results = await signer.modifyAndSignTransactions([transaction, transaction]);
 
             expect(results).toHaveLength(2);
@@ -936,7 +935,7 @@ describe('FordefiSigner', () => {
         it('rejects pre-signed input before submitting remote work', async () => {
             const { config, fixture, transaction } = await setupNativeManual(0);
             setupCreateVaultMock(fixture.feePayer);
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             const preSigned = {
                 ...transaction,
                 signatures: { [fixture.feePayer]: fixture.signature },
@@ -950,7 +949,7 @@ describe('FordefiSigner', () => {
 
         it('rejects a non-Fordefi fee payer before submitting remote work', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(nativeManualConfig);
+            const signer = await createFordefiSigner(nativeManualConfig);
             const transaction = {
                 messageBytes: new Uint8Array(32),
                 signatures: { '22222222222222222222222222222222': null, [MOCK_ADDRESS]: null },
@@ -965,7 +964,7 @@ describe('FordefiSigner', () => {
         it('honors an already-aborted signal without submitting remote work', async () => {
             const { config, fixture, transaction } = await setupNativeManual(0);
             setupCreateVaultMock(fixture.feePayer);
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             const controller = new AbortController();
             controller.abort();
 
@@ -978,20 +977,21 @@ describe('FordefiSigner', () => {
         it('aborts an in-flight manual submission', async () => {
             const { config, fixture, transaction } = await setupNativeManual(0);
             const controller = new AbortController();
+            const reason = new Error('stop manual signing');
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
                 .mockImplementationOnce((_input, init) => {
                     const signal = init?.signal as AbortSignal;
                     return new Promise<Response>((_resolve, reject) => {
                         signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-                        controller.abort(new Error('stop manual signing'));
+                        controller.abort(reason);
                     });
                 });
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await expect(
                 signer.modifyAndSignTransactions([transaction], { abortSignal: controller.signal }),
-            ).rejects.toMatchObject({ code: 'SIGNER_HTTP_ERROR' });
+            ).rejects.toBe(reason);
             expect(fetch).toHaveBeenCalledTimes(2);
         });
 
@@ -1002,7 +1002,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-fail'))
                 .mockResolvedValueOnce(mockPollResponse('error_signing'));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
             });
@@ -1016,7 +1016,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockPollResponse('pending_signature'))
                 .mockResolvedValueOnce(mockPollResponse('pending_signature'));
 
-            const signer = await FordefiSigner.create({
+            const signer = await createFordefiSigner({
                 ...config,
                 maxPollAttempts: 2,
                 pollIntervalMs: 1,
@@ -1034,7 +1034,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
             vi.mocked(assertSignatureValid).mockRejectedValueOnce(new Error('invalid signature'));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await expect(signer.modifyAndSignTransactions([transaction])).rejects.toThrow('invalid signature');
         });
 
@@ -1045,7 +1045,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-fee'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
 
-            const signer = await FordefiSigner.create({
+            const signer = await createFordefiSigner({
                 ...config,
                 fee: { priority_fee: '1000', type: 'custom' },
             });
@@ -1062,7 +1062,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-no-raw'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64));
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
             });
@@ -1094,7 +1094,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-no-vault-sig'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
             });
@@ -1111,7 +1111,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-oversized'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, oversizedWire));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
             });
@@ -1130,7 +1130,7 @@ describe('FordefiSigner', () => {
 
         it('should create a signer without privateKeyPem when requestSigner is provided', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(customConfig);
+            const signer = await createFordefiSigner(customConfig);
             expect(signer.address).toBe(MOCK_ADDRESS);
         });
 
@@ -1140,7 +1140,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse())
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64));
 
-            const signer = await FordefiSigner.create(customConfig);
+            const signer = await createFordefiSigner(customConfig);
             const mockTx = { messageBytes: new Uint8Array(32) } as never;
             await signer.signTransactions([mockTx]);
 
@@ -1154,7 +1154,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse())
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64));
 
-            const signer = await FordefiSigner.create({
+            const signer = await createFordefiSigner({
                 ...customConfig,
                 requestSigner: { signRequest: async () => 'async-sig-value' },
             });
@@ -1166,13 +1166,13 @@ describe('FordefiSigner', () => {
         });
 
         it('should reject when neither privateKeyPem nor requestSigner is provided', async () => {
-            await expect(FordefiSigner.create({ ...customConfig, requestSigner: undefined })).rejects.toMatchObject({
+            await expect(createFordefiSigner({ ...customConfig, requestSigner: undefined })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
             });
         });
 
         it('should reject when both privateKeyPem and requestSigner are provided', async () => {
-            await expect(FordefiSigner.create({ ...customConfig, privateKeyPem: TEST_PEM })).rejects.toMatchObject({
+            await expect(createFordefiSigner({ ...customConfig, privateKeyPem: TEST_PEM })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
             });
         });
@@ -1185,7 +1185,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse())
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64));
 
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             const mockTx = { messageBytes: new Uint8Array(32) } as never;
 
             const results = await signer.signTransactions([mockTx]);
@@ -1217,7 +1217,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse())
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64));
 
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             const mockTx = { messageBytes: new Uint8Array(32).fill(0x11) } as never;
 
             const results = await signer.signTransactions([mockTx]);
@@ -1232,7 +1232,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse())
                 .mockResolvedValueOnce(mockPollResponse('error_signing'));
 
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             const mockTx = { messageBytes: new Uint8Array(32) } as never;
 
             await expect(signer.signTransactions([mockTx])).rejects.toThrow();
@@ -1240,7 +1240,7 @@ describe('FordefiSigner', () => {
 
         it('should timeout after max poll attempts', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create({
+            const signer = await createFordefiSigner({
                 ...mockConfig,
                 maxPollAttempts: 2,
                 pollIntervalMs: 1,
@@ -1256,7 +1256,7 @@ describe('FordefiSigner', () => {
 
         it('should handle submit API error', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             vi.mocked(fetch).mockResolvedValueOnce(
                 new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 }),
             );
@@ -1269,7 +1269,7 @@ describe('FordefiSigner', () => {
         // Black-box mode only signs, so a failed submit has no on-chain outcome to be unconfirmed about.
         it('does not report a 5xx on a black-box submit as unconfirmed', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ message: 'boom' }), { status: 502 }));
 
             const mockTx = { messageBytes: new Uint8Array(32) } as never;
@@ -1284,7 +1284,7 @@ describe('FordefiSigner', () => {
 
         it('should handle completed state without signatures', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockCreateTxResponse())
                 .mockResolvedValueOnce(mockPollResponse('completed')); // no signatures
@@ -1302,7 +1302,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('msg-1'))
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64));
 
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             const results = await signer.signMessages([{ content: new Uint8Array(32), signatures: {} }]);
             expect(results).toHaveLength(1);
 
@@ -1325,7 +1325,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('msg-2'))
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64));
 
-            const signer = await FordefiSigner.create({ ...mockConfig, requestDelayMs: 1 });
+            const signer = await createFordefiSigner({ ...mockConfig, requestDelayMs: 1 });
             const results = await signer.signMessages([
                 { content: new Uint8Array(32), signatures: {} },
                 { content: new Uint8Array(32), signatures: {} },
@@ -1336,7 +1336,7 @@ describe('FordefiSigner', () => {
 
         it('should throw when completed state has no signatures', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockCreateTxResponse('msg-empty'))
                 .mockResolvedValueOnce(mockPollResponse('completed'));
@@ -1346,7 +1346,7 @@ describe('FordefiSigner', () => {
 
         it('should throw on failed state', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockCreateTxResponse('msg-fail'))
                 .mockResolvedValueOnce(mockPollResponse('aborted'));
@@ -1356,7 +1356,7 @@ describe('FordefiSigner', () => {
 
         it('should throw on submit API error', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             vi.mocked(fetch).mockResolvedValueOnce(
                 new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 }),
             );
@@ -1366,7 +1366,7 @@ describe('FordefiSigner', () => {
 
         it('should throw on signature with wrong byte length', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             const shortSig = Buffer.from(new Uint8Array(32).fill(0xab)).toString('base64');
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockCreateTxResponse('msg-short'))
@@ -1388,7 +1388,7 @@ describe('FordefiSigner', () => {
                         mockPollResponse('completed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction),
                     );
 
-                const signer = await FordefiSigner.create(config);
+                const signer = await createFordefiSigner(config);
                 expect(
                     isTransactionSendingSigner(
                         signer as unknown as { [key: string]: unknown; address: typeof signer.address },
@@ -1437,7 +1437,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-native'))
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             const mockTx = { messageBytes, signatures: { [fixture.feePayer]: null } } as never;
             await signer.signAndSendTransactions([mockTx]);
 
@@ -1447,12 +1447,12 @@ describe('FordefiSigner', () => {
 
         it('does not expose the partial-signer method in native mode', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(nativeConfig);
+            const signer = await createFordefiSigner(nativeConfig);
             const guardInput = signer as unknown as { [key: string]: unknown; address: typeof signer.address };
 
             // Kit classifies by method presence: a present-but-throwing
             // signTransactions would make Kit partial-sign and fail at runtime.
-            expect(signer.signTransactions).toBeUndefined();
+            expect((signer as unknown as Record<string, unknown>).signTransactions).toBeUndefined();
             expect('signTransactions' in signer).toBe(false);
             expect(isTransactionPartialSigner(guardInput)).toBe(false);
             expect(isTransactionSendingSigner(guardInput)).toBe(true);
@@ -1462,7 +1462,7 @@ describe('FordefiSigner', () => {
 
         it('should reject native multi-signer auto-broadcast before submitting remote work', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(nativeConfig);
+            const signer = await createFordefiSigner(nativeConfig);
             const mockTx = {
                 messageBytes: new Uint8Array(32),
                 signatures: {
@@ -1479,7 +1479,7 @@ describe('FordefiSigner', () => {
 
         it('should not expose TransactionSendingSigner in black box mode', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             const guardInput = signer as unknown as { [key: string]: unknown; address: typeof signer.address };
 
             expect('signAndSendTransactions' in signer).toBe(false);
@@ -1498,7 +1498,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockPollResponse('confirming'))
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
 
-            const signer = await FordefiSigner.create({ ...config, pollIntervalMs: 1 });
+            const signer = await createFordefiSigner({ ...config, pollIntervalMs: 1 });
             const mockTx = {
                 messageBytes: new Uint8Array(32),
                 signatures: { [fixture.feePayer]: null },
@@ -1522,7 +1522,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-unsigned-payer'))
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
 
-            const signer = await FordefiSigner.create(config);
+            const signer = await createFordefiSigner(config);
             const mockTx = {
                 messageBytes: new Uint8Array(32),
                 signatures: { [fixture.cosigner]: null },
@@ -1544,7 +1544,7 @@ describe('FordefiSigner', () => {
 
         it('reports a 5xx on submit as unconfirmed with no transaction id', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(nativeConfig);
+            const signer = await createFordefiSigner(nativeConfig);
             vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ message: 'boom' }), { status: 502 }));
 
             const mockTx = {
@@ -1564,7 +1564,7 @@ describe('FordefiSigner', () => {
 
         it('reports an accepted submit with no id as unconfirmed', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(nativeConfig);
+            const signer = await createFordefiSigner(nativeConfig);
             vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ state: 'pending' }), { status: 200 }));
 
             const mockTx = {
@@ -1584,7 +1584,7 @@ describe('FordefiSigner', () => {
 
         it('keeps a 4xx on submit a plain failure', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(nativeConfig);
+            const signer = await createFordefiSigner(nativeConfig);
             vi.mocked(fetch).mockResolvedValueOnce(
                 new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 }),
             );
@@ -1608,7 +1608,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-no-raw'))
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64));
 
-            const signer = await FordefiSigner.create(nativeConfig);
+            const signer = await createFordefiSigner(nativeConfig);
             const mockTx = {
                 messageBytes: new Uint8Array(32),
                 signatures: { [MOCK_ADDRESS]: null },
@@ -1626,7 +1626,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-fail'))
                 .mockResolvedValueOnce(mockPollResponse('mined_reverted'));
 
-            const signer = await FordefiSigner.create(nativeConfig);
+            const signer = await createFordefiSigner(nativeConfig);
             const mockTx = {
                 messageBytes: new Uint8Array(32),
                 signatures: { [MOCK_ADDRESS]: null },
@@ -1657,7 +1657,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse())
                 .mockResolvedValueOnce(mockPollResponse(state));
 
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             const mockTx = { messageBytes: new Uint8Array(32) } as never;
             await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
@@ -1672,7 +1672,7 @@ describe('FordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('msg-native'))
                 .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64));
 
-            const signer = await FordefiSigner.create(nativeConfig);
+            const signer = await createFordefiSigner(nativeConfig);
             const results = await signer.signMessages([{ content: new Uint8Array(32), signatures: {} }]);
             expect(results).toHaveLength(1);
 
@@ -1688,7 +1688,7 @@ describe('FordefiSigner', () => {
 
         it('should throw when completed state has no signatures', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(nativeConfig);
+            const signer = await createFordefiSigner(nativeConfig);
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockCreateTxResponse('msg-empty'))
                 .mockResolvedValueOnce(mockPollResponse('signed'));
@@ -1700,7 +1700,7 @@ describe('FordefiSigner', () => {
 
         it('should throw on aborted state', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(nativeConfig);
+            const signer = await createFordefiSigner(nativeConfig);
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockCreateTxResponse('msg-abort'))
                 .mockResolvedValueOnce(mockPollResponse('aborted'));
@@ -1714,21 +1714,21 @@ describe('FordefiSigner', () => {
     describe('isAvailable', () => {
         it('should return true when vault responds OK', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             vi.mocked(fetch).mockResolvedValueOnce(mockVaultResponse());
             expect(await signer.isAvailable()).toBe(true);
         });
 
         it('should return false on API error', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 500 }));
             expect(await signer.isAvailable()).toBe(false);
         });
 
         it('should return false on network error', async () => {
             setupCreateVaultMock();
-            const signer = await FordefiSigner.create(mockConfig);
+            const signer = await createFordefiSigner(mockConfig);
             vi.mocked(fetch).mockRejectedValueOnce(new Error('Network error'));
             expect(await signer.isAvailable()).toBe(false);
         });

@@ -1,6 +1,5 @@
 """Para API signer integration."""
 
-import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -12,8 +11,18 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
+from solana_keychain.core.signature_util import verify_returned_signature
+from solana_keychain.core.signer import (
+    SignedTransaction,
+    SolanaSigner,
+    require_initialized,
+)
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
@@ -23,7 +32,6 @@ from solana_keychain.core.transaction_util import (
 
 DEFAULT_API_BASE_URL = "https://api.getpara.com"
 REQUEST_TIMEOUT_SECONDS = 30.0
-AVAILABILITY_TIMEOUT_SECONDS = 5.0
 
 SIGNATURE_HEX_LENGTH = 128
 
@@ -110,12 +118,7 @@ class ParaSigner(SolanaSigner):
             ) from None
 
     def _initialized_pubkey(self) -> Pubkey:
-        if self._public_key is None:
-            raise SignerError(
-                SignerErrorCode.NOT_INITIALIZED,
-                "ParaSigner is not initialized; call init() before signing",
-            )
-        return self._public_key
+        return require_initialized(self._public_key, "ParaSigner")
 
     @property
     def pubkey(self) -> Pubkey:
@@ -146,7 +149,7 @@ class ParaSigner(SolanaSigner):
             signature_bytes = bytes.fromhex(stripped)
         except ValueError:
             raise SignerError(
-                SignerErrorCode.SIGNING_FAILED, "Failed to decode hex signature"
+                SignerErrorCode.SERIALIZATION_ERROR, "Failed to decode hex signature"
             ) from None
         try:
             return Signature.from_bytes(signature_bytes)
@@ -169,13 +172,7 @@ class ParaSigner(SolanaSigner):
         if not isinstance(hex_signature, str):
             raise SignerError(SignerErrorCode.SIGNING_FAILED, "Missing signature in response")
         signature = self._decode_hex_signature(hex_signature)
-        if not signature.verify(public_key, data):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
-        return signature
+        return verify_returned_signature(signature, public_key, data)
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         signature = await self._sign_bytes(signed_message_bytes(transaction.message))
@@ -190,15 +187,14 @@ class ParaSigner(SolanaSigner):
     async def is_available(self) -> bool:
         """Availability makes a network call bounded to 5 seconds; cache the result
         if frequent checks are needed."""
-        try:
-            wallet = await asyncio.wait_for(self._fetch_wallet(), AVAILABILITY_TIMEOUT_SECONDS)
-        except (SignerError, asyncio.TimeoutError):
-            # asyncio.TimeoutError: on 3.10 wait_for raises this distinct class;
-            # from 3.11 it aliases the builtin, so one except covers both.
-            return False
-        wallet_type = str(wallet.get("type", ""))
-        status = str(wallet.get("status", ""))
-        return wallet_type.upper() == "SOLANA" and status.upper() in ("ACTIVE", "READY")
+
+        async def probe() -> bool:
+            wallet = await self._fetch_wallet()
+            wallet_type = str(wallet.get("type", ""))
+            status = str(wallet.get("status", ""))
+            return wallet_type.upper() == "SOLANA" and status.upper() in ("ACTIVE", "READY")
+
+        return await probe_availability(probe)
 
 
 async def create_para_signer(config: ParaSignerConfig) -> ParaSigner:

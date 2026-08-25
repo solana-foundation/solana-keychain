@@ -17,13 +17,9 @@ from solders.transaction import VersionedTransaction
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.cdp import CdpSigner, CdpSignerConfig, create_cdp_signer
-from solana_keychain.cdp.jwt import (
-    compute_req_hash,
-    create_auth_jwt,
-    create_wallet_jwt,
-    extract_host,
-)
+from solana_keychain.cdp.jwt import create_auth_jwt, create_wallet_jwt
 from solana_keychain.core import signed_message_bytes
+from solana_keychain.core.wallet_jwt import compute_req_hash
 from tests.util import create_test_transaction, create_test_v1_transaction
 
 API_BASE_URL = "https://cdp.example.com"
@@ -66,23 +62,6 @@ def decode_auth_claims(request: httpx.Request) -> tuple[dict[str, Any], dict[str
 def decode_wallet_claims(request: httpx.Request) -> dict[str, Any]:
     token = request.headers["X-Wallet-Auth"]
     return pyjwt.decode(token, _WALLET_EC_KEY.public_key(), algorithms=["ES256"])
-
-
-def test_extract_host() -> None:
-    assert extract_host("https://api.cdp.coinbase.com") == "api.cdp.coinbase.com"
-    assert extract_host("https://cdp.example.com:8443/base") == "cdp.example.com:8443"
-    with pytest.raises(SignerError) as excinfo:
-        extract_host("not a url")
-    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
-
-
-def test_compute_req_hash_rules() -> None:
-    assert compute_req_hash(None) is None
-    assert compute_req_hash({}) is None
-    ordered = compute_req_hash({"a": 1, "b": {"c": 2, "d": 3}})
-    reordered = compute_req_hash({"b": {"d": 3, "c": 2}, "a": 1})
-    assert ordered == reordered
-    assert ordered is not None
 
 
 def test_create_auth_jwt_shape() -> None:

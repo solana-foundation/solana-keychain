@@ -1,4 +1,4 @@
-export { VaultSigner, createVaultSigner } from './vault-signer.js';
+export { createVaultSigner } from './vault-signer.js';
 export type { VaultSignerConfig } from './vault-signer.js';
 export type {
     VaultErrorResponse,

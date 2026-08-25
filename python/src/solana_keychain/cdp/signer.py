@@ -16,9 +16,15 @@ from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
-from solana_keychain.cdp.jwt import create_auth_jwt, create_wallet_jwt, extract_host
+from solana_keychain.cdp.jwt import create_auth_jwt, create_wallet_jwt
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
+from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
@@ -28,6 +34,7 @@ from solana_keychain.core.transaction_util import (
     serialize_transaction,
     signed_message_bytes,
 )
+from solana_keychain.core.wallet_jwt import extract_host
 
 DEFAULT_API_BASE_URL = "https://api.cdp.coinbase.com"
 BASE_PATH = "/platform/v2/solana/accounts"
@@ -76,7 +83,7 @@ class CdpSigner(SolanaSigner):
         api_base_url = normalize_base_url(config.api_base_url)
         assert_https_url(api_base_url, "api_base_url")
         self._api_base_url = api_base_url
-        self._api_host = extract_host(api_base_url)
+        self._api_host = extract_host(api_base_url, "CDP")
         self._api_key_id = config.api_key_id
         self._api_key_secret = config.api_key_secret
         self._wallet_secret = config.wallet_secret
@@ -135,13 +142,7 @@ class CdpSigner(SolanaSigner):
                 f"Invalid signature length from CDP (expected {ED25519_SIGNATURE_LENGTH} bytes)",
             )
         signature = Signature.from_bytes(signature_bytes)
-        if not signature.verify(self._pubkey, message):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
-        return signature
+        return verify_returned_signature(signature, self._pubkey, message)
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         message_data = signed_message_bytes(transaction.message)
@@ -179,12 +180,7 @@ class CdpSigner(SolanaSigner):
                 "Signature not found at expected position in CDP response",
             )
         signature = signatures[position]
-        if not signature.verify(self._pubkey, message_data):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
+        verify_returned_signature(signature, self._pubkey, message_data)
 
         add_signature_to_transaction(transaction, self._pubkey, signature)
         return classify_signed_transaction(
@@ -193,7 +189,8 @@ class CdpSigner(SolanaSigner):
 
     async def is_available(self) -> bool:
         path = f"{BASE_PATH}/{self._pubkey}"
-        try:
+
+        async def probe() -> bool:
             auth_token = create_auth_jwt(
                 self._api_key_id, self._api_key_secret, self._api_host, "GET", path
             )
@@ -203,9 +200,9 @@ class CdpSigner(SolanaSigner):
                 headers={"Authorization": f"Bearer {auth_token}"},
                 client=self._http_client,
             )
-        except SignerError:
-            return False
-        return True
+            return True
+
+        return await probe_availability(probe)
 
 
 async def create_cdp_signer(config: CdpSignerConfig) -> CdpSigner:

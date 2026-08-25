@@ -79,9 +79,7 @@ const signatures = await signer.signTransactions([transaction]);
 
 ## API Reference
 
-### `GcpKmsSigner`
-
-#### Constructor
+### `createGcpKmsSigner(config)`
 
 ```typescript
 createGcpKmsSigner(config: GcpKmsSignerConfig)

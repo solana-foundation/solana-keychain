@@ -5,11 +5,8 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gagliardetto/solana-go"
@@ -46,16 +43,10 @@ func New(cfg Config) (*Signer, error) {
 	if err != nil {
 		return nil, core.WrapSignerError(core.CodeInvalidPublicKey, "invalid public key", err)
 	}
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
-	baseURL := cfg.APIBaseURL
-	if baseURL == "" {
-		baseURL = DefaultAPIBaseURL
-	}
-	if !strings.HasPrefix(baseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "turnkey api_base_url must use HTTPS")
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
+	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
 	return &Signer{
 		organizationID: cfg.OrganizationID,
@@ -141,19 +132,11 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 			"Turnkey signature slot missing from returned transaction")
 	}
 	sig := returned.Signatures[position]
-	if !core.VerifyEd25519(s.publicKey, msg, sig) {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed — the returned signature does not match the public key")
+	if err := core.VerifySignature(s.publicKey, msg, sig); err != nil {
+		return core.SignedTransaction{}, err
 	}
 
-	if err := core.AddSignature(tx, s.publicKey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.AttachSignature(tx, s.publicKey, sig)
 }
 
 // postActivity sends a stamped activity request and returns the result.
@@ -184,6 +167,8 @@ func (s *Signer) postActivity(ctx context.Context, path string, body []byte) (*a
 // credentials are valid, via a stamped whoami query. All errors are swallowed
 // and reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	body, err := json.Marshal(whoAmIRequest{OrganizationID: s.organizationID})
 	if err != nil {
 		return false
@@ -224,8 +209,8 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 	if err != nil {
 		return solana.Signature{}, err
 	}
-	if !core.VerifyEd25519(s.publicKey, message, sig) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "signature verification failed — the returned signature does not match the public key")
+	if err := core.VerifySignature(s.publicKey, message, sig); err != nil {
+		return solana.Signature{}, err
 	}
 	return sig, nil
 }
@@ -236,21 +221,7 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 // exactly 32 bytes before concatenation. Components longer than 32 bytes are
 // rejected.
 func assembleSignature(rHex, sHex string) (solana.Signature, error) {
-	rBytes, err := hex.DecodeString(rHex)
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode r", err)
-	}
-	sBytes, err := hex.DecodeString(sHex)
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode s", err)
-	}
-	if len(rBytes) > 32 || len(sBytes) > 32 {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "invalid signature component length")
-	}
-	var sig solana.Signature
-	copy(sig[32-len(rBytes):32], rBytes)
-	copy(sig[64-len(sBytes):64], sBytes)
-	return sig, nil
+	return core.SignatureFromHexComponents(rHex, sHex, "turnkey", true)
 }
 
 // post sends a stamped JSON POST to the Turnkey API and returns the response
@@ -269,24 +240,12 @@ func (s *Signer) post(ctx context.Context, path string, body []byte) ([]byte, er
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Stamp", stamp)
 
-	resp, err := s.client.Do(req)
+	status, respBody, err := core.SendRequest(s.client, req, "turnkey")
 	if err != nil {
-		// Preserve SignerError codes surfaced by the transport (e.g. the
-		// HTTPS-only guard's CodeConfigError).
-		var se *core.SignerError
-		if errors.As(err, &se) {
-			return nil, se
-		}
-		return nil, core.WrapSignerError(core.CodeHTTPError, "request failed", err)
+		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, core.WrapSignerError(core.CodeHTTPError, "failed to read response body", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, core.NewSignerError(core.CodeRemoteAPIError, "API error "+strconv.Itoa(resp.StatusCode))
+	if !core.IsSuccess(status) {
+		return nil, core.NewSignerError(core.CodeRemoteAPIError, "API error "+strconv.Itoa(status))
 	}
 	return respBody, nil
 }

@@ -3,7 +3,6 @@ package awskms
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -86,22 +85,7 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 // signature at this signer's required-signer position, and returns the encoded
 // transaction with its completeness.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
-	msg, err := tx.Message.MarshalBinary()
-	if err != nil {
-		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction message", err)
-	}
-	sig, err := s.signBytes(ctx, msg)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	if err := core.AddSignature(tx, s.pub, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.SignTransactionWith(ctx, tx, s.pub, s.signBytes)
 }
 
 // IsAvailable reports whether the KMS key is reachable and usable for Solana
@@ -140,17 +124,13 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 	if len(out.Signature) == 0 {
 		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "no signature in aws kms response")
 	}
-	if len(out.Signature) != core.SignatureLength {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			fmt.Sprintf("invalid signature length: expected %d bytes, got %d", core.SignatureLength, len(out.Signature)))
+	sig, err := core.SignatureFromBytes(out.Signature, "aws kms")
+	if err != nil {
+		return solana.Signature{}, err
 	}
 
-	var sig solana.Signature
-	copy(sig[:], out.Signature)
-
-	if !core.VerifyEd25519(s.pub, message, sig) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed: the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pub, message, sig); err != nil {
+		return solana.Signature{}, err
 	}
 	return sig, nil
 }

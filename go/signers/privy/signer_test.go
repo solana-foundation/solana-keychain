@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,43 +33,6 @@ const (
 	rpcPath    = "/wallets/" + testWalletID + "/rpc"
 )
 
-// otherPrivateKey is a second deterministic keypair, distinct from
-// testutils.TestPrivateKey, for mismatched-signer cases.
-func otherPrivateKey() ed25519.PrivateKey {
-	seed := make([]byte, ed25519.SeedSize)
-	for i := range seed {
-		seed[i] = 7
-	}
-	return ed25519.NewKeyFromSeed(seed)
-}
-
-func pubkeyOf(priv ed25519.PrivateKey) solana.PublicKey {
-	return solana.PublicKeyFromBytes(priv.Public().(ed25519.PublicKey))
-}
-
-func signWith(priv ed25519.PrivateKey, msg []byte) solana.Signature {
-	return solana.SignatureFromBytes(ed25519.Sign(priv, msg))
-}
-
-func detailOf(t *testing.T, err error) string {
-	t.Helper()
-	var se *core.SignerError
-	if !errors.As(err, &se) {
-		t.Fatalf("error %v is not a *core.SignerError", err)
-	}
-	return se.Detail()
-}
-
-func assertCode(t *testing.T, err error, want core.Code) {
-	t.Helper()
-	if err == nil {
-		t.Fatalf("expected error with code %s, got nil", want)
-	}
-	if code, ok := core.CodeOf(err); !ok || code != want {
-		t.Errorf("got code %s, want %s (detail: %s)", code, want, detailOf(t, err))
-	}
-}
-
 func testConfig(srv *httptest.Server) Config {
 	return Config{
 		AppID:      testAppID,
@@ -92,7 +54,7 @@ func addWalletRoute(t *testing.T, mux *http.ServeMux, address string) {
 		if got := r.Header.Get("privy-app-id"); got != testAppID {
 			t.Errorf("privy-app-id = %q, want %q", got, testAppID)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
+		testutils.WriteJSON(w, http.StatusOK, map[string]any{
 			"id":         testWalletID,
 			"address":    address,
 			"chain_type": "solana",
@@ -193,13 +155,13 @@ func signedTransactionResponse(t *testing.T, w http.ResponseWriter, priv ed25519
 		t.Errorf("failed to serialize message: %v", err)
 		return
 	}
-	tx.Signatures = []solana.Signature{signWith(priv, msg)}
+	tx.Signatures = []solana.Signature{testutils.SignWith(priv, msg)}
 	signedWire, err := tx.MarshalBinary()
 	if err != nil {
 		t.Errorf("failed to serialize signed transaction: %v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	testutils.WriteJSON(w, http.StatusOK, map[string]any{
 		"method": "signTransaction",
 		"data": map[string]any{
 			"signed_transaction": base64.StdEncoding.EncodeToString(signedWire),
@@ -218,19 +180,13 @@ func mustJSON(t *testing.T, v any) string {
 }
 
 func signatureResponse(w http.ResponseWriter, sig solana.Signature) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	testutils.WriteJSON(w, http.StatusOK, map[string]any{
 		"method": "signMessage",
 		"data": map[string]any{
 			"signature": base64.StdEncoding.EncodeToString(sig[:]),
 			"encoding":  "base64",
 		},
 	})
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
 }
 
 // newTestSigner starts an httptest server for mux and returns a ready signer.
@@ -240,7 +196,7 @@ func newTestSigner(t *testing.T, mux *http.ServeMux) *Signer {
 	t.Cleanup(srv.Close)
 	s, err := New(context.Background(), testConfig(srv))
 	if err != nil {
-		t.Fatalf("New: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("New: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	return s
 }
@@ -254,7 +210,7 @@ func TestNewMissingConfig(t *testing.T) {
 	for name, cfg := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := New(context.Background(), cfg)
-			assertCode(t, err, core.CodeConfigError)
+			testutils.AssertCode(t, err, core.CodeConfigError)
 		})
 	}
 }
@@ -277,13 +233,13 @@ func TestNewFetchesPublicKey(t *testing.T) {
 func TestNewUnauthorized(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+walletPath, func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized"})
+		testutils.WriteJSON(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized"})
 	})
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 
 	_, err := New(context.Background(), testConfig(srv))
-	assertCode(t, err, core.CodeRemoteAPIError)
+	testutils.AssertCode(t, err, core.CodeRemoteAPIError)
 }
 
 // TestNewInvalidPublicKey checks that an unparsable wallet address maps to
@@ -291,7 +247,7 @@ func TestNewUnauthorized(t *testing.T) {
 func TestNewInvalidPublicKey(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+walletPath, func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
+		testutils.WriteJSON(w, http.StatusOK, map[string]any{
 			"id":         testWalletID,
 			"address":    "not-a-valid-pubkey",
 			"chain_type": "solana",
@@ -301,7 +257,7 @@ func TestNewInvalidPublicKey(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	_, err := New(context.Background(), testConfig(srv))
-	assertCode(t, err, core.CodeInvalidPublicKey)
+	testutils.AssertCode(t, err, core.CodeInvalidPublicKey)
 }
 
 // TestNewRejectsNonSolanaWallet guards the wallet-shape checks: a wallet with
@@ -323,13 +279,13 @@ func TestNewRejectsNonSolanaWallet(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			mux := http.NewServeMux()
 			mux.HandleFunc("GET "+walletPath, func(w http.ResponseWriter, _ *http.Request) {
-				writeJSON(w, http.StatusOK, wallet)
+				testutils.WriteJSON(w, http.StatusOK, wallet)
 			})
 			srv := httptest.NewTLSServer(mux)
 			t.Cleanup(srv.Close)
 
 			_, err := New(context.Background(), testConfig(srv))
-			assertCode(t, err, core.CodeRemoteAPIError)
+			testutils.AssertCode(t, err, core.CodeRemoteAPIError)
 		})
 	}
 }
@@ -343,7 +299,7 @@ func TestNewDefaultClientRejectsHTTP(t *testing.T) {
 		WalletID:   testWalletID,
 		APIBaseURL: "http://127.0.0.1:1",
 	})
-	assertCode(t, err, core.CodeConfigError)
+	testutils.AssertCode(t, err, core.CodeConfigError)
 }
 
 // TestStringDoesNotLeakSecrets guards the redacting String/GoString: no fmt verb
@@ -362,7 +318,7 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 	}
 	s, err := New(context.Background(), cfg)
 	if err != nil {
-		t.Fatalf("New: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("New: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 
 	for _, rendered := range []string{
@@ -401,7 +357,7 @@ func TestSignMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := signWith(priv, msg)
+	want := testutils.SignWith(priv, msg)
 
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, pub.String())
@@ -415,7 +371,7 @@ func TestSignMessage(t *testing.T) {
 	s := newTestSigner(t, mux)
 	sig, err := s.SignMessage(context.Background(), msg)
 	if err != nil {
-		t.Fatalf("SignMessage: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignMessage: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if sig != want {
 		t.Errorf("signature = %s, want %s", sig, want)
@@ -433,7 +389,7 @@ func TestSignMessageAuthorizationContextHeaders(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	pub := testutils.TestPublicKey()
 	message := []byte{1, 2, 3, 4}
-	want := signWith(priv, message)
+	want := testutils.SignWith(priv, message)
 
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, pub.String())
@@ -474,11 +430,11 @@ func TestSignMessageAuthorizationContextHeaders(t *testing.T) {
 
 	s, err := New(context.Background(), cfg)
 	if err != nil {
-		t.Fatalf("New: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("New: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	sig, err := s.SignMessage(context.Background(), message)
 	if err != nil {
-		t.Fatalf("SignMessage: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignMessage: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if sig != want {
 		t.Errorf("signature = %s, want %s", sig, want)
@@ -506,7 +462,7 @@ func TestSignMessageAuthorizationRequestExpiry(t *testing.T) {
 		mu.Lock()
 		expiries = append(expiries, r.Header.Get("privy-request-expiry"))
 		mu.Unlock()
-		signatureResponse(w, signWith(priv, message))
+		signatureResponse(w, testutils.SignWith(priv, message))
 	})
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
@@ -523,11 +479,11 @@ func TestSignMessageAuthorizationRequestExpiry(t *testing.T) {
 
 	s, err := New(context.Background(), cfg)
 	if err != nil {
-		t.Fatalf("New: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("New: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	before := time.Now().UnixMilli()
 	if _, err := s.SignMessage(context.Background(), message); err != nil {
-		t.Fatalf("SignMessage: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignMessage: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	after := time.Now().UnixMilli()
 
@@ -567,28 +523,28 @@ func TestSignMessageEmptyAuthorizationContext(t *testing.T) {
 
 	s, err := New(context.Background(), cfg)
 	if err != nil {
-		t.Fatalf("New: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("New: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	_, err = s.SignMessage(context.Background(), []byte("test"))
-	assertCode(t, err, core.CodeConfigError)
+	testutils.AssertCode(t, err, core.CodeConfigError)
 }
 
 // TestSignMessageVerificationFailure checks the case where the remote signs
 // with a different key than the wallet's advertised pubkey.
 func TestSignMessageVerificationFailure(t *testing.T) {
 	signingPriv := testutils.TestPrivateKey()
-	differentPub := pubkeyOf(otherPrivateKey())
+	_, differentPub := testutils.KeyFromSeed(7)
 	msg := []byte("test message")
 
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, differentPub.String())
 	addRPCRoute(t, mux, func(w http.ResponseWriter, _ []byte) {
-		signatureResponse(w, signWith(signingPriv, msg))
+		signatureResponse(w, testutils.SignWith(signingPriv, msg))
 	})
 
 	s := newTestSigner(t, mux)
 	_, err := s.SignMessage(context.Background(), msg)
-	assertCode(t, err, core.CodeSigningFailed)
+	testutils.AssertCode(t, err, core.CodeSigningFailed)
 }
 
 // TestSignMessageInvalidBase64Signature checks that a non-base64 signature in
@@ -597,7 +553,7 @@ func TestSignMessageInvalidBase64Signature(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, testutils.TestPublicKey().String())
 	addRPCRoute(t, mux, func(w http.ResponseWriter, _ []byte) {
-		writeJSON(w, http.StatusOK, map[string]any{
+		testutils.WriteJSON(w, http.StatusOK, map[string]any{
 			"method": "signMessage",
 			"data": map[string]any{
 				"signature": "not-base64###",
@@ -608,7 +564,7 @@ func TestSignMessageInvalidBase64Signature(t *testing.T) {
 
 	s := newTestSigner(t, mux)
 	_, err := s.SignMessage(context.Background(), []byte("test"))
-	assertCode(t, err, core.CodeSerializationError)
+	testutils.AssertCode(t, err, core.CodeSerializationError)
 }
 
 // TestSignMessageWrongLengthSignature checks that a valid-base64 payload that
@@ -617,7 +573,7 @@ func TestSignMessageWrongLengthSignature(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, testutils.TestPublicKey().String())
 	addRPCRoute(t, mux, func(w http.ResponseWriter, _ []byte) {
-		writeJSON(w, http.StatusOK, map[string]any{
+		testutils.WriteJSON(w, http.StatusOK, map[string]any{
 			"method": "signMessage",
 			"data": map[string]any{
 				"signature": base64.StdEncoding.EncodeToString([]byte("short")),
@@ -628,7 +584,7 @@ func TestSignMessageWrongLengthSignature(t *testing.T) {
 
 	s := newTestSigner(t, mux)
 	_, err := s.SignMessage(context.Background(), []byte("test"))
-	assertCode(t, err, core.CodeSigningFailed)
+	testutils.AssertCode(t, err, core.CodeSigningFailed)
 }
 
 // TestSignMessageUnauthorized checks that an unauthorized signing request maps
@@ -637,12 +593,12 @@ func TestSignMessageUnauthorized(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, testutils.TestPublicKey().String())
 	mux.HandleFunc("POST "+rpcPath, func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized"})
+		testutils.WriteJSON(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized"})
 	})
 
 	s := newTestSigner(t, mux)
 	_, err := s.SignMessage(context.Background(), []byte("test"))
-	assertCode(t, err, core.CodeRemoteAPIError)
+	testutils.AssertCode(t, err, core.CodeRemoteAPIError)
 }
 
 // TestSignMessageRemoteErrorBodyDiscarded checks that non-2xx response bodies
@@ -657,9 +613,9 @@ func TestSignMessageRemoteErrorBodyDiscarded(t *testing.T) {
 
 	s := newTestSigner(t, mux)
 	_, err := s.SignMessage(context.Background(), []byte("test"))
-	assertCode(t, err, core.CodeRemoteAPIError)
+	testutils.AssertCode(t, err, core.CodeRemoteAPIError)
 
-	detail := detailOf(t, err)
+	detail := testutils.Detail(t, err)
 	if !strings.Contains(detail, "API error 500") {
 		t.Errorf("detail %q should mention the status", detail)
 	}
@@ -722,7 +678,7 @@ func TestSignTransactionRejectsMissingSignedTransaction(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, pub.String())
 	addSignTransactionRPCRoute(t, mux, func(w http.ResponseWriter, _ []byte) {
-		writeJSON(w, http.StatusOK, map[string]any{
+		testutils.WriteJSON(w, http.StatusOK, map[string]any{
 			"method": "signTransaction",
 			"data":   map[string]any{},
 		})
@@ -749,7 +705,7 @@ func TestSignTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := signWith(priv, msg)
+	want := testutils.SignWith(priv, msg)
 
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, pub.String())
@@ -760,7 +716,7 @@ func TestSignTransaction(t *testing.T) {
 	s := newTestSigner(t, mux)
 	res, err := s.SignTransaction(context.Background(), tx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if res.Signature != want {
 		t.Errorf("signature = %s, want %s", res.Signature, want)
@@ -799,10 +755,10 @@ func TestIsAvailable(t *testing.T) {
 		addr, code := address, status
 		mu.Unlock()
 		if code != http.StatusOK {
-			writeJSON(w, code, map[string]any{"error": "Unauthorized"})
+			testutils.WriteJSON(w, code, map[string]any{"error": "Unauthorized"})
 			return
 		}
-		writeJSON(w, code, map[string]any{
+		testutils.WriteJSON(w, code, map[string]any{
 			"id":         testWalletID,
 			"address":    addr,
 			"chain_type": "solana",
@@ -819,7 +775,8 @@ func TestIsAvailable(t *testing.T) {
 
 	t.Run("pubkey mismatch", func(t *testing.T) {
 		mu.Lock()
-		address = pubkeyOf(otherPrivateKey()).String()
+		_, otherPub := testutils.KeyFromSeed(7)
+		address = otherPub.String()
 		mu.Unlock()
 		if s.IsAvailable(context.Background()) {
 			t.Error("signer should not be available when the wallet resolves to a different pubkey")

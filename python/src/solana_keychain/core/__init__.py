@@ -6,7 +6,8 @@ from solana_keychain.core.http import (
     normalize_base_url,
     sanitize_remote_error_response,
 )
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.signature_util import verify_returned_signature
+from solana_keychain.core.signer import SignedTransaction, SolanaSigner, require_initialized
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
@@ -31,7 +32,9 @@ __all__ = [
     "get_signing_keypair_position",
     "has_all_required_signatures",
     "normalize_base_url",
+    "require_initialized",
     "sanitize_remote_error_response",
     "serialize_transaction",
     "signed_message_bytes",
+    "verify_returned_signature",
 ]

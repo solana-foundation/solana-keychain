@@ -22,23 +22,14 @@ import (
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	s, err := New(context.Background(), Config{
-		KeyID:     requireEnv(t, "AWS_KMS_KEY_ID"),
-		PublicKey: requireEnv(t, "AWS_KMS_SIGNER_PUBKEY"),
+		KeyID:     testutils.RequireEnv(t, "AWS_KMS_KEY_ID"),
+		PublicKey: testutils.RequireEnv(t, "AWS_KMS_SIGNER_PUBKEY"),
 		Region:    os.Getenv("AWS_KMS_REGION"),
 	})
 	if err != nil {
 		t.Fatalf("failed to create aws kms signer: %v", err)
 	}
 	return s
-}
-
-func requireEnv(t *testing.T, key string) string {
-	t.Helper()
-	v := os.Getenv(key)
-	if v == "" {
-		t.Fatalf("%s must be set for integration tests", key)
-	}
-	return v
 }
 
 func TestIntegrationSignMessage(t *testing.T) {

@@ -6,7 +6,6 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -63,36 +62,18 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, core.NewSignerError(core.CodeConfigError, "wallet_locator must not be empty")
 	}
 
-	apiBaseURL := cfg.APIBaseURL
-	if apiBaseURL == "" {
-		apiBaseURL = DefaultBaseURL
-	}
-	apiBaseURL = strings.TrimRight(apiBaseURL, "/")
-
-	if !strings.HasPrefix(apiBaseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "api_base_url must use HTTPS")
+	apiBaseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
 
-	pollInterval := cfg.PollInterval
-	if pollInterval == 0 {
-		pollInterval = DefaultPollInterval
-	}
-	if pollInterval < 0 {
-		return nil, core.NewSignerError(core.CodeConfigError, "poll_interval must be greater than 0")
+	pollInterval, maxPollAttempts, err := core.ResolvePollBounds(
+		cfg.PollInterval, DefaultPollInterval, cfg.MaxPollAttempts, DefaultMaxPollAttempts)
+	if err != nil {
+		return nil, err
 	}
 
-	maxPollAttempts := cfg.MaxPollAttempts
-	if maxPollAttempts == 0 {
-		maxPollAttempts = DefaultMaxPollAttempts
-	}
-	if maxPollAttempts < 0 {
-		return nil, core.NewSignerError(core.CodeConfigError, "max_poll_attempts must be greater than 0")
-	}
-
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 
 	var signingKey ed25519.PrivateKey
 	signerLocator := cfg.Signer
@@ -210,7 +191,7 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 // transaction derives a different key and executes as a new transfer.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.publicKey.IsZero() {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeConfigError, "signer not initialized")
+		return core.SignedTransaction{}, core.NewNotInitializedError("crossmint")
 	}
 
 	expectedMessage, err := tx.Message.MarshalBinary()
@@ -258,20 +239,13 @@ func (s *Signer) finishManagedTransaction(ctx context.Context, tx *solana.Transa
 		return core.SignedTransaction{Signature: sig, Completeness: core.Complete}, nil
 	}
 
-	if err := core.AddSignature(tx, s.publicKey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.AttachSignature(tx, s.publicKey, sig)
 }
 
 // IsAvailable reports whether the Crossmint wallet can be fetched within the
 // availability timeout. Errors are swallowed.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(ctx, availabilityTimeout)
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
 	defer cancel()
 	_, err := s.fetchWallet(ctx)
 	return err == nil
@@ -300,7 +274,7 @@ func (s *Signer) pollTransaction(ctx context.Context, response transactionRespon
 			response = next
 			approvalSubmitted = true
 		default:
-			if err := sleepContext(ctx, s.pollInterval); err != nil {
+			if err := core.SleepContext(ctx, s.pollInterval); err != nil {
 				return transactionResponse{}, err
 			}
 			next, err := s.getTransaction(ctx, response.ID)
@@ -319,8 +293,7 @@ func (s *Signer) pollTransaction(ctx context.Context, response transactionRespon
 	case response.Status == "awaiting-approval" && !approvalSubmitted:
 		return transactionResponse{}, core.NewSignerError(core.CodeSigningFailed, awaitingApprovalDetail)
 	default:
-		return transactionResponse{}, core.NewSignerError(core.CodeRemoteAPIError,
-			fmt.Sprintf("Crossmint transaction polling timed out after %d attempts", s.maxPollAttempts))
+		return transactionResponse{}, core.PollTimeoutError("crossmint", s.maxPollAttempts)
 	}
 }
 
@@ -571,23 +544,6 @@ func (s *Signer) extractSignatureFromSerializedTransaction(serializedTransaction
 
 // decodeBase58Signature decodes a base58 string into a 64-byte signature.
 func decodeBase58Signature(signatureStr string) (solana.Signature, bool) {
-	raw, err := base58.Decode(signatureStr)
-	if err != nil || len(raw) != core.SignatureLength {
-		return solana.Signature{}, false
-	}
-	var sig solana.Signature
-	copy(sig[:], raw)
-	return sig, true
-}
-
-// sleepContext waits for d or until ctx is cancelled.
-func sleepContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return core.WrapSignerError(core.CodeHTTPError, "transaction polling cancelled", ctx.Err())
-	case <-timer.C:
-		return nil
-	}
+	sig, err := core.DecodeSignatureBase58(signatureStr, "crossmint")
+	return sig, err == nil
 }

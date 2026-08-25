@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rsa"
 	"encoding/base64"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -53,25 +52,15 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		}
 	}
 
-	apiBaseURL, err := normalizeAPIBaseURL(cfg.APIBaseURL)
+	apiBaseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
 	if err != nil {
 		return nil, err
 	}
 
-	pollInterval := cfg.PollInterval
-	if pollInterval == 0 {
-		pollInterval = DefaultPollInterval
-	}
-	if pollInterval < 0 {
-		return nil, core.NewSignerError(core.CodeConfigError, "poll_interval must be greater than 0")
-	}
-
-	maxPollAttempts := cfg.MaxPollAttempts
-	if maxPollAttempts == 0 {
-		maxPollAttempts = DefaultMaxPollAttempts
-	}
-	if maxPollAttempts < 0 {
-		return nil, core.NewSignerError(core.CodeConfigError, "max_poll_attempts must be greater than 0")
+	pollInterval, maxPollAttempts, err := core.ResolvePollBounds(
+		cfg.PollInterval, DefaultPollInterval, cfg.MaxPollAttempts, DefaultMaxPollAttempts)
+	if err != nil {
+		return nil, err
 	}
 
 	signingKey, err := parseSigningKey(cfg.ServiceAccountPrivateKeyPEM)
@@ -79,10 +68,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, err
 	}
 
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 
 	designatedSigners := cfg.DesignatedSigners
 	if designatedSigners == nil {
@@ -145,8 +131,7 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 // adds it to tx.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.pubkey.IsZero() {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeConfigError,
-			"UtilaSigner is not initialized")
+		return core.SignedTransaction{}, core.NewNotInitializedError("utila")
 	}
 
 	expectedMessage, err := tx.Message.MarshalBinary()
@@ -177,20 +162,13 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, err
 	}
 
-	if err := core.AddSignature(tx, s.pubkey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.AttachSignature(tx, s.pubkey, sig)
 }
 
 // IsAvailable reports whether the Utila wallet can be fetched within the
 // availability timeout. Errors are swallowed.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(ctx, availabilityTimeout)
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
 	defer cancel()
 	_, err := s.fetchWallet(ctx)
 	return err == nil
@@ -208,7 +186,7 @@ func (s *Signer) pollSignedTransaction(ctx context.Context, transaction utilaTra
 		case transaction.State.isTerminalFailure():
 			return utilaTransaction{}, terminalStateError(transaction.State)
 		default:
-			if err := sleepContext(ctx, s.pollInterval); err != nil {
+			if err := core.SleepContext(ctx, s.pollInterval); err != nil {
 				return utilaTransaction{}, err
 			}
 			transactionID, err := extractTransactionID(transaction.Name)
@@ -228,8 +206,7 @@ func (s *Signer) pollSignedTransaction(ctx context.Context, transaction utilaTra
 	case transaction.State.isTerminalFailure():
 		return utilaTransaction{}, terminalStateError(transaction.State)
 	default:
-		return utilaTransaction{}, core.NewSignerError(core.CodeRemoteAPIError,
-			fmt.Sprintf("Utila transaction polling timed out after %d attempts", s.maxPollAttempts))
+		return utilaTransaction{}, core.PollTimeoutError("utila", s.maxPollAttempts)
 	}
 }
 
@@ -304,16 +281,4 @@ func trimWalletID(value string) string {
 		return value[idx+len(marker):]
 	}
 	return value
-}
-
-// sleepContext waits for d or until ctx is cancelled.
-func sleepContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return core.WrapSignerError(core.CodeHTTPError, "transaction polling cancelled", ctx.Err())
-	case <-timer.C:
-		return nil
-	}
 }

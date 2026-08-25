@@ -21,24 +21,15 @@ import (
 func integrationSigner(t *testing.T) *Signer {
 	t.Helper()
 	s, err := New(context.Background(), Config{
-		SecretKey:    requireEnv(t, "OPENFORT_SECRET_KEY"),
-		AccountID:    requireEnv(t, "OPENFORT_ACCOUNT_ID"),
-		WalletSecret: requireEnv(t, "OPENFORT_WALLET_SECRET"),
+		SecretKey:    testutils.RequireEnv(t, "OPENFORT_SECRET_KEY"),
+		AccountID:    testutils.RequireEnv(t, "OPENFORT_ACCOUNT_ID"),
+		WalletSecret: testutils.RequireEnv(t, "OPENFORT_WALLET_SECRET"),
 		APIBaseURL:   os.Getenv("OPENFORT_BASE_URL"),
 	})
 	if err != nil {
 		t.Fatalf("failed to create openfort signer: %v", err)
 	}
 	return s
-}
-
-func requireEnv(t *testing.T, key string) string {
-	t.Helper()
-	v := os.Getenv(key)
-	if v == "" {
-		t.Fatalf("%s must be set for integration tests", key)
-	}
-	return v
 }
 
 func TestIntegrationSignMessage(t *testing.T) {

@@ -1,6 +1,7 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase58Encoder } from '@solana/codecs-strings';
 import {
+    abortableDelay,
     assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
@@ -13,7 +14,12 @@ import {
     validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
-import { SignableMessage, SignatureDictionary } from '@solana/signers';
+import {
+    MessagePartialSignerConfig,
+    SignableMessage,
+    SignatureDictionary,
+    TransactionPartialSignerConfig,
+} from '@solana/signers';
 import {
     getBase64EncodedWireTransaction,
     Transaction,
@@ -69,16 +75,14 @@ const DEFAULT_MAX_POLL_ATTEMPTS = 60;
  *
  * @example
  * ```typescript
- * const signer = await FireblocksSigner.create({
+ * const signer = await createFireblocksSigner({
  *     apiKey: 'your-api-key',
  *     privateKeyPem: '-----BEGIN PRIVATE KEY-----\n...',
  *     vaultAccountId: '0',
  * });
  * ```
- *
- * @deprecated Prefer `createFireblocksSigner()`. Class export will be removed in a future version.
  */
-export class FireblocksSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class FireblocksSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     private _address: Address<TAddress> | null = null;
     private privateKeyPromise: Promise<CryptoKey> | null = null;
     private readonly apiKey: string;
@@ -94,7 +98,6 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
 
     /**
      * Fetches the public key from Fireblocks API during initialization.
-     * @deprecated Use `createFireblocksSigner()` instead.
      */
     static async create<TAddress extends string = string>(
         config: FireblocksSignerConfig,
@@ -104,10 +107,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
         return signer;
     }
 
-    /**
-     * @deprecated Use `createFireblocksSigner()` instead. Direct construction will be removed in a future version.
-     */
-    constructor(config: FireblocksSignerConfig) {
+    private constructor(config: FireblocksSignerConfig) {
         if (!config.apiKey) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
                 message: 'Missing required apiKey field',
@@ -157,9 +157,8 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
 
     /**
      * Initialize the signer by fetching the public key from Fireblocks
-     * @deprecated Use `createFireblocksSigner()` instead, which handles initialization automatically.
      */
-    async init(): Promise<void> {
+    private async init(): Promise<void> {
         if (this.initialized) {
             return;
         }
@@ -229,11 +228,12 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     /**
      * Make an authenticated request to Fireblocks API
      */
-    private async request<T>(method: string, uri: string, body?: unknown): Promise<T> {
+    private async request<T>(method: string, uri: string, body?: unknown, abortSignal?: AbortSignal): Promise<T> {
         const bodyStr = body ? JSON.stringify(body) : '';
         const token = await createJwt(this.apiKey, await this.getPrivateKey(), uri, bodyStr);
 
         return await fetchSignerJson<T>({
+            abortSignal,
             init: {
                 body: body ? bodyStr : undefined,
                 headers: {
@@ -251,7 +251,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     /**
      * Sign raw bytes using Fireblocks RAW operation
      */
-    private async signRawBytes(messageBytes: Uint8Array): Promise<SignatureBytes> {
+    private async signRawBytes(messageBytes: Uint8Array, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         base16Decoder ||= getBase16Decoder();
         const hexContent = base16Decoder.decode(messageBytes);
 
@@ -269,8 +269,13 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
             },
         };
 
-        const createResponse = await this.request<CreateTransactionResponse>('POST', '/v1/transactions', request);
-        return await this.pollForSignature(createResponse.id, 'RAW');
+        const createResponse = await this.request<CreateTransactionResponse>(
+            'POST',
+            '/v1/transactions',
+            request,
+            abortSignal,
+        );
+        return await this.pollForSignature(createResponse.id, 'RAW', abortSignal);
     }
 
     /**
@@ -282,6 +287,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
      */
     private async signProgramCall(
         transaction: Transaction & TransactionWithinSizeLimit & TransactionWithLifetime,
+        abortSignal?: AbortSignal,
     ): Promise<SignatureBytes> {
         if (isV1Message(transaction.messageBytes)) {
             throwSignerError(SignerErrorCode.SIGNING_FAILED, {
@@ -304,18 +310,27 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
             },
         };
 
-        const createResponse = await this.request<CreateTransactionResponse>('POST', '/v1/transactions', request);
-        return await this.pollForSignature(createResponse.id, 'PROGRAM_CALL');
+        const createResponse = await this.request<CreateTransactionResponse>(
+            'POST',
+            '/v1/transactions',
+            request,
+            abortSignal,
+        );
+        return await this.pollForSignature(createResponse.id, 'PROGRAM_CALL', abortSignal);
     }
 
     /**
      * Poll for transaction completion and extract a reusable signer-bound signature.
      */
-    private async pollForSignature(transactionId: string, operation: 'PROGRAM_CALL' | 'RAW'): Promise<SignatureBytes> {
+    private async pollForSignature(
+        transactionId: string,
+        operation: 'PROGRAM_CALL' | 'RAW',
+        abortSignal?: AbortSignal,
+    ): Promise<SignatureBytes> {
         const uri = `/v1/transactions/${encodeURIComponent(transactionId)}`;
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
-            const txResponse = await this.request<TransactionResponse>('GET', uri);
+            const txResponse = await this.request<TransactionResponse>('GET', uri, undefined, abortSignal);
 
             const status = txResponse.status as FireblocksTransactionStatus;
 
@@ -342,7 +357,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
             }
 
             // Wait before next poll
-            await new Promise(resolve => setTimeout(resolve, this.pollIntervalMs));
+            await abortableDelay(this.pollIntervalMs, abortSignal);
         }
 
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
@@ -394,7 +409,10 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
     /**
      * Sign multiple messages using Fireblocks
      */
-    async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+    async signMessages(
+        messages: readonly SignableMessage[],
+        config?: MessagePartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]> {
         this.ensureInitialized();
 
         return await signBatchStaggered(
@@ -404,7 +422,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                     message.content instanceof Uint8Array
                         ? message.content
                         : new Uint8Array(Array.from(message.content));
-                const signatureBytes = await this.signRawBytes(messageBytes);
+                const signatureBytes = await this.signRawBytes(messageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: messageBytes,
                     signature: signatureBytes,
@@ -416,6 +434,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -424,6 +443,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
      */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        config?: TransactionPartialSignerConfig,
     ): Promise<readonly SignatureDictionary[]> {
         this.ensureInitialized();
 
@@ -431,8 +451,8 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
             transactions,
             async transaction => {
                 const signatureBytes = this.useProgramCall
-                    ? await this.signProgramCall(transaction)
-                    : await this.signRawBytes(new Uint8Array(transaction.messageBytes));
+                    ? await this.signProgramCall(transaction, config?.abortSignal)
+                    : await this.signRawBytes(new Uint8Array(transaction.messageBytes), config?.abortSignal);
                 await assertSignatureValid({
                     data: transaction.messageBytes,
                     signature: signatureBytes,
@@ -444,6 +464,7 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 

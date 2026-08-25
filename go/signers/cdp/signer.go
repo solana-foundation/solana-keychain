@@ -5,26 +5,20 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/base58"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
 
 const (
-	// defaultBaseURL is the production CDP API endpoint.
-	defaultBaseURL = "https://api.cdp.coinbase.com"
+	// DefaultAPIBaseURL is the production CDP API endpoint.
+	DefaultAPIBaseURL = "https://api.cdp.coinbase.com"
 	// basePath is the CDP Solana accounts base path.
 	basePath = "/platform/v2/solana/accounts"
-	// maxResponseBytes caps how much of a CDP response body is read.
-	maxResponseBytes = 1 << 20
 )
 
 // Signer signs Solana transactions and messages with CDP's managed key
@@ -65,22 +59,16 @@ func New(cfg Config) (*Signer, error) {
 		return nil, core.WrapSignerError(core.CodeInvalidPublicKey, "invalid Solana address: "+cfg.Address, err)
 	}
 
-	baseURL := cfg.APIBaseURL
-	if baseURL == "" {
-		baseURL = defaultBaseURL
+	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
-	if !strings.HasPrefix(baseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "cdp api_base_url must use HTTPS")
-	}
-	apiHost, err := extractHost(baseURL)
+	apiHost, err := core.HostFromURL(baseURL)
 	if err != nil {
 		return nil, err
 	}
 
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 
 	return &Signer{
 		apiKeyID:     cfg.APIKeyID,
@@ -110,33 +98,24 @@ func (s Signer) GoString() string { return s.String() }
 // Quirk: the CDP signMessage API takes a UTF-8 string, so non-UTF-8 payloads
 // are rejected with CodeSerializationError.
 func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
-	var sig solana.Signature
 	if !utf8.Valid(message) {
-		return sig, core.NewSignerError(core.CodeSerializationError,
+		return solana.Signature{}, core.NewSignerError(core.CodeSerializationError,
 			"CDP signMessage requires UTF-8; non-UTF-8 bytes are not supported")
 	}
 
 	path := basePath + "/" + s.pubkey.String() + "/sign/message"
 	var resp signMessageResponse
 	if err := s.doPost(ctx, path, map[string]any{"message": string(message)}, &resp, "sign_message"); err != nil {
-		return sig, err
+		return solana.Signature{}, err
 	}
 
-	// CDP returns a base58-encoded signature.
-	sigBytes, err := base58.Decode(resp.Signature)
+	sig, err := core.DecodeSignatureBase58(resp.Signature, "cdp")
 	if err != nil {
-		return sig, core.WrapSignerError(core.CodeSerializationError,
-			"failed to decode base58 signature from CDP", err)
+		return solana.Signature{}, err
 	}
-	if len(sigBytes) != core.SignatureLength {
-		return sig, core.NewSignerError(core.CodeSigningFailed,
-			"invalid signature length from CDP (expected 64 bytes)")
-	}
-	copy(sig[:], sigBytes)
 
-	if !core.VerifyEd25519(s.pubkey, message, sig) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed — the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
+		return solana.Signature{}, err
 	}
 	return sig, nil
 }
@@ -198,25 +177,19 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 			"signature not found at expected position in CDP response")
 	}
 	sig := signedTx.Signatures[pos]
-	if !core.VerifyEd25519(s.pubkey, msgBytes, sig) {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed — the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, msgBytes, sig); err != nil {
+		return core.SignedTransaction{}, err
 	}
 
-	if err := core.AddSignature(tx, s.pubkey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.AttachSignature(tx, s.pubkey, sig)
 }
 
 // IsAvailable checks that the CDP API is reachable and this account is
 // accessible by fetching the account info (GET, bearer auth only). All errors
 // are swallowed and reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	path := basePath + "/" + s.pubkey.String()
 	authToken, err := createAuthJWT(s.apiKeyID, s.apiKeySecret, s.apiHost, http.MethodGet, path)
 	if err != nil {
@@ -228,19 +201,15 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 	}
 	req.Header.Set("Authorization", "Bearer "+authToken)
 
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = resp.Body.Close() }()
-	return resp.StatusCode >= 200 && resp.StatusCode < 300
+	status, _, err := core.SendRequest(s.client, req, "cdp")
+	return err == nil && core.IsSuccess(status)
 }
 
 // doPost sends an authenticated POST to a CDP signing endpoint (bearer auth JWT
 // plus X-Wallet-Auth wallet JWT) and decodes the 2xx JSON response into out.
 // what names the endpoint in error details ("sign_message" / "sign_transaction").
 func (s *Signer) doPost(ctx context.Context, path string, body map[string]any, out any, what string) error {
-	bodyBytes, err := marshalCanonicalJSON(body)
+	bodyBytes, err := core.MarshalCanonicalJSON(body)
 	if err != nil {
 		return core.WrapSignerError(core.CodeSerializationError, "failed to serialize request body", err)
 	}
@@ -261,36 +230,19 @@ func (s *Signer) doPost(ctx context.Context, path string, body map[string]any, o
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Wallet-Auth", walletToken)
 
-	resp, err := s.client.Do(req)
+	status, respBody, err := core.SendRequest(s.client, req, "cdp")
 	if err != nil {
-		return requestError(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return core.WrapSignerError(core.CodeHTTPError, "failed to read CDP response", err)
+		return err
 	}
 
 	// Only the status code goes into the error; the response body is never
 	// attached.
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return core.NewSignerError(core.CodeRemoteAPIError, "CDP API error "+strconv.Itoa(resp.StatusCode))
+	if !core.IsSuccess(status) {
+		return core.NewSignerError(core.CodeRemoteAPIError, "CDP API error "+strconv.Itoa(status))
 	}
 
 	if err := json.Unmarshal(respBody, out); err != nil {
 		return core.WrapSignerError(core.CodeSerializationError, "failed to parse CDP "+what+" response", err)
 	}
 	return nil
-}
-
-// requestError maps a transport-level failure to CodeHTTPError, but propagates a
-// *core.SignerError raised inside the client unchanged (e.g. the HTTPS-only
-// transport's CodeConfigError) so its code survives to the caller.
-func requestError(err error) error {
-	var se *core.SignerError
-	if errors.As(err, &se) {
-		return se
-	}
-	return core.WrapSignerError(core.CodeHTTPError, "CDP HTTP request failed", err)
 }

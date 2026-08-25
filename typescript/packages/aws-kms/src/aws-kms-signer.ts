@@ -11,7 +11,12 @@ import {
     validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
-import { SignableMessage, SignatureDictionary } from '@solana/signers';
+import {
+    MessagePartialSignerConfig,
+    SignableMessage,
+    SignatureDictionary,
+    TransactionPartialSignerConfig,
+} from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
 
 import type { AwsCredentials, AwsKmsSignerConfig } from './types.js';
@@ -41,22 +46,18 @@ export function createAwsKmsSigner<TAddress extends string = string>(
  *   --key-usage SIGN_VERIFY \
  *   --description "Solana signing key"
  * ```
- *
- * @deprecated Prefer `createAwsKmsSigner()`. Class export will be removed in a future version.
  */
-export class AwsKmsSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class AwsKmsSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly keyId: string;
     private readonly client: KMSClient;
     private readonly requestDelayMs: number;
 
-    /** @deprecated Use `createAwsKmsSigner()` instead. */
     static create<TAddress extends string = string>(config: AwsKmsSignerConfig): AwsKmsSigner<TAddress> {
         return new AwsKmsSigner<TAddress>(config);
     }
 
-    /** @deprecated Use `createAwsKmsSigner()` instead. Direct construction will be removed in a future version. */
-    constructor(config: AwsKmsSignerConfig) {
+    private constructor(config: AwsKmsSignerConfig) {
         if (!config.keyId) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
                 message: 'Missing required keyId field',
@@ -103,7 +104,7 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
     /**
      * Sign message bytes using AWS KMS EdDSA signing
      */
-    private async signBytes(messageBytes: Uint8Array): Promise<SignatureBytes> {
+    private async signBytes(messageBytes: Uint8Array, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         try {
             const command = new SignCommand({
                 KeyId: this.keyId,
@@ -112,7 +113,7 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
                 SigningAlgorithm: SigningAlgorithmSpec.ED25519_SHA_512,
             });
 
-            const response = await this.client.send(command);
+            const response = await this.client.send(command, { abortSignal });
 
             if (!response.Signature) {
                 throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
@@ -152,7 +153,10 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
     /**
      * Sign multiple messages using AWS KMS
      */
-    async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+    async signMessages(
+        messages: readonly SignableMessage[],
+        config?: MessagePartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             messages,
             async message => {
@@ -160,7 +164,7 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
                     message.content instanceof Uint8Array
                         ? message.content
                         : new Uint8Array(Array.from(message.content));
-                const signatureBytes = await this.signBytes(messageBytes);
+                const signatureBytes = await this.signBytes(messageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: messageBytes,
                     signature: signatureBytes,
@@ -172,6 +176,7 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -180,13 +185,14 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
      */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        config?: TransactionPartialSignerConfig,
     ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             transactions,
             async transaction => {
                 // Sign the transaction message bytes
                 const txMessageBytes = new Uint8Array(transaction.messageBytes);
-                const signatureBytes = await this.signBytes(txMessageBytes);
+                const signatureBytes = await this.signBytes(txMessageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: txMessageBytes,
                     signature: signatureBytes,
@@ -198,6 +204,7 @@ export class AwsKmsSigner<TAddress extends string = string> implements SolanaSig
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 

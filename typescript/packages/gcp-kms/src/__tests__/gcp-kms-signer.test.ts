@@ -2,7 +2,7 @@ import { address } from '@solana/addresses';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertIsSolanaSigner } from '@solana/keychain-core';
 
-import { GcpKmsSigner } from '../gcp-kms-signer.js';
+import { createGcpKmsSigner } from '../gcp-kms-signer.js';
 import type { GcpKmsSignerConfig } from '../types.js';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
@@ -54,7 +54,7 @@ function assertAuthorizedRequest(url: string, method: string, callIndex = 0): Re
     return init;
 }
 
-describe('GcpKmsSigner', () => {
+describe('createGcpKmsSigner', () => {
     const TEST_KEY_NAME =
         'projects/test-project/locations/us-east1/keyRings/test-ring/cryptoKeys/test-key/cryptoKeyVersions/1';
     const TEST_KEY_NAME_WITH_LEADING_SLASH = `/${TEST_KEY_NAME}`;
@@ -78,9 +78,9 @@ describe('GcpKmsSigner', () => {
         globalThis.fetch = originalFetch;
     });
 
-    describe('create', () => {
+    describe('basic construction', () => {
         it('creates a GcpKmsSigner with valid config', () => {
-            const signer = GcpKmsSigner.create({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -91,7 +91,7 @@ describe('GcpKmsSigner', () => {
 
         it('should throw error for missing keyName', () => {
             expect(() => {
-                GcpKmsSigner.create({
+                createGcpKmsSigner({
                     keyName: '',
                     publicKey: TEST_PUBLIC_KEY,
                 });
@@ -99,14 +99,14 @@ describe('GcpKmsSigner', () => {
         });
     });
 
-    describe('constructor', () => {
+    describe('additional cases', () => {
         it('creates a GcpKmsSigner with valid config', () => {
             const config: GcpKmsSignerConfig = {
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             };
 
-            const signer = new GcpKmsSigner(config);
+            const signer = createGcpKmsSigner(config);
 
             expect(signer.address).toBe(TEST_PUBLIC_KEY);
             assertIsSolanaSigner(signer);
@@ -117,7 +117,7 @@ describe('GcpKmsSigner', () => {
 
         it('should throw error for missing keyName', () => {
             expect(() => {
-                new GcpKmsSigner({
+                createGcpKmsSigner({
                     keyName: '',
                     publicKey: TEST_PUBLIC_KEY,
                 });
@@ -126,7 +126,7 @@ describe('GcpKmsSigner', () => {
 
         it('should throw error for missing publicKey', () => {
             expect(() => {
-                new GcpKmsSigner({
+                createGcpKmsSigner({
                     keyName: TEST_KEY_NAME,
                     publicKey: '',
                 });
@@ -135,7 +135,7 @@ describe('GcpKmsSigner', () => {
 
         it('should throw error for invalid public key', () => {
             expect(() => {
-                new GcpKmsSigner({
+                createGcpKmsSigner({
                     keyName: TEST_KEY_NAME,
                     publicKey: 'invalid-key',
                 });
@@ -153,7 +153,7 @@ describe('GcpKmsSigner', () => {
 
             for (const keyName of invalidKeyNames) {
                 expect(() => {
-                    new GcpKmsSigner({
+                    createGcpKmsSigner({
                         keyName,
                         publicKey: TEST_PUBLIC_KEY,
                     });
@@ -164,7 +164,7 @@ describe('GcpKmsSigner', () => {
         it('should canonicalize leading slashes in keyName', async () => {
             mockFetch.mockResolvedValue(createJsonResponse({ signature: TEST_SIGNATURE_BASE64 }));
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME_WITH_LEADING_SLASH,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -177,7 +177,7 @@ describe('GcpKmsSigner', () => {
 
         it('should validate requestDelayMs', () => {
             expect(() => {
-                new GcpKmsSigner({
+                createGcpKmsSigner({
                     keyName: TEST_KEY_NAME,
                     publicKey: TEST_PUBLIC_KEY,
                     requestDelayMs: -1,
@@ -188,7 +188,7 @@ describe('GcpKmsSigner', () => {
         it('should warn for high requestDelayMs', () => {
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-            new GcpKmsSigner({
+            createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
                 requestDelayMs: 5000,
@@ -204,7 +204,7 @@ describe('GcpKmsSigner', () => {
         it('should sign a message successfully', async () => {
             mockFetch.mockResolvedValue(createJsonResponse({ signature: TEST_SIGNATURE_BASE64 }));
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -231,7 +231,7 @@ describe('GcpKmsSigner', () => {
         });
 
         it('should build sign URL without fragments or queries for valid keyName', async () => {
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -252,7 +252,7 @@ describe('GcpKmsSigner', () => {
                 Promise.resolve(createJsonResponse({ signature: TEST_SIGNATURE_BASE64 })),
             );
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
                 requestDelayMs: 10,
@@ -277,7 +277,7 @@ describe('GcpKmsSigner', () => {
             const shortSignature = Buffer.from(new Uint8Array(32).fill(0x42)).toString('base64');
             mockFetch.mockResolvedValue(createJsonResponse({ signature: shortSignature }));
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -290,7 +290,7 @@ describe('GcpKmsSigner', () => {
         it('should throw error on missing signature', async () => {
             mockFetch.mockResolvedValue(createJsonResponse({}));
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -312,7 +312,7 @@ describe('GcpKmsSigner', () => {
                 ),
             );
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -325,7 +325,7 @@ describe('GcpKmsSigner', () => {
         it('should handle network errors', async () => {
             mockFetch.mockRejectedValue(new Error('Network error'));
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -340,7 +340,7 @@ describe('GcpKmsSigner', () => {
         it('should sign a transaction successfully', async () => {
             mockFetch.mockResolvedValue(createJsonResponse({ signature: TEST_SIGNATURE_BASE64 }));
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -364,7 +364,7 @@ describe('GcpKmsSigner', () => {
                 Promise.resolve(createJsonResponse({ signature: TEST_SIGNATURE_BASE64 })),
             );
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -384,7 +384,7 @@ describe('GcpKmsSigner', () => {
             const shortSignature = Buffer.from(new Uint8Array(32).fill(0x42)).toString('base64');
             mockFetch.mockResolvedValue(createJsonResponse({ signature: shortSignature }));
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -397,7 +397,7 @@ describe('GcpKmsSigner', () => {
         it('should throw error on missing signature', async () => {
             mockFetch.mockResolvedValue(createJsonResponse({}));
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -419,7 +419,7 @@ describe('GcpKmsSigner', () => {
                 ),
             );
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -434,7 +434,7 @@ describe('GcpKmsSigner', () => {
         it('should return true for valid Ed25519 key', async () => {
             mockFetch.mockResolvedValue(createJsonResponse({ algorithm: 'EC_SIGN_ED25519' }));
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -449,7 +449,7 @@ describe('GcpKmsSigner', () => {
         it('should use canonical public key endpoint for valid key names', async () => {
             mockFetch.mockResolvedValue(createJsonResponse({ algorithm: 'EC_SIGN_ED25519' }));
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME_WITH_LEADING_SLASH,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -464,7 +464,7 @@ describe('GcpKmsSigner', () => {
         it('should return false for wrong algorithm', async () => {
             mockFetch.mockResolvedValue(createJsonResponse({ algorithm: 'RSA_SIGN_PKCS1_2048_SHA256' }));
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -477,7 +477,7 @@ describe('GcpKmsSigner', () => {
         it('should return false for missing public key response', async () => {
             mockFetch.mockResolvedValue(createJsonResponse({}));
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });
@@ -499,7 +499,7 @@ describe('GcpKmsSigner', () => {
                 ),
             );
 
-            const signer = new GcpKmsSigner({
+            const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
                 publicKey: TEST_PUBLIC_KEY,
             });

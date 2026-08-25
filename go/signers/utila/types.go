@@ -28,12 +28,6 @@ const utilaAPIAudience = "https://api.utila.io/"
 // tokenTTL is the service-account access token lifetime.
 const tokenTTL = 55 * time.Minute
 
-// availabilityTimeout bounds the wallet fetch performed by IsAvailable.
-const availabilityTimeout = 5 * time.Second
-
-// maxResponseBytes caps how much of a remote response body is read.
-const maxResponseBytes = 1 << 20
-
 // Config configures a Utila signer.
 type Config struct {
 	// ServiceAccountEmail is the Utila service account email, used as the JWT

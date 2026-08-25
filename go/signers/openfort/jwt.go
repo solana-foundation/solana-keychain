@@ -3,11 +3,7 @@ package openfort
 import (
 	"bytes"
 	"crypto/ecdsa"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -25,18 +21,6 @@ func jwtURI(host, method, path string) string {
 	return method + " " + host + path
 }
 
-// marshalCanonical serializes v to compact JSON with object keys sorted
-// (encoding/json sorts map keys) and without HTML escaping.
-func marshalCanonical(v any) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		return nil, core.WrapSignerError(core.CodeSerializationError, "failed to serialize request body", err)
-	}
-	return bytes.TrimRight(buf.Bytes(), "\n"), nil
-}
-
 // computeReqHash returns hex(sha256(canonical-JSON(body))), where the
 // canonical form recursively sorts object keys so the hash is key-order
 // invariant.
@@ -47,12 +31,7 @@ func computeReqHash(body []byte) (string, error) {
 	if err := dec.Decode(&v); err != nil {
 		return "", core.WrapSignerError(core.CodeSerializationError, "failed to serialize request body", err)
 	}
-	canonical, err := marshalCanonical(v)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(canonical)
-	return hex.EncodeToString(sum[:]), nil
+	return core.CanonicalRequestHash(v)
 }
 
 // walletSecretToPEM normalizes the wallet secret to a PEM string. A full PEM
@@ -84,17 +63,6 @@ func parseWalletSecret(walletSecret string) (*ecdsa.PrivateKey, error) {
 	return key, nil
 }
 
-// newUUIDv4 returns an RFC 4122 version-4 UUID string for the JWT `jti` claim.
-func newUUIDv4() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", core.WrapSignerError(core.CodeSigningFailed, "failed to generate jwt request id", err)
-	}
-	b[6] = (b[6] & 0x0f) | 0x40 // version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
-}
-
 // createWalletJWT builds the x-wallet-auth ES256 JWT for an Openfort backend
 // wallet request. Claims: uris, iat, nbf, exp, jti, and reqHash over the
 // request body.
@@ -107,7 +75,7 @@ func createWalletJWT(walletSecret, host, method, path string, requestBody []byte
 	if err != nil {
 		return "", err
 	}
-	jti, err := newUUIDv4()
+	jti, err := core.RandomUUIDv4()
 	if err != nil {
 		return "", err
 	}

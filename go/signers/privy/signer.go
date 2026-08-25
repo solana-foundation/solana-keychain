@@ -5,19 +5,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gagliardetto/solana-go"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
-
-// maxResponseBytes caps how much of a Privy response body is read.
-const maxResponseBytes = 1 << 20 // 1 MiB
 
 // Signer signs with a Privy wallet via Privy's REST API. All fields are
 // immutable after New, so a Signer is safe for concurrent use.
@@ -42,16 +36,10 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, core.NewSignerError(core.CodeConfigError,
 			"missing required configuration fields (AppID, AppSecret, or WalletID)")
 	}
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
-	baseURL := cfg.APIBaseURL
-	if baseURL == "" {
-		baseURL = DefaultAPIBaseURL
-	}
-	if !strings.HasPrefix(baseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "privy api_base_url must use HTTPS")
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
+	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
 	s := &Signer{
 		appID:                        cfg.AppID,
@@ -137,19 +125,11 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 			"privy signature slot missing from returned transaction")
 	}
 	sig := returned.Signatures[position]
-	if !core.VerifyEd25519(s.pubkey, msg, sig) {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed: the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, msg, sig); err != nil {
+		return core.SignedTransaction{}, err
 	}
 
-	if err := core.AddSignature(tx, s.pubkey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.AttachSignature(tx, s.pubkey, sig)
 }
 
 // postRPC sends a wallet RPC request with Privy auth and
@@ -184,6 +164,8 @@ func (s *Signer) postRPC(ctx context.Context, request any) ([]byte, error) {
 // still resolves to this signer's public key. All errors are swallowed and
 // reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	pubkey, err := s.fetchPublicKey(ctx)
 	return err == nil && pubkey == s.pubkey
 }
@@ -250,19 +232,13 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse privy signing response", err)
 	}
 
-	raw, err := base64.StdEncoding.DecodeString(signResp.Data.Signature)
+	sig, err := core.DecodeSignatureBase64(signResp.Data.Signature, "privy")
 	if err != nil {
-		return solana.Signature{}, core.NewSignerError(core.CodeSerializationError, "failed to decode base64 signature from privy")
+		return solana.Signature{}, err
 	}
-	if len(raw) != core.SignatureLength {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "failed to parse signature")
-	}
-	var sig solana.Signature
-	copy(sig[:], raw)
 
-	if !core.VerifyEd25519(s.pubkey, message, sig) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed: the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
+		return solana.Signature{}, err
 	}
 	return sig, nil
 }
@@ -271,27 +247,15 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 // failures to CodeHTTPError and non-2xx statuses to CodeRemoteAPIError whose
 // detail carries only the status code ("API error {status}").
 func (s *Signer) do(req *http.Request, what string) ([]byte, error) {
-	resp, err := s.client.Do(req)
+	status, body, err := core.SendRequest(s.client, req, "privy")
 	if err != nil {
-		// Preserve an already-classified error (e.g. the HTTPS-only transport's
-		// CodeConfigError) instead of reclassifying it as a transport failure.
-		var se *core.SignerError
-		if errors.As(err, &se) {
-			return nil, se
-		}
-		return nil, core.WrapSignerError(core.CodeHTTPError, what+" request failed", err)
+		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return nil, core.WrapSignerError(core.CodeHTTPError, "failed to read "+what+" response", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !core.IsSuccess(status) {
 		// Only the status code goes into the detail; the response body is
 		// deliberately discarded since it may echo request material.
 		return nil, core.NewSignerError(core.CodeRemoteAPIError,
-			what+" failed: API error "+strconv.Itoa(resp.StatusCode))
+			what+" failed: API error "+strconv.Itoa(status))
 	}
 	return body, nil
 }

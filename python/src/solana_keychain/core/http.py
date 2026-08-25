@@ -1,7 +1,9 @@
 """HTTPS-enforcing HTTP pipeline for remote signer backends."""
 
+import asyncio
 import os
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -10,6 +12,7 @@ import httpx
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 60.0
+AVAILABILITY_TIMEOUT_SECONDS = 5.0
 DEFAULT_REMOTE_ERROR_RESPONSE_MAX_LENGTH = 256
 
 _LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -64,6 +67,19 @@ def sanitize_remote_error_response(
     if len(normalized) <= max_length:
         return normalized
     return f"{normalized[:max_length]} [truncated]"
+
+
+async def probe_availability(probe: Callable[[], Awaitable[bool]]) -> bool:
+    """Run a backend health probe under the shared availability timeout.
+
+    Any failure means unavailable: a signer error, a timeout, or an exception from
+    caller-supplied credential machinery all report ``False`` rather than raising,
+    since the contract returns a bool. Cancellation still propagates.
+    """
+    try:
+        return await asyncio.wait_for(probe(), AVAILABILITY_TIMEOUT_SECONDS)
+    except Exception:
+        return False
 
 
 def provider_may_have_accepted(status_code: int | None) -> bool:

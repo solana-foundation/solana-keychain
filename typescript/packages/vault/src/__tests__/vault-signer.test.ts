@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { VaultSigner } from '../vault-signer.js';
+import { createVaultSigner } from '../vault-signer.js';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
@@ -21,7 +21,7 @@ vi.mock('@solana/keychain-core', async importOriginal => {
 // Mock fetch globally
 global.fetch = vi.fn();
 
-describe('VaultSigner', () => {
+describe('createVaultSigner', () => {
     const mockConfig = {
         keyName: 'test-key',
         publicKey: '11111111111111111111111111111111',
@@ -33,28 +33,28 @@ describe('VaultSigner', () => {
         vi.clearAllMocks();
     });
 
-    describe('create', () => {
+    describe('basic construction', () => {
         it('should create a signer with valid configuration', () => {
-            const signer = VaultSigner.create(mockConfig);
+            const signer = createVaultSigner(mockConfig);
             expect(signer.address).toBe(mockConfig.publicKey);
         });
 
         it('should throw error for missing config fields', () => {
-            expect(() => VaultSigner.create({ ...mockConfig, vaultAddr: '' })).toThrow(
+            expect(() => createVaultSigner({ ...mockConfig, vaultAddr: '' })).toThrow(
                 'Missing required configuration fields',
             );
         });
     });
 
-    describe('constructor', () => {
+    describe('additional cases', () => {
         it('should create a signer with valid configuration', () => {
-            const signer = new VaultSigner(mockConfig);
+            const signer = createVaultSigner(mockConfig);
             expect(signer.address).toBe(mockConfig.publicKey);
         });
 
         it('should throw error for missing vaultAddr', () => {
             expect(() => {
-                new VaultSigner({
+                createVaultSigner({
                     ...mockConfig,
                     vaultAddr: '',
                 });
@@ -63,7 +63,7 @@ describe('VaultSigner', () => {
 
         it('should throw error for missing vaultToken', () => {
             expect(() => {
-                new VaultSigner({
+                createVaultSigner({
                     ...mockConfig,
                     vaultToken: '',
                 });
@@ -72,7 +72,7 @@ describe('VaultSigner', () => {
 
         it('should throw error for missing keyName', () => {
             expect(() => {
-                new VaultSigner({
+                createVaultSigner({
                     ...mockConfig,
                     keyName: '',
                 });
@@ -81,7 +81,7 @@ describe('VaultSigner', () => {
 
         it('should throw error for invalid public key', () => {
             expect(() => {
-                new VaultSigner({
+                createVaultSigner({
                     ...mockConfig,
                     publicKey: 'invalid-key',
                 });
@@ -90,7 +90,7 @@ describe('VaultSigner', () => {
 
         it('should throw error for invalid vaultAddr URL', () => {
             expect(() => {
-                new VaultSigner({
+                createVaultSigner({
                     ...mockConfig,
                     vaultAddr: 'not-a-url',
                 });
@@ -99,7 +99,7 @@ describe('VaultSigner', () => {
 
         it('should throw error for non-HTTPS vaultAddr', () => {
             expect(() => {
-                new VaultSigner({
+                createVaultSigner({
                     ...mockConfig,
                     vaultAddr: 'http://vault.example.com',
                 });
@@ -112,7 +112,7 @@ describe('VaultSigner', () => {
                 process.env.NODE_ENV = 'test';
 
                 expect(() => {
-                    new VaultSigner({
+                    createVaultSigner({
                         ...mockConfig,
                         vaultAddr: 'http://127.0.0.1:8200',
                     });
@@ -123,16 +123,16 @@ describe('VaultSigner', () => {
         });
 
         it('should remove trailing slash from vaultAddr', () => {
-            const signer = new VaultSigner({
+            const signer = createVaultSigner({
                 ...mockConfig,
                 vaultAddr: 'https://vault.example.com/',
             });
-            expect(signer['vaultAddr']).toBe('https://vault.example.com');
+            expect((signer as unknown as { vaultAddr: string })['vaultAddr']).toBe('https://vault.example.com');
         });
 
         it('should validate requestDelayMs', () => {
             expect(() => {
-                new VaultSigner({
+                createVaultSigner({
                     ...mockConfig,
                     requestDelayMs: -1,
                 });
@@ -141,7 +141,7 @@ describe('VaultSigner', () => {
 
         it('should warn for high requestDelayMs', () => {
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-            new VaultSigner({
+            createVaultSigner({
                 ...mockConfig,
                 requestDelayMs: 3001,
             });
@@ -165,7 +165,7 @@ describe('VaultSigner', () => {
                 }),
             );
 
-            const signer = new VaultSigner(mockConfig);
+            const signer = createVaultSigner(mockConfig);
             const result = await signer.isAvailable();
 
             expect(result).toBe(true);
@@ -194,7 +194,7 @@ describe('VaultSigner', () => {
                 }),
             );
 
-            const signer = new VaultSigner(mockConfig);
+            const signer = createVaultSigner(mockConfig);
             const result = await signer.isAvailable();
 
             expect(result).toBe(false);
@@ -214,7 +214,7 @@ describe('VaultSigner', () => {
                 }),
             );
 
-            const signer = new VaultSigner(mockConfig);
+            const signer = createVaultSigner(mockConfig);
             const result = await signer.isAvailable();
 
             expect(result).toBe(false);
@@ -227,7 +227,7 @@ describe('VaultSigner', () => {
                 }),
             );
 
-            const signer = new VaultSigner(mockConfig);
+            const signer = createVaultSigner(mockConfig);
             const result = await signer.isAvailable();
 
             expect(result).toBe(false);
@@ -236,7 +236,7 @@ describe('VaultSigner', () => {
         it('should return false when network request fails', async () => {
             vi.mocked(fetch).mockRejectedValueOnce(new Error('Network error'));
 
-            const signer = new VaultSigner(mockConfig);
+            const signer = createVaultSigner(mockConfig);
             const result = await signer.isAvailable();
 
             expect(result).toBe(false);
@@ -258,7 +258,7 @@ describe('VaultSigner', () => {
                 }),
             );
 
-            const signer = new VaultSigner(mockConfig);
+            const signer = createVaultSigner(mockConfig);
             const message = {
                 content: new Uint8Array([1, 2, 3, 4]),
                 signatures: {},
@@ -291,7 +291,7 @@ describe('VaultSigner', () => {
                 }),
             );
 
-            const signer = new VaultSigner(mockConfig);
+            const signer = createVaultSigner(mockConfig);
             const message = {
                 content: new Uint8Array([1, 2, 3, 4]),
                 signatures: {},
@@ -303,7 +303,7 @@ describe('VaultSigner', () => {
         it('should handle network errors', async () => {
             vi.mocked(fetch).mockRejectedValueOnce(new Error('Network failure'));
 
-            const signer = new VaultSigner(mockConfig);
+            const signer = createVaultSigner(mockConfig);
             const message = {
                 content: new Uint8Array([1, 2, 3, 4]),
                 signatures: {},
@@ -323,7 +323,7 @@ describe('VaultSigner', () => {
                 }),
             );
 
-            const signer = new VaultSigner(mockConfig);
+            const signer = createVaultSigner(mockConfig);
             const message = {
                 content: new Uint8Array([1, 2, 3, 4]),
                 signatures: {},
@@ -346,7 +346,7 @@ describe('VaultSigner', () => {
                 }),
             );
 
-            const signer = new VaultSigner(mockConfig);
+            const signer = createVaultSigner(mockConfig);
             const message = {
                 content: new Uint8Array([1, 2, 3, 4]),
                 signatures: {},
@@ -374,7 +374,7 @@ describe('VaultSigner', () => {
                     }),
                 );
 
-            const signer = new VaultSigner(mockConfig);
+            const signer = createVaultSigner(mockConfig);
             const messages = [
                 {
                     content: new Uint8Array([1, 2, 3, 4]),
@@ -409,7 +409,7 @@ describe('VaultSigner', () => {
             );
 
             const delaySpy = vi.spyOn(global, 'setTimeout');
-            const signer = new VaultSigner({
+            const signer = createVaultSigner({
                 ...mockConfig,
                 requestDelayMs: 100,
             });
@@ -446,7 +446,7 @@ describe('VaultSigner', () => {
                 }),
             );
 
-            const signer = new VaultSigner(mockConfig);
+            const signer = createVaultSigner(mockConfig);
 
             // Create a mock transaction - this is simplified
             const mockTransaction = {

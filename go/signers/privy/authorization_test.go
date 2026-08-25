@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/testutils"
 )
 
 // testP256PKCS8PEM and testP256PKCS8Base64 are the same fixed P-256 PKCS#8 key
@@ -156,8 +157,8 @@ func TestInvalidAuthorizationPrivateKeyErrors(t *testing.T) {
 
 	for _, tc := range cases {
 		_, err := parseAuthorizationPrivateKey(tc.key)
-		assertCode(t, err, core.CodeInvalidPrivateKey)
-		detail := detailOf(t, err)
+		testutils.AssertCode(t, err, core.CodeInvalidPrivateKey)
+		detail := testutils.Detail(t, err)
 		if detail != tc.wantDetail {
 			t.Errorf("detail = %q, want %q", detail, tc.wantDetail)
 		}

@@ -10,7 +10,7 @@ import {
 import { assertIsSolanaSigner } from '@solana/keychain-core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createTurnkeySigner, TurnkeySigner } from '../turnkey-signer.js';
+import { createTurnkeySigner } from '../turnkey-signer.js';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
@@ -47,7 +47,7 @@ const createMockTransaction = (): Transaction & TransactionWithinSizeLimit & Tra
     return {} as Transaction & TransactionWithinSizeLimit & TransactionWithLifetime;
 };
 
-describe('TurnkeySigner', () => {
+describe('createTurnkeySigner', () => {
     beforeEach(() => {
         vi.resetAllMocks();
     });
@@ -96,11 +96,11 @@ describe('TurnkeySigner', () => {
         });
     };
 
-    describe('create', () => {
+    describe('basic construction', () => {
         it('creates a TurnkeySigner with valid config', async () => {
             const keyPair = await generateKeyPairSigner();
 
-            const signer = TurnkeySigner.create({
+            const signer = createTurnkeySigner({
                 ...mockConfig,
                 publicKey: keyPair.address,
             });
@@ -111,7 +111,7 @@ describe('TurnkeySigner', () => {
 
         it('should throw error for missing config fields', () => {
             expect(() => {
-                TurnkeySigner.create({
+                createTurnkeySigner({
                     ...mockConfig,
                     publicKey: 'some-key',
                     organizationId: '',
@@ -120,7 +120,7 @@ describe('TurnkeySigner', () => {
         });
     });
 
-    describe('constructor', () => {
+    describe('additional cases', () => {
         it('creates a TurnkeySigner with valid config', async () => {
             const keyPair = await generateKeyPairSigner();
 
@@ -129,7 +129,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             expect(signer.address).toBe(keyPair.address);
             assertIsSolanaSigner(signer);
@@ -146,7 +146,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             expect(signer.address).toBe(keyPair.address);
         });
@@ -156,47 +156,47 @@ describe('TurnkeySigner', () => {
                 const keyPair = await generateKeyPairSigner();
                 const invalidConfig = { ...mockConfig, apiPublicKey: '', publicKey: keyPair.address };
 
-                expect(() => new TurnkeySigner(invalidConfig)).toThrow();
+                expect(() => createTurnkeySigner(invalidConfig)).toThrow();
             });
 
             it('throws CONFIG_ERROR when apiPrivateKey is missing', async () => {
                 const keyPair = await generateKeyPairSigner();
                 const invalidConfig = { ...mockConfig, apiPrivateKey: '', publicKey: keyPair.address };
 
-                expect(() => new TurnkeySigner(invalidConfig)).toThrow();
+                expect(() => createTurnkeySigner(invalidConfig)).toThrow();
             });
 
             it('throws CONFIG_ERROR when organizationId is missing', async () => {
                 const keyPair = await generateKeyPairSigner();
                 const invalidConfig = { ...mockConfig, organizationId: '', publicKey: keyPair.address };
 
-                expect(() => new TurnkeySigner(invalidConfig)).toThrow();
+                expect(() => createTurnkeySigner(invalidConfig)).toThrow();
             });
 
             it('throws CONFIG_ERROR when privateKeyId is missing', async () => {
                 const keyPair = await generateKeyPairSigner();
                 const invalidConfig = { ...mockConfig, privateKeyId: '', publicKey: keyPair.address };
 
-                expect(() => new TurnkeySigner(invalidConfig)).toThrow();
+                expect(() => createTurnkeySigner(invalidConfig)).toThrow();
             });
 
             it('throws CONFIG_ERROR when publicKey is missing', () => {
                 const invalidConfig = { ...mockConfig, publicKey: '' };
 
-                expect(() => new TurnkeySigner(invalidConfig)).toThrow();
+                expect(() => createTurnkeySigner(invalidConfig)).toThrow();
             });
 
             it('throws CONFIG_ERROR when publicKey is invalid', () => {
                 const invalidConfig = { ...mockConfig, publicKey: 'not-a-valid-address' };
 
-                expect(() => new TurnkeySigner(invalidConfig)).toThrow();
+                expect(() => createTurnkeySigner(invalidConfig)).toThrow();
             });
 
             it('throws CONFIG_ERROR when apiBaseUrl is not a valid URL', async () => {
                 const keyPair = await generateKeyPairSigner();
                 const invalidConfig = { ...mockConfig, apiBaseUrl: 'not-a-url', publicKey: keyPair.address };
 
-                expect(() => new TurnkeySigner(invalidConfig)).toThrow('apiBaseUrl is not a valid URL');
+                expect(() => createTurnkeySigner(invalidConfig)).toThrow('apiBaseUrl is not a valid URL');
             });
 
             it('throws CONFIG_ERROR when apiBaseUrl does not use HTTPS', async () => {
@@ -207,7 +207,7 @@ describe('TurnkeySigner', () => {
                     publicKey: keyPair.address,
                 };
 
-                expect(() => new TurnkeySigner(invalidConfig)).toThrow('apiBaseUrl must use HTTPS');
+                expect(() => createTurnkeySigner(invalidConfig)).toThrow('apiBaseUrl must use HTTPS');
             });
         });
     });
@@ -222,7 +222,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPairSigner.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             const messageContent = new Uint8Array([1, 2, 3, 4]);
             const signature = await signBytes(keyPair.privateKey, messageContent);
@@ -248,7 +248,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             // Create undersized components (less than 32 bytes)
             const r = '1234abcd'; // 4 bytes
@@ -275,7 +275,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             // Create oversized r component (> 32 bytes)
             const r = Buffer.alloc(33, 0xff).toString('hex');
@@ -299,7 +299,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             // Create oversized s component (> 32 bytes)
             const r = Buffer.alloc(32, 0x01).toString('hex');
@@ -323,7 +323,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Network timeout'));
 
@@ -343,7 +343,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 ok: false,
@@ -367,7 +367,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 json: () => Promise.reject(new Error('Invalid JSON')),
@@ -391,7 +391,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 json: () => Promise.resolve({}),
@@ -415,7 +415,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 json: () =>
@@ -444,7 +444,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 json: () =>
@@ -476,7 +476,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             setupMockSignResponse('abc', 'de');
 
@@ -575,7 +575,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 ok: false,
@@ -596,7 +596,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Network timeout'));
 
@@ -616,7 +616,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 json: () => Promise.reject(new Error('Invalid JSON')),
@@ -640,7 +640,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 json: () => Promise.resolve({}),
@@ -664,7 +664,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 json: () =>
@@ -694,7 +694,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 json: () =>
@@ -725,7 +725,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             setupMockWhoAmIResponse(mockConfig.organizationId);
 
@@ -741,7 +741,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
                 ok: false,
@@ -761,7 +761,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Network error'));
 
@@ -777,7 +777,7 @@ describe('TurnkeySigner', () => {
                 publicKey: keyPair.address,
             };
 
-            const signer = new TurnkeySigner(config);
+            const signer = createTurnkeySigner(config);
 
             setupMockWhoAmIResponse('different-org-id');
 

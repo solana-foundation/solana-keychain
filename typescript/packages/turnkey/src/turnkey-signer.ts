@@ -13,7 +13,12 @@ import {
     validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
-import { SignableMessage, SignatureDictionary } from '@solana/signers';
+import {
+    MessagePartialSignerConfig,
+    SignableMessage,
+    SignatureDictionary,
+    TransactionPartialSignerConfig,
+} from '@solana/signers';
 import {
     getBase64EncodedWireTransaction,
     Transaction,
@@ -59,10 +64,8 @@ export interface TurnkeySignerConfig {
  * Turnkey-based signer using Turnkey's API
  *
  * Uses P256 ECDSA for API authentication (X-Stamp header) and Ed25519 for Solana signing
- *
- * @deprecated Prefer `createTurnkeySigner()`. Class export will be removed in a future version.
  */
-export class TurnkeySigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class TurnkeySigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly apiBaseUrl: string;
     private readonly organizationId: string;
@@ -70,13 +73,11 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
     private readonly stamper: ApiKeyStamper;
     private readonly requestDelayMs: number;
 
-    /** @deprecated Use `createTurnkeySigner()` instead. */
     static create<TAddress extends string = string>(config: TurnkeySignerConfig): TurnkeySigner<TAddress> {
         return new TurnkeySigner<TAddress>(config);
     }
 
-    /** @deprecated Use `createTurnkeySigner()` instead. Direct construction will be removed in a future version. */
-    constructor(config: TurnkeySignerConfig) {
+    private constructor(config: TurnkeySignerConfig) {
         if (!config.apiPublicKey || !config.apiPrivateKey || !config.organizationId || !config.privateKeyId) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
                 message:
@@ -162,7 +163,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
      * @param hexPayload
      * @returns Promise of SignatureBytes
      */
-    private async sign(hexPayload: string): Promise<SignatureBytes> {
+    private async sign(hexPayload: string, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         const request: SignRequest = {
             organizationId: this.organizationId,
             parameters: {
@@ -179,6 +180,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
         const stamp = this.stamper.stamp(body);
 
         const activityResponse = await fetchSignerJson<ActivityResponse>({
+            abortSignal,
             init: {
                 body,
                 headers: {
@@ -215,14 +217,17 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
     /**
      * Sign multiple messages using Turnkey API
      */
-    async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+    async signMessages(
+        messages: readonly SignableMessage[],
+        config?: MessagePartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             messages,
             async message => {
                 // Convert message bytes to hex for Turnkey
                 const bytesToHex = getBase16Decoder().decode;
                 const hexMessage = bytesToHex(message.content);
-                const signatureBytes = await this.sign(hexMessage);
+                const signatureBytes = await this.sign(hexMessage, config?.abortSignal);
                 await assertSignatureValid({
                     data: message.content,
                     signature: signatureBytes,
@@ -234,6 +239,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -244,7 +250,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
      * @param hexTransaction
      * @returns Promise of string (signed transaction hex)
      */
-    private async signTransaction(hexTransaction: string): Promise<string> {
+    private async signTransaction(hexTransaction: string, abortSignal?: AbortSignal): Promise<string> {
         const request: SignTransactionRequest = {
             organizationId: this.organizationId,
             parameters: {
@@ -260,6 +266,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
         const stamp = this.stamper.stamp(body);
 
         const activityResponse = await fetchSignerJson<ActivityResponse>({
+            abortSignal,
             init: {
                 body,
                 headers: {
@@ -292,6 +299,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
      */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        config?: TransactionPartialSignerConfig,
     ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             transactions,
@@ -305,7 +313,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                 const hexTx = bytesToHex(txBytes);
 
                 // Use Turnkey's sign_transaction endpoint which returns the full signed transaction
-                const signedTransactionHex = await this.signTransaction(hexTx);
+                const signedTransactionHex = await this.signTransaction(hexTx, config?.abortSignal);
 
                 // Convert signed transaction hex back to bytes for signature extraction
                 const hexToBytes = getBase16Encoder().encode;
@@ -322,6 +330,7 @@ export class TurnkeySigner<TAddress extends string = string> implements SolanaSi
                 return sigDict;
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 

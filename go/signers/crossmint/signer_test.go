@@ -20,7 +20,6 @@ import (
 
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/base58"
-	"github.com/gagliardetto/solana-go/programs/system"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
 	"github.com/solana-foundation/solana-keychain/go/testutils"
@@ -31,55 +30,9 @@ const (
 	testWalletPath = "/" + walletsAPIVersion + "/wallets/test-wallet"
 )
 
-// testBlockhash mirrors the fixed blockhash used by testutils so transactions
-// built with a custom recipient stay deterministic.
-var testBlockhash = func() solana.Hash {
-	var h solana.Hash
-	for i := range h {
-		h[i] = 9
-	}
-	return h
-}()
-
-func assertCode(t *testing.T, err error, want core.Code) {
-	t.Helper()
-	if err == nil {
-		t.Fatalf("expected error with code %s, got nil", want)
-	}
-	got, ok := core.CodeOf(err)
-	if !ok {
-		t.Fatalf("expected *core.SignerError, got %T: %v", err, err)
-	}
-	if got != want {
-		t.Fatalf("error code = %s, want %s (detail: %s)", got, want, detailOf(t, err))
-	}
-}
-
-func detailOf(t *testing.T, err error) string {
-	t.Helper()
-	var se *core.SignerError
-	if !errors.As(err, &se) {
-		t.Fatalf("expected *core.SignerError, got %T: %v", err, err)
-	}
-	return se.Detail()
-}
-
-func pubkeyOf(priv ed25519.PrivateKey) solana.PublicKey {
-	var pub solana.PublicKey
-	copy(pub[:], priv.Public().(ed25519.PublicKey))
-	return pub
-}
-
-func signMessage(priv ed25519.PrivateKey, message []byte) solana.Signature {
-	var sig solana.Signature
-	copy(sig[:], ed25519.Sign(priv, message))
-	return sig
-}
-
 func createTestTransactionWithRecipient(t *testing.T, payer, recipient solana.PublicKey) *solana.Transaction {
 	t.Helper()
-	inst := system.NewTransferInstruction(testutils.TestTransferLamports, payer, recipient).Build()
-	tx, err := solana.NewTransaction([]solana.Instruction{inst}, testBlockhash, solana.TransactionPayer(payer))
+	tx, err := testutils.CreateTestTransactionTo(payer, recipient)
 	if err != nil {
 		t.Fatalf("build transaction: %v", err)
 	}
@@ -95,8 +48,8 @@ func signAndEncodeB58(t *testing.T, tx *solana.Transaction, priv ed25519.Private
 	if err != nil {
 		t.Fatalf("serialize message: %v", err)
 	}
-	sig := signMessage(priv, msg)
-	if err := core.AddSignature(tx, pubkeyOf(priv), sig); err != nil {
+	sig := testutils.SignWith(priv, msg)
+	if err := core.AddSignature(tx, testutils.PubkeyOf(priv), sig); err != nil {
 		t.Fatalf("add signature: %v", err)
 	}
 	raw, err := tx.MarshalBinary()
@@ -104,12 +57,6 @@ func signAndEncodeB58(t *testing.T, tx *solana.Transaction, priv ed25519.Private
 		t.Fatalf("serialize transaction: %v", err)
 	}
 	return base58.Encode(raw), sig
-}
-
-func writeJSON(w http.ResponseWriter, status int, body string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write([]byte(body))
 }
 
 func walletJSON(address string) string {
@@ -123,15 +70,8 @@ func walletHandler(t *testing.T, apiKey, address string) http.HandlerFunc {
 		if got := r.Header.Get("X-API-KEY"); got != apiKey {
 			t.Errorf("x-api-key = %q, want %q", got, apiKey)
 		}
-		writeJSON(w, http.StatusOK, walletJSON(address))
+		testutils.WriteRawJSON(w, http.StatusOK, walletJSON(address))
 	}
-}
-
-func startServer(t *testing.T, handler http.Handler) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewTLSServer(handler)
-	t.Cleanup(srv.Close)
-	return srv
 }
 
 func baseConfig(srv *httptest.Server) Config {
@@ -149,7 +89,7 @@ func newTestSigner(t *testing.T, cfg Config) *Signer {
 	t.Helper()
 	s, err := New(context.Background(), cfg)
 	if err != nil {
-		t.Fatalf("New: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("New: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	return s
 }
@@ -237,7 +177,7 @@ func TestNewRejectsInsecureAPIBaseURL(t *testing.T) {
 				APIBaseURL:    "http://insecure.example.com",
 				HTTPClient:    client,
 			})
-			assertCode(t, err, core.CodeConfigError)
+			testutils.AssertCode(t, err, core.CodeConfigError)
 		})
 	}
 }
@@ -256,7 +196,7 @@ func TestNewValidatesConfig(t *testing.T) {
 	for name, cfg := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := New(context.Background(), cfg)
-			assertCode(t, err, core.CodeConfigError)
+			testutils.AssertCode(t, err, core.CodeConfigError)
 		})
 	}
 }
@@ -265,7 +205,7 @@ func TestNewSuccess(t *testing.T) {
 	want := testutils.TestPublicKey()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, want.String()))
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	s := newTestSigner(t, baseConfig(srv))
 	if s.Pubkey() != want {
@@ -279,11 +219,11 @@ func TestNewURLEncodesWalletLocator(t *testing.T) {
 	want := testutils.TestPublicKey()
 	const wantPath = "/" + walletsAPIVersion + "/wallets/userId%3Atest-user%3Asolana%3Asmart"
 
-	srv := startServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.EscapedPath(); got != wantPath {
 			t.Errorf("request path = %s, want %s", got, wantPath)
 		}
-		writeJSON(w, http.StatusOK, walletJSON(want.String()))
+		testutils.WriteRawJSON(w, http.StatusOK, walletJSON(want.String()))
 	}))
 
 	cfg := baseConfig(srv)
@@ -343,12 +283,12 @@ func TestNewWalletValidation(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := startServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				writeJSON(w, tc.status, tc.body)
+			srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				testutils.WriteRawJSON(w, tc.status, tc.body)
 			}))
 			_, err := New(context.Background(), baseConfig(srv))
-			assertCode(t, err, tc.wantCode)
-			if detail := detailOf(t, err); !strings.Contains(detail, tc.wantIn) {
+			testutils.AssertCode(t, err, tc.wantCode)
+			if detail := testutils.Detail(t, err); !strings.Contains(detail, tc.wantIn) {
 				t.Errorf("detail = %q, want it to contain %q", detail, tc.wantIn)
 			}
 		})
@@ -360,19 +300,19 @@ func TestNewWalletValidation(t *testing.T) {
 func TestSignMessageNotSupported(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.TestPublicKey().String()))
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 	s := newTestSigner(t, baseConfig(srv))
 
 	_, err := s.SignMessage(context.Background(), []byte("hello"))
-	assertCode(t, err, core.CodeSigningFailed)
-	if detail := detailOf(t, err); !strings.Contains(detail, "not supported") {
+	testutils.AssertCode(t, err, core.CodeSigningFailed)
+	if detail := testutils.Detail(t, err); !strings.Contains(detail, "not supported") {
 		t.Errorf("detail = %q, want it to contain %q", detail, "not supported")
 	}
 }
 
 func TestSignTransactionSuccess(t *testing.T) {
 	priv := testutils.TestPrivateKey()
-	signerPubkey := pubkeyOf(priv)
+	signerPubkey := testutils.PubkeyOf(priv)
 
 	localTx, err := testutils.CreateTestTransaction(signerPubkey)
 	if err != nil {
@@ -410,16 +350,16 @@ func TestSignTransactionSuccess(t *testing.T) {
 		if got := r.Header.Get("x-idempotency-key"); got != want {
 			t.Errorf("x-idempotency-key = %q, want %q", got, want)
 		}
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-123","status":"success","chainType":"solana","walletType":"smart","onChain":{"transaction":%q}}`,
 			onChainTransaction))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	s := newTestSigner(t, baseConfig(srv))
 	res, err := s.SignTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if res.Signature != expectedSignature {
 		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
@@ -444,11 +384,11 @@ func createStatusSigner(t *testing.T, status int, body string) *Signer {
 	t.Helper()
 	priv := testutils.TestPrivateKey()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, pubkeyOf(priv).String()))
+	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.PubkeyOf(priv).String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, status, body)
+		testutils.WriteRawJSON(w, status, body)
 	})
-	cfg := baseConfig(startServer(t, mux))
+	cfg := baseConfig(testutils.StartTLSServer(t, mux))
 	cfg.MaxPollAttempts = 1
 	return newTestSigner(t, cfg)
 }
@@ -457,7 +397,7 @@ func createStatusSigner(t *testing.T, status int, body string) *Signer {
 // carrying wantStatus (0 when the provider sent no failing status).
 func assertUnconfirmedWithoutID(t *testing.T, err error, wantStatus int) {
 	t.Helper()
-	assertCode(t, err, core.CodeBroadcastUnconfirmed)
+	testutils.AssertCode(t, err, core.CodeBroadcastUnconfirmed)
 	var se *core.SignerError
 	if !errors.As(err, &se) || se.ProviderTxID != "" {
 		t.Errorf("error must carry no provider transaction id, got %v", err)
@@ -494,7 +434,7 @@ func TestCreateRejectionStaysPlainFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertCode(t, err, core.CodeRemoteAPIError)
+	testutils.AssertCode(t, err, core.CodeRemoteAPIError)
 }
 
 // TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes:
@@ -502,19 +442,19 @@ func TestCreateRejectionStaysPlainFailure(t *testing.T) {
 // as the transaction signature.
 func TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes(t *testing.T) {
 	priv := testutils.TestPrivateKey()
-	signerPubkey := pubkeyOf(priv)
+	signerPubkey := testutils.PubkeyOf(priv)
 
 	approvalPriv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
-	approvalSignature := signMessage(approvalPriv, []byte("crossmint-approval-payload"))
+	approvalSignature := testutils.SignWith(approvalPriv, []byte("crossmint-approval-payload"))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, signerPubkey.String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-approval","status":"success","approvals":{"submitted":[{"signature":%q}]}}`,
 			base58.Encode(approvalSignature[:])))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.MaxPollAttempts = 1
@@ -525,8 +465,8 @@ func TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes(t *tes
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertCode(t, err, core.CodeBroadcastUnconfirmed)
-	if detail := detailOf(t, err); !strings.Contains(detail, "unable to extract signature") {
+	testutils.AssertCode(t, err, core.CodeBroadcastUnconfirmed)
+	if detail := testutils.Detail(t, err); !strings.Contains(detail, "unable to extract signature") {
 		t.Errorf("detail = %q, want it to contain %q", detail, "unable to extract signature")
 	}
 }
@@ -536,20 +476,20 @@ func TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes(t *tes
 // even when Crossmint modified the transaction (e.g. a smart-wallet rewrite).
 func TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes(t *testing.T) {
 	priv := testutils.TestPrivateKey()
-	signerPubkey := pubkeyOf(priv)
+	signerPubkey := testutils.PubkeyOf(priv)
 
-	recipient := pubkeyOf(ed25519.NewKeyFromSeed(bytes.Repeat([]byte{11}, ed25519.SeedSize)))
+	recipient := testutils.PubkeyOf(ed25519.NewKeyFromSeed(bytes.Repeat([]byte{11}, ed25519.SeedSize)))
 	remoteTx := createTestTransactionWithRecipient(t, signerPubkey, recipient)
 	remoteOnChainTransaction, remoteSignature := signAndEncodeB58(t, remoteTx, priv)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, signerPubkey.String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-mismatch","status":"success","onChain":{"transaction":%q}}`,
 			remoteOnChainTransaction))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.MaxPollAttempts = 1
@@ -561,7 +501,7 @@ func TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes(t *testing.T
 	}
 	res, err := s.SignTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if res.Signature != remoteSignature {
 		t.Errorf("signature = %s, want %s", res.Signature, remoteSignature)
@@ -614,11 +554,11 @@ func TestSignTransactionLocatesDelegatedSignerSignature(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, derivableAPIKey, walletPub.String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-delegated","status":"success","onChain":{"transaction":%q}}`,
 			base58.Encode(wireBytes)))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.APIKey = derivableAPIKey
@@ -632,7 +572,7 @@ func TestSignTransactionLocatesDelegatedSignerSignature(t *testing.T) {
 	}
 	res, err := s.SignTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if res.Signature != expectedSignature {
 		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
@@ -675,11 +615,11 @@ func TestSignTransactionSponsoredReturnsFeePayerTransactionID(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, derivableAPIKey, walletPub.String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-sponsored","status":"success","approvals":{"submitted":[{"signature":%q,"signer":{"address":%q}}]},"onChain":{"transaction":%q}}`,
 			approvalSignature.String(), delegated.String(), base58.Encode(wireBytes)))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.APIKey = derivableAPIKey
@@ -693,7 +633,7 @@ func TestSignTransactionSponsoredReturnsFeePayerTransactionID(t *testing.T) {
 	}
 	res, err := s.SignTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if res.Signature != feePayerSignature {
 		t.Errorf("signature = %s, want fee payer %s", res.Signature, feePayerSignature)
@@ -733,10 +673,10 @@ func TestSignTransactionExplicitLocatorSignerIsACandidate(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, derivableAPIKey, walletPub.String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-admin","status":"success","onChain":{"transaction":%q}}`, base58.Encode(wireBytes)))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.APIKey = derivableAPIKey
@@ -751,7 +691,7 @@ func TestSignTransactionExplicitLocatorSignerIsACandidate(t *testing.T) {
 	}
 	res, err := s.SignTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if res.Signature != expectedSignature {
 		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
@@ -783,11 +723,11 @@ func TestSignTransactionRejectsUnrelatedSignerKey(t *testing.T) {
 	derivableAPIKey := "sk_staging_" + base58.Encode([]byte("proj:sig"))
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, derivableAPIKey, walletPub.String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-stranger","status":"success","onChain":{"transaction":%q}}`,
 			base58.Encode(wireBytes)))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.APIKey = derivableAPIKey
@@ -807,7 +747,7 @@ func TestSignTransactionRejectsUnrelatedSignerKey(t *testing.T) {
 
 func TestSignTransactionUnrewrittenTransactionSignsCallerBytes(t *testing.T) {
 	priv := testutils.TestPrivateKey()
-	signerPubkey := pubkeyOf(priv)
+	signerPubkey := testutils.PubkeyOf(priv)
 
 	localTx, err := testutils.CreateTestTransaction(signerPubkey)
 	if err != nil {
@@ -822,10 +762,10 @@ func TestSignTransactionUnrewrittenTransactionSignsCallerBytes(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, signerPubkey.String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-exact","status":"success","onChain":{"transaction":%q}}`, onChainTransaction))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.MaxPollAttempts = 1
@@ -833,7 +773,7 @@ func TestSignTransactionUnrewrittenTransactionSignsCallerBytes(t *testing.T) {
 
 	res, err := s.SignTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if res.EncodedTransaction == "" {
 		t.Error("an unrewritten transaction is the caller's to broadcast")
@@ -845,9 +785,9 @@ func TestSignTransactionUnrewrittenTransactionSignsCallerBytes(t *testing.T) {
 
 func TestSignTransactionPrefersOnChainTransactionSignatureOverTxIDFallback(t *testing.T) {
 	priv := testutils.TestPrivateKey()
-	signerPubkey := pubkeyOf(priv)
+	signerPubkey := testutils.PubkeyOf(priv)
 
-	recipient := pubkeyOf(ed25519.NewKeyFromSeed(bytes.Repeat([]byte{13}, ed25519.SeedSize)))
+	recipient := testutils.PubkeyOf(ed25519.NewKeyFromSeed(bytes.Repeat([]byte{13}, ed25519.SeedSize)))
 	remoteTx := createTestTransactionWithRecipient(t, signerPubkey, recipient)
 	remoteOnChainTransaction, remoteSignature := signAndEncodeB58(t, remoteTx, priv)
 	// txId is only valid for the remote transaction bytes, not the local ones.
@@ -856,11 +796,11 @@ func TestSignTransactionPrefersOnChainTransactionSignatureOverTxIDFallback(t *te
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, signerPubkey.String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-fallthrough","status":"success","onChain":{"transaction":%q,"txId":%q}}`,
 			remoteOnChainTransaction, txID))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.MaxPollAttempts = 1
@@ -872,7 +812,7 @@ func TestSignTransactionPrefersOnChainTransactionSignatureOverTxIDFallback(t *te
 	}
 	res, err := s.SignTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if res.Signature != remoteSignature {
 		t.Errorf("signature = %s, want %s", res.Signature, remoteSignature)
@@ -885,10 +825,10 @@ func TestSignTransactionAwaitingApproval(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.TestPublicKey().String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated,
+		testutils.WriteRawJSON(w, http.StatusCreated,
 			`{"id":"tx-123","status":"awaiting-approval","chainType":"solana","walletType":"smart"}`)
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	s := newTestSigner(t, baseConfig(srv))
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())
@@ -896,8 +836,8 @@ func TestSignTransactionAwaitingApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertCode(t, err, core.CodeBroadcastUnconfirmed)
-	if detail := detailOf(t, err); !strings.Contains(detail, "awaiting approval") {
+	testutils.AssertCode(t, err, core.CodeBroadcastUnconfirmed)
+	if detail := testutils.Detail(t, err); !strings.Contains(detail, "awaiting approval") {
 		t.Errorf("detail = %q, want it to contain %q", detail, "awaiting approval")
 	}
 }
@@ -906,7 +846,7 @@ func TestSignTransactionAwaitingApproval(t *testing.T) {
 // final poll attempt is still honored.
 func TestSignTransactionSuccessOnLastPolledResponse(t *testing.T) {
 	priv := testutils.TestPrivateKey()
-	signerPubkey := pubkeyOf(priv)
+	signerPubkey := testutils.PubkeyOf(priv)
 
 	tx, err := testutils.CreateTestTransaction(signerPubkey)
 	if err != nil {
@@ -916,21 +856,21 @@ func TestSignTransactionSuccessOnLastPolledResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedSignature := signMessage(priv, msg)
+	expectedSignature := testutils.SignWith(priv, msg)
 	txID := base58.Encode(expectedSignature[:])
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, signerPubkey.String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated,
+		testutils.WriteRawJSON(w, http.StatusCreated,
 			`{"id":"tx-123","status":"pending","chainType":"solana","walletType":"smart"}`)
 	})
 	mux.HandleFunc("GET "+testWalletPath+"/transactions/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusOK, fmt.Sprintf(
 			`{"id":"tx-123","status":"success","chainType":"solana","walletType":"smart","onChain":{"txId":%q}}`,
 			txID))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.MaxPollAttempts = 1
@@ -938,7 +878,7 @@ func TestSignTransactionSuccessOnLastPolledResponse(t *testing.T) {
 
 	res, err := s.SignTransaction(context.Background(), tx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if res.Signature != expectedSignature {
 		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
@@ -951,10 +891,10 @@ func TestSignTransactionFailedStatus(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.TestPublicKey().String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated,
+		testutils.WriteRawJSON(w, http.StatusCreated,
 			`{"id":"tx-9","status":"failed","error":{"reason":"insufficient funds"}}`)
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	s := newTestSigner(t, baseConfig(srv))
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())
@@ -962,8 +902,8 @@ func TestSignTransactionFailedStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertCode(t, err, core.CodeBroadcastUnconfirmed)
-	detail := detailOf(t, err)
+	testutils.AssertCode(t, err, core.CodeBroadcastUnconfirmed)
+	detail := testutils.Detail(t, err)
 	if !strings.Contains(detail, "Crossmint transaction failed") || !strings.Contains(detail, "insufficient funds") {
 		t.Errorf("detail = %q, want it to contain the failed-status message and remote reason", detail)
 	}
@@ -975,12 +915,12 @@ func TestSignTransactionPollingTimesOut(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.TestPublicKey().String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated, pending)
+		testutils.WriteRawJSON(w, http.StatusCreated, pending)
 	})
 	mux.HandleFunc("GET "+testWalletPath+"/transactions/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, pending)
+		testutils.WriteRawJSON(w, http.StatusOK, pending)
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	s := newTestSigner(t, baseConfig(srv))
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())
@@ -988,8 +928,8 @@ func TestSignTransactionPollingTimesOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertCode(t, err, core.CodeBroadcastUnconfirmed)
-	if detail := detailOf(t, err); !strings.Contains(detail, "polling timed out after 2 attempts") {
+	testutils.AssertCode(t, err, core.CodeBroadcastUnconfirmed)
+	if detail := testutils.Detail(t, err); !strings.Contains(detail, "polling timed out after 2 attempts") {
 		t.Errorf("detail = %q, want it to contain %q", detail, "polling timed out after 2 attempts")
 	}
 	var se *core.SignerError
@@ -1019,9 +959,9 @@ func TestCreateTransactionRemoteAPIError(t *testing.T) {
 			mux := http.NewServeMux()
 			mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.TestPublicKey().String()))
 			mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-				writeJSON(w, http.StatusBadRequest, tc.body)
+				testutils.WriteRawJSON(w, http.StatusBadRequest, tc.body)
 			})
-			srv := startServer(t, mux)
+			srv := testutils.StartTLSServer(t, mux)
 
 			s := newTestSigner(t, baseConfig(srv))
 			tx, err := testutils.CreateTestTransaction(s.Pubkey())
@@ -1029,8 +969,8 @@ func TestCreateTransactionRemoteAPIError(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = s.SignTransaction(context.Background(), tx)
-			assertCode(t, err, core.CodeRemoteAPIError)
-			if detail := detailOf(t, err); !strings.Contains(detail, tc.wantIn) {
+			testutils.AssertCode(t, err, core.CodeRemoteAPIError)
+			if detail := testutils.Detail(t, err); !strings.Contains(detail, tc.wantIn) {
 				t.Errorf("detail = %q, want it to contain %q", detail, tc.wantIn)
 			}
 		})
@@ -1047,13 +987,13 @@ func TestRemoteAPIErrorSanitizesHostileBody(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusInternalServerError, string(hostileBody))
+		testutils.WriteRawJSON(w, http.StatusInternalServerError, string(hostileBody))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	_, err = New(context.Background(), baseConfig(srv))
-	assertCode(t, err, core.CodeRemoteAPIError)
-	detail := detailOf(t, err)
+	testutils.AssertCode(t, err, core.CodeRemoteAPIError)
+	detail := testutils.Detail(t, err)
 	if strings.ContainsAny(detail, "\x07\x1b\n") {
 		t.Errorf("detail contains raw control characters: %q", detail)
 	}
@@ -1071,7 +1011,7 @@ func TestRemoteAPIErrorSanitizesHostileBody(t *testing.T) {
 // transaction.
 func TestSignTransactionSubmitsApprovalWithDerivedKey(t *testing.T) {
 	priv := testutils.TestPrivateKey()
-	signerPubkey := pubkeyOf(priv)
+	signerPubkey := testutils.PubkeyOf(priv)
 
 	apiKey := "sk_staging_" + base58.Encode([]byte("project-123:signature-data"))
 	secret := signerSecretPrefix + strings.Repeat("4d", 32)
@@ -1108,7 +1048,7 @@ func TestSignTransactionSubmitsApprovalWithDerivedKey(t *testing.T) {
 		if req.Params.Signer != wantLocator {
 			t.Errorf("create request signer = %q, want %q", req.Params.Signer, wantLocator)
 		}
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-1","status":"awaiting-approval","approvals":{"pending":[{"signer":{"locator":%q},"message":%q}]}}`,
 			wantLocator, approvalMessageB58))
 	})
@@ -1132,11 +1072,11 @@ func TestSignTransactionSubmitsApprovalWithDerivedKey(t *testing.T) {
 		if !ed25519.Verify(derivedPub, approvalMessage, sigBytes) {
 			t.Error("approval signature does not verify under the derived server signer key")
 		}
-		writeJSON(w, http.StatusOK, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusOK, fmt.Sprintf(
 			`{"id":"tx-1","status":"success","onChain":{"transaction":%q}}`,
 			onChainTransaction))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.APIKey = apiKey
@@ -1146,7 +1086,7 @@ func TestSignTransactionSubmitsApprovalWithDerivedKey(t *testing.T) {
 
 	res, err := s.SignTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if res.Signature != expectedSignature {
 		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
@@ -1171,11 +1111,11 @@ func TestSignTransactionAwaitingApprovalNoPendingMessage(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, apiKey, testutils.TestPublicKey().String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-1","status":"awaiting-approval","approvals":{"pending":[{"signer":{"locator":%q}}]}}`,
 			wantLocator))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.APIKey = apiKey
@@ -1187,8 +1127,8 @@ func TestSignTransactionAwaitingApprovalNoPendingMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertCode(t, err, core.CodeBroadcastUnconfirmed)
-	if detail := detailOf(t, err); !strings.Contains(detail, "no pending message found") {
+	testutils.AssertCode(t, err, core.CodeBroadcastUnconfirmed)
+	if detail := testutils.Detail(t, err); !strings.Contains(detail, "no pending message found") {
 		t.Errorf("detail = %q, want it to contain %q", detail, "no pending message found")
 	}
 }
@@ -1206,7 +1146,7 @@ func attachApprovalSigner(s *Signer, locator string, key ed25519.PrivateKey) {
 // the transaction succeeds.
 func TestSignTransactionSubmitsApprovalOnceAndPollsAfterAsyncRegistration(t *testing.T) {
 	priv := testutils.TestPrivateKey()
-	signerPubkey := pubkeyOf(priv)
+	signerPubkey := testutils.PubkeyOf(priv)
 	locator := "server:test-approver"
 	approvalKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
 	approvalMessage := base58.Encode([]byte("approval-challenge"))
@@ -1219,14 +1159,14 @@ func TestSignTransactionSubmitsApprovalOnceAndPollsAfterAsyncRegistration(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedSignature := signMessage(priv, msg)
+	expectedSignature := testutils.SignWith(priv, msg)
 	txID := base58.Encode(expectedSignature[:])
 
 	var approvalCalls atomic.Int32
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, signerPubkey.String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-123","status":"awaiting-approval","approvals":{"pending":[{"signer":{"locator":%q},"message":%q}]}}`,
 			locator, approvalMessage))
 	})
@@ -1234,14 +1174,14 @@ func TestSignTransactionSubmitsApprovalOnceAndPollsAfterAsyncRegistration(t *tes
 	// the transaction still reports awaiting-approval with nothing pending.
 	mux.HandleFunc("POST "+testWalletPath+"/transactions/tx-123/approvals", func(w http.ResponseWriter, _ *http.Request) {
 		approvalCalls.Add(1)
-		writeJSON(w, http.StatusOK,
+		testutils.WriteRawJSON(w, http.StatusOK,
 			`{"id":"tx-123","status":"awaiting-approval","approvals":{"pending":[]}}`)
 	})
 	mux.HandleFunc("GET "+testWalletPath+"/transactions/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusOK, fmt.Sprintf(
 			`{"id":"tx-123","status":"success","onChain":{"txId":%q}}`, txID))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.MaxPollAttempts = 5
@@ -1250,7 +1190,7 @@ func TestSignTransactionSubmitsApprovalOnceAndPollsAfterAsyncRegistration(t *tes
 
 	res, err := s.SignTransaction(context.Background(), tx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if res.Signature != expectedSignature {
 		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
@@ -1265,7 +1205,7 @@ func TestSignTransactionSubmitsApprovalOnceAndPollsAfterAsyncRegistration(t *tes
 // locator is signed, never pending[0].
 func TestSignTransactionSelectsPendingApprovalMatchingSignerLocator(t *testing.T) {
 	priv := testutils.TestPrivateKey()
-	signerPubkey := pubkeyOf(priv)
+	signerPubkey := testutils.PubkeyOf(priv)
 	locator := "server:test-approver"
 	approvalKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
 
@@ -1282,7 +1222,7 @@ func TestSignTransactionSelectsPendingApprovalMatchingSignerLocator(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedTxSignature := signMessage(priv, msg)
+	expectedTxSignature := testutils.SignWith(priv, msg)
 	txID := base58.Encode(expectedTxSignature[:])
 
 	var approvalCalls atomic.Int32
@@ -1290,7 +1230,7 @@ func TestSignTransactionSelectsPendingApprovalMatchingSignerLocator(t *testing.T
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, signerPubkey.String()))
 	// pending[0] belongs to another approver; ours is second.
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-multi","status":"awaiting-approval","approvals":{"pending":[`+
 				`{"signer":{"locator":"server:other-approver"},"message":%q},`+
 				`{"signer":{"locator":%q},"message":%q}]}}`,
@@ -1316,10 +1256,10 @@ func TestSignTransactionSelectsPendingApprovalMatchingSignerLocator(t *testing.T
 					req.Approvals[0].Signature, expectedApprovalSignature)
 			}
 		}
-		writeJSON(w, http.StatusOK, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusOK, fmt.Sprintf(
 			`{"id":"tx-multi","status":"success","onChain":{"txId":%q}}`, txID))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.MaxPollAttempts = 5
@@ -1328,7 +1268,7 @@ func TestSignTransactionSelectsPendingApprovalMatchingSignerLocator(t *testing.T
 
 	res, err := s.SignTransaction(context.Background(), tx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if res.Signature != expectedTxSignature {
 		t.Errorf("signature = %s, want %s", res.Signature, expectedTxSignature)
@@ -1388,12 +1328,12 @@ func TestIsAvailable(t *testing.T) {
 	var healthy atomic.Bool
 	healthy.Store(true)
 
-	srv := startServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if !healthy.Load() {
-			writeJSON(w, http.StatusInternalServerError, `{"message":"down"}`)
+			testutils.WriteRawJSON(w, http.StatusInternalServerError, `{"message":"down"}`)
 			return
 		}
-		writeJSON(w, http.StatusOK, walletJSON(testutils.TestPublicKey().String()))
+		testutils.WriteRawJSON(w, http.StatusOK, walletJSON(testutils.TestPublicKey().String()))
 	}))
 
 	s := newTestSigner(t, baseConfig(srv))
@@ -1414,7 +1354,7 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, apiKey, testutils.TestPublicKey().String()))
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	cfg := baseConfig(srv)
 	cfg.APIKey = apiKey
@@ -1456,7 +1396,7 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 // Crossmint must use exactly that wire encoding.
 func TestSignTransactionSendsPlaceholderSignatures(t *testing.T) {
 	priv := testutils.TestPrivateKey()
-	signerPubkey := pubkeyOf(priv)
+	signerPubkey := testutils.PubkeyOf(priv)
 
 	localTx, err := testutils.CreateTestTransaction(signerPubkey)
 	if err != nil {
@@ -1483,15 +1423,15 @@ func TestSignTransactionSendsPlaceholderSignatures(t *testing.T) {
 			t.Errorf("decode create request: %v", err)
 		}
 		postedB58 = req.Params.Transaction
-		writeJSON(w, http.StatusCreated, fmt.Sprintf(
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
 			`{"id":"tx-123","status":"success","chainType":"solana","walletType":"smart","onChain":{"transaction":%q}}`,
 			onChainTransaction))
 	})
-	srv := startServer(t, mux)
+	srv := testutils.StartTLSServer(t, mux)
 
 	s := newTestSigner(t, baseConfig(srv))
 	if _, err := s.SignTransaction(context.Background(), localTx); err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, detailOf(t, err))
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 
 	posted, err := base58.Decode(postedB58)

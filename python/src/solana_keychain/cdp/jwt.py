@@ -2,18 +2,17 @@
 ES256 wallet token for write endpoints."""
 
 import base64
-import hashlib
-import json
 import time
 import uuid
 from typing import Any
-from urllib.parse import urlsplit
 
 try:
     import jwt as pyjwt
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives.serialization import load_der_private_key
+
+    from solana_keychain.core.wallet_jwt import create_es256_wallet_jwt
 except ImportError as error:  # pragma: no cover
     raise ImportError(
         "solana_keychain.cdp requires the cdp extra: pip install 'solana-keychain[cdp]'"
@@ -30,30 +29,6 @@ ED25519_KEYPAIR_LENGTH = 64
 
 def jwt_uri(host: str, method: str, path: str) -> str:
     return f"{method} {host}{path}"
-
-
-def extract_host(base_url: str) -> str:
-    """Extract the request host (including port if present) from a base URL."""
-    try:
-        parsed = urlsplit(base_url)
-        hostname = parsed.hostname
-        port = parsed.port
-    except ValueError:
-        raise SignerError(
-            SignerErrorCode.CONFIG_ERROR, f"Invalid CDP base URL: {base_url}"
-        ) from None
-    if not hostname:
-        raise SignerError(SignerErrorCode.CONFIG_ERROR, f"Missing host in CDP base URL: {base_url}")
-    return f"{hostname}:{port}" if port is not None else hostname
-
-
-def compute_req_hash(body: Any | None) -> str | None:
-    """SHA-256 hex of the request body serialized with recursively sorted keys and
-    compact separators; ``None`` for absent, null, or empty-object bodies."""
-    if body is None or body == {}:
-        return None
-    serialized = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(serialized.encode()).hexdigest()
 
 
 def _parse_ed25519_signing_key(api_key_secret: str) -> Ed25519PrivateKey:
@@ -136,21 +111,4 @@ def create_wallet_jwt(
             SignerErrorCode.INVALID_PRIVATE_KEY,
             "Failed to parse walletSecret as EC private key",
         )
-
-    now = int(time.time())
-    claims: dict[str, Any] = {
-        "uris": [jwt_uri(host, method, path)],
-        "iat": now,
-        "nbf": now,
-        "exp": now + JWT_TTL_SECONDS,
-        "jti": str(uuid.uuid4()),
-    }
-    req_hash = compute_req_hash(request_body)
-    if req_hash is not None:
-        claims["reqHash"] = req_hash
-    try:
-        return pyjwt.encode(claims, signing_key, algorithm="ES256", headers={"typ": "JWT"})
-    except Exception:
-        raise SignerError(
-            SignerErrorCode.SIGNING_FAILED, "Failed to create CDP wallet JWT"
-        ) from None
+    return create_es256_wallet_jwt(signing_key, host, method, path, request_body, "CDP")

@@ -20,14 +20,8 @@ const (
 	DefaultMaxPollAttempts = 60
 )
 
-// availabilityTimeout bounds the wallet fetch performed by IsAvailable.
-const availabilityTimeout = 5 * time.Second
-
 // walletsAPIVersion is the pinned Crossmint Wallets API version path segment.
 const walletsAPIVersion = "2025-06-09"
-
-// maxResponseBytes caps how much of a remote response body is read.
-const maxResponseBytes = 1 << 20
 
 // Config configures a Crossmint signer.
 type Config struct {

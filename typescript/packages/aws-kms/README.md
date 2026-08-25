@@ -126,9 +126,7 @@ const signer = createAwsKmsSigner({
 
 ## API Reference
 
-### `AwsKmsSigner`
-
-#### Constructor
+### `createAwsKmsSigner(config)`
 
 ```typescript
 createAwsKmsSigner(config: AwsKmsSignerConfig)

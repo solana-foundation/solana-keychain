@@ -2,10 +2,26 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import TypeVar
 
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
+
+from solana_keychain.core.errors import SignerError, SignerErrorCode
+
+_T = TypeVar("_T")
+
+
+def require_initialized(value: _T | None, signer_name: str) -> _T:
+    """Return state resolved by ``init()``, raising ``NOT_INITIALIZED`` when the
+    signer has not been initialized yet."""
+    if value is None:
+        raise SignerError(
+            SignerErrorCode.NOT_INITIALIZED,
+            f"{signer_name} is not initialized; call init() before signing",
+        )
+    return value
 
 
 @dataclass(frozen=True)

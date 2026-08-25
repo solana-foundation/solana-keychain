@@ -48,11 +48,6 @@ func testP256Key(t *testing.T) (*ecdsa.PrivateKey, string) {
 	return key, string(pemBytes)
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
-}
-
 func baseConfig(t *testing.T) Config {
 	t.Helper()
 	_, pemKey := testP256Key(t)
@@ -70,7 +65,7 @@ func newTestServer(t *testing.T, address string, configure func(mux *http.ServeM
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc(vaultPath, func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, map[string]any{"id": testVaultID, "address": address})
+		testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": testVaultID, "address": address})
 	})
 	if configure != nil {
 		configure(mux)
@@ -176,7 +171,7 @@ func TestNewValidationRejectsBeforeAnyNetworkCall(t *testing.T) {
 	var requests atomic.Int64
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
-		writeJSON(w, map[string]any{"id": testVaultID, "address": testutils.TestPublicKey().String()})
+		testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": testVaultID, "address": testutils.TestPublicKey().String()})
 	}))
 	t.Cleanup(srv.Close)
 
@@ -300,7 +295,7 @@ func TestNewVerifiesVaultOwnership(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			mux := http.NewServeMux()
 			mux.HandleFunc(vaultPath, func(w http.ResponseWriter, _ *http.Request) {
-				writeJSON(w, tc.vault)
+				testutils.WriteJSON(w, http.StatusOK, tc.vault)
 			})
 			srv := httptest.NewTLSServer(mux)
 			t.Cleanup(srv.Close)
@@ -351,10 +346,10 @@ func respondSigned(t *testing.T, state string, sigData []map[string]string) func
 	t.Helper()
 	return func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{"id": "tx-123"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123"})
 		})
 		mux.HandleFunc(transactionsPath+"/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{"state": state, "signatures": sigData})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"state": state, "signatures": sigData})
 		})
 	}
 }
@@ -411,10 +406,10 @@ func TestSignMessageBlackBoxSuccess(t *testing.T) {
 				t.Errorf("x-idempotence-id = %q, want none on the black-box path", got)
 			}
 
-			writeJSON(w, map[string]any{"id": "tx-123"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123"})
 		})
 		mux.HandleFunc(transactionsPath+"/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
 				"state":      "signed",
 				"signatures": []map[string]string{{"data": base64.StdEncoding.EncodeToString(signature)}},
 			})
@@ -475,7 +470,7 @@ func TestSignMessagePollingTimeout(t *testing.T) {
 		t.Errorf("got %s, want REMOTE_API_ERROR", code)
 	}
 	var se *core.SignerError
-	if errors.As(err, &se) && !strings.Contains(se.Detail(), "Polling timeout") {
+	if errors.As(err, &se) && !strings.Contains(se.Detail(), "polling timed out") {
 		t.Errorf("detail = %q, want polling timeout message", se.Detail())
 	}
 }
@@ -657,10 +652,10 @@ func TestSignTransactionNativeSuccess(t *testing.T) {
 			if got := r.Header.Get("x-idempotence-id"); got != want {
 				t.Errorf("x-idempotence-id = %q, want %q", got, want)
 			}
-			writeJSON(w, map[string]any{"id": "tx-123"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123"})
 		})
 		mux.HandleFunc(transactionsPath+"/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
 				"state":           "completed",
 				"raw_transaction": base64.StdEncoding.EncodeToString(wireBytes),
 			})
@@ -748,7 +743,7 @@ func TestSignTransactionNativeSubmitWithoutIDIsUnconfirmed(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{"state": "pending"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"state": "pending"})
 		})
 	})
 
@@ -822,7 +817,7 @@ func TestSignTransactionNativeRejectsMultiSigner(t *testing.T) {
 	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
 			requests.Add(1)
-			writeJSON(w, map[string]any{"id": "tx-123"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123"})
 		})
 	})
 
@@ -863,10 +858,10 @@ func TestSignTransactionNativeUndecodableRawTransaction(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{"id": "tx-123"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123"})
 		})
 		mux.HandleFunc(transactionsPath+"/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
 				"state":           "completed",
 				"raw_transaction": base64.StdEncoding.EncodeToString([]byte{0xff, 0xff}),
 			})
@@ -906,10 +901,10 @@ func TestSignMessageNativeUsesSolanaMessage(t *testing.T) {
 				details["raw_data"] != base64.StdEncoding.EncodeToString(message) {
 				t.Errorf("unexpected message details: %v", details)
 			}
-			writeJSON(w, map[string]any{"id": "tx-123"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123"})
 		})
 		mux.HandleFunc(transactionsPath+"/tx-123", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
 				"state":      "signed",
 				"signatures": []map[string]string{{"data": base64.StdEncoding.EncodeToString(signature)}},
 			})
@@ -941,7 +936,7 @@ func TestIsAvailableFailure(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		writeJSON(w, map[string]any{"id": testVaultID, "address": testutils.TestPublicKey().String()})
+		testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": testVaultID, "address": testutils.TestPublicKey().String()})
 	})
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)

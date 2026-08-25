@@ -381,10 +381,10 @@ func manualResponse(state, rawTransaction string, inspect func(*http.Request)) f
 			if inspect != nil {
 				inspect(r)
 			}
-			writeJSON(w, map[string]any{"id": "manual-tx"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "manual-tx"})
 		})
 		mux.HandleFunc(transactionsPath+"/manual-tx", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
 				"state":           state,
 				"raw_transaction": rawTransaction,
 			})
@@ -613,10 +613,10 @@ func TestSignMessageNativeManualStillUsesSolanaMessage(t *testing.T) {
 			if details["raw_data"] != base64.StdEncoding.EncodeToString(message) {
 				t.Errorf("unexpected message details: %v", details)
 			}
-			writeJSON(w, map[string]any{"id": "manual-message"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "manual-message"})
 		})
 		mux.HandleFunc(transactionsPath+"/manual-message", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
 				"state":      stateSigned,
 				"signatures": []map[string]string{{"data": base64.StdEncoding.EncodeToString(signature)}},
 			})
@@ -661,7 +661,7 @@ func TestSignTransactionNativeManualRejectsInvalidInputsBeforePost(t *testing.T)
 			signer := newTestSigner(t, nativeManualConfig(t), publicKey.String(), func(mux *http.ServeMux) {
 				mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
 					posts.Add(1)
-					writeJSON(w, map[string]any{"id": "unexpected"})
+					testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "unexpected"})
 				})
 			})
 			tx := tc.makeTx(t)
@@ -868,7 +868,7 @@ func TestSignTransactionNativeManualPollingCancellationIsOrdinaryHTTPError(t *te
 	polled := make(chan struct{})
 	signer := newTestSigner(t, nativeManualConfig(t), publicKey.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{"id": "manual-cancel"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "manual-cancel"})
 		})
 		mux.HandleFunc(transactionsPath+"/manual-cancel", func(w http.ResponseWriter, _ *http.Request) {
 			select {
@@ -876,7 +876,7 @@ func TestSignTransactionNativeManualPollingCancellationIsOrdinaryHTTPError(t *te
 			default:
 				close(polled)
 			}
-			writeJSON(w, map[string]any{"state": "pending"})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"state": "pending"})
 		})
 	})
 	signer.pollInterval = time.Hour
@@ -983,16 +983,16 @@ func TestSignTransactionsBatchesNativeManualResults(t *testing.T) {
 	signer := newTestSigner(t, nativeManualConfig(t), publicKey.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
 			id := creates.Add(1)
-			writeJSON(w, map[string]any{"id": "manual-batch-" + strconv.FormatInt(id, 10)})
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "manual-batch-" + strconv.FormatInt(id, 10)})
 		})
 		mux.HandleFunc(transactionsPath+"/manual-batch-1", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
 				"state":           stateSigned,
 				"raw_transaction": returnedRaw[0],
 			})
 		})
 		mux.HandleFunc(transactionsPath+"/manual-batch-2", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, map[string]any{
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
 				"state":           stateCompleted,
 				"raw_transaction": returnedRaw[1],
 			})

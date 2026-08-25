@@ -17,12 +17,13 @@ from solders.keypair import Keypair
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.core import signed_message_bytes
+from solana_keychain.core.wallet_jwt import compute_req_hash
 from solana_keychain.openfort import (
     OpenfortSigner,
     OpenfortSignerConfig,
     create_openfort_signer,
 )
-from solana_keychain.openfort.jwt import compute_req_hash, create_wallet_jwt, extract_host
+from solana_keychain.openfort.jwt import create_wallet_jwt
 from tests.util import create_test_transaction
 
 API_BASE_URL = "https://openfort.example.com"
@@ -73,14 +74,6 @@ async def initialized_signer(keypair: Keypair, **overrides: Any) -> OpenfortSign
     signer = make_signer(**overrides)
     await signer.init()
     return signer
-
-
-def test_extract_host() -> None:
-    assert extract_host("https://api.openfort.io") == "api.openfort.io"
-    assert extract_host("https://openfort.example.com:8443") == "openfort.example.com:8443"
-    with pytest.raises(SignerError) as excinfo:
-        extract_host("not a url")
-    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
 @pytest.mark.parametrize(

@@ -6,8 +6,6 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,7 +14,6 @@ import (
 
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/base58"
-	"github.com/gagliardetto/solana-go/programs/system"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
 	"github.com/solana-foundation/solana-keychain/go/testutils"
@@ -90,38 +87,10 @@ func newTestSigner(t *testing.T, srv *httptest.Server, address string) *Signer {
 	return s
 }
 
-// newServer starts an httptest server that is closed on test cleanup.
-func newServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewTLSServer(handler)
-	t.Cleanup(srv.Close)
-	return srv
-}
-
-// assertCode fails the test unless err carries the wanted core error code.
-func assertCode(t *testing.T, err error, want core.Code) {
-	t.Helper()
-	if err == nil {
-		t.Fatalf("expected error with code %s, got nil", want)
-	}
-	code, ok := core.CodeOf(err)
-	if !ok {
-		t.Fatalf("expected *core.SignerError, got %T: %v", err, err)
-	}
-	if code != want {
-		t.Errorf("error code = %s, want %s", code, want)
-	}
-}
-
 // transferTx builds a single-signer System transfer to an explicit recipient.
 func transferTx(t *testing.T, payer, recipient solana.PublicKey) *solana.Transaction {
 	t.Helper()
-	inst := system.NewTransferInstruction(testutils.TestTransferLamports, payer, recipient).Build()
-	var blockhash solana.Hash
-	for i := range blockhash {
-		blockhash[i] = 9
-	}
-	tx, err := solana.NewTransaction([]solana.Instruction{inst}, blockhash, solana.TransactionPayer(payer))
+	tx, err := testutils.CreateTestTransactionTo(payer, recipient)
 	if err != nil {
 		t.Fatalf("failed to build test transaction: %v", err)
 	}
@@ -150,7 +119,7 @@ func TestNewRejectsEmptyFields(t *testing.T) {
 			cfg := testConfig("", nil)
 			mutate(&cfg)
 			_, err := New(cfg)
-			assertCode(t, err, core.CodeConfigError)
+			testutils.AssertCode(t, err, core.CodeConfigError)
 		})
 	}
 }
@@ -159,7 +128,7 @@ func TestNewRejectsInvalidAddress(t *testing.T) {
 	cfg := testConfig("", nil)
 	cfg.Address = "not-a-valid-pubkey"
 	_, err := New(cfg)
-	assertCode(t, err, core.CodeInvalidPublicKey)
+	testutils.AssertCode(t, err, core.CodeInvalidPublicKey)
 }
 
 func TestPubkey(t *testing.T) {
@@ -177,23 +146,7 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, rendered := range []string{
-		fmt.Sprintf("%v", s),
-		fmt.Sprintf("%+v", s),
-		s.String(),
-		fmt.Sprintf("%#v", s),
-		fmt.Sprintf("%v", *s),
-		fmt.Sprintf("%+v", *s),
-		fmt.Sprintf("%s", *s), //nolint:staticcheck // deliberately exercising the %s verb path
-		fmt.Sprintf("%#v", *s),
-	} {
-		if strings.Contains(rendered, testEd25519Key()) || strings.Contains(rendered, testWalletSecret()) {
-			t.Errorf("rendered signer leaks secrets: %s", rendered)
-		}
-		if !strings.Contains(rendered, "cdp.Signer") {
-			t.Errorf("rendered signer should identify the type: %s", rendered)
-		}
-	}
+	testutils.AssertRedacted(t, s, "cdp.Signer", []string{testEd25519Key(), testWalletSecret()})
 }
 
 func TestSignMessageInvalidAPIKeySecret(t *testing.T) {
@@ -204,7 +157,7 @@ func TestSignMessageInvalidAPIKeySecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignMessage(context.Background(), []byte("test"))
-	assertCode(t, err, core.CodeInvalidPrivateKey)
+	testutils.AssertCode(t, err, core.CodeInvalidPrivateKey)
 }
 
 func TestSignMessageInvalidWalletSecret(t *testing.T) {
@@ -215,7 +168,7 @@ func TestSignMessageInvalidWalletSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignMessage(context.Background(), []byte("test"))
-	assertCode(t, err, core.CodeInvalidPrivateKey)
+	testutils.AssertCode(t, err, core.CodeInvalidPrivateKey)
 }
 
 func TestSignMessageSuccess(t *testing.T) {
@@ -225,7 +178,7 @@ func TestSignMessageSuccess(t *testing.T) {
 	sigBytes := ed25519.Sign(priv, message)
 
 	var calls atomic.Int32
-	srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", r.Method)
@@ -249,12 +202,12 @@ func TestSignMessageSuccess(t *testing.T) {
 			t.Errorf("request message = %v, want %s", body["message"], message)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]string{"signature": base58.Encode(sigBytes)})
-	})
+	}))
 
 	s := newTestSigner(t, srv, pub.String())
 	sig, err := s.SignMessage(context.Background(), message)
 	if err != nil {
-		t.Fatalf("SignMessage failed: %v (detail: %s)", err, detailOf(err))
+		t.Fatalf("SignMessage failed: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if !bytes.Equal(sig[:], sigBytes) {
 		t.Error("returned signature does not match the remote signature")
@@ -270,44 +223,44 @@ func TestSignMessageSignatureVerificationFailure(t *testing.T) {
 	message := []byte("test message")
 	sigBytes := ed25519.Sign(signingPriv, message)
 
-	srv := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"signature": base58.Encode(sigBytes)})
-	})
+	}))
 
 	s := newTestSigner(t, srv, testPubkeyStr)
 	_, err := s.SignMessage(context.Background(), message)
-	assertCode(t, err, core.CodeSigningFailed)
+	testutils.AssertCode(t, err, core.CodeSigningFailed)
 }
 
 func TestSignMessageAPIError(t *testing.T) {
-	srv := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-	})
+	}))
 
 	s := newTestSigner(t, srv, testPubkeyStr)
 	_, err := s.SignMessage(context.Background(), []byte("test"))
-	assertCode(t, err, core.CodeRemoteAPIError)
+	testutils.AssertCode(t, err, core.CodeRemoteAPIError)
 }
 
 func TestSignMessageInvalidSignatureLength(t *testing.T) {
-	srv := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// A base58 value that decodes to != 64 bytes.
 		_ = json.NewEncoder(w).Encode(map[string]string{"signature": base58.Encode(make([]byte, 10))})
-	})
+	}))
 
 	s := newTestSigner(t, srv, testPubkeyStr)
 	_, err := s.SignMessage(context.Background(), []byte("test"))
-	assertCode(t, err, core.CodeSigningFailed)
+	testutils.AssertCode(t, err, core.CodeSigningFailed)
 }
 
 func TestSignMessageRejectsNonUTF8(t *testing.T) {
-	srv := newServer(t, func(http.ResponseWriter, *http.Request) {
+	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Error("no request should be sent for a non-UTF-8 message")
-	})
+	}))
 
 	s := newTestSigner(t, srv, testPubkeyStr)
 	_, err := s.SignMessage(context.Background(), []byte{0xff, 0xfe, 0xfd})
-	assertCode(t, err, core.CodeSerializationError)
+	testutils.AssertCode(t, err, core.CodeSerializationError)
 }
 
 func TestSignTransactionSuccess(t *testing.T) {
@@ -338,7 +291,7 @@ func TestSignTransactionSuccess(t *testing.T) {
 	}
 
 	var calls atomic.Int32
-	srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		if want := basePath + "/" + pub.String() + "/sign/transaction"; r.URL.Path != want {
 			t.Errorf("path = %s, want %s", r.URL.Path, want)
@@ -352,12 +305,12 @@ func TestSignTransactionSuccess(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"signedTransaction": base64.StdEncoding.EncodeToString(signedWire),
 		})
-	})
+	}))
 
 	s := newTestSigner(t, srv, pub.String())
 	res, err := s.SignTransaction(context.Background(), tx)
 	if err != nil {
-		t.Fatalf("SignTransaction failed: %v (detail: %s)", err, detailOf(err))
+		t.Fatalf("SignTransaction failed: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 	if res.EncodedTransaction == "" {
 		t.Error("encoded transaction should not be empty")
@@ -408,15 +361,15 @@ func TestSignTransactionRejectsTamperedRemoteTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srv := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"signedTransaction": base64.StdEncoding.EncodeToString(tamperedWire),
 		})
-	})
+	}))
 
 	s := newTestSigner(t, srv, pub.String())
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertCode(t, err, core.CodeSigningFailed)
+	testutils.AssertCode(t, err, core.CodeSigningFailed)
 
 	afterMsg, err := tx.Message.MarshalBinary()
 	if err != nil {
@@ -428,9 +381,9 @@ func TestSignTransactionRejectsTamperedRemoteTransaction(t *testing.T) {
 }
 
 func TestSignTransactionAPIError(t *testing.T) {
-	srv := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-	})
+	}))
 
 	s := newTestSigner(t, srv, testPubkeyStr)
 	tx, err := testutils.CreateTestTransaction(solana.MustPublicKeyFromBase58(testPubkeyStr))
@@ -438,13 +391,13 @@ func TestSignTransactionAPIError(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.SignTransaction(context.Background(), tx)
-	assertCode(t, err, core.CodeRemoteAPIError)
+	testutils.AssertCode(t, err, core.CodeRemoteAPIError)
 }
 
 func TestIsAvailable(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		var calls atomic.Int32
-		srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+		srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			calls.Add(1)
 			if r.Method != http.MethodGet {
 				t.Errorf("method = %s, want GET", r.Method)
@@ -459,7 +412,7 @@ func TestIsAvailable(t *testing.T) {
 				t.Error("GET requests must not carry X-Wallet-Auth")
 			}
 			_ = json.NewEncoder(w).Encode(map[string]string{"address": testPubkeyStr})
-		})
+		}))
 
 		s := newTestSigner(t, srv, testPubkeyStr)
 		if !s.IsAvailable(context.Background()) {
@@ -471,9 +424,9 @@ func TestIsAvailable(t *testing.T) {
 	})
 
 	t.Run("failure", func(t *testing.T) {
-		srv := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
-		})
+		}))
 
 		s := newTestSigner(t, srv, testPubkeyStr)
 		if s.IsAvailable(context.Background()) {
@@ -507,16 +460,7 @@ func TestHTTPSEnforcementDefaultClient(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error for http:// base URL")
 			}
-			assertCode(t, err, core.CodeConfigError)
+			testutils.AssertCode(t, err, core.CodeConfigError)
 		})
 	}
-}
-
-// detailOf extracts the private detail for test diagnostics.
-func detailOf(err error) string {
-	var se *core.SignerError
-	if errors.As(err, &se) {
-		return se.Detail()
-	}
-	return ""
 }

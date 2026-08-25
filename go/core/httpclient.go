@@ -3,6 +3,8 @@ package core
 import (
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -67,4 +69,38 @@ func NewHTTPClient(cfg HTTPClientConfig) *http.Client {
 			return NewSignerError(CodeHTTPError, "HTTP redirect blocked: remote signer APIs must respond directly")
 		},
 	}
+}
+
+// AvailabilityTimeout bounds the health check an IsAvailable implementation
+// performs, so a hung remote cannot stall a caller for the full request timeout.
+const AvailabilityTimeout = 5 * time.Second
+
+// NormalizeHTTPSBaseURL returns raw, or defaultURL when raw is empty, with
+// trailing slashes trimmed. The result must be an absolute HTTPS URL with a
+// host; field names the configuration field in the error detail.
+func NormalizeHTTPSBaseURL(raw, defaultURL, field string) (string, error) {
+	if raw == "" {
+		raw = defaultURL
+	}
+	normalized := strings.TrimRight(raw, "/")
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return "", WrapSignerError(CodeConfigError, "invalid "+field, err)
+	}
+	if parsed.Scheme != "https" {
+		return "", NewSignerError(CodeConfigError, field+" must use HTTPS")
+	}
+	if parsed.Opaque != "" || parsed.Host == "" {
+		return "", NewSignerError(CodeConfigError, field+" cannot be used as a base URL")
+	}
+	return normalized, nil
+}
+
+// ResolveHTTPClient returns the caller-supplied client, or a new one built from
+// cfg when none was supplied.
+func ResolveHTTPClient(client *http.Client, cfg HTTPClientConfig) *http.Client {
+	if client != nil {
+		return client
+	}
+	return NewHTTPClient(cfg)
 }

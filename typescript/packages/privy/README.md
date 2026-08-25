@@ -84,7 +84,7 @@ console.log('Privy API available:', available);
 
 ### `createPrivySigner(config)`
 
-Creates and initializes a new PrivySigner instance.
+Creates and initializes a new Privy signer.
 
 **Config options:**
 
@@ -98,7 +98,7 @@ Creates and initializes a new PrivySigner instance.
 
 **Example:**
 
-**Returns:** `Promise<PrivySigner>`
+**Returns:** `Promise<SolanaSigner>`
 
 ### Methods
 

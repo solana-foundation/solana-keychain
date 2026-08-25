@@ -5,18 +5,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gagliardetto/solana-go"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
 )
-
-// maxResponseBytes caps how much of a Vault response body is read (1 MiB).
-const maxResponseBytes = 1 << 20
 
 // signRequest is the transit sign request body: the base64-encoded payload.
 type signRequest struct {
@@ -59,10 +55,7 @@ func New(cfg Config) (*Signer, error) {
 	if err != nil {
 		return nil, core.WrapSignerError(core.CodeInvalidPublicKey, "failed to decode base58 public key", err)
 	}
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 	return &Signer{
 		client:    client,
 		vaultAddr: cfg.VaultAddr,
@@ -92,28 +85,15 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 // the signature at this signer's required-signer position, returning the encoded
 // transaction and its completeness.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
-	msg, err := tx.Message.MarshalBinary()
-	if err != nil {
-		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction message", err)
-	}
-	sig, err := s.signBytes(ctx, msg)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	if err := core.AddSignature(tx, s.pubkey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.SignTransactionWith(ctx, tx, s.pubkey, s.signBytes)
 }
 
 // IsAvailable reads the transit key's metadata as a health check and reports
 // whether it is a signing-capable ed25519 key. All errors are swallowed and
 // reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	url := s.vaultAddr + "/v1/transit/keys/" + s.keyName
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -121,17 +101,13 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 	}
 	req.Header.Set("X-Vault-Token", s.token)
 
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	status, body, err := core.SendRequest(s.client, req, "vault")
+	if err != nil || !core.IsSuccess(status) {
 		return false
 	}
 
 	var parsed keyReadResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&parsed); err != nil {
+	if err := json.Unmarshal(body, &parsed); err != nil {
 		return false
 	}
 	return parsed.Data.SupportsSigning && parsed.Data.Type == "ed25519"
@@ -153,26 +129,13 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Vault-Token", s.token)
 
-	resp, err := s.client.Do(req)
+	status, body, err := core.SendRequest(s.client, req, "vault")
 	if err != nil {
-		// Preserve SignerError codes raised inside the transport (e.g. the
-		// HTTPS-only guard's CodeConfigError); everything else is a remote API
-		// failure.
-		var se *core.SignerError
-		if errors.As(err, &se) {
-			return solana.Signature{}, se
-		}
-		return solana.Signature{}, core.WrapSignerError(core.CodeRemoteAPIError, "failed to send request to vault", err)
+		return solana.Signature{}, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeRemoteAPIError, "failed to read vault response", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !core.IsSuccess(status) {
 		return solana.Signature{}, core.NewSignerError(core.CodeRemoteAPIError,
-			"vault API error "+resp.Status+": "+core.SanitizeRemoteResponse(string(body)))
+			"vault API error "+strconv.Itoa(status)+": "+core.SanitizeRemoteResponse(string(body)))
 	}
 
 	var parsed signResponse
@@ -183,19 +146,13 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 		return solana.Signature{}, core.NewSignerError(core.CodeRemoteAPIError, "no signature in vault response")
 	}
 
-	sigBytes, err := base64.StdEncoding.DecodeString(stripVaultSignaturePrefix(parsed.Data.Signature))
+	sig, err := core.DecodeSignatureBase64(stripVaultSignaturePrefix(parsed.Data.Signature), "vault")
 	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode signature", err)
+		return solana.Signature{}, err
 	}
-	if len(sigBytes) != core.SignatureLength {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed, "invalid signature format")
-	}
-	var sig solana.Signature
-	copy(sig[:], sigBytes)
 
-	if !core.VerifyEd25519(s.pubkey, message, sig) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed: the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
+		return solana.Signature{}, err
 	}
 	return sig, nil
 }

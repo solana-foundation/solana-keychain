@@ -11,8 +11,18 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
+from solana_keychain.core.signature_util import verify_returned_signature
+from solana_keychain.core.signer import (
+    SignedTransaction,
+    SolanaSigner,
+    require_initialized,
+)
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
@@ -20,7 +30,8 @@ from solana_keychain.core.transaction_util import (
     serialize_transaction,
     signed_message_bytes,
 )
-from solana_keychain.openfort.jwt import create_wallet_jwt, extract_host
+from solana_keychain.core.wallet_jwt import extract_host
+from solana_keychain.openfort.jwt import create_wallet_jwt
 
 DEFAULT_API_BASE_URL = "https://api.openfort.io"
 ACCOUNTS_PATH = "/v2/accounts"
@@ -62,7 +73,7 @@ class OpenfortSigner(SolanaSigner):
         api_base_url = normalize_base_url(config.api_base_url)
         assert_https_url(api_base_url, "api_base_url")
         self._api_base_url = api_base_url
-        self._api_host = extract_host(api_base_url)
+        self._api_host = extract_host(api_base_url, "Openfort")
         self._secret_key = config.secret_key
         self._account_id = config.account_id
         self._wallet_secret = config.wallet_secret
@@ -107,12 +118,7 @@ class OpenfortSigner(SolanaSigner):
         self._public_key = await self._fetch_public_key()
 
     def _initialized_pubkey(self) -> Pubkey:
-        if self._public_key is None:
-            raise SignerError(
-                SignerErrorCode.NOT_INITIALIZED,
-                "OpenfortSigner is not initialized; call init() before signing",
-            )
-        return self._public_key
+        return require_initialized(self._public_key, "OpenfortSigner")
 
     @property
     def pubkey(self) -> Pubkey:
@@ -153,13 +159,7 @@ class OpenfortSigner(SolanaSigner):
                 f"(expected {ED25519_SIGNATURE_LENGTH} bytes)",
             )
         signature = Signature.from_bytes(signature_bytes)
-        if not signature.verify(public_key, message):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
-        return signature
+        return verify_returned_signature(signature, public_key, message)
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         signature = await self._sign_bytes(signed_message_bytes(transaction.message))
@@ -174,10 +174,11 @@ class OpenfortSigner(SolanaSigner):
     async def is_available(self) -> bool:
         if self._public_key is None:
             return False
-        try:
+
+        async def probe() -> bool:
             return await self._fetch_public_key() == self._public_key
-        except SignerError:
-            return False
+
+        return await probe_availability(probe)
 
 
 async def create_openfort_signer(config: OpenfortSignerConfig) -> OpenfortSigner:

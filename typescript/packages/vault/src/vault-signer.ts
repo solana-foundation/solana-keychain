@@ -13,7 +13,12 @@ import {
     validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
-import { SignableMessage, SignatureDictionary } from '@solana/signers';
+import {
+    MessagePartialSignerConfig,
+    SignableMessage,
+    SignatureDictionary,
+    TransactionPartialSignerConfig,
+} from '@solana/signers';
 import { Transaction, TransactionWithinSizeLimit, TransactionWithLifetime } from '@solana/transactions';
 
 import type { VaultKeyReadResponse, VaultPayloadBase64, VaultSignRequest, VaultSignResponse } from './types.js';
@@ -48,23 +53,19 @@ export interface VaultSignerConfig {
  *
  * The Vault key must be an ED25519 key created in the transit engine.
  * Example creation: `vault write transit/keys/my-key type=ed25519`
- *
- * @deprecated Prefer `createVaultSigner()`. Class export will be removed in a future version.
  */
-export class VaultSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class VaultSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly vaultAddr: string;
     private readonly vaultToken: string;
     private readonly keyName: string;
     private readonly requestDelayMs: number;
 
-    /** @deprecated Use `createVaultSigner()` instead. */
     static create<TAddress extends string = string>(config: VaultSignerConfig): VaultSigner<TAddress> {
         return new VaultSigner<TAddress>(config);
     }
 
-    /** @deprecated Use `createVaultSigner()` instead. Direct construction will be removed in a future version. */
-    constructor(config: VaultSignerConfig) {
+    private constructor(config: VaultSignerConfig) {
         if (!config.vaultAddr || !config.vaultToken || !config.keyName) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
                 message: 'Missing required configuration fields (vaultAddr, vaultToken, or keyName)',
@@ -119,7 +120,7 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
     /**
      * Sign data using Vault's transit engine
      */
-    private async signWithVault(base64Data: string): Promise<SignatureBytes> {
+    private async signWithVault(base64Data: string, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         const url = `${this.vaultAddr}/v1/transit/sign/${encodeURIComponent(this.keyName)}`;
 
         const request: VaultSignRequest = {
@@ -127,6 +128,7 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
         };
 
         const signResponse = await fetchSignerJson<VaultSignResponse>({
+            abortSignal,
             init: {
                 body: JSON.stringify(request),
                 headers: {
@@ -151,22 +153,28 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
     /**
      * Sign message bytes using Vault
      */
-    private async signMessageBytes(messageBytes: ArrayLike<number>): Promise<SignatureBytes> {
+    private async signMessageBytes(
+        messageBytes: ArrayLike<number>,
+        abortSignal?: AbortSignal,
+    ): Promise<SignatureBytes> {
         // Encode message bytes to base64 string for Vault
         const decoder = getBase64Decoder();
         const bytes = messageBytes instanceof Uint8Array ? messageBytes : new Uint8Array(Array.from(messageBytes));
         const base64EncodedMessage = decoder.decode(bytes);
-        return await this.signWithVault(base64EncodedMessage);
+        return await this.signWithVault(base64EncodedMessage, abortSignal);
     }
 
     /**
      * Sign multiple messages using Vault
      */
-    async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+    async signMessages(
+        messages: readonly SignableMessage[],
+        config?: MessagePartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             messages,
             async message => {
-                const signatureBytes = await this.signMessageBytes(message.content);
+                const signatureBytes = await this.signMessageBytes(message.content, config?.abortSignal);
                 await assertSignatureValid({
                     data: message.content,
                     signature: signatureBytes,
@@ -178,6 +186,7 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -186,12 +195,13 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
      */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        config?: TransactionPartialSignerConfig,
     ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             transactions,
             async transaction => {
                 // Sign the transaction message bytes
-                const signatureBytes = await this.signMessageBytes(transaction.messageBytes);
+                const signatureBytes = await this.signMessageBytes(transaction.messageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: transaction.messageBytes,
                     signature: signatureBytes,
@@ -203,6 +213,7 @@ export class VaultSigner<TAddress extends string = string> implements SolanaSign
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 

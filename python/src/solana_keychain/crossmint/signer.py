@@ -20,9 +20,14 @@ from solana_keychain.core.http import (
     assert_https_url,
     fetch_signer_json,
     normalize_base_url,
+    probe_availability,
     provider_may_have_accepted,
 )
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.signer import (
+    SignedTransaction,
+    SolanaSigner,
+    require_initialized,
+)
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
@@ -39,7 +44,6 @@ DEFAULT_API_BASE_URL = "https://www.crossmint.com/api"
 API_VERSION_PATH = "2025-06-09"
 DEFAULT_POLL_INTERVAL_MS = 1000
 DEFAULT_MAX_POLL_ATTEMPTS = 60
-AVAILABILITY_TIMEOUT_SECONDS = 5.0
 
 
 _AWAITING_APPROVAL_ERROR = (
@@ -228,12 +232,7 @@ class CrossmintSigner(SolanaSigner):
             ) from None
 
     def _initialized_pubkey(self) -> Pubkey:
-        if self._public_key is None:
-            raise SignerError(
-                SignerErrorCode.NOT_INITIALIZED,
-                "CrossmintSigner is not initialized; call init() before signing",
-            )
-        return self._public_key
+        return require_initialized(self._public_key, "CrossmintSigner")
 
     @property
     def pubkey(self) -> Pubkey:
@@ -291,18 +290,24 @@ class CrossmintSigner(SolanaSigner):
         error = response.get("error")
         return json.dumps(error) if error is not None else "unknown error"
 
+    def _settled_or_none(self, response: dict[str, Any]) -> dict[str, Any] | None:
+        status = response.get("status")
+        if status == "success":
+            return response
+        if status == "failed":
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                f"Crossmint transaction failed: {self._failure_detail(response)}",
+            )
+        return None
+
     async def _poll_transaction(self, response: dict[str, Any]) -> dict[str, Any]:
         approval_submitted = False
         for _ in range(self._max_poll_attempts):
-            status = response.get("status")
-            if status == "success":
-                return response
-            if status == "failed":
-                raise SignerError(
-                    SignerErrorCode.SIGNING_FAILED,
-                    f"Crossmint transaction failed: {self._failure_detail(response)}",
-                )
-            if status == "awaiting-approval" and not approval_submitted:
+            settled = self._settled_or_none(response)
+            if settled is not None:
+                return settled
+            if response.get("status") == "awaiting-approval" and not approval_submitted:
                 # Approve at most once; the approval may register asynchronously,
                 # so afterwards awaiting-approval re-polls like any other
                 # in-flight status.
@@ -312,15 +317,10 @@ class CrossmintSigner(SolanaSigner):
             await asyncio.sleep(self._poll_interval_ms / 1000)
             response = await self._get_transaction(str(response.get("id")))
 
-        status = response.get("status")
-        if status == "success":
-            return response
-        if status == "failed":
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                f"Crossmint transaction failed: {self._failure_detail(response)}",
-            )
-        if status == "awaiting-approval" and not approval_submitted:
+        settled = self._settled_or_none(response)
+        if settled is not None:
+            return settled
+        if response.get("status") == "awaiting-approval" and not approval_submitted:
             raise SignerError(SignerErrorCode.SIGNING_FAILED, _AWAITING_APPROVAL_ERROR)
         raise SignerError(
             SignerErrorCode.REMOTE_API_ERROR,
@@ -654,11 +654,11 @@ class CrossmintSigner(SolanaSigner):
         )
 
     async def is_available(self) -> bool:
-        try:
-            await asyncio.wait_for(self._fetch_wallet(), AVAILABILITY_TIMEOUT_SECONDS)
-        except (SignerError, asyncio.TimeoutError):
-            return False
-        return True
+        async def probe() -> bool:
+            await self._fetch_wallet()
+            return True
+
+        return await probe_availability(probe)
 
 
 async def create_crossmint_signer(config: CrossmintSignerConfig) -> CrossmintSigner:

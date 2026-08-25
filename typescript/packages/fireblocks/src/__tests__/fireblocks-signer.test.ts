@@ -14,8 +14,7 @@ import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertIsSolanaSigner, assertSignatureValid } from '@solana/keychain-core';
 
-import { createFireblocksSigner, FireblocksSigner } from '../fireblocks-signer.js';
-import type { FireblocksSignerConfig } from '../types.js';
+import { createFireblocksSigner } from '../fireblocks-signer.js';
 import { TEST_API_KEY, TEST_RSA_PRIVATE_KEY, TEST_VAULT_ACCOUNT_ID } from './setup.js';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
@@ -39,90 +38,84 @@ global.fetch = vi.fn();
 
 const mockFetch = global.fetch as ReturnType<typeof vi.fn>;
 
-describe('FireblocksSigner', () => {
+describe('createFireblocksSigner', () => {
     beforeEach(() => {
         vi.resetAllMocks();
     });
 
-    describe('constructor', () => {
-        it('creates a FireblocksSigner with valid config', () => {
-            const config: FireblocksSignerConfig = {
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            };
-
-            const signer = new FireblocksSigner(config);
-            expect(signer).toBeDefined();
-        });
-
-        it('should throw error for missing apiKey', () => {
-            expect(() => {
-                new FireblocksSigner({
+    describe('config validation', () => {
+        it('should throw error for missing apiKey', async () => {
+            await expect(
+                createFireblocksSigner({
                     apiKey: '',
                     privateKeyPem: TEST_RSA_PRIVATE_KEY,
                     vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-                });
-            }).toThrow('Missing required apiKey field');
+                }),
+            ).rejects.toThrow('Missing required apiKey field');
         });
 
-        it('should throw error for missing privateKeyPem', () => {
-            expect(() => {
-                new FireblocksSigner({
+        it('should throw error for missing privateKeyPem', async () => {
+            await expect(
+                createFireblocksSigner({
                     apiKey: TEST_API_KEY,
                     privateKeyPem: '',
                     vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-                });
-            }).toThrow('Missing required privateKeyPem field');
+                }),
+            ).rejects.toThrow('Missing required privateKeyPem field');
         });
 
-        it('should throw error for missing vaultAccountId', () => {
-            expect(() => {
-                new FireblocksSigner({
+        it('should throw error for missing vaultAccountId', async () => {
+            await expect(
+                createFireblocksSigner({
                     apiKey: TEST_API_KEY,
                     privateKeyPem: TEST_RSA_PRIVATE_KEY,
                     vaultAccountId: '',
-                });
-            }).toThrow('Missing required vaultAccountId field');
+                }),
+            ).rejects.toThrow('Missing required vaultAccountId field');
         });
 
-        it('should throw error when apiBaseUrl is not a valid URL', () => {
-            expect(() => {
-                new FireblocksSigner({
+        it('should throw error when apiBaseUrl is not a valid URL', async () => {
+            await expect(
+                createFireblocksSigner({
                     apiBaseUrl: 'not-a-url',
                     apiKey: TEST_API_KEY,
                     privateKeyPem: TEST_RSA_PRIVATE_KEY,
                     vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-                });
-            }).toThrow('apiBaseUrl is not a valid URL');
+                }),
+            ).rejects.toThrow('apiBaseUrl is not a valid URL');
         });
 
-        it('should throw error when apiBaseUrl does not use HTTPS', () => {
-            expect(() => {
-                new FireblocksSigner({
+        it('should throw error when apiBaseUrl does not use HTTPS', async () => {
+            await expect(
+                createFireblocksSigner({
                     apiBaseUrl: 'http://api.fireblocks.test',
                     apiKey: TEST_API_KEY,
                     privateKeyPem: TEST_RSA_PRIVATE_KEY,
                     vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-                });
-            }).toThrow('apiBaseUrl must use HTTPS');
+                }),
+            ).rejects.toThrow('apiBaseUrl must use HTTPS');
         });
 
-        it('should validate requestDelayMs', () => {
-            expect(() => {
-                new FireblocksSigner({
+        it('should validate requestDelayMs', async () => {
+            await expect(
+                createFireblocksSigner({
                     apiKey: TEST_API_KEY,
                     privateKeyPem: TEST_RSA_PRIVATE_KEY,
                     vaultAccountId: TEST_VAULT_ACCOUNT_ID,
                     requestDelayMs: -1,
-                });
-            }).toThrow('requestDelayMs must not be negative');
+                }),
+            ).rejects.toThrow('requestDelayMs must not be negative');
         });
 
-        it('should warn for high requestDelayMs', () => {
+        it('should warn for high requestDelayMs', async () => {
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            const keyPair = await generateKeyPairSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ addresses: [{ address: keyPair.address }] }),
+            });
 
-            new FireblocksSigner({
+            await createFireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
@@ -134,113 +127,9 @@ describe('FireblocksSigner', () => {
             warnSpy.mockRestore();
         });
 
-        it('should use default assetId', () => {
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            expect(signer).toBeDefined();
-        });
-
-        it('should accept custom assetId', () => {
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-                assetId: 'SOL_TEST',
-            });
-
-            expect(signer).toBeDefined();
-        });
-
-        it('should allow useProgramCall:true', () => {
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                useProgramCall: true,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            expect(signer).toBeDefined();
-        });
-
-        it('should allow useProgramCall:false', () => {
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                useProgramCall: false,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            expect(signer).toBeDefined();
-        });
-    });
-
-    describe('create', () => {
-        it('creates and initializes a FireblocksSigner', async () => {
-            const keyPair = await generateKeyPairSigner();
-
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ addresses: [{ address: keyPair.address }] }),
-            });
-
-            const signer = await FireblocksSigner.create({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            expect(signer.address).toBe(keyPair.address);
-            assertIsSolanaSigner(signer);
-        });
-
-        it('should throw error on API failure during create', async () => {
-            mockFetch.mockResolvedValueOnce({
-                ok: false,
-                status: 401,
-                text: async () => 'Unauthorized',
-            });
-
-            await expect(
-                FireblocksSigner.create({
-                    apiKey: TEST_API_KEY,
-                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-                }),
-            ).rejects.toThrow('Fireblocks API error: 401');
-        });
-
-        it('should throw error for missing apiKey', async () => {
-            await expect(
-                FireblocksSigner.create({
-                    apiKey: '',
-                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-                }),
-            ).rejects.toThrow('Missing required apiKey field');
-        });
-
-        it('should throw HTTP_ERROR when fetch fails during create', async () => {
-            mockFetch.mockRejectedValueOnce(new Error('Network timeout'));
-
-            await expect(
-                FireblocksSigner.create({
-                    apiKey: TEST_API_KEY,
-                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-                }),
-            ).rejects.toMatchObject({
-                code: 'SIGNER_HTTP_ERROR',
-                message: expect.stringContaining('Fireblocks network request failed'),
-            });
-        });
-
         it('should throw INVALID_PRIVATE_KEY for an unparseable PEM before any network call', async () => {
             await expect(
-                FireblocksSigner.create({
+                createFireblocksSigner({
                     apiKey: TEST_API_KEY,
                     privateKeyPem: 'not-a-pem',
                     vaultAccountId: TEST_VAULT_ACCOUNT_ID,
@@ -254,8 +143,8 @@ describe('FireblocksSigner', () => {
         });
     });
 
-    describe('init', () => {
-        it('should initialize signer by fetching public key', async () => {
+    describe('initialization', () => {
+        it('creates and initializes a signer by fetching the public key', async () => {
             const keyPair = await generateKeyPairSigner();
 
             mockFetch.mockResolvedValueOnce({
@@ -263,32 +152,79 @@ describe('FireblocksSigner', () => {
                 json: async () => ({ addresses: [{ address: keyPair.address }] }),
             });
 
-            const signer = new FireblocksSigner({
+            const signer = await createFireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
 
-            await signer.init();
-
             expect(signer.address).toBe(keyPair.address);
             assertIsSolanaSigner(signer);
         });
 
-        it('should throw error on API failure during init', async () => {
+        it('accepts a custom assetId', async () => {
+            const keyPair = await generateKeyPairSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ addresses: [{ address: keyPair.address, assetId: 'SOL_TEST' }] }),
+            });
+
+            const signer = await createFireblocksSigner({
+                apiKey: TEST_API_KEY,
+                assetId: 'SOL_TEST',
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+
+            expect(signer.address).toBe(keyPair.address);
+        });
+
+        it('accepts useProgramCall:true', async () => {
+            const keyPair = await generateKeyPairSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ addresses: [{ address: keyPair.address }] }),
+            });
+
+            const signer = await createFireblocksSigner({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                useProgramCall: true,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+
+            expect(signer).toBeDefined();
+        });
+
+        it('should throw error on API failure during initialization', async () => {
             mockFetch.mockResolvedValueOnce({
                 ok: false,
                 status: 401,
                 text: async () => 'Unauthorized',
             });
 
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
+            await expect(
+                createFireblocksSigner({
+                    apiKey: TEST_API_KEY,
+                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                }),
+            ).rejects.toThrow('Fireblocks API error: 401');
+        });
 
-            await expect(signer.init()).rejects.toThrow('Fireblocks API error: 401');
+        it('should throw HTTP_ERROR when fetch fails during initialization', async () => {
+            mockFetch.mockRejectedValueOnce(new Error('Network timeout'));
+
+            await expect(
+                createFireblocksSigner({
+                    apiKey: TEST_API_KEY,
+                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                }),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_HTTP_ERROR',
+                message: expect.stringContaining('Fireblocks network request failed'),
+            });
         });
 
         it('should throw error on invalid address from API', async () => {
@@ -297,13 +233,13 @@ describe('FireblocksSigner', () => {
                 json: async () => ({ addresses: [{ address: 'invalid-address' }] }),
             });
 
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            await expect(signer.init()).rejects.toThrow('Invalid address from Fireblocks');
+            await expect(
+                createFireblocksSigner({
+                    apiKey: TEST_API_KEY,
+                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                }),
+            ).rejects.toThrow('Invalid address from Fireblocks');
         });
 
         it('should throw structured error on malformed address response shape', async () => {
@@ -312,13 +248,13 @@ describe('FireblocksSigner', () => {
                 json: async () => ({}),
             });
 
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            await expect(signer.init()).rejects.toMatchObject({
+            await expect(
+                createFireblocksSigner({
+                    apiKey: TEST_API_KEY,
+                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                }),
+            ).rejects.toMatchObject({
                 code: 'SIGNER_INVALID_PUBLIC_KEY',
                 message: expect.stringContaining('returned no address'),
             });
@@ -337,12 +273,11 @@ describe('FireblocksSigner', () => {
                 }),
             });
 
-            const signer = new FireblocksSigner({
+            const signer = await createFireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
-            await signer.init();
 
             expect(signer.address).toBe(wanted.address);
         });
@@ -360,13 +295,12 @@ describe('FireblocksSigner', () => {
                 }),
             });
 
-            const signer = new FireblocksSigner({
+            const signer = await createFireblocksSigner({
                 apiKey: TEST_API_KEY,
                 assetId: 'SOL_TEST',
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
-            await signer.init();
 
             expect(signer.address).toBe(devnet.address);
         });
@@ -384,13 +318,13 @@ describe('FireblocksSigner', () => {
                 }),
             });
 
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            await expect(signer.init()).rejects.toMatchObject({
+            await expect(
+                createFireblocksSigner({
+                    apiKey: TEST_API_KEY,
+                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                }),
+            ).rejects.toMatchObject({
                 code: 'SIGNER_INVALID_PUBLIC_KEY',
                 message: expect.stringContaining('cannot choose a signing identity'),
             });
@@ -403,13 +337,13 @@ describe('FireblocksSigner', () => {
                 json: async () => ({ addresses: [{ address: other.address, assetId: 'SOL_TEST' }] }),
             });
 
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            await expect(signer.init()).rejects.toMatchObject({
+            await expect(
+                createFireblocksSigner({
+                    apiKey: TEST_API_KEY,
+                    privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                    vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+                }),
+            ).rejects.toMatchObject({
                 code: 'SIGNER_INVALID_PUBLIC_KEY',
                 message: expect.stringContaining('returned no address'),
             });
@@ -427,46 +361,13 @@ describe('FireblocksSigner', () => {
                 }),
             });
 
-            const signer = new FireblocksSigner({
+            const signer = await createFireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
-            await signer.init();
 
             expect(signer.address).toBe(wanted.address);
-        });
-
-        it('should not re-initialize if already initialized', async () => {
-            const keyPair = await generateKeyPairSigner();
-
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ addresses: [{ address: keyPair.address }] }),
-            });
-
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            await signer.init();
-            await signer.init(); // Second call should be a no-op
-
-            expect(mockFetch).toHaveBeenCalledTimes(1);
-        });
-    });
-
-    describe('address', () => {
-        it('should throw error if not initialized', () => {
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            expect(() => signer.address).toThrow('Signer not initialized');
         });
     });
 
@@ -480,7 +381,7 @@ describe('FireblocksSigner', () => {
                 json: async () => ({ addresses: [{ address: keyPair.address }] }),
             });
 
-            const signer = await FireblocksSigner.create({
+            const signer = await createFireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
@@ -497,21 +398,6 @@ describe('FireblocksSigner', () => {
                 code: 'SIGNER_HTTP_ERROR',
                 message: expect.stringContaining('Fireblocks network request failed'),
             });
-        });
-
-        it('should throw error if not initialized', async () => {
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            const message = {
-                content: new Uint8Array([1, 2, 3, 4]),
-                signatures: {},
-            };
-
-            await expect(signer.signMessages([message])).rejects.toThrow('Signer not initialized');
         });
 
         it('should sign a message successfully', async () => {
@@ -545,13 +431,11 @@ describe('FireblocksSigner', () => {
                 }),
             });
 
-            const signer = new FireblocksSigner({
+            const signer = await createFireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
-
-            await signer.init();
 
             const message = {
                 content: new Uint8Array([1, 2, 3, 4]),
@@ -587,13 +471,11 @@ describe('FireblocksSigner', () => {
                 }),
             });
 
-            const signer = new FireblocksSigner({
+            const signer = await createFireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
-
-            await signer.init();
 
             const message = {
                 content: new Uint8Array([1, 2, 3, 4]),
@@ -634,13 +516,11 @@ describe('FireblocksSigner', () => {
                 }),
             });
 
-            const signer = new FireblocksSigner({
+            const signer = await createFireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
-
-            await signer.init();
 
             const message = {
                 content: new Uint8Array([1, 2, 3, 4]),
@@ -683,13 +563,11 @@ describe('FireblocksSigner', () => {
                 }),
             });
 
-            const signer = new FireblocksSigner({
+            const signer = await createFireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
-
-            await signer.init();
 
             const transaction = {
                 messageBytes: new Uint8Array([1, 2, 3, 4]),
@@ -726,13 +604,11 @@ describe('FireblocksSigner', () => {
                 }),
             });
 
-            const signer = new FireblocksSigner({
+            const signer = await createFireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
-
-            await signer.init();
 
             const transaction = {
                 messageBytes: new Uint8Array([1, 2, 3, 4]),
@@ -748,7 +624,7 @@ describe('FireblocksSigner', () => {
     describe('signTransactions with PROGRAM_CALL', () => {
         async function createProgramCallSigner(): Promise<{
             signer: Awaited<ReturnType<typeof createFireblocksSigner>>;
-            transaction: Parameters<FireblocksSigner['signTransactions']>[0][0];
+            transaction: Parameters<Awaited<ReturnType<typeof createFireblocksSigner>>['signTransactions']>[0][0];
         }> {
             const keyPair = await generateKeyPairSigner();
 
@@ -779,7 +655,7 @@ describe('FireblocksSigner', () => {
                             tx,
                         ),
                 ),
-            ) as Parameters<FireblocksSigner['signTransactions']>[0][0];
+            ) as Parameters<Awaited<ReturnType<typeof createFireblocksSigner>>['signTransactions']>[0][0];
 
             return { signer, transaction };
         }
@@ -867,7 +743,7 @@ describe('FireblocksSigner', () => {
             const v1Transaction = {
                 messageBytes: new Uint8Array([0x81, 1, 2, 3]),
                 signatures: {},
-            } as unknown as Parameters<FireblocksSigner['signTransactions']>[0][0];
+            } as unknown as Parameters<Awaited<ReturnType<typeof createFireblocksSigner>>['signTransactions']>[0][0];
 
             await expect(signer.signTransactions([v1Transaction])).rejects.toThrow(/legacy and v0 messages only/);
             expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -876,15 +752,20 @@ describe('FireblocksSigner', () => {
 
     describe('isAvailable', () => {
         it('should return true when API is accessible', async () => {
+            const keyPair = await generateKeyPairSigner();
             mockFetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ id: TEST_VAULT_ACCOUNT_ID }),
+                json: async () => ({ addresses: [{ address: keyPair.address }] }),
             });
-
-            const signer = new FireblocksSigner({
+            const signer = await createFireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ id: TEST_VAULT_ACCOUNT_ID }),
             });
 
             const available = await signer.isAvailable();
@@ -893,44 +774,41 @@ describe('FireblocksSigner', () => {
         });
 
         it('should return false when API returns error', async () => {
+            const keyPair = await generateKeyPairSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ addresses: [{ address: keyPair.address }] }),
+            });
+            const signer = await createFireblocksSigner({
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+
             mockFetch.mockResolvedValueOnce({
                 ok: false,
                 status: 401,
                 text: async () => 'Unauthorized',
             });
 
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
             const available = await signer.isAvailable();
 
             expect(available).toBe(false);
-        });
-
-        it('should return false for an unparseable PEM', async () => {
-            const signer = new FireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: 'not-a-pem',
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            const available = await signer.isAvailable();
-
-            expect(available).toBe(false);
-            expect(mockFetch).not.toHaveBeenCalled();
         });
 
         it('should return false when fetch throws', async () => {
-            mockFetch.mockRejectedValueOnce(new Error('Network error'));
-
-            const signer = new FireblocksSigner({
+            const keyPair = await generateKeyPairSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ addresses: [{ address: keyPair.address }] }),
+            });
+            const signer = await createFireblocksSigner({
                 apiKey: TEST_API_KEY,
                 privateKeyPem: TEST_RSA_PRIVATE_KEY,
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
+
+            mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
             const available = await signer.isAvailable();
 

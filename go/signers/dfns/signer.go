@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/gagliardetto/solana-go"
 
@@ -81,17 +80,11 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, core.NewSignerError(core.CodeConfigError, "missing required wallet id field")
 	}
 
-	baseURL := cfg.APIBaseURL
-	if baseURL == "" {
-		baseURL = DefaultAPIBaseURL
+	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
-	if !strings.HasPrefix(baseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "dfns api_base_url must use HTTPS")
-	}
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 
 	s := &Signer{
 		authToken:     cfg.AuthToken,
@@ -146,7 +139,7 @@ func (s *Signer) getWallet(ctx context.Context) (*getWalletResponse, error) {
 // request to the Keys API, returning the combined 64-byte signature.
 func (s *Signer) sendSignatureRequest(ctx context.Context, request generateSignatureRequest) (solana.Signature, error) {
 	httpPath := "/keys/" + s.keyID + "/signatures"
-	bodyJSON, err := marshalJSON(request)
+	bodyJSON, err := core.MarshalCanonicalJSON(request)
 	if err != nil {
 		return solana.Signature{}, err
 	}
@@ -184,23 +177,7 @@ func (s *Signer) sendSignatureRequest(ctx context.Context, request generateSigna
 // misaligned split could never verify anyway, and rejecting it here yields an
 // accurate error instead of a downstream verification failure.
 func combineSignature(r, s string) (solana.Signature, error) {
-	rBytes, err := hex.DecodeString(strings.TrimPrefix(r, "0x"))
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode signature r", err)
-	}
-	sBytes, err := hex.DecodeString(strings.TrimPrefix(s, "0x"))
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to decode signature s", err)
-	}
-	const componentLength = solana.SignatureLength / 2
-	if len(rBytes) != componentLength || len(sBytes) != componentLength {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"invalid signature component length (expected 32-byte r and s)")
-	}
-	var sig solana.Signature
-	copy(sig[:], rBytes)
-	copy(sig[componentLength:], sBytes)
-	return sig, nil
+	return core.SignatureFromHexComponents(r, s, "dfns", false)
 }
 
 // Pubkey returns the Dfns wallet's public key resolved during New.
@@ -226,9 +203,8 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 	if err != nil {
 		return solana.Signature{}, err
 	}
-	if !core.VerifyEd25519(s.pubkey, message, sig) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed — the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, message, sig); err != nil {
+		return solana.Signature{}, err
 	}
 	return sig, nil
 }
@@ -256,25 +232,19 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 	if err != nil {
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction message", err)
 	}
-	if !core.VerifyEd25519(s.pubkey, msgBytes, sig) {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed — the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, msgBytes, sig); err != nil {
+		return core.SignedTransaction{}, err
 	}
 
-	if err := core.AddSignature(tx, s.pubkey, sig); err != nil {
-		return core.SignedTransaction{}, err
-	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, sig), nil
+	return core.AttachSignature(tx, s.pubkey, sig)
 }
 
 // IsAvailable reports whether the Dfns wallet is available and healthy:
 // reachable, active, and backed by an EdDSA/ed25519 signing key. All errors
 // are swallowed.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
+	defer cancel()
 	wallet, err := s.getWallet(ctx)
 	if err != nil {
 		return false

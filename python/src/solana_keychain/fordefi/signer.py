@@ -24,12 +24,16 @@ from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.http import (
+    AVAILABILITY_TIMEOUT_SECONDS,
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
     assert_https_url,
     fetch_signer_json,
     normalize_base_url,
+    probe_availability,
     provider_may_have_accepted,
 )
+from solana_keychain.core.poll import poll_attempts
+from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
@@ -62,7 +66,6 @@ SOLANA_PACKET_DATA_SIZE = 1232
 
 FordefiPushMode = Literal["auto", "manual"]
 
-_AVAILABILITY_TIMEOUT_SECONDS = 5.0
 _VAULT_VERIFICATION_TIMEOUT_SECONDS = 10.0
 
 _PUSHABLE_SUCCESS_STATES = frozenset({"completed"})
@@ -482,7 +485,7 @@ class FordefiSigner(SolanaSigner):
 
     async def _poll_for_result(self, transaction_id: str, *, pushable: bool) -> dict[str, Any]:
         success_states = _PUSHABLE_SUCCESS_STATES if pushable else _NON_PUSHABLE_SUCCESS_STATES
-        for attempt in range(self._max_poll_attempts):
+        async for _ in poll_attempts(self._max_poll_attempts, self._poll_interval_ms):
             response = await self._get_json(
                 f"/api/v1/transactions/{quote(transaction_id, safe='')}"
             )
@@ -496,8 +499,6 @@ class FordefiSigner(SolanaSigner):
                     SignerErrorCode.SIGNING_FAILED,
                     f"Transaction {transaction_id} reached terminal state: {state}",
                 )
-            if attempt + 1 < self._max_poll_attempts:
-                await asyncio.sleep(self._poll_interval_ms / 1000)
         raise SignerError(
             SignerErrorCode.REMOTE_API_ERROR,
             f"Polling timeout after {self._max_poll_attempts} attempts",
@@ -531,14 +532,6 @@ class FordefiSigner(SolanaSigner):
         transaction_id = await self._post_transaction(self._black_box_request(data))
         result = await self._poll_for_result(transaction_id, pushable=False)
         return self._extract_signature(result)
-
-    def _verify_signature(self, signature: Signature, message: bytes) -> None:
-        if not signature.verify(self._public_key, message):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         """Sign ``transaction`` via Fordefi MPC.
@@ -577,7 +570,7 @@ class FordefiSigner(SolanaSigner):
             return await self._sign_transaction_native_auto(transaction)
         message_data = signed_message_bytes(transaction.message)
         signature = await self._sign_black_box(message_data)
-        self._verify_signature(signature, message_data)
+        verify_returned_signature(signature, self._public_key, message_data)
         add_signature_to_transaction(transaction, self._public_key, signature)
         return classify_signed_transaction(
             transaction, serialize_transaction(transaction), signature
@@ -860,7 +853,7 @@ class FordefiSigner(SolanaSigner):
                 SignerErrorCode.SIGNING_FAILED,
                 "Fordefi manual signing unexpectedly populated a downstream signer slot",
             )
-        self._verify_signature(signature, signed_message_bytes(returned.message))
+        verify_returned_signature(signature, self.pubkey, signed_message_bytes(returned.message))
 
         try:
             canonical_wire = bytes(returned)
@@ -911,7 +904,9 @@ class FordefiSigner(SolanaSigner):
                 "Fordefi signature slot missing from returned transaction",
             )
         signature = signatures[position]
-        self._verify_signature(signature, signed_message_bytes(returned.message))
+        verify_returned_signature(
+            signature, self._public_key, signed_message_bytes(returned.message)
+        )
         return classify_signed_transaction(returned, "", signature)
 
     async def sign_message(self, message: bytes) -> Signature:
@@ -921,7 +916,7 @@ class FordefiSigner(SolanaSigner):
             signature = self._extract_signature(result)
         else:
             signature = await self._sign_black_box(message)
-        self._verify_signature(signature, message)
+        verify_returned_signature(signature, self._public_key, message)
         return signature
 
     async def _fetch_vault(self, timeout_seconds: float) -> dict[str, Any]:
@@ -973,15 +968,12 @@ class FordefiSigner(SolanaSigner):
         """Readiness probe: the vault is reachable with the bearer token and the
         request signer can produce an ``x-signature`` value."""
 
-        async def probe() -> None:
-            await self._fetch_vault(_AVAILABILITY_TIMEOUT_SECONDS)
+        async def probe() -> bool:
+            await self._fetch_vault(AVAILABILITY_TIMEOUT_SECONDS)
             await self._sign_request("/api/v1/vaults", _timestamp_ms(), "")
+            return True
 
-        try:
-            await asyncio.wait_for(probe(), timeout=_AVAILABILITY_TIMEOUT_SECONDS)
-        except Exception:
-            return False
-        return True
+        return await probe_availability(probe)
 
 
 async def create_fordefi_signer(config: FordefiSignerConfig) -> FordefiSigner:

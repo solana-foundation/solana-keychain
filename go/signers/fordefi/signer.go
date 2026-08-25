@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gagliardetto/solana-go"
@@ -17,7 +16,6 @@ import (
 // and the IsAvailable readiness check).
 const (
 	vaultVerificationTimeout = 10 * time.Second
-	availabilityTimeout      = 5 * time.Second
 	solanaPacketDataSize     = 1232
 )
 
@@ -109,13 +107,9 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		requestSigner = pemSigner
 	}
 
-	apiBaseURL := cfg.APIBaseURL
-	if apiBaseURL == "" {
-		apiBaseURL = DefaultAPIBaseURL
-	}
-	apiBaseURL = strings.TrimRight(apiBaseURL, "/")
-	if !strings.HasPrefix(apiBaseURL, "https://") {
-		return nil, core.NewSignerError(core.CodeConfigError, "fordefi api_base_url must use HTTPS")
+	apiBaseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
+	if err != nil {
+		return nil, err
 	}
 
 	pubkey, err := solana.PublicKeyFromBase58(cfg.PublicKey)
@@ -123,17 +117,11 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, core.WrapSignerError(core.CodeInvalidPublicKey, "invalid Solana public key format", err)
 	}
 
-	client := cfg.HTTPClient
-	if client == nil {
-		client = core.NewHTTPClient(cfg.HTTPClientConfig)
-	}
-	pollInterval := cfg.PollInterval
-	if pollInterval <= 0 {
-		pollInterval = DefaultPollInterval
-	}
-	maxPollAttempts := cfg.MaxPollAttempts
-	if maxPollAttempts <= 0 {
-		maxPollAttempts = DefaultMaxPollAttempts
+	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
+	pollInterval, maxPollAttempts, err := core.ResolvePollBounds(
+		cfg.PollInterval, DefaultPollInterval, cfg.MaxPollAttempts, DefaultMaxPollAttempts)
+	if err != nil {
+		return nil, err
 	}
 
 	s := &Signer{
@@ -209,9 +197,8 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 	if err != nil {
 		return solana.Signature{}, err
 	}
-	if !core.VerifyEd25519(s.pubkey, message, signature) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed - the returned signature does not match the public key")
+	if err := core.VerifySignature(s.pubkey, message, signature); err != nil {
+		return solana.Signature{}, err
 	}
 	return signature, nil
 }
@@ -265,25 +252,17 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}
-	if !core.VerifyEd25519(s.pubkey, messageBytes, signature) {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature verification failed - the returned signature does not match the public key")
-	}
-	if err := core.AddSignature(tx, s.pubkey, signature); err != nil {
+	if err := core.VerifySignature(s.pubkey, messageBytes, signature); err != nil {
 		return core.SignedTransaction{}, err
 	}
-	encoded, err := core.Serialize(tx)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	return core.Classify(tx, encoded, signature), nil
+	return core.AttachSignature(tx, s.pubkey, signature)
 }
 
 // IsAvailable reports whether the vault is reachable with the bearer token and
 // the request signer can produce an x-signature value. All errors are
 // swallowed and reported as false.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
-	actx, cancel := context.WithTimeout(ctx, availabilityTimeout)
+	actx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
 	defer cancel()
 	if _, err := s.fetchVault(actx); err != nil {
 		return false

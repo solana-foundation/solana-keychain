@@ -5,11 +5,9 @@ import (
 	"context"
 	"crypto/rsa"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -48,33 +46,11 @@ func createAccessToken(serviceAccountEmail string, signingKey *rsa.PrivateKey) (
 	return token, nil
 }
 
-// normalizeAPIBaseURL applies the default, trims trailing slashes, and validates
-// the URL, which must be usable as a base URL. It runs regardless of whether a
-// custom HTTP client is supplied, so HTTPS is always enforced.
-func normalizeAPIBaseURL(raw string) (string, error) {
-	if raw == "" {
-		raw = DefaultAPIBaseURL
-	}
-	normalized := strings.TrimRight(raw, "/")
-
-	parsed, err := url.Parse(normalized)
-	if err != nil {
-		return "", core.WrapSignerError(core.CodeConfigError, "invalid api_base_url", err)
-	}
-	if parsed.Scheme != "https" {
-		return "", core.NewSignerError(core.CodeConfigError, "api_base_url must use HTTPS")
-	}
-	if parsed.Opaque != "" || parsed.Host == "" {
-		return "", core.NewSignerError(core.CodeConfigError, "api_base_url cannot be used as a base URL")
-	}
-	return normalized, nil
-}
-
 // fetchWallet retrieves the wallet object holding the Solana address. The
 // "wallet" envelope (and, when solanaDetails is present, its address) is
 // required.
 func (s *Signer) fetchWallet(ctx context.Context) (walletResponse, error) {
-	path := "/v2/vaults/" + encodeURIComponent(s.vaultID) + "/wallets/" + encodeURIComponent(s.walletID)
+	path := "/v2/vaults/" + core.EncodeURIComponent(s.vaultID) + "/wallets/" + core.EncodeURIComponent(s.walletID)
 	status, body, err := s.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return walletResponse{}, err
@@ -93,7 +69,7 @@ func (s *Signer) fetchWallet(ctx context.Context) (walletResponse, error) {
 // initiateTransaction submits the base64 wire transaction for signing (publish
 // and blockhash replacement disabled).
 func (s *Signer) initiateTransaction(ctx context.Context, rawTransaction string) (utilaTransaction, error) {
-	path := "/v2/vaults/" + encodeURIComponent(s.vaultID) + "/transactions:initiate"
+	path := "/v2/vaults/" + core.EncodeURIComponent(s.vaultID) + "/transactions:initiate"
 	request := initiateTransactionRequest{
 		Details: initiateTransactionDetails{
 			SolanaSerializedTransaction: solanaSerializedTransaction{
@@ -113,8 +89,8 @@ func (s *Signer) initiateTransaction(ctx context.Context, rawTransaction string)
 // getTransaction fetches the current state of a Utila transaction (FULL view, so
 // the signed rawTransaction is included).
 func (s *Signer) getTransaction(ctx context.Context, transactionID string) (utilaTransaction, error) {
-	path := "/v2/vaults/" + encodeURIComponent(s.vaultID) +
-		"/transactions/" + encodeURIComponent(transactionID) + "?view=FULL"
+	path := "/v2/vaults/" + core.EncodeURIComponent(s.vaultID) +
+		"/transactions/" + core.EncodeURIComponent(transactionID) + "?view=FULL"
 	status, body, err := s.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return utilaTransaction{}, err
@@ -151,21 +127,7 @@ func (s *Signer) doRequest(ctx context.Context, method, path string, body any) (
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := s.client.Do(req)
-	if err != nil {
-		var se *core.SignerError
-		if errors.As(err, &se) {
-			return 0, nil, se
-		}
-		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "request to utila api failed", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "failed to read utila response body", err)
-	}
-	return resp.StatusCode, data, nil
+	return core.SendRequest(s.client, req, "utila")
 }
 
 // parseResponse maps any 4xx/5xx status to RemoteApiError carrying only the
@@ -197,24 +159,4 @@ func parseTransactionEnvelope(status int, body []byte, opContext string) (utilaT
 			"Failed to parse Utila "+opContext+" response")
 	}
 	return *envelope.Transaction, nil
-}
-
-// encodeURIComponent percent-encodes every byte except the JavaScript
-// encodeURIComponent unreserved set (A-Z a-z 0-9 - _ . ! ~ * ' ( )).
-func encodeURIComponent(input string) string {
-	var b strings.Builder
-	b.Grow(len(input))
-	for i := 0; i < len(input); i++ {
-		c := input[i]
-		switch {
-		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9':
-			b.WriteByte(c)
-		case c == '-' || c == '_' || c == '.' || c == '!' || c == '~' ||
-			c == '*' || c == '\'' || c == '(' || c == ')':
-			b.WriteByte(c)
-		default:
-			fmt.Fprintf(&b, "%%%02X", c)
-		}
-	}
-	return b.String()
 }

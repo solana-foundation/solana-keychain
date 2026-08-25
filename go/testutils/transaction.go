@@ -6,11 +6,14 @@ import (
 )
 
 // testRecipient is a fixed transfer recipient for deterministic test transactions.
-var testRecipient = deriveKey(0x42)
+var testRecipient = func() solana.PublicKey {
+	_, pub := KeyFromSeed(0x42)
+	return pub
+}()
 
-// testBlockhash is a fixed recent blockhash so test transactions serialize
+// TestBlockhash is a fixed recent blockhash so test transactions serialize
 // deterministically (these transactions are never submitted to a cluster).
-var testBlockhash = func() solana.Hash {
+var TestBlockhash = func() solana.Hash {
 	var h solana.Hash
 	for i := range h {
 		h[i] = 9
@@ -31,10 +34,15 @@ const (
 // (payer -> a fixed recipient) with a fixed blockhash. It is deterministic for a
 // given payer.
 func CreateTestTransaction(payer solana.PublicKey) (*solana.Transaction, error) {
-	inst := system.NewTransferInstruction(TestTransferLamports, payer, testRecipient).Build()
+	return CreateTestTransactionTo(payer, testRecipient)
+}
+
+// CreateTestTransactionTo is CreateTestTransaction with an explicit recipient.
+func CreateTestTransactionTo(payer, recipient solana.PublicKey) (*solana.Transaction, error) {
+	inst := system.NewTransferInstruction(TestTransferLamports, payer, recipient).Build()
 	return solana.NewTransaction(
 		[]solana.Instruction{inst},
-		testBlockhash,
+		TestBlockhash,
 		solana.TransactionPayer(payer),
 	)
 }

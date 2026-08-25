@@ -17,10 +17,10 @@ async def make_signer() -> VaultSigner:
     env = require_env("VAULT_ADDR", "VAULT_TOKEN", "VAULT_KEY_NAME", "VAULT_SIGNER_PUBKEY")
     return await create_vault_signer(
         VaultSignerConfig(
-            vault_addr=env["VAULT_ADDR"],
+            api_base_url=env["VAULT_ADDR"],
             token=env["VAULT_TOKEN"],
             key_name=env["VAULT_KEY_NAME"],
-            pubkey=env["VAULT_SIGNER_PUBKEY"],
+            public_key=env["VAULT_SIGNER_PUBKEY"],
         )
     )
 

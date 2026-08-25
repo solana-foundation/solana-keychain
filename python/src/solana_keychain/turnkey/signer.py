@@ -20,7 +20,13 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.http import assert_https_url, fetch_signer_json, normalize_base_url
+from solana_keychain.core.http import (
+    assert_https_url,
+    fetch_signer_json,
+    normalize_base_url,
+    probe_availability,
+)
+from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
@@ -188,13 +194,7 @@ class TurnkeySigner(SolanaSigner):
         signature = Signature.from_bytes(
             self._assemble_signature(sign_result["r"], sign_result["s"])
         )
-        if not signature.verify(self._pubkey, message):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
-        return signature
+        return verify_returned_signature(signature, self._pubkey, message)
 
     @staticmethod
     def _completed_activity_result(response: Any) -> Any:
@@ -244,12 +244,9 @@ class TurnkeySigner(SolanaSigner):
                 "Turnkey signature slot missing from returned transaction",
             )
         signature = signatures[position]
-        if not signature.verify(self._pubkey, signed_message_bytes(transaction.message)):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature verification failed — the returned signature does not match "
-                "the public key",
-            )
+        verify_returned_signature(
+            signature, self._pubkey, signed_message_bytes(transaction.message)
+        )
         add_signature_to_transaction(transaction, self._pubkey, signature)
         return classify_signed_transaction(
             transaction, serialize_transaction(transaction), signature
@@ -259,13 +256,13 @@ class TurnkeySigner(SolanaSigner):
         return await self._sign_bytes(message)
 
     async def is_available(self) -> bool:
-        try:
+        async def probe() -> bool:
             await self._post_stamped(
                 "/public/v1/query/whoami", {"organizationId": self._organization_id}
             )
-        except SignerError:
-            return False
-        return True
+            return True
+
+        return await probe_availability(probe)
 
 
 async def create_turnkey_signer(config: TurnkeySignerConfig) -> TurnkeySigner:

@@ -11,6 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/testutils"
 )
 
 // decodeJWTPart base64url-decodes one JWT segment into a JSON map.
@@ -47,7 +48,7 @@ func TestExtractHost(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			got, err := extractHost(tc.baseURL)
+			got, err := core.HostFromURL(tc.baseURL)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("expected error")
@@ -132,7 +133,7 @@ func TestAuthJWTShape(t *testing.T) {
 
 func TestAuthJWTRejectsPEMKey(t *testing.T) {
 	_, err := createAuthJWT("key", "-----BEGIN EC PRIVATE KEY-----", "host", "POST", "/p")
-	assertCode(t, err, core.CodeInvalidPrivateKey)
+	testutils.AssertCode(t, err, core.CodeInvalidPrivateKey)
 }
 
 func TestWalletJWTIncludesReqHash(t *testing.T) {

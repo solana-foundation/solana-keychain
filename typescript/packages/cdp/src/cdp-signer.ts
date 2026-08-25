@@ -16,7 +16,12 @@ import {
     validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { createKeyPairFromBytes, SignatureBytes } from '@solana/keys';
-import type { SignableMessage, SignatureDictionary } from '@solana/signers';
+import type {
+    MessagePartialSignerConfig,
+    SignableMessage,
+    SignatureDictionary,
+    TransactionPartialSignerConfig,
+} from '@solana/signers';
 import {
     type Base64EncodedWireTransaction,
     getBase64EncodedWireTransaction,
@@ -199,7 +204,7 @@ async function loadWalletKey(walletSecret: string): Promise<CryptoKey> {
  *
  * @example
  * ```typescript
- * const signer = await CdpSigner.create({
+ * const signer = await createCdpSigner({
  *   cdpApiKeyId: process.env.CDP_API_KEY_ID!,
  *   cdpApiKeySecret: process.env.CDP_API_KEY_SECRET!,
  *   cdpWalletSecret: process.env.CDP_WALLET_SECRET!,
@@ -207,10 +212,8 @@ async function loadWalletKey(walletSecret: string): Promise<CryptoKey> {
  * });
  * const signed = await signTransactionMessageWithSigners(transactionMessage, [signer]);
  * ```
- *
- * @deprecated Prefer `createCdpSigner()`. Class export will be removed in a future version.
  */
-export class CdpSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class CdpSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly apiKeyId: string;
     private readonly apiKey: CryptoKey;
@@ -242,7 +245,6 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
      *
      * Validates the Ed25519 API key (seed↔pubkey match via `createKeyPairFromBytes`)
      * and loads the P-256 wallet key. Both keys are loaded in parallel.
-     * @deprecated Use `createCdpSigner()` instead.
      */
     static async create<TAddress extends string = string>(config: CdpSignerConfig): Promise<CdpSigner<TAddress>> {
         if (!config.cdpApiKeyId) {
@@ -338,13 +340,14 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
      * Sign a UTF-8 message string using the CDP API.
      * @returns The 64-byte Ed25519 signature.
      */
-    private async callSignMessage(message: string): Promise<SignatureBytes> {
+    private async callSignMessage(message: string, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         const path = `${CDP_BASE_PATH}/${this.address}/sign/message`;
         const url = `${this.baseUrl}${path}`;
         const body = { message };
         const headers = await this.buildPostHeaders(path, body);
 
         const data = await fetchSignerJson<SignMessageResponse>({
+            abortSignal,
             init: {
                 body: JSON.stringify(body),
                 headers,
@@ -379,6 +382,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
      */
     private async callSignTransaction(
         wireTransaction: Base64EncodedWireTransaction,
+        abortSignal?: AbortSignal,
     ): Promise<Base64EncodedWireTransaction> {
         const path = `${CDP_BASE_PATH}/${this.address}/sign/transaction`;
         const url = `${this.baseUrl}${path}`;
@@ -386,6 +390,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
         const headers = await this.buildPostHeaders(path, body);
 
         const data = await fetchSignerJson<SignTransactionResponse>({
+            abortSignal,
             init: {
                 body: JSON.stringify(body),
                 headers,
@@ -408,12 +413,15 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
      * Sign multiple messages using the CDP API.
      * Message bytes are decoded as UTF-8 before sending to the CDP signMessage endpoint.
      */
-    async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+    async signMessages(
+        messages: readonly SignableMessage[],
+        config?: MessagePartialSignerConfig,
+    ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             messages,
             async message => {
                 const utf8Message = this.decodeMessageBytes(message.content);
-                const signatureBytes = await this.callSignMessage(utf8Message);
+                const signatureBytes = await this.callSignMessage(utf8Message, config?.abortSignal);
                 await assertSignatureValid({
                     data: message.content,
                     signature: signatureBytes,
@@ -425,6 +433,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
                 });
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -434,12 +443,13 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
      */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
+        config?: TransactionPartialSignerConfig,
     ): Promise<readonly SignatureDictionary[]> {
         return await signBatchStaggered(
             transactions,
             async transaction => {
                 const wireTransaction = getBase64EncodedWireTransaction(transaction);
-                const signedWireTx = await this.callSignTransaction(wireTransaction);
+                const signedWireTx = await this.callSignTransaction(wireTransaction, config?.abortSignal);
                 const sigDict = extractSignatureFromWireTransaction({
                     base64WireTransaction: signedWireTx,
                     signerAddress: this.address,
@@ -452,6 +462,7 @@ export class CdpSigner<TAddress extends string = string> implements SolanaSigner
                 return sigDict;
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
