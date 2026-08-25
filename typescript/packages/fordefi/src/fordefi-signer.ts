@@ -154,10 +154,10 @@ export interface FordefiSignerConfig {
     maxPollAttempts?: number;
     /**
      * Ceiling, in lamports, on a priority fee Fordefi introduces itself during
-     * native manual signing. Omitted applies
-     * {@link DEFAULT_MAX_PRIORITY_FEE_LAMPORTS}, unless `fee` sets a custom
-     * `priority_fee`, which governs instead. Never applies to a compute-unit
-     * price the caller set, since those messages are compared byte-for-byte.
+     * native manual signing. Omitted applies the default of 100,000,000
+     * lamports (0.1 SOL), unless `fee` sets a custom `priority_fee`, which
+     * governs instead. Never applies to a compute-unit price the caller set,
+     * since those messages are compared byte-for-byte.
      *
      * The ceiling bounds the product of compute-unit price and limit, not the
      * limit itself: Fordefi manages the `SetComputeUnitLimit` instruction in
@@ -255,12 +255,7 @@ export async function createFordefiSigner<TAddress extends string = string>(
     | (MessagePartialSigner<TAddress> & SolanaModifyingSigner<TAddress>)
     | (MessagePartialSigner<TAddress> & SolanaSendingSigner<TAddress>)
 > {
-    // The instance's own properties expose the mode-appropriate signing
-    // method, which the class type cannot express statically.
-    return (await FordefiSigner.create(config)) as unknown as
-        | SolanaSigner<TAddress>
-        | (MessagePartialSigner<TAddress> & SolanaModifyingSigner<TAddress>)
-        | (MessagePartialSigner<TAddress> & SolanaSendingSigner<TAddress>);
+    return (await FordefiSigner.create(config))
 }
 
 /**
