@@ -602,18 +602,6 @@ impl FordefiSigner {
             })
     }
 
-    /// Sign a transaction end-to-end, dispatching to black box or native path.
-    async fn sign_and_serialize(
-        &self,
-        transaction: &mut VersionedTransaction,
-    ) -> Result<SignedTransaction, SignerError> {
-        if self.chain.is_some() {
-            self.sign_and_serialize_native(transaction).await
-        } else {
-            self.sign_and_serialize_black_box(transaction).await
-        }
-    }
-
     /// Fetch the configured vault from Fordefi.
     async fn fetch_vault(&self) -> Result<VaultResponse, SignerError> {
         let url = format!("{}/api/v1/vaults/{}", self.api_base_url, self.vault_id);
@@ -713,7 +701,7 @@ impl SolanaSigner for FordefiSigner {
                     .to_string(),
             ));
         }
-        let signed_transaction = self.sign_and_serialize(tx).await?;
+        let signed_transaction = self.sign_and_serialize_black_box(tx).await?;
         Ok(TransactionUtil::classify_signed_transaction(
             tx,
             signed_transaction,
@@ -730,7 +718,7 @@ impl SolanaSigner for FordefiSigner {
                     .to_string(),
             ));
         }
-        let (_, signature) = self.sign_and_serialize(tx).await?;
+        let (_, signature) = self.sign_and_serialize_native(tx).await?;
         Ok(signature)
     }
 
