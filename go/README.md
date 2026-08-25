@@ -194,10 +194,10 @@ present.
 
 ### Sign and Send
 
-`core.SignAndSendTransaction` gets a transaction on chain with one call whichever
-shape the signer has. Managed-broadcast signers (Crossmint, Fordefi native mode)
-broadcast through their provider and ignore the send function; every other signer
-signs and the injected function broadcasts the result:
+`core.SignAndSendTransaction` gets a transaction on chain with one call.
+Managed-broadcast signers (Crossmint, Fordefi native mode) broadcast through their
+provider and ignore the send function; every other signer signs and the send
+function broadcasts the base64-encoded result:
 
 ```go
 sig, err := core.SignAndSendTransaction(ctx, signer, tx,

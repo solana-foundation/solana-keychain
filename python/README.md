@@ -137,18 +137,15 @@ Errors are always `SignerError` with a stable `code`
 
 ### Sign and Send
 
-`sign_and_send_transaction` gets a transaction on chain with one call whichever
-shape the signer has. Signers whose `broadcasts_transactions` is True (Crossmint,
-Fordefi native mode) broadcast through their provider and the send function is
-never called; every other signer signs and the injected function broadcasts the
-result:
+`sign_and_send_transaction` gets a transaction on chain with one call. Signers
+whose `broadcasts_transactions` is True (Crossmint, Fordefi native mode) broadcast
+through their provider and the send function is never called; every other signer
+signs and the send function broadcasts the base64-encoded result:
 
 ```python
 from solana_keychain import sign_and_send_transaction
 
-signature = await sign_and_send_transaction(
-    signer, transaction, lambda encoded: rpc_send(encoded)
-)
+signature = await sign_and_send_transaction(signer, transaction, rpc_send)
 ```
 
 ## Development

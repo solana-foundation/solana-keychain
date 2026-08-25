@@ -7,8 +7,8 @@ import (
 	"github.com/gagliardetto/solana-go"
 )
 
-// sendingSigner is a minimal in-package Signer stub for SignAndSendTransaction
-// tests: it records that it signed and returns a configurable result.
+// sendingSigner is a minimal in-package Signer stub: it records that it signed
+// and returns a configurable result.
 type sendingSigner struct {
 	broadcasts bool
 	signed     SignedTransaction
@@ -36,8 +36,8 @@ func completeSignature(first byte) SignedTransaction {
 	return SignedTransaction{EncodedTransaction: "encoded", Signature: sig, Completeness: Complete}
 }
 
-// A managed-broadcast signer needs no send function: its SignTransaction already
-// put the transaction on chain, so its own signature identifies it.
+// A managed-broadcast signer needs no send function: SignTransaction already put
+// the transaction on chain.
 func TestSignAndSendTransactionUsesTheProviderBroadcast(t *testing.T) {
 	s := &sendingSigner{broadcasts: true, signed: completeSignature(7)}
 
@@ -70,8 +70,7 @@ func TestSignAndSendTransactionBroadcastsWithTheInjectedSender(t *testing.T) {
 	}
 }
 
-// A sign-only signer with no sender must fail before signing: a signature the
-// caller cannot broadcast is a wasted remote signing request.
+// A signature the caller cannot broadcast is a wasted remote signing request.
 func TestSignAndSendTransactionRequiresASenderBeforeSigning(t *testing.T) {
 	s := &sendingSigner{signed: completeSignature(1)}
 

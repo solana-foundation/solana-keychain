@@ -55,8 +55,7 @@ impl SolanaSigner for StubSigner {
     }
 }
 
-/// A provider that broadcasts server-side has already put the transaction on
-/// chain, so its own signature identifies it and no broadcast is attempted.
+/// A provider that broadcasts server-side already put the transaction on chain.
 #[tokio::test]
 async fn broadcasting_signer_skips_the_injected_send() {
     let signer = StubSigner::new(true, true);

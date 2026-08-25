@@ -8,20 +8,16 @@ use crate::traits::{SignTransactionResult, SolanaSigner};
 
 /// Sign `tx` and get it on chain with one call.
 ///
-/// A signer that reports [`SolanaSigner::broadcasts_transactions`] has already
-/// broadcast the transaction through its provider, so its own signature identifies
-/// it and `send` is never called. Any other signer signs, and `send` broadcasts the
-/// encoded wire transaction.
-///
-/// The crate has no RPC client, so the network hop is always injected: implement
-/// `send` with whatever transport the caller already has, an
-/// `RpcClient::send_transaction` call or a relayer endpoint.
+/// A signer that reports [`SolanaSigner::broadcasts_transactions`] broadcasts
+/// through its provider, so its own signature identifies the transaction and `send`
+/// is never called; any other signer signs and `send` broadcasts the encoded wire
+/// transaction. The crate has no RPC client, so the network hop is always
+/// caller-supplied.
 ///
 /// # Errors
 ///
-/// [`SignerError::SigningFailed`] when a signer that does not broadcast leaves the
-/// transaction partially signed, since it cannot land. Backend signing errors and
-/// anything `send` returns propagate unchanged.
+/// [`SignerError::SigningFailed`] when the transaction is still partially signed.
+/// Backend signing errors and anything `send` returns propagate unchanged.
 pub async fn sign_and_send<S, F, Fut>(
     signer: &S,
     tx: &mut VersionedTransaction,

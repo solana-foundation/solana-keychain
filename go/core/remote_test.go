@@ -17,8 +17,7 @@ func TestSleepContextReportsCancellationAsAFailedRequest(t *testing.T) {
 	}
 }
 
-// Cancelling a poll the provider may already be executing must not look like a
-// plain failure: the caller would retry a transaction that is already on chain.
+// A plain failure here would invite a retry of a transaction already on chain.
 func TestSleepContextUnconfirmedReportsCancellationAsUnconfirmed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

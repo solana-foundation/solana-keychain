@@ -323,10 +323,10 @@ pub trait SolanaSigner: Send + Sync {
 
 ### Sign and Send
 
-`sign_and_send` gets a transaction on chain with one call whichever shape the
-signer has. Signers that report `broadcasts_transactions()` (Crossmint, Fordefi
-native mode) broadcast through their provider and the send closure is never
-called; every other signer signs and the closure broadcasts the result:
+`sign_and_send` gets a transaction on chain with one call. Signers that report
+`broadcasts_transactions()` (Crossmint, Fordefi native mode) broadcast through
+their provider and the send closure is never called; every other signer signs and
+the closure broadcasts the base64-encoded result:
 
 ```rust
 use solana_keychain::sign_and_send;

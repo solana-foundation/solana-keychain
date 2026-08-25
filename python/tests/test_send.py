@@ -46,8 +46,7 @@ class StubSigner(SolanaSigner):
 
 
 async def test_broadcasting_signer_skips_the_injected_sender() -> None:
-    """A provider that broadcasts server-side has already put the transaction on
-    chain, so its own signature identifies it."""
+    """A provider that broadcasts server-side already put the transaction on chain."""
     signer = StubSigner(broadcasts=True, is_complete=True)
 
     async def send(encoded: str) -> Signature:
