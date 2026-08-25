@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // do sends a Dfns API request and returns the response body on 2xx.

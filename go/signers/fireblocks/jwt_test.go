@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // testRSAKey is a throwaway PKCS#8 RSA key for unit tests only.

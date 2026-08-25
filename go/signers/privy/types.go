@@ -7,7 +7,7 @@ package privy
 import (
 	"net/http"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // DefaultAPIBaseURL is the Privy API base URL used when Config.APIBaseURL is

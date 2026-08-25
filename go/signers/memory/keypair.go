@@ -8,7 +8,7 @@ import (
 
 	"github.com/gagliardetto/solana-go"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // resolvePrivateKey turns a Config into an ed25519.PrivateKey (the 64-byte

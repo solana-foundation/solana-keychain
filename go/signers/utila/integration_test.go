@@ -11,7 +11,7 @@ import (
 
 	"github.com/gagliardetto/solana-go"
 
-	"github.com/solana-foundation/solana-keychain/go/testutils"
+	"github.com/solana-foundation/solana-keychain/go/testutils/v2"
 )
 
 // integrationSigner builds a signer against the live Utila API configured by

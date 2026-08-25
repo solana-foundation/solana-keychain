@@ -11,7 +11,7 @@ import (
 
 	"github.com/gagliardetto/solana-go"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // signRequest is the transit sign request body: the base64-encoded payload.

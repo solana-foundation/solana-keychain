@@ -7,7 +7,7 @@ package turnkey
 import (
 	"net/http"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // DefaultAPIBaseURL is the Turnkey API endpoint used when Config.APIBaseURL is

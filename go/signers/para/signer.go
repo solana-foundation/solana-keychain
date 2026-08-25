@@ -12,7 +12,7 @@ import (
 
 	"github.com/gagliardetto/solana-go"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // Signer signs Solana transactions and messages via Para's wallet API. All

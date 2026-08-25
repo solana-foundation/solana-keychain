@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // p256PKCS8DER is a minimal valid P-256 PKCS#8 DER private key whose scalar is

@@ -3,7 +3,7 @@ package turnkey
 import (
 	"testing"
 
-	"github.com/solana-foundation/solana-keychain/go/testutils"
+	"github.com/solana-foundation/solana-keychain/go/testutils/v2"
 )
 
 func TestStringDoesNotLeakSecrets(t *testing.T) {

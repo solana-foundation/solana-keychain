@@ -1,12 +1,12 @@
-module github.com/solana-foundation/solana-keychain/go/signers/utila
+module github.com/solana-foundation/solana-keychain/go/signers/utila/v2
 
 go 1.25.0
 
 require (
 	github.com/gagliardetto/solana-go v1.20.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/solana-foundation/solana-keychain/go/core v0.0.0-00010101000000-000000000000
-	github.com/solana-foundation/solana-keychain/go/testutils v0.0.0-00010101000000-000000000000
+	github.com/solana-foundation/solana-keychain/go/core/v2 v2.0.0
+	github.com/solana-foundation/solana-keychain/go/testutils/v2 v2.0.0
 )
 
 require (
@@ -38,8 +38,8 @@ require (
 	golang.org/x/time v0.11.0 // indirect
 )
 
-replace github.com/solana-foundation/solana-keychain/go/core => ../../core
+replace github.com/solana-foundation/solana-keychain/go/core/v2 => ../../core
 
-replace github.com/solana-foundation/solana-keychain/go/testutils => ../../testutils
+replace github.com/solana-foundation/solana-keychain/go/testutils/v2 => ../../testutils
 
 replace github.com/gagliardetto/solana-go => github.com/sonicfromnewyoke/solana-go v0.0.0-20260817125726-409ee9873f6d

@@ -9,7 +9,7 @@ import (
 
 	"github.com/gagliardetto/solana-go"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // Timeouts for the two bounded probes (vault ownership verification during New

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
-	"github.com/solana-foundation/solana-keychain/go/testutils"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
+	"github.com/solana-foundation/solana-keychain/go/testutils/v2"
 )
 
 // testP256PKCS8PEM and testP256PKCS8Base64 are the same fixed P-256 PKCS#8 key

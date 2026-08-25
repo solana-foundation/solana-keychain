@@ -42,8 +42,8 @@ backend you import (a memory-only consumer pulls no AWS/GCP SDKs and no
 `google.golang.org/api` toolchain floor):
 
 ```bash
-go get github.com/solana-foundation/solana-keychain/go/signers/memory@latest
-go get github.com/solana-foundation/solana-keychain/go/signers/vault@latest
+go get github.com/solana-foundation/solana-keychain/go/signers/memory/v2@latest
+go get github.com/solana-foundation/solana-keychain/go/signers/vault/v2@latest
 ```
 
 Requires **Go 1.25+** (the `gcpkms` module requires the toolchain floor set by
@@ -89,7 +89,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/solana-foundation/solana-keychain/go/signers/memory"
+	"github.com/solana-foundation/solana-keychain/go/signers/memory/v2"
 )
 
 func main() {
@@ -128,7 +128,7 @@ constructor that returns a ready-to-use signer (backends that need a remote
 lookup take a `context.Context` and perform it inline):
 
 ```go
-import "github.com/solana-foundation/solana-keychain/go/signers/vault"
+import "github.com/solana-foundation/solana-keychain/go/signers/vault/v2"
 
 signer, err := vault.New(vault.Config{
 	VaultAddr: "https://vault.example.com",
@@ -139,7 +139,7 @@ signer, err := vault.New(vault.Config{
 ```
 
 ```go
-import "github.com/solana-foundation/solana-keychain/go/signers/privy"
+import "github.com/solana-foundation/solana-keychain/go/signers/privy/v2"
 
 signer, err := privy.New(ctx, privy.Config{
 	AppID:     os.Getenv("PRIVY_APP_ID"),

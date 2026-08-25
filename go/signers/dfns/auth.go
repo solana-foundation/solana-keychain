@@ -15,7 +15,7 @@ import (
 	"encoding/pem"
 	"net/http"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // Dfns User Action Signing flow. See

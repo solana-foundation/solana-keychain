@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // RequireEnv returns the trimmed value of the environment variable key, failing

@@ -15,7 +15,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // jwtTTL is the JWT validity window in seconds.

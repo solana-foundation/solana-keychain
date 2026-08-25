@@ -10,7 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // RequestSigner signs Fordefi API-request payloads for the x-signature header.

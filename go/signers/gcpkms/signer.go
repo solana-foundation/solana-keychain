@@ -7,7 +7,7 @@ import (
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"github.com/gagliardetto/solana-go"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // Signer signs with an Ed25519 key held in Google Cloud KMS. AsymmetricSign is

@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // walletResponse is the subset of the Crossmint wallet object the signer needs.

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 const (

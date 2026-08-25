@@ -13,7 +13,7 @@ import (
 
 	"github.com/gagliardetto/solana-go/base58"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // signerSecretPrefix is the expected prefix of a Crossmint server signer secret.

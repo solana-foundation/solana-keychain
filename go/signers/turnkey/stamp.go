@@ -11,7 +11,7 @@ import (
 	"encoding/json"
 	"math/big"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // stampScheme is the signature scheme Turnkey expects for API-key stamps.

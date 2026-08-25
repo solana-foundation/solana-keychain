@@ -1,4 +1,4 @@
-module github.com/solana-foundation/solana-keychain/go/core
+module github.com/solana-foundation/solana-keychain/go/core/v2
 
 go 1.25.0
 

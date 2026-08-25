@@ -6,7 +6,7 @@ import (
 	"encoding/pem"
 	"testing"
 
-	"github.com/solana-foundation/solana-keychain/go/core"
+	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // testEd25519PEM is an Ed25519 test key in PKCS#8 PEM format.

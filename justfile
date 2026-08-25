@@ -642,9 +642,9 @@ go-release-prep version:
         echo "==> $dir"
         (cd "$dir" && \
             go mod edit \
-                -dropreplace=github.com/solana-foundation/solana-keychain/go/core \
-                -dropreplace=github.com/solana-foundation/solana-keychain/go/testutils \
-                -require=github.com/solana-foundation/solana-keychain/go/core@{{version}} \
-                -require=github.com/solana-foundation/solana-keychain/go/testutils@{{version}} && \
+                -dropreplace=github.com/solana-foundation/solana-keychain/go/core/v2 \
+                -dropreplace=github.com/solana-foundation/solana-keychain/go/testutils/v2 \
+                -require=github.com/solana-foundation/solana-keychain/go/core/v2@{{version}} \
+                -require=github.com/solana-foundation/solana-keychain/go/testutils/v2@{{version}} && \
             go mod tidy)
     done
