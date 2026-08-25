@@ -706,16 +706,32 @@ impl SolanaSigner for FordefiSigner {
         &self,
         tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
-        let signed_transaction = self.sign_and_serialize(tx).await?;
         if self.chain.is_some() {
-            // Native mode has already broadcast the transaction, so it is
-            // complete regardless of the caller's untouched signature slots.
-            return Ok(SignTransactionResult::Complete(signed_transaction));
+            return Err(SignerError::SigningFailed(
+                "Fordefi native mode broadcasts through its own API; call \
+                 sign_and_send_transaction instead"
+                    .to_string(),
+            ));
         }
+        let signed_transaction = self.sign_and_serialize(tx).await?;
         Ok(TransactionUtil::classify_signed_transaction(
             tx,
             signed_transaction,
         ))
+    }
+
+    async fn sign_and_send_transaction(
+        &self,
+        tx: &mut VersionedTransaction,
+    ) -> Result<Signature, SignerError> {
+        if self.chain.is_none() {
+            return Err(SignerError::SigningFailed(
+                "Fordefi black-box mode only signs; sign the transaction and broadcast the result"
+                    .to_string(),
+            ));
+        }
+        let (_, signature) = self.sign_and_serialize(tx).await?;
+        Ok(signature)
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {

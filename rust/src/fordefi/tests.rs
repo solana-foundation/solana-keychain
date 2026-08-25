@@ -930,24 +930,13 @@ async fn test_fordefi_native_sign_transaction_success() {
         .await;
 
     let mut tx = tx;
-    let result = signer.sign_transaction(&mut tx).await;
+    let result = signer.sign_and_send_transaction(&mut tx).await;
     assert!(
         result.is_ok(),
-        "native sign_transaction failed: {:?}",
+        "native sign_and_send_transaction failed: {:?}",
         result.err()
     );
-    let result = result.unwrap();
-    assert!(
-        matches!(result, SignTransactionResult::Complete(_)),
-        "a broadcast native transaction is complete even though the caller's \
-             signature slots stay untouched"
-    );
-    let (serialized_tx, sig) = result.into_signed_transaction();
-    // Native mode auto-broadcasts, so no re-sendable wire tx is returned.
-    assert!(
-        serialized_tx.is_empty(),
-        "native mode should return an empty serialized transaction"
-    );
+    let sig = result.unwrap();
     assert!(sig.verify(&pubkey.to_bytes(), &message_data));
     assert!(
         tx.signatures.iter().all(|s| *s == Signature::default()),
@@ -981,7 +970,7 @@ async fn test_fordefi_native_sign_transaction_missing_raw_transaction() {
         .await;
 
     let mut tx = create_test_transaction(&pubkey);
-    let result = signer.sign_transaction(&mut tx).await;
+    let result = signer.sign_and_send_transaction(&mut tx).await;
     match result.unwrap_err() {
         SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
             assert_eq!(provider_tx_id.as_deref(), Some("native-tx-no-raw"));
@@ -1003,7 +992,7 @@ async fn test_native_submit_server_error_is_unconfirmed_without_a_transaction_id
         .await;
 
     let mut tx = create_test_transaction(&pubkey);
-    match signer.sign_transaction(&mut tx).await.unwrap_err() {
+    match signer.sign_and_send_transaction(&mut tx).await.unwrap_err() {
         SignerError::BroadcastUnconfirmed {
             provider_tx_id,
             provider_status,
@@ -1031,7 +1020,7 @@ async fn test_native_submit_accepted_without_an_id_is_unconfirmed() {
         .await;
 
     let mut tx = create_test_transaction(&pubkey);
-    match signer.sign_transaction(&mut tx).await.unwrap_err() {
+    match signer.sign_and_send_transaction(&mut tx).await.unwrap_err() {
         SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
             assert_eq!(provider_tx_id, None);
         }
@@ -1052,7 +1041,7 @@ async fn test_native_submit_rejected_by_fordefi_stays_a_plain_failure() {
         .await;
 
     let mut tx = create_test_transaction(&pubkey);
-    match signer.sign_transaction(&mut tx).await.unwrap_err() {
+    match signer.sign_and_send_transaction(&mut tx).await.unwrap_err() {
         SignerError::RemoteApiError(_) => {}
         other => panic!("Expected RemoteApiError, got: {other:?}"),
     }
@@ -1104,7 +1093,7 @@ async fn test_fordefi_native_sign_transaction_failed_state() {
         .await;
 
     let mut tx = create_test_transaction(&pubkey);
-    let result = signer.sign_transaction(&mut tx).await;
+    let result = signer.sign_and_send_transaction(&mut tx).await;
     match result.unwrap_err() {
         SignerError::BroadcastUnconfirmed {
             provider_tx_id,
@@ -1219,7 +1208,7 @@ async fn test_fordefi_native_sign_transaction_poll_timeout_is_broadcast_unconfir
         .await;
 
     let mut tx = create_test_transaction(&pubkey);
-    let result = signer.sign_transaction(&mut tx).await;
+    let result = signer.sign_and_send_transaction(&mut tx).await;
     match result.unwrap_err() {
         SignerError::BroadcastUnconfirmed {
             provider_tx_id,
@@ -1268,7 +1257,7 @@ async fn test_fordefi_native_sign_transaction_malformed_raw_transaction() {
         .await;
 
     let mut tx = create_test_transaction(&pubkey);
-    let result = signer.sign_transaction(&mut tx).await;
+    let result = signer.sign_and_send_transaction(&mut tx).await;
     match result.unwrap_err() {
         SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
             assert_eq!(provider_tx_id.as_deref(), Some("native-tx-malformed"));

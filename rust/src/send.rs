@@ -30,7 +30,7 @@ where
     Fut: Future<Output = Result<Signature, SignerError>>,
 {
     if signer.broadcasts_transactions() {
-        let (_, signature) = signer.sign_transaction(tx).await?.into_signed_transaction();
+        let signature = signer.sign_and_send_transaction(tx).await?;
         if signature == Signature::default() {
             return Err(SignerError::SigningFailed(
                 "Signer returned no signature for the transaction it broadcast".to_string(),

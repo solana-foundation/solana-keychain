@@ -46,6 +46,13 @@ impl SolanaSigner for StubSigner {
         })
     }
 
+    async fn sign_and_send_transaction(
+        &self,
+        _tx: &mut VersionedTransaction,
+    ) -> Result<Signature, SignerError> {
+        Ok(self.signature)
+    }
+
     async fn sign_message(&self, _message: &[u8]) -> Result<Signature, SignerError> {
         Ok(self.signature)
     }

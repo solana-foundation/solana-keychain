@@ -458,6 +458,13 @@ impl SolanaSigner for Signer {
         dispatch_signer!(self, s => s.sign_transaction(tx).await)
     }
 
+    async fn sign_and_send_transaction(
+        &self,
+        tx: &mut sdk_adapter::VersionedTransaction,
+    ) -> Result<sdk_adapter::Signature, SignerError> {
+        dispatch_signer!(self, s => s.sign_and_send_transaction(tx).await)
+    }
+
     async fn sign_message(&self, message: &[u8]) -> Result<sdk_adapter::Signature, SignerError> {
         dispatch_signer!(self, s => s.sign_message(message).await)
     }

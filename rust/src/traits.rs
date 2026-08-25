@@ -50,6 +50,36 @@ pub trait SolanaSigner: Send + Sync {
         tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError>;
 
+    /// Sign a Solana transaction and broadcast it through the provider
+    ///
+    /// Implemented only by signers whose provider executes the transaction
+    /// server-side; every other signer signs and leaves broadcasting to the
+    /// caller. [`broadcasts_transactions`](Self::broadcasts_transactions) reports
+    /// which shape a signer has in its current configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `tx` - The transaction to sign and broadcast. The provider may rewrite
+    ///   it, in which case `tx` is left untouched and the returned signature
+    ///   identifies the transaction that actually landed.
+    ///
+    /// # Returns
+    ///
+    /// The signature identifying the broadcast transaction.
+    ///
+    /// # Errors
+    ///
+    /// [`SignerError::SigningFailed`] when this signer cannot broadcast.
+    async fn sign_and_send_transaction(
+        &self,
+        _tx: &mut VersionedTransaction,
+    ) -> Result<Signature, SignerError> {
+        Err(SignerError::SigningFailed(
+            "This signer cannot broadcast transactions; sign it and broadcast the result"
+                .to_string(),
+        ))
+    }
+
     /// Sign an arbitrary message
     ///
     /// # Arguments
