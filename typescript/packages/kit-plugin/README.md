@@ -47,7 +47,7 @@ Fordefi in black-box mode (no `chain`) is a regular partial signer and remains s
 
 ## Fordefi native manual mode is accepted
 
-Fordefi with `chain` set and `pushMode: 'manual'` rewrites the transaction (fresh blockhash, managed Compute Budget fee instructions) but leaves broadcasting to the caller, making it a Kit `TransactionModifyingSigner`. Kit runs modifying signers ahead of the partial signers in its normal signing pipeline, so `keychainSigner()` and `keychainPayer()` accept the config, and `client.payer` is then typed `SolanaModifyingSigner` instead of `SolanaSigner`.
+Fordefi with `chain` set and `pushMode: 'manual'` rewrites the transaction (fresh blockhash, managed Compute Budget fee instructions) but leaves broadcasting to the caller, making it a Kit `TransactionModifyingSigner`. Kit runs modifying signers ahead of the partial signers in its normal signing pipeline, so `keychainSigner()` and `keychainPayer()` accept the config, and `client.payer` is then typed `MessagePartialSigner & SolanaModifyingSigner` instead of `SolanaSigner`.
 
 `keychainIdentity()` rejects it, at compile time and at runtime: manual mode requires the Fordefi vault to be the transaction fee payer, which an identity-only installation cannot guarantee.
 

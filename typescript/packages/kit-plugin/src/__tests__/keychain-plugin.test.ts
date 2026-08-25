@@ -1,5 +1,5 @@
 import { createClient } from '@solana/kit';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { keychainIdentity, keychainPayer, keychainSigner } from '../keychain-plugin.js';
 
@@ -88,6 +88,15 @@ describe('managed-broadcast exclusion', () => {
         } as const;
         const manualPlugin = keychainPayer(manualConfig);
         expect(typeof manualPlugin).toBe('function');
+
+        // Never executed: pins that a manual-mode payer keeps its statically
+        // known modifying and message-signing methods, matching the factory.
+        const _manualPayerTypeCheck = async () => {
+            const client = await createClient().use(keychainPayer(manualConfig));
+            expectTypeOf(client.payer.modifyAndSignTransactions).toBeFunction();
+            expectTypeOf(client.payer.signMessages).toBeFunction();
+        };
+        void _manualPayerTypeCheck;
 
         // As an identity-only signer it could never be the fee payer, so the
         // config is rejected at the type level too.

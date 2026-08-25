@@ -12,6 +12,7 @@ import {
     SignerErrorCode,
     throwSignerError,
 } from '@solana/keychain';
+import type { MessagePartialSigner } from '@solana/kit';
 import { extendClient } from '@solana/kit';
 
 /**
@@ -36,14 +37,15 @@ export type KeychainKitPluginConfig =
 
 /**
  * The client-facing signer shape a plugin config produces. Only Fordefi native
- * manual mode yields a modifying signer; every other accepted backend is a
- * partial signer, and its statically known `signTransactions`/`signMessages`
- * must survive on `client.payer`/`client.identity`.
+ * manual mode yields a modifying signer — which also signs messages, matching
+ * the factory's return type; every other accepted backend is a partial signer,
+ * and its statically known `signTransactions`/`signMessages` must survive on
+ * `client.payer`/`client.identity`.
  */
 type ClientSigner<TConfig extends KeychainKitPluginConfig> = TConfig extends FordefiManualSignerConfig & {
     backend: 'fordefi';
 }
-    ? SolanaModifyingSigner
+    ? MessagePartialSigner & SolanaModifyingSigner
     : SolanaSigner;
 
 /**
