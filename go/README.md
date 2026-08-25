@@ -154,6 +154,82 @@ when unset, requests go through an HTTPS-enforcing client built from
 The KMS backends (`awskms`, `gcpkms`) expose the equivalent SDK-level client
 override instead.
 
+### Fordefi Signing Modes
+
+Fordefi supports three transaction modes:
+
+- **Black box** (`Chain` empty): signs the caller's exact message bytes, updates
+  the transaction locally, and returns its base64 wire encoding for the caller
+  to broadcast.
+- **Native auto** (`Chain` set and `PushMode` empty or `PushModeAuto`): Fordefi
+  may modify the transaction, signs it, and broadcasts it. The caller's
+  transaction is intentionally left untouched and `EncodedTransaction` is
+  empty because it must not be sent again.
+- **Native manual** (`Chain` set and `PushModeManual`): Fordefi may replace the
+  recent blockhash and manage `SetComputeUnitPrice`/`SetComputeUnitLimit`, then
+  signs the transaction without broadcasting it. Every other message field is
+  validated exactly. `SignTransaction` replaces the caller's
+  `*solana.Transaction` with Fordefi's validated result and returns a non-empty
+  base64 wire transaction. Custom unit prices must match and custom priority
+  fees cap the effective returned fee.
+
+A priority fee Fordefi introduces on its own initiative is capped at
+`DefaultMaxPriorityFeeLamports` (0.1 SOL), so a compromised or malfunctioning
+response cannot drain the fee payer. Set `Config.MaxPriorityFeeLamports` to
+raise or lower that ceiling; a custom `priority_fee` governs instead when set.
+The ceiling never applies to a compute-unit price the caller placed in the
+transaction themselves, since those requests are validated byte-for-byte.
+
+The two fee instructions are asymmetric by design. A compute-unit *price*
+you set yourself is protected: the whole message is then compared
+byte-for-byte, so Fordefi can only replace the blockhash. A compute-unit
+*limit* you set with no price is **not** preserved — Fordefi manages the limit
+in manual mode, and the returned limit is only bounded indirectly, through the
+lamport ceiling above. Set a compute-unit price alongside your limit if you
+need the limit held exactly.
+
+Manual mode must run first with the Fordefi vault as fee payer. Single-signer
+results are complete and ready for caller-managed broadcasting. Multisigner
+results are partial: add every downstream signature to the replaced `tx`, then
+serialize that completed transaction rather than broadcasting the earlier
+partial encoding.
+
+```go
+import "github.com/solana-foundation/solana-keychain/go/signers/fordefi"
+
+signer, err := fordefi.New(ctx, fordefi.Config{
+	AccessToken:   os.Getenv("FORDEFI_ACCESS_TOKEN"),
+	VaultID:       os.Getenv("FORDEFI_VAULT_ID"),
+	PublicKey:     os.Getenv("FORDEFI_PUBLIC_KEY"),
+	PrivateKeyPEM: os.Getenv("FORDEFI_PRIVATE_KEY_PEM"),
+	Chain:         fordefi.ChainSolanaDevnet,
+	PushMode:      fordefi.PushModeManual,
+})
+if err != nil {
+	return err
+}
+
+result, err := signer.SignTransaction(ctx, tx)
+if err != nil {
+	return err
+}
+// tx now contains Fordefi's authoritative message and signature. If
+// result.IsComplete(), result.EncodedTransaction can be sent to Solana RPC.
+```
+
+Fordefi can replace the recent blockhash but does not return its
+`lastValidBlockHeight`. Go retains the replacement blockhash in `tx`; broadcast
+manual results promptly rather than relying on local block-height expiry
+detection.
+
+Mutation eligibility depends on whether signatures are supplied, not on
+`push_mode`. This SDK's native manual request is unsigned, omits
+`details.signatures`, and rejects pre-signed inputs, so Fordefi may refresh the
+blockhash and manage fees. A future provided-signatures flow must preserve the
+complete message byte-for-byte. `push_mode` controls submission only.
+Durable-nonce transactions keep both their lifetime and fee layout exact; v1
+transactions may replace only the blockhash and keep their inline configuration exact.
+
 ### Batch Signing
 
 Single-item methods match the contract 1:1; batch signing is provided as free
@@ -243,7 +319,7 @@ sig, err := core.SignAndSendTransaction(ctx, signer, tx,
 | [`signers/para`](signers/para/) | Para wallet API |
 | [`signers/crossmint`](signers/crossmint/) | Crossmint (create/poll/approve flow, HKDF delegated-signer key) |
 | [`signers/openfort`](signers/openfort/) | Openfort (ES256 x-wallet-auth JWTs) |
-| [`signers/fordefi`](signers/fordefi/) | Fordefi (black-box or native Solana MPC signing with status polling, P-256 request signing) |
+| [`signers/fordefi`](signers/fordefi/) | Fordefi (black-box, native auto, or native manual Solana MPC signing with status polling and P-256 request signing) |
 | [`testutils`](testutils/) | Deterministic keypair + test-transaction helpers for testing your own signers |
 
 Backend-behavior quirks: `crossmint` intentionally does not support

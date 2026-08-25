@@ -358,10 +358,15 @@ let signature = sign_and_send(&signer, &mut tx, |encoded| async move {
 
 ### Fordefi Signer
 
-Fordefi supports two signing modes, which differ in whether Fordefi broadcasts the transaction and in which entry point is available:
+Fordefi supports three signing modes, which differ in whether Fordefi modifies or broadcasts the transaction and in which entry point is available:
 
-- **Black box mode** : Signs raw bytes via EdDSA; the wire transaction is assembled locally. Fordefi does **not** broadcast: `sign_transaction` returns the signed serialized transaction, and **you** submit it to an RPC. `sign_and_send_transaction` is rejected in this mode. Use with a Fordefi black box vault.
-- **Native Solana mode** (recommended): Uses Solana-specific API types. Fordefi modifies the transaction (at minimum updating the blockhash, and optionally adding priority fees) and **auto-broadcasts** it on-chain (`push_mode: "auto"`). Call `sign_and_send_transaction`, which returns the signature, the on-chain identifier; do not re-send the transaction. `sign_transaction` is rejected in this mode. The current auto-broadcast request supports only transactions whose sole required signer is the configured Fordefi vault; additional required signers are rejected before submission. Use with a regular Fordefi Solana vault.
+- **Black box mode** : Signs raw bytes via EdDSA; the wire transaction is assembled locally. Fordefi does **not** broadcast — `sign_transaction` returns the signed serialized transaction, and **you** submit it to an RPC. `sign_and_send_transaction` is rejected in this mode. Use with a Fordefi black box vault.
+- **Native auto mode** (recommended for managed broadcasting): Uses Solana-specific API types. Fordefi modifies the transaction (at minimum updating the blockhash, and optionally adding priority fees) and **auto-broadcasts** it on-chain (`push_mode: "auto"`). Call `sign_and_send_transaction`, which returns the signature, the on-chain identifier; do not re-send the transaction. `sign_transaction` is rejected in this mode. The current auto-broadcast request supports only transactions whose sole required signer is the configured Fordefi vault; additional required signers are rejected before submission. Use with a regular Fordefi Solana vault.
+- **Native manual mode**: Fordefi may replace the recent blockhash and manage `SetComputeUnitPrice`/`SetComputeUnitLimit`, then signs the transaction but does **not** broadcast it (`push_mode: "manual"`). Every other message field is validated exactly. Custom unit prices must match and custom priority fees cap the effective returned fee. Because Fordefi does not broadcast, this mode signs through `sign_transaction`, which replaces your `&mut VersionedTransaction` with Fordefi's validated transaction and returns a non-empty serialized transaction; `sign_and_send_transaction` is rejected. Fordefi must be the fee payer and must sign before every downstream signer.
+
+A priority fee Fordefi introduces on its own initiative is capped at `DEFAULT_MAX_PRIORITY_FEE_LAMPORTS` (0.1 SOL), so a compromised or malfunctioning response cannot drain the fee payer. Set `max_priority_fee_lamports` to raise or lower that ceiling; a custom `priority_fee` governs instead when set. The ceiling never applies to a compute-unit price the caller placed in the transaction themselves, since those requests are validated byte-for-byte.
+
+The two fee instructions are asymmetric by design. A compute-unit *price* you set yourself is protected: the whole message is then compared byte-for-byte, so Fordefi can only replace the blockhash. A compute-unit *limit* you set with no price is **not** preserved — Fordefi manages the limit in manual mode, and the returned limit is only bounded indirectly, through the lamport ceiling above. Set a compute-unit price alongside your limit if you need the limit held exactly.
 
 Construction is async because it fetches the Fordefi vault and verifies that its
 authoritative address matches the configured `public_key` before returning.
@@ -386,6 +391,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_client_config: None,
         chain: None,
         fee: None,
+        push_mode: None,
+        max_priority_fee_lamports: None,
     })
     .await?;
 
@@ -394,7 +401,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-For native Solana mode, set `chain` and optionally `fee`:
+For native auto mode, set `chain` and optionally `fee`:
 
 ```rust
 use solana_keychain::{
@@ -420,6 +427,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fee: Some(FordefiSolanaFee::Priority {
             priority_level: FordefiPriorityLevel::Medium,
         }),
+        // None is equivalent to Some(FordefiPushMode::Auto).
+        push_mode: None,
+        max_priority_fee_lamports: None,
     })
     .await?;
 
@@ -430,6 +440,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+For native manual mode, use the explicit push-mode constructor. A single-signer
+result is `Complete` and can be broadcast using the returned base64 wire transaction.
+A multi-signer result is `Partial`; add the remaining signatures to the mutated
+`transaction`, serialize that fully signed transaction, and then broadcast it.
+
+```rust
+use solana_keychain::{
+    FordefiPushMode, FordefiSigner, FordefiSignerConfig,
+    SignTransactionResult, SolanaChainUniqueId, SolanaSigner,
+};
+
+let signer = FordefiSigner::from_config(FordefiSignerConfig {
+    access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
+    vault_id: std::env::var("FORDEFI_VAULT_ID")?,
+    private_key_pem: Some(pem),
+    request_signer: None,
+    public_key: std::env::var("FORDEFI_PUBLIC_KEY")?,
+    api_base_url: None,
+    poll_interval_ms: None,
+    max_poll_attempts: None,
+    http_client_config: None,
+    chain: Some(SolanaChainUniqueId::SolanaMainnet),
+    fee: None,
+    push_mode: Some(FordefiPushMode::Manual),
+    // Cap a Fordefi-introduced priority fee; None applies the 0.1 SOL default.
+    max_priority_fee_lamports: None,
+})
+.await?;
+
+let result = signer.sign_transaction(&mut transaction).await?;
+match result {
+    SignTransactionResult::Complete((base64_transaction, _)) => {
+        // Broadcast base64_transaction through your RPC client.
+    }
+    SignTransactionResult::Partial(_) => {
+        // Apply the remaining signatures to `transaction`, reserialize, and broadcast.
+    }
+}
+```
+
+Fordefi normally replaces the recent blockhash immediately before signing. The
+returned Rust transaction contains that replacement blockhash, but Fordefi does not
+return its exact `lastValidBlockHeight`. Broadcast promptly; callers cannot use a
+locally known block height to detect expiry when the blockhash changed.
+
+Mutation eligibility depends on whether signatures are supplied, not on
+`push_mode`. This SDK's native manual request is unsigned, omits
+`details.signatures`, and rejects pre-signed inputs, so Fordefi may refresh the
+blockhash and manage fees. A future provided-signatures flow must preserve the
+complete message byte-for-byte. `push_mode` controls submission only.
+Durable-nonce transactions keep both their lifetime and fee layout exact; v1
+transactions may replace only the blockhash and keep their inline configuration exact.
 
 #### Custom API-request signer (KMS/HSM)
 
@@ -468,6 +531,8 @@ let signer = FordefiSigner::from_config(FordefiSignerConfig {
     http_client_config: None,
     chain: None,
     fee: None,
+    push_mode: None,
+    max_priority_fee_lamports: None,
 })
 .await?;
 ```

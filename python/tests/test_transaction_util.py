@@ -7,7 +7,7 @@ from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
-from solana_keychain import SignerError, SignerErrorCode
+from solana_keychain import SignedTransaction, SignerError, SignerErrorCode
 from solana_keychain.core import (
     add_signature_to_transaction,
     classify_signed_transaction,
@@ -75,6 +75,28 @@ def test_classify_marks_missing_cosigner_partial() -> None:
     result = classify_signed_transaction(transaction, serialize_transaction(transaction), signature)
 
     assert not result.is_complete
+
+
+def test_signed_transaction_carries_the_authoritative_transaction() -> None:
+    _, transaction = signed_test_transaction()
+    _, other = signed_test_transaction()
+    signature = Signature.default()
+    result = SignedTransaction("encoded", signature, False, transaction)
+
+    assert result.transaction is transaction
+    # Excluded from equality and repr: it is the authoritative payload, not
+    # identity, and printing a whole transaction drowns out the useful fields.
+    assert result == SignedTransaction("encoded", signature, False, other)
+    assert ", transaction=" not in repr(result)
+
+
+def test_classify_signed_transaction_carries_the_transaction_through() -> None:
+    _, transaction = signed_test_transaction()
+    signature = Signature.default()
+
+    result = classify_signed_transaction(transaction, "encoded", signature)
+
+    assert result.transaction is transaction
 
 
 def test_serialize_transaction_round_trips_through_bincode() -> None:

@@ -83,6 +83,8 @@ One feature per backend (`memory` is default), `all` enables everything. At leas
 - **GCP KMS:** PureEdDSA mode with `EC_SIGN_ED25519`.
 - **Transaction serialization:** go through `transaction_util::serialize_wire_transaction` / `deserialize_wire_transaction`, never `bincode` directly (`sdk-v4` needs `wincode` for v1).
 - **Transaction types:** `sign_transaction` takes a `VersionedTransaction` (legacy, v0 or v1). v1 messages exist only in the solana-sdk 4.x line, so v1 requires `sdk-v4` and is unrepresentable under `sdk-v2`/`sdk-v3`.
+- **Fordefi push mode:** `FordefiSignerConfig.push_mode` picks native `Auto` (Fordefi broadcasts) or `Manual` (caller broadcasts). `None` means `Auto`; `Manual` requires `chain`. `broadcasts_transactions()` — what `sign_and_send` keys on — is true only for `Auto`.
+- **Compute Budget program ID:** declared locally in each `sdk_adapter/v*.rs`, not pulled from `solana-compute-budget-interface`, so non-Fordefi consumers skip that dependency. Pinned to its canonical bytes in `sdk_adapter::tests`.
 - **Remote-signer tests** use `wiremock`; no live API calls in unit tests.
 
 ## TypeScript
@@ -107,7 +109,8 @@ See [typescript/README.md](typescript/README.md) for the full package list and u
 ### Gotchas
 
 - **Async construction:** always `await createXSigner(...)` — direct class construction is deprecated and skips `init()`.
-- **Managed-broadcast backends (Crossmint, Fordefi native mode):** implement `SolanaSendingSigner` from core — `signAndSendTransactions()` only, with **no** `signTransactions`/`signMessages` (Crossmint) because Kit classifies signers by duck-typed method presence. They are excluded from `@solana/keychain-kit-plugin` at the type level.
+- **Managed-broadcast backends (Crossmint, Fordefi native *auto* mode):** implement `SolanaSendingSigner` from core — `signAndSendTransactions()` only, with **no** `signTransactions`/`signMessages` (Crossmint) because Kit classifies signers by duck-typed method presence. They are excluded from `@solana/keychain-kit-plugin` at both the type level and by a runtime guard.
+- **Modifying backends (Fordefi native *manual* mode):** implement `SolanaModifyingSigner` from core — `modifyAndSignTransactions()` only, and likewise no `signTransactions`. They rewrite the message but do not broadcast, so Kit runs them ahead of the partial signers and `@solana/keychain-kit-plugin` *does* accept them. Core's `signAndSendTransaction()` handles all three shapes, broadcasting the transaction the signer returned, never the caller's.
 - **`signMessages` quirks (parity with Rust):** `CrossmintSigner` does not expose `signMessages` at all (Rust returns `SigningFailed`). `CdpSigner` requires UTF-8 message bytes.
 - **HTTPS enforced:** all `apiBaseUrl` config fields must reject non-HTTPS URLs — validate with `assertHttpsUrl()` from `@solana/keychain-core`.
 - **Remote API calls:** go through `fetchSignerJson()` from `@solana/keychain-core` — it owns the HTTP_ERROR/REMOTE_API_ERROR/PARSING_ERROR pipeline, response sanitization (`sanitizeRemoteErrorResponse()`), redirect rejection, and a default 60s timeout. Batch signing uses core `signBatchStaggered()` + `validateRequestDelayMs()`.
@@ -121,7 +124,7 @@ Single package under [python/](python/) (PyPI `solana-keychain`, import `solana_
 
 ### Architecture
 
-- **Contract** (`solana_keychain.core`): `SolanaSigner` ABC — `pubkey` property, async `sign_transaction()` / `sign_message()` / `is_available()`. `sign_transaction` takes a `VersionedTransaction` (legacy, v0 or v1) and returns `SignedTransaction` with `is_complete`. Use `signed_message_bytes()` for the bytes a signature covers; never hand-roll the version prefix.
+- **Contract** (`solana_keychain.core`): `SolanaSigner` ABC — `pubkey` property, async `sign_transaction()` / `sign_message()` / `is_available()`. `sign_transaction` takes a `VersionedTransaction` (legacy, v0 or v1) and returns `SignedTransaction` with `is_complete` and `transaction`. Always continue from `result.transaction`, never the object you passed in: a provider may return a rewritten message that `solders` cannot apply in place (Fordefi native manual mode). `classify_signed_transaction()` is the single chokepoint that populates it. Use `signed_message_bytes()` for the bytes a signature covers; never hand-roll the version prefix.
 - **Errors**: `SignerError` with stable `code` values; `str()`/`repr()` only surface generic messages (detail is redacted and must never leak key material or raw remote responses).
 - **Serialization**: built on `solders`; golden wire-format vectors pinned in `python/tests/test_parity.py` — never regenerate them to make the suite pass.
 - **Remote API calls** go through `fetch_signer_json()` from `solana_keychain.core` — it owns the HTTP_ERROR/REMOTE_API_ERROR/PARSING_ERROR pipeline, response sanitization, redirect rejection, and a default 60s timeout. Base URLs must pass `assert_https_url()`. Unit tests mock HTTP with `respx`; no live API calls in unit tests.

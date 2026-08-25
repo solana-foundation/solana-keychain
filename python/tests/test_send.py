@@ -39,6 +39,7 @@ class StubSigner(SolanaSigner):
             encoded_transaction=ENCODED,
             signature=self._signature,
             is_complete=self._is_complete,
+            transaction=transaction,
         )
 
     async def sign_and_send_transaction(self, transaction: VersionedTransaction) -> Signature:

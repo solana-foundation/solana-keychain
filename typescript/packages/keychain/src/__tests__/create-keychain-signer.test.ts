@@ -228,4 +228,28 @@ describe('createKeychainSigner', () => {
 
         expect(signer.signAndSendTransactions).toBe(mockSigner.signAndSendTransactions);
     });
+
+    it('preserves the native manual Fordefi TransactionModifyingSigner type', async () => {
+        const mod = await import('@solana/keychain-fordefi');
+        const factory = mod.createFordefiSigner as ReturnType<typeof vi.fn>;
+        const mockSigner = {
+            ...makeMockSigner(),
+            modifyAndSignTransactions: vi.fn().mockResolvedValue([]),
+        };
+        factory.mockResolvedValue(mockSigner);
+
+        const signer = await createKeychainSigner({
+            accessToken: 'token',
+            backend: 'fordefi',
+            chain: 'solana_devnet',
+            privateKeyPem: 'pem',
+            publicKey: TEST_ADDRESS,
+            pushMode: 'manual',
+            vaultId: 'vault',
+        });
+
+        // The manual overload must resolve to the modifying shape, not the
+        // sending one the plain `chain` overload returns.
+        expect(signer.modifyAndSignTransactions).toBe(mockSigner.modifyAndSignTransactions);
+    });
 });

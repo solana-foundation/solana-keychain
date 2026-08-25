@@ -1,4 +1,9 @@
-import type { MessagePartialSigner, TransactionPartialSigner, TransactionSendingSigner } from '@solana/signers';
+import type {
+    MessagePartialSigner,
+    TransactionModifyingSigner,
+    TransactionPartialSigner,
+    TransactionSendingSigner,
+} from '@solana/signers';
 
 /**
  * Unified signer interface that extends both transaction and message signers.
@@ -44,6 +49,29 @@ export interface SolanaSigner<TAddress extends string = string>
  * (Fordefi native mode does; Crossmint does not).
  */
 export interface SolanaSendingSigner<TAddress extends string = string> extends TransactionSendingSigner<TAddress> {
+    /**
+     * Check if the signer is available and healthy.
+     * For remote signers, this performs an API health check.
+     *
+     * @throws {SignerError} Some implementations may throw for configuration or initialization errors.
+     */
+    isAvailable(): Promise<boolean>;
+}
+
+/**
+ * Unified interface for signers that rewrite the transaction before signing it.
+ *
+ * A backend belongs here when it modifies the message — a fresh blockhash, its
+ * own priority-fee instructions — but leaves broadcasting to the caller. The
+ * transaction it returns is what the signature covers, so downstream signers and
+ * the send must use that object, not the one passed in.
+ *
+ * Like {@link SolanaSendingSigner}, it must not also expose `signTransactions`:
+ * Kit classifies by method presence and would partial-sign the stale
+ * transaction. Intersect {@link MessagePartialSigner} per backend when the
+ * backend genuinely signs messages.
+ */
+export interface SolanaModifyingSigner<TAddress extends string = string> extends TransactionModifyingSigner<TAddress> {
     /**
      * Check if the signer is available and healthy.
      * For remote signers, this performs an API health check.

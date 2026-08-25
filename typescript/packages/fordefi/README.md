@@ -10,9 +10,9 @@ npm install @solana/keychain-fordefi
 
 ## Signing Modes
 
-The signer supports two modes determined by whether `chain` is provided:
+The signer supports three modes determined by `chain` and `pushMode`:
 
-### Native Solana mode (recommended for on-chain use)
+### Native auto mode (recommended for managed broadcasting)
 
 Set `chain` to use Fordefi's native Solana transaction type. Fordefi may modify the transaction (e.g. updating the blockhash or adding compute budget instructions) and broadcasts it on-chain automatically (`push_mode: 'auto'`). Use this with a **Solana vault**.
 
@@ -35,6 +35,43 @@ const transactionSignature = await signAndSendTransactionMessageWithSigners(tran
 ```
 
 Native auto-broadcast currently supports transactions whose only required signer is the configured Fordefi vault. Transactions requiring additional signers are rejected before submission until the integration forwards their partial signatures through Fordefi's `details.signatures` field.
+
+### Native manual mode
+
+Set `chain` and `pushMode: 'manual'` to let Fordefi replace the recent blockhash and manage `SetComputeUnitPrice`/`SetComputeUnitLimit`, then sign the transaction while leaving broadcasting to the caller. Every other message field is validated exactly. Custom unit prices must match and custom priority fees cap the effective returned fee. This returns a Kit `TransactionModifyingSigner` (`FordefiNativeManualSigner`) with `modifyAndSignTransactions()` and no `signTransactions()` or `signAndSendTransactions()`.
+
+A priority fee Fordefi introduces on its own initiative is capped at `DEFAULT_MAX_PRIORITY_FEE_LAMPORTS` (0.1 SOL), so a compromised or malfunctioning response cannot drain the fee payer. Set `maxPriorityFeeLamports` to raise or lower that ceiling; a custom `priority_fee` governs instead when set. The ceiling never applies to a compute-unit price the caller placed in the transaction themselves, since those requests are validated byte-for-byte.
+
+The two fee instructions are asymmetric by design. A compute-unit *price* you set yourself is protected: the whole message is then compared byte-for-byte, so Fordefi can only replace the blockhash. A compute-unit *limit* you set with no price is **not** preserved — Fordefi manages the limit in manual mode, and the returned limit is only bounded indirectly, through the lamport ceiling above. Set a compute-unit price alongside your limit if you need the limit held exactly.
+
+Fordefi must be the transaction fee payer and must sign before any other signer. The validated transaction retains unsigned slots for downstream partial signers, which can sign the blockhash-updated message before the caller submits it.
+
+```typescript
+import { createFordefiSigner } from '@solana/keychain-fordefi';
+import { partiallySignTransactionWithSigners } from '@solana/signers';
+
+const signer = await createFordefiSigner({
+    accessToken: process.env.FORDEFI_ACCESS_TOKEN!,
+    vaultId: process.env.FORDEFI_VAULT_ID!,
+    privateKeyPem: fs.readFileSync('./secret/private.pem', 'utf8'),
+    publicKey: process.env.FORDEFI_PUBLIC_KEY!,
+    chain: 'solana_devnet',
+    pushMode: 'manual',
+});
+
+const [fordefiSignedTransaction] = await signer.modifyAndSignTransactions([transaction]);
+const fullySignedTransaction = await partiallySignTransactionWithSigners(
+    remainingSigners,
+    fordefiSignedTransaction,
+);
+// Broadcast fullySignedTransaction through your RPC client.
+```
+
+Fordefi may replace the recent blockhash immediately before signing. Its response does not include that blockhash's exact `lastValidBlockHeight`, so the returned transaction uses Kit's standard unknown-height sentinel when the lifetime token changes. Broadcast promptly; local confirmation logic cannot detect blockhash expiry from an exact height in that case.
+
+Mutation eligibility depends on whether signatures are supplied, not on `push_mode`. This SDK's native manual request is unsigned, omits `details.signatures`, and rejects pre-signed inputs, so Fordefi may refresh the blockhash and manage fees. A future provided-signatures flow must preserve the complete message byte-for-byte. `push_mode` controls submission only.
+
+Durable-nonce transactions keep both their lifetime and fee layout exact. V1 transactions may replace only the blockhash and keep their inline transaction configuration exact.
 
 ### Black box mode
 
@@ -59,6 +96,7 @@ const signer = await createFordefiSigner({
 | `requestSigner` | One of | Custom API-request signer (e.g. KMS/HSM). Provide exactly one of `privateKeyPem` or `requestSigner` |
 | `publicKey` | Yes | Solana public key of the vault (base58) |
 | `chain` | No | `'solana_mainnet'` or `'solana_devnet'` — enables native Solana mode |
+| `pushMode` | No | `'auto'` (default) for Fordefi broadcasting or `'manual'` for caller broadcasting |
 | `fee` | No | Priority fee config for native mode (e.g. `{ type: 'custom', priority_fee: '1000' }`) |
 | `apiBaseUrl` | No | API base URL (default: `https://api.fordefi.com`) |
 | `pollIntervalMs` | No | Polling interval in ms (default: 2000) |
@@ -97,7 +135,7 @@ const signer = await createFordefiSigner({
 
 ## Integration Tests
 
-**`fordefi-signer.integration.test.ts`** exercises black box mode against the real Fordefi API and verifies the returned signatures with LiteSVM. It requires a **black box vault** (`FORDEFI_BB_VAULT_ID`, `FORDEFI_BB_PUBLIC_KEY`).
+**`fordefi-signer.integration.test.ts`** exercises black box mode against the real Fordefi API and verifies the returned signatures with LiteSVM. It also exercises native manual signing when a Solana vault is configured; that test retrieves but does not broadcast the transaction.
 
 Required env vars (shared):
 
@@ -111,6 +149,14 @@ Black box vault:
 ```
 FORDEFI_BB_VAULT_ID=<bb-vault-uuid>
 FORDEFI_BB_PUBLIC_KEY=<bb-vault-address>
+```
+
+Native manual vault:
+
+```
+FORDEFI_VAULT_ID=<solana-vault-uuid>
+FORDEFI_PUBLIC_KEY=<solana-vault-address>
+FORDEFI_CHAIN=solana_devnet
 ```
 
 ## License

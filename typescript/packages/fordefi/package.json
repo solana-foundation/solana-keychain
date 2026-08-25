@@ -41,6 +41,7 @@
         "test:treeshakability": "agadoo dist/index.js"
     },
     "dependencies": {
+        "@solana-program/compute-budget": "^0.18.0",
         "@solana/keychain-core": "workspace:*"
     },
     "peerDependencies": {
@@ -48,6 +49,7 @@
         "@solana/codecs-strings": ">=8.0.0",
         "@solana/keys": ">=8.0.0",
         "@solana/signers": ">=8.0.0",
+        "@solana/transaction-messages": ">=8.0.0",
         "@solana/transactions": ">=8.0.0"
     },
     "publishConfig": {
@@ -58,7 +60,9 @@
         "@solana/codecs-strings": "8.0.0",
         "@solana/keychain-test-utils": "workspace:*",
         "@solana/keys": "8.0.0",
+        "@solana/kit": "8.0.0",
         "@solana/signers": "8.0.0",
+        "@solana/transaction-messages": "8.0.0",
         "@solana/transactions": "8.0.0",
         "dotenv": "^17.4.2"
     }

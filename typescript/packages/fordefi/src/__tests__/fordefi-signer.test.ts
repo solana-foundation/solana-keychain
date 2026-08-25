@@ -1,6 +1,7 @@
 import { createHash, generateKeyPairSync } from 'node:crypto';
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { COMPUTE_BUDGET_PROGRAM_ADDRESS } from '@solana-program/compute-budget';
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import {
     assertIsSolanaSigner,
@@ -8,9 +9,17 @@ import {
     isSolanaSendingSigner,
     isSolanaSigner,
     type SignerError,
+    type SolanaSigner,
 } from '@solana/keychain-core';
 import { createCosignedWireTransaction, createSignedWireTransaction } from '@solana/keychain-test-utils';
-import { isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
+import { isTransactionModifyingSigner, isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
+import {
+    type CompiledTransactionMessage,
+    type CompiledTransactionMessageWithLifetime,
+    getCompiledTransactionMessageDecoder,
+    getCompiledTransactionMessageEncoder,
+} from '@solana/transaction-messages';
+import type { Transaction, TransactionWithLifetime } from '@solana/transactions';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
@@ -28,7 +37,14 @@ vi.mock('@solana/keychain-core', async importOriginal => {
     };
 });
 
-import { createFordefiSigner, type FordefiSignerConfig } from '../fordefi-signer.js';
+import {
+    createFordefiSigner,
+    DEFAULT_MAX_PRIORITY_FEE_LAMPORTS,
+    type FordefiManualSignerConfig,
+    type FordefiNativeManualSigner,
+    type FordefiNativeSigner,
+    type FordefiSignerConfig,
+} from '../fordefi-signer.js';
 
 // Mock fetch globally
 global.fetch = vi.fn();
@@ -55,6 +71,12 @@ const nativeConfig = {
     chain: 'solana_mainnet',
 } satisfies FordefiSignerConfig;
 
+const nativeManualConfig = {
+    ...mockConfig,
+    chain: 'solana_mainnet',
+    pushMode: 'manual',
+} satisfies FordefiManualSignerConfig;
+
 function mockCreateTxResponse(id = 'tx-123') {
     return new Response(JSON.stringify({ id }), { status: 200 });
 }
@@ -79,6 +101,171 @@ async function setupNativeBroadcast(version: 0 | 1) {
         publicKey: fixture.feePayer,
     } satisfies FordefiSignerConfig;
     return { config, fixture };
+}
+
+async function setupNativeManual(version: 'legacy' | 0 | 1) {
+    const versionedFixture = await createSignedWireTransaction(version === 'legacy' ? 0 : version);
+    const fixture =
+        version === 'legacy'
+            ? (() => {
+                  const wireBytes = Buffer.from(versionedFixture.wireTransaction, 'base64');
+                  const messageOffset = 1 + wireBytes[0]! * 64;
+                  if (wireBytes[messageOffset] !== 0x80) {
+                      throw new Error('expected a v0 transaction fixture');
+                  }
+                  const legacyWireBytes = Buffer.concat([
+                      wireBytes.subarray(0, messageOffset),
+                      wireBytes.subarray(messageOffset + 1),
+                  ]);
+                  return {
+                      ...versionedFixture,
+                      messageBytes: new Uint8Array(legacyWireBytes.subarray(messageOffset)),
+                      wireTransaction: legacyWireBytes.toString('base64'),
+                  };
+              })()
+            : versionedFixture;
+    const config = {
+        ...mockConfig,
+        chain: 'solana_mainnet',
+        publicKey: fixture.feePayer,
+        pushMode: 'manual',
+    } satisfies FordefiManualSignerConfig;
+    const transaction = {
+        lifetimeConstraint: { blockhash: MOCK_ADDRESS, lastValidBlockHeight: 100n },
+        messageBytes: fixture.messageBytes,
+        signatures: { [fixture.feePayer]: null },
+    } as unknown as Transaction & TransactionWithLifetime;
+    return { config, fixture, transaction };
+}
+
+function replaceLegacyWireSignatures(wireTransaction: string, signatures: readonly (Uint8Array | null)[]): string {
+    const bytes = Buffer.from(wireTransaction, 'base64');
+    if (bytes[0] !== signatures.length) {
+        throw new Error('fixture must use a single-byte compact signature count');
+    }
+    signatures.forEach((signature, index) => {
+        const start = 1 + index * 64;
+        bytes.fill(0, start, start + 64);
+        if (signature) {
+            bytes.set(signature, start);
+        }
+    });
+    return bytes.toString('base64');
+}
+
+function replaceWireMessage(wireTransaction: string, messageBytes: ArrayLike<number>): string {
+    const wireBytes = Buffer.from(wireTransaction, 'base64');
+    const signatureCount = wireBytes[0]!;
+    const messageOffset = 1 + signatureCount * 64;
+    return Buffer.concat([wireBytes.subarray(0, messageOffset), Buffer.from(Array.from(messageBytes))]).toString(
+        'base64',
+    );
+}
+
+function wireWithComputeBudgetInstructions(
+    wireTransaction: string,
+    feeInstructions: readonly { accountIndices?: number[]; data: Uint8Array }[],
+): { messageBytes: Uint8Array; wireTransaction: string } {
+    const wireBytes = Buffer.from(wireTransaction, 'base64');
+    const messageOffset = 1 + wireBytes[0]! * 64;
+    const decoded = getCompiledTransactionMessageDecoder().decode(wireBytes.subarray(messageOffset));
+    if (decoded.version === 1) throw new Error('test helper supports legacy/v0 only');
+    const staticAccounts = [...decoded.staticAccounts];
+    let programAddressIndex = staticAccounts.indexOf(COMPUTE_BUDGET_PROGRAM_ADDRESS);
+    const header = { ...decoded.header };
+    if (programAddressIndex === -1) {
+        programAddressIndex = staticAccounts.length;
+        staticAccounts.push(COMPUTE_BUDGET_PROGRAM_ADDRESS);
+        header.numReadonlyNonSignerAccounts++;
+    }
+    const mutated = {
+        ...decoded,
+        header,
+        instructions: [
+            ...feeInstructions.map(instruction => ({ ...instruction, programAddressIndex })),
+            ...decoded.instructions,
+        ],
+        staticAccounts,
+    } as CompiledTransactionMessage & CompiledTransactionMessageWithLifetime;
+    const messageBytes = new Uint8Array(getCompiledTransactionMessageEncoder().encode(mutated));
+    return { messageBytes, wireTransaction: replaceWireMessage(wireTransaction, messageBytes) };
+}
+
+function wireWithDurableNonce(wireTransaction: string): { messageBytes: Uint8Array; wireTransaction: string } {
+    const wireBytes = Buffer.from(wireTransaction, 'base64');
+    const messageOffset = 1 + wireBytes[0]! * 64;
+    const decoded = getCompiledTransactionMessageDecoder().decode(wireBytes.subarray(messageOffset));
+    if (decoded.version === 1 || decoded.instructions.length === 0) {
+        throw new Error('durable-nonce test helper supports legacy/v0 messages with an instruction');
+    }
+    const mutated = {
+        ...decoded,
+        instructions: decoded.instructions.map((instruction, index) =>
+            index === 0
+                ? { ...instruction, accountIndices: [0, 0, 0], data: new Uint8Array([4, 0, 0, 0]) }
+                : instruction,
+        ),
+    } as CompiledTransactionMessage & CompiledTransactionMessageWithLifetime;
+    const messageBytes = new Uint8Array(getCompiledTransactionMessageEncoder().encode(mutated));
+    return { messageBytes, wireTransaction: replaceWireMessage(wireTransaction, messageBytes) };
+}
+
+function wireWithChangedV1Config(wireTransaction: string): string {
+    const wireBytes = Buffer.from(wireTransaction, 'base64');
+    const messageOffset = 0; // V1 transactions use the message-first envelope.
+    if (wireBytes[messageOffset] !== 0x81 || wireBytes.length <= messageOffset + 40) {
+        throw new Error('fixture must have an encoded v1 config value');
+    }
+    // V1 layout: prefix + header + config mask + 32-byte lifetime, followed by
+    // inline config values. Change the first value without touching the mask.
+    wireBytes[messageOffset + 40] = wireBytes[messageOffset + 40]! ^ 0x01;
+    return wireBytes.toString('base64');
+}
+
+function computeLimitData(limit: number): Uint8Array {
+    const data = Buffer.alloc(5);
+    data[0] = 2;
+    data.writeUInt32LE(limit, 1);
+    return data;
+}
+
+function computePriceData(price: bigint): Uint8Array {
+    const data = Buffer.alloc(9);
+    data[0] = 3;
+    data.writeBigUInt64LE(price, 1);
+    return data;
+}
+
+function replaceMessageBlockhash(messageBytes: ArrayLike<number>, marker: number): Uint8Array {
+    const replaced = new Uint8Array(Array.from(messageBytes));
+    let blockhashOffset: number;
+    if (replaced[0] === 0x81) {
+        blockhashOffset = 8;
+    } else {
+        let cursor = (replaced[0]! & 0x80) !== 0 ? 4 : 3;
+        let accountCount = 0;
+        let shift = 0;
+        for (;;) {
+            const value = replaced[cursor++]!;
+            accountCount |= (value & 0x7f) << shift;
+            if ((value & 0x80) === 0) break;
+            shift += 7;
+        }
+        blockhashOffset = cursor + accountCount * 32;
+    }
+    replaced.fill(marker, blockhashOffset, blockhashOffset + 32);
+    return replaced;
+}
+
+function idempotencyIdForMessage(messageBytes: ArrayLike<number>): string {
+    const digest = createHash('sha256')
+        .update(new Uint8Array(Array.from(messageBytes)))
+        .digest()
+        .subarray(0, 16);
+    digest[6] = (digest[6]! & 0x0f) | 0x40;
+    digest[8] = (digest[8]! & 0x3f) | 0x80;
+    const hex = digest.toString('hex');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
 function mockVaultResponse(address: string = MOCK_ADDRESS) {
@@ -110,6 +297,63 @@ describe('createFordefiSigner', () => {
             setupCreateVaultMock();
             const signer = await createFordefiSigner(mockConfig);
             expect(() => assertIsSolanaSigner(signer)).not.toThrow();
+        });
+
+        it('should infer and expose the native manual signer interface', async () => {
+            setupCreateVaultMock();
+            const signer = await createFordefiSigner(nativeManualConfig);
+            expectTypeOf(signer).toMatchTypeOf<FordefiNativeManualSigner>();
+            expect(typeof signer.modifyAndSignTransactions).toBe('function');
+        });
+
+        it('should infer the black-box and native-auto signer interfaces', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce(mockVaultResponse()).mockResolvedValueOnce(mockVaultResponse());
+
+            const blackBoxSigner = await createFordefiSigner(mockConfig);
+            const nativeAutoSigner = await createFordefiSigner(nativeConfig);
+
+            expectTypeOf(blackBoxSigner).toMatchTypeOf<SolanaSigner>();
+            expectTypeOf(nativeAutoSigner).toMatchTypeOf<FordefiNativeSigner>();
+        });
+
+        it('should reject manual push mode without a chain before any network call', async () => {
+            await expect(
+                createFordefiSigner({
+                    ...mockConfig,
+                    pushMode: 'manual',
+                } as unknown as FordefiManualSignerConfig),
+            ).rejects.toMatchObject({ code: 'SIGNER_CONFIG_ERROR' });
+            expect(fetch).not.toHaveBeenCalled();
+        });
+
+        // An unrecognized pushMode must never fall through to auto: that would
+        // hand back a broadcasting sending signer and move funds on-chain for a
+        // caller who asked for caller-managed broadcasting.
+        it.each(['Manual', 'MANUAL', 'manual\n', ' manual', 'push', ''])(
+            'should reject the unrecognized pushMode %o before any network call',
+            async pushMode => {
+                await expect(
+                    createFordefiSigner({
+                        ...nativeManualConfig,
+                        pushMode,
+                    } as unknown as FordefiManualSignerConfig),
+                ).rejects.toMatchObject({ code: 'SIGNER_CONFIG_ERROR' });
+                expect(fetch).not.toHaveBeenCalled();
+            },
+        );
+
+        it('should accept an explicit auto pushMode as a sending signer', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce(
+                new Response(JSON.stringify({ address: MOCK_ADDRESS }), { status: 200 }),
+            );
+            const signer = await createFordefiSigner({
+                ...nativeConfig,
+                pushMode: 'auto',
+            });
+            const guardInput = signer as unknown as { [key: string]: unknown; address: typeof signer.address };
+
+            expect(isTransactionSendingSigner(guardInput)).toBe(true);
+            expect(isTransactionModifyingSigner(guardInput)).toBe(false);
         });
 
         it('should derive address from public_key_compressed for black box vaults', async () => {
@@ -216,6 +460,662 @@ describe('createFordefiSigner', () => {
                 expect(fetch).not.toHaveBeenCalled();
             },
         );
+    });
+
+    describe('modifyAndSignTransactions (native manual mode)', () => {
+        it.each(['legacy', 0, 1] as const)(
+            'returns a signed, lifetime-bearing transaction from a %s envelope without broadcasting',
+            async version => {
+                const { config, fixture, transaction } = await setupNativeManual(version);
+                vi.mocked(fetch)
+                    .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                    .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
+                    .mockResolvedValueOnce(
+                        mockPollResponse(
+                            version === 1 ? 'completed' : 'signed',
+                            MOCK_SIGNATURE_BASE64,
+                            fixture.wireTransaction,
+                        ),
+                    );
+
+                const signer = await createFordefiSigner(config);
+                const [result] = await signer.modifyAndSignTransactions([transaction]);
+
+                expect(result?.messageBytes).toStrictEqual(fixture.messageBytes);
+                expect(result?.signatures[fixture.feePayer]).toStrictEqual(fixture.signature);
+                expect(result?.lifetimeConstraint).toEqual({
+                    blockhash: MOCK_ADDRESS,
+                    lastValidBlockHeight: 100n,
+                });
+                expect(assertSignatureValid).toHaveBeenCalledWith({
+                    data: fixture.messageBytes,
+                    signature: fixture.signature,
+                    signerAddress: fixture.feePayer,
+                });
+
+                const postOpts = vi.mocked(fetch).mock.calls[1]![1] as RequestInit;
+                const body = JSON.parse(postOpts.body as string);
+                expect(body.details.push_mode).toBe('manual');
+                expect(body.details.type).toBe('solana_serialized_transaction_message');
+                expect(fetch).toHaveBeenCalledTimes(3);
+            },
+        );
+
+        it('exposes only the modifying transaction method', async () => {
+            setupCreateVaultMock();
+            const signer = await createFordefiSigner(nativeManualConfig);
+            const guardInput = signer as unknown as { [key: string]: unknown; address: typeof signer.address };
+
+            expect(isTransactionModifyingSigner(guardInput)).toBe(true);
+            expect(isTransactionPartialSigner(guardInput)).toBe(false);
+            expect(isTransactionSendingSigner(guardInput)).toBe(false);
+            expect(isSolanaSigner(guardInput)).toBe(false);
+            expect(isSolanaSendingSigner(guardInput)).toBe(false);
+            expect('signTransactions' in signer).toBe(false);
+            expect('signAndSendTransactions' in signer).toBe(false);
+        });
+
+        it('retains native Solana personal-message signing', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse())
+                .mockResolvedValueOnce(mockCreateTxResponse('msg-manual'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64));
+
+            const signer = await createFordefiSigner(nativeManualConfig);
+            await signer.signMessages([{ content: new Uint8Array(32), signatures: {} }]);
+
+            const postOpts = vi.mocked(fetch).mock.calls[1]![1] as RequestInit;
+            const body = JSON.parse(postOpts.body as string);
+            expect(body.type).toBe('solana_message');
+            expect(body.details.type).toBe('personal_message_type');
+            expect(body.details.chain).toBe('solana_mainnet');
+        });
+
+        it('namespaces deterministic manual idempotency away from auto mode', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            const namespace = Buffer.from(`fordefi:solana:manual:${config.chain}:${config.vaultId}:`, 'utf8');
+            const digest = createHash('sha256')
+                .update(Buffer.concat([namespace, Buffer.from(transaction.messageBytes)]))
+                .digest()
+                .subarray(0, 16);
+            digest[6] = (digest[6]! & 0x0f) | 0x40;
+            digest[8] = (digest[8]! & 0x3f) | 0x80;
+            const hex = digest.toString('hex');
+            const expectedId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-id'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
+
+            const signer = await createFordefiSigner(config);
+            await signer.modifyAndSignTransactions([transaction]);
+
+            const postOpts = vi.mocked(fetch).mock.calls[1]![1] as RequestInit;
+            expect(postOpts.headers).toHaveProperty('x-idempotence-id', expectedId);
+            expect(expectedId).not.toBe(idempotencyIdForMessage(transaction.messageBytes));
+        });
+
+        it('uses Kit unknown-height lifetime when Fordefi replaces the lifetime token', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            const originalWithDifferentLifetime = {
+                ...transaction,
+                lifetimeConstraint: {
+                    blockhash: '22222222222222222222222222222222',
+                    lastValidBlockHeight: 50n,
+                },
+                messageBytes: replaceMessageBlockhash(transaction.messageBytes, 0x22),
+            } as unknown as Transaction & TransactionWithLifetime;
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-new-lifetime'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
+
+            const signer = await createFordefiSigner(config);
+            const [result] = await signer.modifyAndSignTransactions([originalWithDifferentLifetime]);
+
+            expect(result?.messageBytes).toStrictEqual(fixture.messageBytes);
+            expect(result?.lifetimeConstraint).toEqual({
+                blockhash: MOCK_ADDRESS,
+                lastValidBlockHeight: 0xffffffffffffffffn,
+            });
+        });
+
+        it('rejects a Fordefi replacement that changes instruction content', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            const alteredWireBytes = Buffer.from(fixture.wireTransaction, 'base64');
+            alteredWireBytes[alteredWireBytes.length - 1] = alteredWireBytes[alteredWireBytes.length - 1]! ^ 0x01;
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-altered-content'))
+                .mockResolvedValueOnce(
+                    mockPollResponse('signed', MOCK_SIGNATURE_BASE64, alteredWireBytes.toString('base64')),
+                );
+
+            const signer = await createFordefiSigner(config);
+            await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+        });
+
+        describe('priority-fee ceiling', () => {
+            // Largest compute-unit price that still lands on the default ceiling
+            // when Fordefi also sets the maximum compute-unit limit.
+            const CEILING_PRICE = (DEFAULT_MAX_PRIORITY_FEE_LAMPORTS * 1_000_000n) / 1_400_000n;
+
+            /** Runs a manual signing round trip against a Fordefi-introduced fee. */
+            async function attemptWithFee(
+                configOverrides: Partial<FordefiManualSignerConfig>,
+                price: bigint,
+                limit: number | undefined = 1_400_000,
+            ) {
+                const { config, fixture, transaction } = await setupNativeManual(0);
+                const returned = wireWithComputeBudgetInstructions(fixture.wireTransaction, [
+                    { data: computePriceData(price) },
+                    ...(limit === undefined ? [] : [{ data: computeLimitData(limit) }]),
+                ]);
+                vi.mocked(fetch)
+                    .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                    .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-fee-ceiling'))
+                    .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
+                const signer = await createFordefiSigner({ ...config, ...configOverrides });
+                return signer.modifyAndSignTransactions([transaction]);
+            }
+
+            it.each([
+                ['no fee config', undefined],
+                ['a priority level', { priority_level: 'high', type: 'priority' } as const],
+                ['a bare custom fee', { type: 'custom' } as const],
+            ])('rejects a drain-sized fee with %s', async (_label, fee) => {
+                await expect(attemptWithFee({ fee }, 2n ** 64n - 1n)).rejects.toMatchObject({
+                    code: 'SIGNER_SIGNING_FAILED',
+                });
+            });
+
+            it.each([
+                ['an ordinary fee', 1_000_000n, 200_000],
+                ['a congestion-level fee', 10_000_000n, 1_400_000],
+                ['a fee exactly at the ceiling', CEILING_PRICE, 1_400_000],
+            ])('accepts %s', async (_label, price, limit) => {
+                await expect(attemptWithFee({}, price, limit)).resolves.toHaveLength(1);
+            });
+
+            it('rejects one micro-lamport past the ceiling', async () => {
+                await expect(attemptWithFee({}, CEILING_PRICE + 1n)).rejects.toMatchObject({
+                    code: 'SIGNER_SIGNING_FAILED',
+                });
+            });
+
+            it('charges a fee with no explicit limit at the runtime maximum', async () => {
+                await expect(attemptWithFee({}, CEILING_PRICE + 1n, undefined)).rejects.toMatchObject({
+                    code: 'SIGNER_SIGNING_FAILED',
+                });
+            });
+
+            it('lets an explicit ceiling override the default in both directions', async () => {
+                await expect(
+                    attemptWithFee({ maxPriorityFeeLamports: 10_000_000_000n }, 1_000_000_000n),
+                ).resolves.toHaveLength(1);
+                await expect(
+                    attemptWithFee({ maxPriorityFeeLamports: 1_000n }, 1_000_000n, 200_000),
+                ).rejects.toMatchObject({ code: 'SIGNER_SIGNING_FAILED' });
+            });
+
+            it('lets a caller-stated custom priority_fee govern instead of the default', async () => {
+                const fee = { priority_fee: '500000000', type: 'custom' } as const;
+                await expect(attemptWithFee({ fee }, 300_000_000n)).resolves.toHaveLength(1);
+                await expect(attemptWithFee({ fee }, 400_000_000n)).rejects.toMatchObject({
+                    code: 'SIGNER_SIGNING_FAILED',
+                });
+            });
+
+            it('never widens an explicit ceiling via a custom priority_fee', async () => {
+                await expect(
+                    attemptWithFee(
+                        { fee: { priority_fee: '500000000', type: 'custom' }, maxPriorityFeeLamports: 1_000n },
+                        300_000_000n,
+                    ),
+                ).rejects.toMatchObject({ code: 'SIGNER_SIGNING_FAILED' });
+            });
+
+            it('never applies the ceiling to a caller-authored price', async () => {
+                // The caller set the price themselves, so the message is compared
+                // byte-for-byte and Fordefi has no discretion left to bound.
+                const { config, fixture, transaction } = await setupNativeManual(0);
+                const original = wireWithComputeBudgetInstructions(fixture.wireTransaction, [
+                    { data: computePriceData(2n ** 64n - 1n) },
+                    { data: computeLimitData(1_400_000) },
+                ]);
+                const input = { ...transaction, messageBytes: original.messageBytes } as unknown as Transaction &
+                    TransactionWithLifetime;
+                vi.mocked(fetch)
+                    .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                    .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-caller-price'))
+                    .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, original.wireTransaction));
+                const signer = await createFordefiSigner(config);
+                await expect(signer.modifyAndSignTransactions([input])).resolves.toHaveLength(1);
+            });
+        });
+
+        it('accepts fee insertion alongside an unchanged non-fee Compute Budget instruction', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            const original = wireWithComputeBudgetInstructions(fixture.wireTransaction, [
+                { data: new Uint8Array([1, 0, 128, 0, 0]) },
+            ]);
+            const returned = wireWithComputeBudgetInstructions(original.wireTransaction, [
+                { data: computePriceData(7n) },
+                { data: computeLimitData(300_000) },
+            ]);
+            const input = { ...transaction, messageBytes: original.messageBytes } as unknown as Transaction &
+                TransactionWithLifetime;
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-fee-insertion'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
+
+            const signer = await createFordefiSigner(config);
+            const [result] = await signer.modifyAndSignTransactions([input]);
+
+            expect(result?.messageBytes).toStrictEqual(returned.messageBytes);
+        });
+
+        it('accepts compute-unit limit adjustment and removal when the original has no price', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            const original = wireWithComputeBudgetInstructions(fixture.wireTransaction, [
+                { data: computeLimitData(200_000) },
+            ]);
+            const adjusted = wireWithComputeBudgetInstructions(fixture.wireTransaction, [
+                { data: computeLimitData(400_000) },
+            ]);
+            const input = { ...transaction, messageBytes: original.messageBytes } as unknown as Transaction &
+                TransactionWithLifetime;
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-limit-adjustment'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, adjusted.wireTransaction));
+
+            const signer = await createFordefiSigner(config);
+            await expect(signer.modifyAndSignTransactions([input])).resolves.toHaveLength(1);
+
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-limit-removal'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
+            await expect(signer.modifyAndSignTransactions([input])).resolves.toHaveLength(1);
+        });
+
+        it('rejects fee changes when the original already sets a compute-unit price', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            const original = wireWithComputeBudgetInstructions(fixture.wireTransaction, [
+                { data: computePriceData(5n) },
+            ]);
+            const returned = wireWithComputeBudgetInstructions(fixture.wireTransaction, [
+                { data: computePriceData(6n) },
+            ]);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-changed-price'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
+
+            const signer = await createFordefiSigner(config);
+            await expect(
+                signer.modifyAndSignTransactions([
+                    { ...transaction, messageBytes: original.messageBytes } as unknown as Transaction &
+                        TransactionWithLifetime,
+                ]),
+            ).rejects.toMatchObject({ code: 'SIGNER_SIGNING_FAILED' });
+
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-unchanged-existing-price'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, original.wireTransaction));
+            await expect(
+                signer.modifyAndSignTransactions([
+                    { ...transaction, messageBytes: original.messageBytes } as unknown as Transaction &
+                        TransactionWithLifetime,
+                ]),
+            ).resolves.toHaveLength(1);
+        });
+
+        it('rejects v1 inline transaction-config changes', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(1);
+            const returnedWire = wireWithChangedV1Config(fixture.wireTransaction);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-v1-config'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returnedWire));
+
+            const signer = await createFordefiSigner(config);
+            await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+        });
+
+        it.each([
+            ['malformed', new Uint8Array([2, 1])],
+            ['account-bearing', computePriceData(1n)],
+            ['out-of-range', computeLimitData(1_400_001)],
+            ['unknown', new Uint8Array([9])],
+        ] as const)('rejects a %s fee instruction', async (name, data) => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            const returned = wireWithComputeBudgetInstructions(fixture.wireTransaction, [
+                { accountIndices: name === 'account-bearing' ? [0] : undefined, data },
+            ]);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse(`tx-manual-${name}`))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
+
+            const signer = await createFordefiSigner(config);
+            await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+        });
+
+        it('rejects duplicate fee instructions', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            const returned = wireWithComputeBudgetInstructions(fixture.wireTransaction, [
+                { data: computePriceData(1n) },
+                { data: computePriceData(2n) },
+            ]);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-duplicate-fee'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
+
+            const signer = await createFordefiSigner(config);
+            await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+        });
+
+        it('rejects a durable-nonce lifetime change', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            const original = wireWithDurableNonce(fixture.wireTransaction);
+            const returnedMessage = replaceMessageBlockhash(original.messageBytes, 0x44);
+            const returnedWire = replaceWireMessage(original.wireTransaction, returnedMessage);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-durable-nonce-lifetime'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returnedWire));
+
+            const signer = await createFordefiSigner(config);
+            await expect(
+                signer.modifyAndSignTransactions([
+                    { ...transaction, messageBytes: original.messageBytes } as unknown as Transaction &
+                        TransactionWithLifetime,
+                ]),
+            ).rejects.toMatchObject({ code: 'SIGNER_SIGNING_FAILED' });
+        });
+
+        it('enforces custom unit price and effective priority-fee caps', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            const returned = wireWithComputeBudgetInstructions(fixture.wireTransaction, [
+                { data: computePriceData(10n) },
+                { data: computeLimitData(200_000) },
+            ]);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-custom-fee'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
+            const matchingSigner = await createFordefiSigner({
+                ...config,
+                fee: { priority_fee: '2', type: 'custom', unit_price: '10' },
+            });
+            await expect(matchingSigner.modifyAndSignTransactions([transaction])).resolves.toHaveLength(1);
+
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-capped-fee'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
+            const cappedSigner = await createFordefiSigner({
+                ...config,
+                fee: { priority_fee: '1', type: 'custom' },
+            });
+            await expect(cappedSigner.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-conflicting-existing-price'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, returned.wireTransaction));
+            const conflictingSigner = await createFordefiSigner({
+                ...config,
+                fee: { type: 'custom', unit_price: '11' },
+            });
+            await expect(
+                conflictingSigner.modifyAndSignTransactions([
+                    { ...transaction, messageBytes: returned.messageBytes } as unknown as Transaction &
+                        TransactionWithLifetime,
+                ]),
+            ).rejects.toMatchObject({ code: 'SIGNER_SIGNING_FAILED' });
+        });
+
+        it('supports unsigned downstream signer slots in manual mode', async () => {
+            const fixture = await createCosignedWireTransaction(0);
+            const manualWire = replaceLegacyWireSignatures(fixture.wireTransaction, [MOCK_SIGNATURE_BYTES, null]);
+            const config = {
+                ...mockConfig,
+                chain: 'solana_mainnet',
+                publicKey: fixture.feePayer,
+                pushMode: 'manual',
+            } satisfies FordefiManualSignerConfig;
+            const transaction = {
+                lifetimeConstraint: { blockhash: MOCK_ADDRESS, lastValidBlockHeight: 100n },
+                messageBytes: Buffer.from(manualWire, 'base64').subarray(129),
+                signatures: { [fixture.feePayer]: null, [fixture.cosigner]: null },
+            } as unknown as Transaction & TransactionWithLifetime;
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-cosign'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, manualWire));
+
+            const signer = await createFordefiSigner(config);
+            const [result] = await signer.modifyAndSignTransactions([transaction]);
+
+            expect(result?.signatures[fixture.feePayer]).toStrictEqual(MOCK_SIGNATURE_BYTES);
+            expect(result?.signatures[fixture.cosigner]).toBeNull();
+        });
+
+        it('signs batches with the configured request delay', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-1'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-2'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
+
+            const signer = await createFordefiSigner({ ...config, requestDelayMs: 1 });
+            const results = await signer.modifyAndSignTransactions([transaction, transaction]);
+
+            expect(results).toHaveLength(2);
+            expect(fetch).toHaveBeenCalledTimes(5);
+        });
+
+        it('rejects pre-signed input before submitting remote work', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            setupCreateVaultMock(fixture.feePayer);
+            const signer = await createFordefiSigner(config);
+            const preSigned = {
+                ...transaction,
+                signatures: { [fixture.feePayer]: fixture.signature },
+            } as unknown as Transaction & TransactionWithLifetime;
+
+            await expect(signer.modifyAndSignTransactions([preSigned])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+            expect(fetch).toHaveBeenCalledTimes(1);
+        });
+
+        it('rejects a non-Fordefi fee payer before submitting remote work', async () => {
+            setupCreateVaultMock();
+            const signer = await createFordefiSigner(nativeManualConfig);
+            const transaction = {
+                messageBytes: new Uint8Array(32),
+                signatures: { '22222222222222222222222222222222': null, [MOCK_ADDRESS]: null },
+            } as never;
+
+            await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+            expect(fetch).toHaveBeenCalledTimes(1);
+        });
+
+        it('honors an already-aborted signal without submitting remote work', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            setupCreateVaultMock(fixture.feePayer);
+            const signer = await createFordefiSigner(config);
+            const controller = new AbortController();
+            controller.abort();
+
+            await expect(
+                signer.modifyAndSignTransactions([transaction], { abortSignal: controller.signal }),
+            ).rejects.toThrow();
+            expect(fetch).toHaveBeenCalledTimes(1);
+        });
+
+        it('aborts an in-flight manual submission', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            const controller = new AbortController();
+            const reason = new Error('stop manual signing');
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockImplementationOnce((_input, init) => {
+                    const signal = init?.signal as AbortSignal;
+                    return new Promise<Response>((_resolve, reject) => {
+                        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+                        controller.abort(reason);
+                    });
+                });
+
+            const signer = await createFordefiSigner(config);
+            await expect(
+                signer.modifyAndSignTransactions([transaction], { abortSignal: controller.signal }),
+            ).rejects.toBe(reason);
+            expect(fetch).toHaveBeenCalledTimes(2);
+        });
+
+        it('reports manual signing failures without broadcast-unconfirmed wrapping', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-fail'))
+                .mockResolvedValueOnce(mockPollResponse('error_signing'));
+
+            const signer = await createFordefiSigner(config);
+            await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+        });
+
+        it('times out while waiting for a manual signature', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-timeout'))
+                .mockResolvedValueOnce(mockPollResponse('pending_signature'))
+                .mockResolvedValueOnce(mockPollResponse('pending_signature'));
+
+            const signer = await createFordefiSigner({
+                ...config,
+                maxPollAttempts: 2,
+                pollIntervalMs: 1,
+            });
+            await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_REMOTE_API_ERROR',
+            });
+        });
+
+        it('rejects a manual response whose vault signature does not verify', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-invalid-signature'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
+            vi.mocked(assertSignatureValid).mockRejectedValueOnce(new Error('invalid signature'));
+
+            const signer = await createFordefiSigner(config);
+            await expect(signer.modifyAndSignTransactions([transaction])).rejects.toThrow('invalid signature');
+        });
+
+        it('passes native fee configuration in manual mode', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-fee'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
+
+            const signer = await createFordefiSigner({
+                ...config,
+                fee: { priority_fee: '1000', type: 'custom' },
+            });
+            await signer.modifyAndSignTransactions([transaction]);
+
+            const postOpts = vi.mocked(fetch).mock.calls[1]![1] as RequestInit;
+            const body = JSON.parse(postOpts.body as string);
+            expect(body.details.fee).toEqual({ priority_fee: '1000', type: 'custom' });
+        });
+
+        it('rejects missing and malformed manual raw transactions', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-no-raw'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64));
+            const signer = await createFordefiSigner(config);
+            await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-malformed'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, 'AQID'));
+            await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_PARSING_ERROR',
+            });
+        });
+
+        it('rejects a manual wire transaction missing the Fordefi signature', async () => {
+            const fixture = await createCosignedWireTransaction(0);
+            const config = {
+                ...mockConfig,
+                chain: 'solana_mainnet',
+                publicKey: fixture.feePayer,
+                pushMode: 'manual',
+            } satisfies FordefiManualSignerConfig;
+            const messageBytes = Buffer.from(fixture.wireTransaction, 'base64').subarray(129);
+            const transaction = {
+                lifetimeConstraint: { blockhash: MOCK_ADDRESS, lastValidBlockHeight: 100n },
+                messageBytes,
+                signatures: { [fixture.feePayer]: null, [fixture.cosigner]: null },
+            } as never;
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-no-vault-sig'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
+
+            const signer = await createFordefiSigner(config);
+            await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+        });
+
+        it('rejects an oversized returned manual transaction', async () => {
+            const { config, fixture, transaction } = await setupNativeManual(0);
+            const oversizedWire = Buffer.concat([
+                Buffer.from(fixture.wireTransaction, 'base64'),
+                Buffer.alloc(2_000),
+            ]).toString('base64');
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockVaultResponse(fixture.feePayer))
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual-oversized'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64, oversizedWire));
+
+            const signer = await createFordefiSigner(config);
+            await expect(signer.modifyAndSignTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+        });
     });
 
     describe('custom requestSigner', () => {

@@ -1,4 +1,16 @@
-use super::VaultResponse;
+use super::{FordefiPushMode, VaultResponse};
+
+#[test]
+fn serializes_push_modes() {
+    assert_eq!(
+        serde_json::to_string(&FordefiPushMode::Auto).unwrap(),
+        "\"auto\""
+    );
+    assert_eq!(
+        serde_json::to_string(&FordefiPushMode::Manual).unwrap(),
+        "\"manual\""
+    );
+}
 
 #[test]
 fn deserializes_chain_specific_vault_response() {

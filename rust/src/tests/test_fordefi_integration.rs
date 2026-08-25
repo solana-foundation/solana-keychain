@@ -16,7 +16,10 @@ mod tests {
     use dotenvy::dotenv;
 
     use super::*;
-    use crate::fordefi::{FordefiSigner, FordefiSignerConfig, SolanaChainUniqueId};
+    use crate::fordefi::{
+        normalize_manual_fee_message, FordefiPushMode, FordefiSigner, FordefiSignerConfig,
+        SolanaChainUniqueId,
+    };
     #[cfg(feature = "integration-tests")]
     use crate::sdk_adapter::{AccountMeta, Instruction, Message, VersionedTransaction};
     use crate::sdk_adapter::{Pubkey, Transaction};
@@ -37,13 +40,14 @@ mod tests {
         vault_id: String,
         public_key: String,
         chain: Option<SolanaChainUniqueId>,
+        push_mode: FordefiPushMode,
     ) -> FordefiSigner {
         let access_token = env::var(FORDEFI_ACCESS_TOKEN)
             .expect("FORDEFI_ACCESS_TOKEN must be set for integration tests");
         let private_key_pem = env::var(FORDEFI_PRIVATE_KEY_PEM)
             .expect("FORDEFI_PRIVATE_KEY_PEM must be set for integration tests");
 
-        FordefiSigner::from_config(FordefiSignerConfig {
+        let config = FordefiSignerConfig {
             access_token,
             vault_id,
             private_key_pem: Some(private_key_pem),
@@ -55,9 +59,13 @@ mod tests {
             http_client_config: None,
             chain,
             fee: None,
-        })
-        .await
-        .expect("Failed to create Fordefi signer")
+            push_mode: Some(push_mode),
+            max_priority_fee_lamports: None,
+        };
+
+        FordefiSigner::from_config(config)
+            .await
+            .expect("Failed to create Fordefi signer")
     }
 
     /// Black box signer — uses the dedicated black box vault (`FORDEFI_BB_*`),
@@ -68,7 +76,7 @@ mod tests {
             .expect("FORDEFI_BB_VAULT_ID must be set for integration tests");
         let public_key = env::var(FORDEFI_BB_PUBLIC_KEY)
             .expect("FORDEFI_BB_PUBLIC_KEY must be set for integration tests");
-        load_signer(vault_id, public_key, None).await
+        load_signer(vault_id, public_key, None, FordefiPushMode::Auto).await
     }
 
     /// Native Solana signer — uses the Solana vault (`FORDEFI_VAULT_ID`) and the
@@ -84,7 +92,24 @@ mod tests {
             "solana_mainnet" => SolanaChainUniqueId::SolanaMainnet,
             other => panic!("Invalid FORDEFI_CHAIN value: {other}"),
         });
-        load_signer(vault_id, public_key, chain).await
+        load_signer(vault_id, public_key, chain, FordefiPushMode::Auto).await
+    }
+
+    async fn get_native_manual_signer() -> FordefiSigner {
+        dotenv().ok();
+        let vault_id =
+            env::var(FORDEFI_VAULT_ID).expect("FORDEFI_VAULT_ID must be set for integration tests");
+        let public_key = env::var(FORDEFI_PUBLIC_KEY)
+            .expect("FORDEFI_PUBLIC_KEY must be set for integration tests");
+        let chain = match env::var(FORDEFI_CHAIN)
+            .expect("FORDEFI_CHAIN must be set for native manual integration tests")
+            .as_str()
+        {
+            "solana_devnet" => SolanaChainUniqueId::SolanaDevnet,
+            "solana_mainnet" => SolanaChainUniqueId::SolanaMainnet,
+            other => panic!("Invalid FORDEFI_CHAIN value: {other}"),
+        };
+        load_signer(vault_id, public_key, Some(chain), FordefiPushMode::Manual).await
     }
 
     #[tokio::test]
@@ -298,6 +323,61 @@ mod tests {
             .expect("Native transaction was not confirmed on devnet");
 
         println!("Devnet native transaction confirmed: {tx_sig}");
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "integration-tests")]
+    async fn test_fordefi_native_manual_sign_transaction_without_broadcasting() {
+        let signer = get_native_manual_signer().await;
+        let from = signer.pubkey();
+        assert!(!signer.broadcasts_transactions());
+
+        let transfer_ix = Instruction {
+            program_id: Pubkey::from_str("11111111111111111111111111111111").unwrap(),
+            accounts: vec![AccountMeta::new(from, true), AccountMeta::new(from, false)],
+            data: {
+                let mut data = vec![2, 0, 0, 0];
+                data.extend_from_slice(&0u64.to_le_bytes());
+                data
+            },
+        };
+        let message = Message::new(&[transfer_ix], Some(&from));
+        let mut transaction: VersionedTransaction = Transaction::new_unsigned(message).into();
+        let original_versioned_message = transaction.message.clone();
+        let original_message = transaction.message.serialize();
+
+        let (serialized_tx, signature) = signer
+            .sign_transaction(&mut transaction)
+            .await
+            .expect("Failed to sign transaction with Fordefi native manual mode")
+            .into_signed_transaction();
+
+        assert!(!serialized_tx.is_empty());
+        assert!(signature.verify(&from.to_bytes(), &transaction.message.serialize()));
+        assert_ne!(transaction.message.serialize(), original_message);
+
+        let (normalized_original, _) = normalize_manual_fee_message(&original_versioned_message)
+            .expect("Original manual message must normalize");
+        let (mut normalized_returned, _) = normalize_manual_fee_message(&transaction.message)
+            .expect("Returned manual message must contain only valid fee instructions");
+        normalized_returned.set_recent_blockhash(*normalized_original.recent_blockhash());
+        assert_eq!(
+            normalized_returned.serialize(),
+            normalized_original.serialize(),
+            "live Fordefi mutation must be limited to blockhash and permitted fee instructions"
+        );
+
+        let decoded = deserialize_wire_transaction(
+            &STANDARD
+                .decode(serialized_tx)
+                .expect("Failed to decode manual transaction"),
+        )
+        .expect("Failed to deserialize manual transaction");
+        assert_eq!(decoded.message.serialize(), transaction.message.serialize());
+        assert_eq!(decoded.signatures, transaction.signatures);
+
+        // Intentionally no RPC submission: this integration test verifies
+        // sign-without-send behavior only.
     }
 
     #[tokio::test]

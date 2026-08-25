@@ -8,6 +8,7 @@
 - `create_keychain_signer()` umbrella factory with lazy per-backend imports, plus the env-gated live integration suite (#222)
 - Fordefi backend: black-box raw signing and native Solana auto-broadcast mode, pluggable P-256 request signer, vault ownership verification (#227)
 - `sign_and_send_transaction()`: one call to get a transaction on chain, using the provider's broadcast when the signer has one and a caller-injected send function otherwise
+- Fordefi native manual mode: provider-modified signing with caller-managed broadcasting and authoritative returned transactions
 
 ### Bug Fixes
 

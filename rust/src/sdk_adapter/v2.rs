@@ -4,9 +4,11 @@
 #[allow(unused_imports)]
 pub use solana_sdk::hash::Hash;
 #[allow(unused_imports)]
-pub use solana_sdk::instruction::{AccountMeta, Instruction};
+pub use solana_sdk::instruction::{AccountMeta, CompiledInstruction, Instruction};
 #[allow(unused_imports)]
-pub use solana_sdk::message::{Message, VersionedMessage};
+pub use solana_sdk::message::v0::Message as V0Message;
+#[allow(unused_imports)]
+pub use solana_sdk::message::{Message, MessageHeader, VersionedMessage};
 pub use solana_sdk::pubkey::Pubkey;
 pub use solana_sdk::signature::{Keypair, Signature};
 pub use solana_sdk::signer::Signer;
@@ -36,3 +38,9 @@ pub fn keypair_from_seed(seed: &[u8]) -> Result<Keypair, String> {
 pub fn keypair_sign_message(keypair: &Keypair, message: &[u8]) -> Signature {
     keypair.sign_message(message)
 }
+
+/// Declared locally rather than pulled from `solana-compute-budget-interface`,
+/// which would add that crate to every consumer's tree for one fixed ID.
+#[allow(dead_code)]
+pub const COMPUTE_BUDGET_PROGRAM_ID: Pubkey =
+    Pubkey::from_str_const("ComputeBudget111111111111111111111111111111");

@@ -1,3 +1,4 @@
+import type { Address } from '@solana/addresses';
 import type { SignatureBytes } from '@solana/keys';
 import type {
     SendableTransaction,
@@ -8,8 +9,8 @@ import type {
 import { isFullySignedTransaction } from '@solana/transactions';
 
 import { SignerErrorCode, throwSignerError } from './errors.js';
-import type { SolanaSendingSigner, SolanaSigner } from './types.js';
-import { isSolanaSendingSigner } from './utils.js';
+import type { SolanaModifyingSigner, SolanaSendingSigner, SolanaSigner } from './types.js';
+import { isSolanaModifyingSigner, isSolanaSendingSigner } from './utils.js';
 
 type SignableTransaction = Transaction & TransactionWithinSizeLimit & TransactionWithLifetime;
 
@@ -49,8 +50,11 @@ export type SignAndSendTransactionConfig = Readonly<{
  * Gets a transaction on chain with one flow, whichever shape the signer has.
  *
  * A {@link SolanaSendingSigner} signs and broadcasts through its provider. A
- * {@link SolanaSigner} signs, its signature is merged into the transaction, and
- * `config.sendTransaction` broadcasts the result.
+ * {@link SolanaModifyingSigner} rewrites the transaction, signs it, and
+ * `config.sendTransaction` broadcasts the transaction it returned — not the one
+ * passed in, which no longer matches the signature. A {@link SolanaSigner} signs,
+ * its signature is merged into the transaction, and `config.sendTransaction`
+ * broadcasts the result.
  *
  * @param signer - Any keychain signer.
  * @param transaction - The transaction to sign and broadcast.
@@ -68,7 +72,7 @@ export type SignAndSendTransactionConfig = Readonly<{
  * ```
  */
 export async function signAndSendTransaction<TAddress extends string>(
-    signer: SolanaSendingSigner<TAddress> | SolanaSigner<TAddress>,
+    signer: SolanaModifyingSigner<TAddress> | SolanaSendingSigner<TAddress> | SolanaSigner<TAddress>,
     transaction: SignableTransaction,
     config?: SignAndSendTransactionConfig,
 ): Promise<SignatureBytes> {
@@ -93,6 +97,19 @@ export async function signAndSendTransaction<TAddress extends string>(
         });
     }
 
+    if (isSolanaModifyingSigner(signer)) {
+        // Only what the signer returned matches the signature; `transaction` is
+        // now stale.
+        const [modifiedTransaction] = await signer.modifyAndSignTransactions([transaction], { abortSignal });
+        if (!modifiedTransaction) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                address: signer.address,
+                message: 'Signer returned no transaction',
+            });
+        }
+        return await broadcast(signer.address, modifiedTransaction, sendTransaction, abortSignal);
+    }
+
     const [signatureDictionary] = await signer.signTransactions([transaction], { abortSignal });
     if (!signatureDictionary) {
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
@@ -106,25 +123,35 @@ export async function signAndSendTransaction<TAddress extends string>(
         signatures: Object.freeze({ ...transaction.signatures, ...signatureDictionary }),
     });
 
-    if (!isFullySignedTransaction(signedTransaction)) {
-        const missing = Object.entries(signedTransaction.signatures)
+    return await broadcast(signer.address, signedTransaction, sendTransaction, abortSignal);
+}
+
+/** Falls back to the fee payer's signature when the sender returns none. */
+async function broadcast(
+    address: Address,
+    transaction: SignableTransaction,
+    sendTransaction: SendTransactionFn,
+    abortSignal: AbortSignal | undefined,
+): Promise<SignatureBytes> {
+    if (!isFullySignedTransaction(transaction)) {
+        const missing = Object.entries(transaction.signatures)
             .filter(([, signature]) => !signature)
-            .map(([address]) => address);
+            .map(([signerAddress]) => signerAddress);
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-            address: signer.address,
+            address,
             message: `Transaction is missing signatures for ${missing.join(', ')}`,
         });
     }
 
-    const signature = await sendTransaction(signedTransaction, { abortSignal });
+    const signature = await sendTransaction(transaction, { abortSignal });
     if (signature) {
         return signature;
     }
 
-    const feePayerSignature = Object.values(signedTransaction.signatures)[0];
+    const feePayerSignature = Object.values(transaction.signatures)[0];
     if (!feePayerSignature) {
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-            address: signer.address,
+            address,
             message: 'Broadcast transaction has no fee payer signature to identify it by',
         });
     }

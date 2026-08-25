@@ -1,3 +1,4 @@
+import type { SolanaSigner } from '@solana/keychain';
 import { createClient } from '@solana/kit';
 import { describe, expect, it } from 'vitest';
 
@@ -24,10 +25,11 @@ describe('keychainSigner', () => {
 
     it('installs a functional signer', async () => {
         const client = await createClient().use(keychainSigner(MEMORY_CONFIG));
+        const payer = client.payer as SolanaSigner;
 
-        expect(typeof client.payer.signTransactions).toBe('function');
-        expect(typeof client.payer.signMessages).toBe('function');
-        await expect(client.payer.isAvailable()).resolves.toBe(true);
+        expect(typeof payer.signTransactions).toBe('function');
+        expect(typeof payer.signMessages).toBe('function');
+        await expect(payer.isAvailable()).resolves.toBe(true);
     });
 });
 
@@ -55,10 +57,10 @@ describe('managed-broadcast exclusion', () => {
         // plugin is applied to a client — so these calls are side-effect free.
         // @ts-expect-error Crossmint broadcasts server-side and cannot be a client payer/identity
         keychainSigner({ apiKey: 'k', backend: 'crossmint', walletLocator: 'w' });
+        // @ts-expect-error Fordefi native auto mode broadcasts server-side
         keychainPayer({
             accessToken: 't',
             backend: 'fordefi',
-            // @ts-expect-error Fordefi native mode (chain set) broadcasts server-side
             chain: 'solana_mainnet',
             privateKeyPem: 'p',
             publicKey: 'x',
@@ -73,6 +75,19 @@ describe('managed-broadcast exclusion', () => {
             vaultId: 'v',
         });
         expect(typeof plugin).toBe('function');
+
+        // Fordefi native manual mode modifies but does not broadcast, so Kit can
+        // run it as a client payer/identity.
+        const manualPlugin = keychainPayer({
+            accessToken: 't',
+            backend: 'fordefi',
+            chain: 'solana_mainnet',
+            privateKeyPem: 'p',
+            publicKey: 'x',
+            pushMode: 'manual',
+            vaultId: 'v',
+        });
+        expect(typeof manualPlugin).toBe('function');
     });
 });
 

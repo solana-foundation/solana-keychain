@@ -7,10 +7,18 @@ the CI matrix). Selection deliberately avoids ``pytest -k``: a ``-k`` expression
 substring-matches marker keywords, and every test here carries ``parametrize``.
 """
 
+import base64
 import os
 
 import pytest
+from solders.hash import Hash
+from solders.instruction import AccountMeta, Instruction
+from solders.message import MessageV0
+from solders.signature import Signature
+from solders.system_program import ID as SYSTEM_PROGRAM_ID
+from solders.transaction import VersionedTransaction
 
+from solana_keychain.core import signed_message_bytes
 from solana_keychain.core.signer import SolanaSigner
 from tests.integration.conftest import (
     assert_message_roundtrip,
@@ -145,6 +153,31 @@ async def make_fordefi_signer() -> SolanaSigner:
             public_key=env["FORDEFI_BB_PUBLIC_KEY"],
             private_key_pem=env["FORDEFI_PRIVATE_KEY_PEM"],
             api_base_url=optional_env("FORDEFI_API_BASE_URL") or DEFAULT_API_BASE_URL,
+        )
+    )
+
+
+async def make_fordefi_manual_signer() -> SolanaSigner:
+    from solana_keychain.fordefi import FordefiSignerConfig, create_fordefi_signer
+    from solana_keychain.fordefi.signer import DEFAULT_API_BASE_URL
+
+    env = require_env(
+        "FORDEFI_ACCESS_TOKEN",
+        "FORDEFI_VAULT_ID",
+        "FORDEFI_PUBLIC_KEY",
+        "FORDEFI_PRIVATE_KEY_PEM",
+    )
+    return await create_fordefi_signer(
+        FordefiSignerConfig(
+            access_token=env["FORDEFI_ACCESS_TOKEN"],
+            vault_id=env["FORDEFI_VAULT_ID"],
+            public_key=env["FORDEFI_PUBLIC_KEY"],
+            private_key_pem=env["FORDEFI_PRIVATE_KEY_PEM"],
+            api_base_url=optional_env("FORDEFI_API_BASE_URL") or DEFAULT_API_BASE_URL,
+            chain=optional_env("FORDEFI_CHAIN") or "solana_devnet",
+            poll_interval_ms=1000,
+            max_poll_attempts=110,
+            push_mode="manual",
         )
     )
 
@@ -294,6 +327,48 @@ async def test_live_sign_transaction(backend: str) -> None:
     await assert_transaction_roundtrip(
         signer, signs_caller_bytes=backend not in _REWRITES_TRANSACTION
     )
+
+
+async def test_live_fordefi_native_manual_signs_without_broadcasting() -> None:
+    from solana_keychain.fordefi.signer import (
+        _messages_match_with_blockhash_policy,
+        _normalize_manual_fee_message,
+    )
+
+    _skip_unless_selected("fordefi")
+    signer = await make_fordefi_manual_signer()
+    assert not signer.broadcasts_transactions
+
+    transfer = Instruction(
+        SYSTEM_PROGRAM_ID,
+        bytes([2, 0, 0, 0]) + (0).to_bytes(8, "little"),
+        [
+            AccountMeta(signer.pubkey, is_signer=True, is_writable=True),
+            AccountMeta(signer.pubkey, is_signer=False, is_writable=True),
+        ],
+    )
+    message = MessageV0.try_compile(signer.pubkey, [transfer], [], Hash.default())
+    transaction = VersionedTransaction.populate(
+        message, [Signature.default()] * message.header.num_required_signatures
+    )
+    original_wire = bytes(transaction)
+
+    result = await signer.sign_transaction(transaction)
+
+    assert bytes(transaction) == original_wire
+    assert result.is_complete
+    assert result.encoded_transaction
+    assert result.transaction is not None
+    assert base64.b64decode(result.encoded_transaction, validate=True) == bytes(result.transaction)
+    assert result.signature.verify(signer.pubkey, signed_message_bytes(result.transaction.message))
+    assert isinstance(transaction.message, MessageV0)
+    assert isinstance(result.transaction.message, MessageV0)
+    original_normalized, _ = _normalize_manual_fee_message(transaction.message)
+    returned_normalized, _ = _normalize_manual_fee_message(result.transaction.message)
+    assert _messages_match_with_blockhash_policy(
+        original_normalized, returned_normalized, replaceable_blockhash=True
+    ), "live Fordefi mutation must be limited to blockhash and permitted fee instructions"
+    # Intentionally no RPC submission: this test verifies sign-without-send only.
 
 
 @pytest.mark.parametrize("backend", sorted(_ALL_BACKENDS))

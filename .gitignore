@@ -40,3 +40,5 @@ secret/*
 test-ledger/
 validator.log
 /node_modules/
+
+/.pnpm-store/

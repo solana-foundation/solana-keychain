@@ -82,6 +82,7 @@ async def main() -> None:
     #   result.encoded_transaction  # base64 wire transaction
     #   result.signature            # this signer's signature
     #   result.is_complete          # are all required signatures present?
+    #   result.transaction          # authoritative provider replacement, when present
 
 
 asyncio.run(main())
@@ -110,6 +111,81 @@ Remote HTTP backends accept an optional `http_client` override in their config
 through an HTTPS-enforcing one-shot client with a 60s timeout and redirects
 rejected.
 
+### Fordefi signing modes
+
+Fordefi supports three transaction modes:
+
+- With no `chain`, black-box mode signs the caller's exact message bytes and
+  leaves broadcasting to the caller.
+- With `chain` and the default `push_mode="auto"`, Fordefi may update the
+  blockhash and fees, then signs and broadcasts the transaction. The result's
+  encoded transaction is empty and the caller's transaction remains untouched.
+- With `chain` and `push_mode="manual"`, Fordefi may replace the recent
+  blockhash and manage `SetComputeUnitPrice`/`SetComputeUnitLimit`, then signs
+  the transaction without broadcasting it. Every other message field is
+  validated exactly. Custom unit prices must match and custom priority fees cap
+  the effective returned fee. The caller's solders transaction cannot have its
+  read-only message replaced, so use `result.transaction` for downstream
+  signing and broadcasting.
+
+A priority fee Fordefi introduces on its own initiative is capped at
+`DEFAULT_MAX_PRIORITY_FEE_LAMPORTS` (0.1 SOL), so a compromised or
+malfunctioning response cannot drain the fee payer. Set
+`max_priority_fee_lamports` to raise or lower that ceiling; a custom
+`priority_fee` governs instead when set. The ceiling never applies to a
+compute-unit price the caller placed in the transaction themselves, since those
+requests are validated byte-for-byte.
+
+The two fee instructions are asymmetric by design. A compute-unit *price*
+you set yourself is protected: the whole message is then compared
+byte-for-byte, so Fordefi can only replace the blockhash. A compute-unit
+*limit* you set with no price is **not** preserved — Fordefi manages the limit
+in manual mode, and the returned limit is only bounded indirectly, through the
+lamport ceiling above. Set a compute-unit price alongside your limit if you
+need the limit held exactly.
+
+```python
+import os
+
+from solana_keychain.fordefi import FordefiSignerConfig, create_fordefi_signer
+
+signer = await create_fordefi_signer(
+    FordefiSignerConfig(
+        access_token=os.environ["FORDEFI_ACCESS_TOKEN"],
+        vault_id=os.environ["FORDEFI_VAULT_ID"],
+        public_key=os.environ["FORDEFI_PUBLIC_KEY"],
+        private_key_pem=os.environ["FORDEFI_PRIVATE_KEY_PEM"],
+        chain="solana_mainnet",
+        push_mode="manual",
+    )
+)
+
+result = await signer.sign_transaction(transaction)
+fordefi_transaction = result.transaction
+if fordefi_transaction is None:
+    raise RuntimeError("Fordefi manual signing did not return a transaction")
+
+if result.is_complete:
+    # Broadcast result.encoded_transaction through your RPC client.
+    pass
+else:
+    # Apply downstream signatures to fordefi_transaction, reserialize, and broadcast.
+    pass
+```
+
+Manual mode requires Fordefi to be the fee payer and to sign before every
+downstream signer. Fordefi normally refreshes the transaction blockhash but
+does not return its exact `lastValidBlockHeight`; broadcast manual results
+promptly rather than relying on a locally known block-height expiry.
+
+Mutation eligibility depends on whether signatures are supplied, not on
+`push_mode`. This SDK's native manual request is unsigned, omits
+`details.signatures`, and rejects pre-signed inputs, so Fordefi may refresh the
+blockhash and manage fees. A future provided-signatures flow must preserve the
+complete message byte-for-byte. `push_mode` controls submission only.
+Durable-nonce transactions keep both their lifetime and fee layout exact; v1
+transactions may replace only the blockhash and keep their inline configuration exact.
+
 ## Core API
 
 Every signer implements the `SolanaSigner` ABC from `solana_keychain.core`:
@@ -126,10 +202,12 @@ class SolanaSigner(ABC):
     async def is_available(self) -> bool: ...
 ```
 
-`sign_transaction` signs the transaction in place and returns a
-`SignedTransaction(encoded_transaction, signature, is_complete)`; `is_complete`
-reports whether every required signature is present. Legacy, v0 and v1
-transactions are all accepted.
+`sign_transaction` returns a
+`SignedTransaction(encoded_transaction, signature, is_complete, transaction=...)`;
+`is_complete` reports whether every required signature is present. Most signers
+modify the supplied transaction in place. When a provider returns authoritative
+replacement bytes that cannot be applied in place, the optional `transaction`
+field carries the replacement. Legacy, v0 and v1 transactions are accepted.
 
 Errors are always `SignerError` with a stable `code`
 (`SIGNER_INVALID_PRIVATE_KEY`, `SIGNER_SIGNING_FAILED`, …).

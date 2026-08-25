@@ -11,10 +11,13 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 import httpx
+from solders.compute_budget import ID as COMPUTE_BUDGET_ID
+from solders.instruction import CompiledInstruction
+from solders.message import Message, MessageHeader, MessageV0, MessageV1
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
@@ -48,7 +51,16 @@ _logger = logging.getLogger("solana_keychain")
 DEFAULT_API_BASE_URL = "https://api.fordefi.com"
 DEFAULT_POLL_INTERVAL_MS = 2000
 DEFAULT_MAX_POLL_ATTEMPTS = 50
+
+DEFAULT_MAX_PRIORITY_FEE_LAMPORTS = 100_000_000
+"""Default ceiling, in lamports, on a priority fee Fordefi introduces itself
+during native manual signing, so a compromised or malfunctioning response cannot
+drain the fee payer. Override via ``FordefiSignerConfig.max_priority_fee_lamports``.
+"""
 SUPPORTED_CHAINS = ("solana_devnet", "solana_mainnet")
+SOLANA_PACKET_DATA_SIZE = 1232
+
+FordefiPushMode = Literal["auto", "manual"]
 
 _VAULT_VERIFICATION_TIMEOUT_SECONDS = 10.0
 
@@ -67,6 +79,163 @@ _TERMINAL_FAILURE_STATES = frozenset(
     }
 )
 
+_SET_COMPUTE_UNIT_LIMIT = 2
+_SET_COMPUTE_UNIT_PRICE = 3
+_MAX_COMPUTE_UNIT_LIMIT = 1_400_000
+_MICRO_LAMPORTS_PER_LAMPORT = 1_000_000
+
+
+@dataclass(frozen=True)
+class _ManualFeeInstructions:
+    limit: int | None = None
+    price: int | None = None
+
+
+def _message_with_recent_blockhash(message: Any, recent_blockhash: Any) -> Any:
+    """Clone a supported message while replacing only its lifetime hash."""
+    if isinstance(message, Message):
+        header = message.header
+        return Message.new_with_compiled_instructions(
+            header.num_required_signatures,
+            header.num_readonly_signed_accounts,
+            header.num_readonly_unsigned_accounts,
+            message.account_keys,
+            recent_blockhash,
+            message.instructions,
+        )
+    if isinstance(message, MessageV0):
+        return MessageV0(
+            message.header,
+            message.account_keys,
+            recent_blockhash,
+            message.instructions,
+            message.address_table_lookups,
+        )
+    if isinstance(message, MessageV1):
+        return MessageV1(
+            message.header,
+            message.config,
+            recent_blockhash,
+            message.account_keys,
+            message.instructions,
+        )
+    raise TypeError(f"Unsupported Solana message type: {type(message).__name__}")
+
+
+def _normalize_manual_fee_message(
+    message: Message | MessageV0,
+) -> tuple[Any, _ManualFeeInstructions]:
+    """Remove only the priority-fee instructions Fordefi is allowed to manage."""
+    account_keys = list(message.account_keys)
+    kept: list[CompiledInstruction] = []
+    limit: int | None = None
+    price: int | None = None
+
+    for instruction in message.instructions:
+        program_index = instruction.program_id_index
+        data = bytes(instruction.data)
+        is_mutable_fee = (
+            program_index < len(account_keys)
+            and account_keys[program_index] == COMPUTE_BUDGET_ID
+            and data
+            and data[0] in (_SET_COMPUTE_UNIT_LIMIT, _SET_COMPUTE_UNIT_PRICE)
+        )
+        if not is_mutable_fee:
+            kept.append(instruction)
+            continue
+        if instruction.accounts:
+            raise ValueError("priority-fee instruction has accounts")
+        if data[0] == _SET_COMPUTE_UNIT_LIMIT:
+            if limit is not None:
+                raise ValueError("duplicate SetComputeUnitLimit")
+            if len(data) != 5:
+                raise ValueError("malformed SetComputeUnitLimit")
+            limit = int.from_bytes(data[1:], "little")
+            if limit == 0 or limit > _MAX_COMPUTE_UNIT_LIMIT:
+                raise ValueError("SetComputeUnitLimit is out of range")
+        else:
+            if price is not None:
+                raise ValueError("duplicate SetComputeUnitPrice")
+            if len(data) != 9:
+                raise ValueError("malformed SetComputeUnitPrice")
+            price = int.from_bytes(data[1:], "little")
+
+    compute_budget_indexes = [
+        index for index, account_key in enumerate(account_keys) if account_key == COMPUTE_BUDGET_ID
+    ]
+    if len(compute_budget_indexes) == 1:
+        key_index = compute_budget_indexes[0]
+        header = message.header
+        first_readonly_unsigned = len(account_keys) - header.num_readonly_unsigned_accounts
+        is_readonly_unsigned = (
+            header.num_readonly_unsigned_accounts > 0
+            and key_index >= header.num_required_signatures
+            and key_index >= first_readonly_unsigned
+        )
+        is_still_used = any(
+            instruction.program_id_index == key_index or key_index in instruction.accounts
+            for instruction in kept
+        )
+        if is_readonly_unsigned and not is_still_used:
+            del account_keys[key_index]
+            header = MessageHeader(
+                header.num_required_signatures,
+                header.num_readonly_signed_accounts,
+                header.num_readonly_unsigned_accounts - 1,
+            )
+            reindexed: list[CompiledInstruction] = []
+            for instruction in kept:
+                program_index = instruction.program_id_index
+                if program_index > key_index:
+                    program_index -= 1
+                accounts = bytes(
+                    index - 1 if index > key_index else index for index in instruction.accounts
+                )
+                reindexed.append(
+                    CompiledInstruction(program_index, bytes(instruction.data), accounts)
+                )
+            kept = reindexed
+        else:
+            header = message.header
+    else:
+        header = message.header
+
+    if isinstance(message, Message):
+        normalized: Any = Message.new_with_compiled_instructions(
+            header.num_required_signatures,
+            header.num_readonly_signed_accounts,
+            header.num_readonly_unsigned_accounts,
+            account_keys,
+            message.recent_blockhash,
+            kept,
+        )
+    else:
+        normalized = MessageV0(
+            header,
+            account_keys,
+            message.recent_blockhash,
+            kept,
+            message.address_table_lookups,
+        )
+    return normalized, _ManualFeeInstructions(limit=limit, price=price)
+
+
+def _effective_priority_fee_lamports(fee: _ManualFeeInstructions) -> int:
+    """Round up, and charge an absent limit at the runtime maximum."""
+    price = fee.price or 0
+    limit = fee.limit or _MAX_COMPUTE_UNIT_LIMIT
+    return (price * limit + _MICRO_LAMPORTS_PER_LAMPORT - 1) // _MICRO_LAMPORTS_PER_LAMPORT
+
+
+def _messages_match_with_blockhash_policy(
+    original: Any, returned: Any, *, replaceable_blockhash: bool
+) -> bool:
+    if type(original) is not type(returned):
+        return False
+    if replaceable_blockhash:
+        returned = _message_with_recent_blockhash(returned, original.recent_blockhash)
+    return signed_message_bytes(original) == signed_message_bytes(returned)
+
 
 def _timestamp_ms() -> int:
     return int(time.time() * 1000)
@@ -81,12 +250,21 @@ class FordefiSignerConfig:
     ``request_signer`` for KMS/HSM-backed request signing.
 
     ``chain`` (``solana_devnet`` / ``solana_mainnet``) switches from black-box
-    raw signing to Fordefi's native Solana API types: transactions are signed
-    and auto-broadcast by Fordefi, messages use ``solana_message``.
+    raw signing to Fordefi's native Solana API types. ``push_mode`` controls
+    whether Fordefi broadcasts native transactions (``auto``) or returns them
+    for caller-managed broadcasting (``manual``). Messages use ``solana_message``.
 
     ``fee`` is the native-mode fee configuration passed through verbatim,
     e.g. ``{"type": "priority", "priority_level": "medium"}`` or
     ``{"type": "custom", "priority_fee": "1000"}``. Requires ``chain``.
+
+    ``max_priority_fee_lamports`` bounds the priority fee Fordefi may introduce
+    on its own initiative during native manual signing. ``None`` applies
+    ``DEFAULT_MAX_PRIORITY_FEE_LAMPORTS`` unless ``fee`` states a custom
+    ``priority_fee``, in which case that bound governs. The ceiling never applies
+    to a compute-unit price the caller placed in the transaction themselves,
+    because those requests are validated byte-for-byte and carry no Fordefi
+    discretion.
     """
 
     access_token: str = field(repr=False)
@@ -100,6 +278,8 @@ class FordefiSignerConfig:
     chain: str | None = None
     fee: dict[str, Any] | None = None
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
+    push_mode: FordefiPushMode = "auto"
+    max_priority_fee_lamports: int | None = None
 
 
 class FordefiSigner(SolanaSigner):
@@ -110,9 +290,12 @@ class FordefiSigner(SolanaSigner):
     ``vault_id``. ``create_fordefi_signer()`` does this for you.
 
     Black-box mode (default) signs the caller's exact message bytes and the
-    caller broadcasts. Native mode (``chain`` set) lets Fordefi replace the
-    blockhash and fees, sign, and auto-broadcast; see
-    ``sign_and_send_transaction``.
+    caller broadcasts. Native auto mode lets Fordefi replace the blockhash and
+    fees, sign, and auto-broadcast; see ``sign_and_send_transaction``. For the
+    unsigned native manual requests supported here, Fordefi may replace the
+    blockhash and manage priority-fee instructions without broadcasting, then
+    returns the validated transaction through ``SignedTransaction.transaction``;
+    see ``sign_transaction``.
     """
 
     def __init__(self, config: FordefiSignerConfig) -> None:
@@ -136,6 +319,16 @@ class FordefiSigner(SolanaSigner):
             raise SignerError(
                 SignerErrorCode.CONFIG_ERROR,
                 f"chain must be one of {', '.join(SUPPORTED_CHAINS)}",
+            )
+        if config.push_mode not in ("auto", "manual"):
+            raise SignerError(
+                SignerErrorCode.CONFIG_ERROR,
+                "push_mode must be one of auto, manual",
+            )
+        if config.push_mode == "manual" and config.chain is None:
+            raise SignerError(
+                SignerErrorCode.CONFIG_ERROR,
+                "manual push_mode requires chain to be set (native Solana mode)",
             )
         if config.fee is not None and config.chain is None:
             raise SignerError(
@@ -164,6 +357,8 @@ class FordefiSigner(SolanaSigner):
         self._max_poll_attempts = config.max_poll_attempts
         self._chain = config.chain
         self._fee = config.fee
+        self._push_mode = config.push_mode
+        self._max_priority_fee_lamports = config.max_priority_fee_lamports
         self._http_client = config.http_client
         try:
             self._public_key = Pubkey.from_string(config.public_key)
@@ -195,7 +390,7 @@ class FordefiSigner(SolanaSigner):
 
     @property
     def broadcasts_transactions(self) -> bool:
-        return self._chain is not None
+        return self._chain is not None and self._push_mode == "auto"
 
     async def _sign_request(self, path: str, timestamp: int, body: str) -> str:
         return await self._request_signer.sign_request(f"{path}|{timestamp}|{body}".encode())
@@ -256,7 +451,7 @@ class FordefiSigner(SolanaSigner):
             "type": "solana_serialized_transaction_message",
             "chain": self._chain,
             "data": base64.b64encode(data).decode("ascii"),
-            "push_mode": "auto",
+            "push_mode": self._push_mode,
         }
         if self._fee is not None:
             details["fee"] = self._fee
@@ -338,15 +533,30 @@ class FordefiSigner(SolanaSigner):
         ``transaction`` in place, and returns the encoded transaction for the
         caller to broadcast.
 
-        Native mode (``chain`` set) broadcasts through Fordefi, so it raises
+        Native auto mode broadcasts through Fordefi, so it raises
         ``SIGNING_FAILED`` here; call ``sign_and_send_transaction`` instead.
+
+        Native manual mode submits an unsigned message with ``push_mode:
+        manual``. Fordefi may replace the blockhash and manage compute-unit
+        price/limit instructions, then signs without broadcasting. All content
+        outside that documented mutation set is validated exactly. Because
+        solders messages are read-only, the caller's object stays untouched and
+        the validated replacement is returned in
+        ``SignedTransaction.transaction`` and as canonical base64 in
+        ``encoded_transaction``. Fordefi must be the fee payer and sign first.
+
+        Each native create carries a deterministic ``x-idempotence-id``. Manual
+        mode uses a mode/chain/vault namespace so it never collides with auto.
         """
         if self._chain is not None:
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Fordefi native mode broadcasts through its own API; call "
-                "sign_and_send_transaction instead",
-            )
+            if self._push_mode != "manual":
+                raise SignerError(
+                    SignerErrorCode.SIGNING_FAILED,
+                    "Fordefi native auto mode broadcasts through its own API; call "
+                    "sign_and_send_transaction instead",
+                )
+            # Native manual mode does not broadcast, so it signs through here.
+            return await self._sign_transaction_native_manual(transaction)
         message_data = signed_message_bytes(transaction.message)
         signature = await self._sign_black_box(message_data)
         verify_returned_signature(signature, self._public_key, message_data)
@@ -381,7 +591,13 @@ class FordefiSigner(SolanaSigner):
                 SignerErrorCode.SIGNING_FAILED,
                 "Fordefi black-box mode only signs; sign the transaction and broadcast the result",
             )
-        signed = await self._sign_transaction_native(transaction)
+        if self._push_mode == "manual":
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi native manual mode does not broadcast; sign the transaction "
+                "and broadcast the result",
+            )
+        signed = await self._sign_transaction_native_auto(transaction)
         return signed.signature
 
     def _require_sole_required_signer(self, transaction: VersionedTransaction) -> None:
@@ -395,7 +611,7 @@ class FordefiSigner(SolanaSigner):
                 "whose sole required signer is the configured vault",
             )
 
-    async def _sign_transaction_native(
+    async def _sign_transaction_native_auto(
         self, transaction: VersionedTransaction
     ) -> SignedTransaction:
         self._require_sole_required_signer(transaction)
@@ -443,6 +659,233 @@ class FordefiSigner(SolanaSigner):
                 error._detail,
                 provider_transaction_id=transaction_id,
             ) from None
+
+    @staticmethod
+    def _required_signer_keys(transaction: VersionedTransaction) -> tuple[Pubkey, ...]:
+        required_signatures = transaction.message.header.num_required_signatures
+        account_keys = transaction.message.account_keys
+        if len(account_keys) < required_signatures:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Transaction does not contain all required signer account keys",
+            )
+        return tuple(account_keys[:required_signatures])
+
+    def _validate_native_manual_transaction(self, transaction: VersionedTransaction) -> None:
+        required_signers = self._required_signer_keys(transaction)
+        if not required_signers or required_signers[0] != self._public_key:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi native manual signing requires the configured vault to be "
+                "the transaction fee payer",
+            )
+        default_signature = Signature.default()
+        if any(signature != default_signature for signature in transaction.signatures):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi native manual signing must run before any transaction "
+                "signatures are applied",
+            )
+
+    def _manual_idempotence_id(self, message_data: bytes) -> str:
+        namespace = f"fordefi:solana:manual:{self._chain}:{self._vault_id}:".encode() + message_data
+        return idempotency_key_from_message(namespace)
+
+    def _validate_manual_custom_fee(self, fee: _ManualFeeInstructions) -> None:
+        if not isinstance(self._fee, dict) or self._fee.get("type") != "custom":
+            return
+        configured_unit_price = self._fee.get("unit_price")
+        if configured_unit_price is not None:
+            try:
+                expected_price = int(configured_unit_price)
+            except (TypeError, ValueError):
+                raise ValueError("configured custom unit_price is invalid") from None
+            if expected_price < 0 or fee.price is None or expected_price != fee.price:
+                raise ValueError(
+                    "returned compute-unit price does not match the configured custom unit_price"
+                )
+        configured_priority_fee = self._fee.get("priority_fee")
+        if configured_priority_fee is not None and fee.price is not None:
+            try:
+                maximum_fee = int(configured_priority_fee)
+            except (TypeError, ValueError):
+                raise ValueError("configured custom priority_fee is invalid") from None
+            if maximum_fee < 0:
+                raise ValueError("configured custom priority_fee is invalid")
+            if _effective_priority_fee_lamports(fee) > maximum_fee:
+                raise ValueError("returned priority fee exceeds the configured custom priority_fee")
+
+    def _manual_priority_fee_ceiling(self) -> int | None:
+        """Return ``None`` when a custom ``priority_fee`` already bounds the total."""
+        if self._max_priority_fee_lamports is not None:
+            return self._max_priority_fee_lamports
+        if (
+            isinstance(self._fee, dict)
+            and self._fee.get("type") == "custom"
+            and self._fee.get("priority_fee") is not None
+        ):
+            return None
+        return DEFAULT_MAX_PRIORITY_FEE_LAMPORTS
+
+    def _validate_manual_fee_ceiling(self, fee: _ManualFeeInstructions) -> None:
+        """Enforce ``DEFAULT_MAX_PRIORITY_FEE_LAMPORTS`` or the configured override."""
+        if fee.price is None:
+            return
+        ceiling = self._manual_priority_fee_ceiling()
+        if ceiling is None:
+            return
+        if _effective_priority_fee_lamports(fee) > ceiling:
+            raise ValueError(
+                "returned priority fee exceeds the maximum; raise "
+                "max_priority_fee_lamports to allow it"
+            )
+
+    def _validate_manual_message_mutation(
+        self, original: VersionedTransaction, returned: VersionedTransaction
+    ) -> None:
+        if type(original.message) is not type(returned.message):
+            raise ValueError("changed the transaction message version")
+        if original.uses_durable_nonce():
+            if not _messages_match_with_blockhash_policy(
+                original.message, returned.message, replaceable_blockhash=False
+            ):
+                raise ValueError("changed a durable-nonce transaction")
+            if isinstance(original.message, (Message, MessageV0)):
+                _, original_fee = _normalize_manual_fee_message(original.message)
+                self._validate_manual_custom_fee(original_fee)
+            return
+        if isinstance(original.message, MessageV1):
+            if not _messages_match_with_blockhash_policy(
+                original.message, returned.message, replaceable_blockhash=True
+            ):
+                raise ValueError("changed v1 content outside the recent blockhash")
+            return
+
+        if not isinstance(original.message, (Message, MessageV0)) or not isinstance(
+            returned.message, (Message, MessageV0)
+        ):
+            raise ValueError("unsupported transaction message version")
+
+        normalized_original, original_fee = _normalize_manual_fee_message(original.message)
+        if original_fee.price is not None:
+            if not _messages_match_with_blockhash_policy(
+                original.message, returned.message, replaceable_blockhash=True
+            ):
+                raise ValueError(
+                    "changed transaction content after the caller set a compute-unit price"
+                )
+            self._validate_manual_custom_fee(original_fee)
+            return
+
+        normalized_returned, returned_fee = _normalize_manual_fee_message(returned.message)
+        # No caller price, so any price here is Fordefi's own.
+        self._validate_manual_fee_ceiling(returned_fee)
+        self._validate_manual_custom_fee(returned_fee)
+        if not _messages_match_with_blockhash_policy(
+            normalized_original, normalized_returned, replaceable_blockhash=True
+        ):
+            raise ValueError(
+                "changed transaction content outside the recent blockhash and priority fee"
+            )
+
+    async def _sign_transaction_native_manual(
+        self, transaction: VersionedTransaction
+    ) -> SignedTransaction:
+        self._validate_native_manual_transaction(transaction)
+        message_data = signed_message_bytes(transaction.message)
+        transaction_id = await self._post_transaction(
+            self._solana_transaction_request(message_data),
+            idempotence_id=self._manual_idempotence_id(message_data),
+        )
+        return await self._finish_native_manual(transaction_id, transaction)
+
+    async def _finish_native_manual(
+        self, transaction_id: str, original: VersionedTransaction
+    ) -> SignedTransaction:
+        result = await self._poll_for_result(transaction_id, pushable=False)
+        raw_transaction = result.get("raw_transaction")
+        if not isinstance(raw_transaction, str):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual solana_transaction response missing raw_transaction",
+            )
+        try:
+            wire_bytes = base64.b64decode(raw_transaction, validate=True)
+        except Exception:
+            raise SignerError(
+                SignerErrorCode.SERIALIZATION_ERROR,
+                "Failed to decode Fordefi manual raw_transaction base64",
+            ) from None
+        if len(wire_bytes) > SOLANA_PACKET_DATA_SIZE:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual wire transaction exceeds the Solana size limit",
+            )
+        try:
+            returned = VersionedTransaction.from_bytes(wire_bytes)
+        except Exception:
+            raise SignerError(
+                SignerErrorCode.SERIALIZATION_ERROR,
+                "Failed to deserialize Fordefi manual wire transaction",
+            ) from None
+
+        original_signers = self._required_signer_keys(original)
+        returned_signers = self._required_signer_keys(returned)
+        if returned_signers != original_signers:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual signing changed the transaction required-signer set",
+            )
+
+        try:
+            self._validate_manual_message_mutation(original, returned)
+        except ValueError as error:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                f"Fordefi manual signing returned an unauthorized transaction mutation: {error}",
+            ) from None
+        except Exception:
+            raise SignerError(
+                SignerErrorCode.SERIALIZATION_ERROR,
+                "Failed to validate Fordefi-returned manual transaction message",
+            ) from None
+
+        signatures = list(returned.signatures)
+        if len(signatures) != len(returned_signers):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual wire transaction has an invalid signature-slot count",
+            )
+        signature = signatures[0]
+        default_signature = Signature.default()
+        if signature == default_signature:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual wire transaction did not contain the configured vault signature",
+            )
+        if any(item != default_signature for item in signatures[1:]):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual signing unexpectedly populated a downstream signer slot",
+            )
+        verify_returned_signature(signature, self.pubkey, signed_message_bytes(returned.message))
+
+        try:
+            canonical_wire = bytes(returned)
+        except Exception:
+            raise SignerError(
+                SignerErrorCode.SERIALIZATION_ERROR,
+                "Failed to serialize Fordefi manual wire transaction",
+            ) from None
+        if len(canonical_wire) > SOLANA_PACKET_DATA_SIZE:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi manual wire transaction exceeds the Solana size limit",
+            )
+
+        return classify_signed_transaction(
+            returned, base64.b64encode(canonical_wire).decode("ascii"), signature
+        )
 
     async def _finish_native_broadcast(self, transaction_id: str) -> SignedTransaction:
         result = await self._poll_for_result(transaction_id, pushable=True)

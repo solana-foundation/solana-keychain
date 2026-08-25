@@ -120,6 +120,14 @@ func TestNewValidatesConfig(t *testing.T) {
 			mutate:   func(cfg *Config) { cfg.Chain = "solana_testnet" },
 			wantCode: core.CodeConfigError,
 		},
+		"invalid push mode": {
+			mutate:   func(cfg *Config) { cfg.PushMode = "invalid" },
+			wantCode: core.CodeConfigError,
+		},
+		"manual push mode without chain": {
+			mutate:   func(cfg *Config) { cfg.PushMode = PushModeManual },
+			wantCode: core.CodeConfigError,
+		},
 		"fee without chain": {
 			mutate:   func(cfg *Config) { cfg.Fee = &Fee{Type: FeeTypePriority, PriorityLevel: PriorityMedium} },
 			wantCode: core.CodeConfigError,
@@ -170,9 +178,25 @@ func TestNewValidationRejectsBeforeAnyNetworkCall(t *testing.T) {
 	cfg := baseConfig(t)
 	cfg.APIBaseURL = srv.URL
 	cfg.HTTPClient = srv.Client()
-	cfg.Fee = &Fee{Type: FeeTypePriority, PriorityLevel: PriorityMedium}
-	if _, err := New(context.Background(), cfg); err == nil {
-		t.Fatal("expected New to reject fee without chain")
+	cases := map[string]func(*Config){
+		"fee without chain": func(cfg *Config) {
+			cfg.Fee = &Fee{Type: FeeTypePriority, PriorityLevel: PriorityMedium}
+		},
+		"manual without chain": func(cfg *Config) {
+			cfg.PushMode = PushModeManual
+		},
+		"invalid push mode": func(cfg *Config) {
+			cfg.PushMode = "invalid"
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			invalid := cfg
+			mutate(&invalid)
+			if _, err := New(context.Background(), invalid); err == nil {
+				t.Fatal("expected New to reject invalid config")
+			}
+		})
 	}
 	if got := requests.Load(); got != 0 {
 		t.Errorf("invalid config must be rejected before any network call, server saw %d requests", got)
@@ -550,16 +574,28 @@ func nativeConfig(t *testing.T) Config {
 	return cfg
 }
 
-// Native mode broadcasts, so batch helpers must reject it; black box may batch.
+// Only native auto broadcasts; black box and native manual may batch.
 func TestBroadcastsTransactionsFollowsMode(t *testing.T) {
 	pub := testutils.TestPublicKey()
-	native := newTestSigner(t, nativeConfig(t), pub.String(), func(*http.ServeMux) {})
-	if !native.BroadcastsTransactions() {
-		t.Error("native mode must report broadcasting")
+	nativeAuto := newTestSigner(t, nativeConfig(t), pub.String(), func(*http.ServeMux) {})
+	if !nativeAuto.BroadcastsTransactions() {
+		t.Error("native auto mode must report broadcasting")
+	}
+	explicitAutoConfig := nativeConfig(t)
+	explicitAutoConfig.PushMode = PushModeAuto
+	explicitAuto := newTestSigner(t, explicitAutoConfig, pub.String(), func(*http.ServeMux) {})
+	if !explicitAuto.BroadcastsTransactions() {
+		t.Error("explicit native auto mode must report broadcasting")
 	}
 	blackBox := newTestSigner(t, baseConfig(t), pub.String(), func(*http.ServeMux) {})
 	if blackBox.BroadcastsTransactions() {
 		t.Error("black-box mode must not report broadcasting")
+	}
+	manualConfig := nativeConfig(t)
+	manualConfig.PushMode = PushModeManual
+	manual := newTestSigner(t, manualConfig, pub.String(), func(*http.ServeMux) {})
+	if manual.BroadcastsTransactions() {
+		t.Error("native manual mode must not report broadcasting")
 	}
 }
 

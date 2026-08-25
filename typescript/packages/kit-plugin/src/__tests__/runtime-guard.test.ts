@@ -11,6 +11,12 @@ const FAKE_SENDING_SIGNER = {
         Promise.resolve(transactions.map(() => new Uint8Array(64) as SignatureBytes)),
 };
 
+const FAKE_MODIFYING_SIGNER = {
+    address: 'BLDprCsFyPBSyJDbYYbJXQWvexEuoUJP1zEbrVnNNaR3' as Address,
+    isAvailable: () => Promise.resolve(true),
+    modifyAndSignTransactions: (transactions: readonly Transaction[]) => Promise.resolve(transactions),
+};
+
 vi.mock('@solana/keychain', async importOriginal => {
     const actual = await importOriginal<typeof import('@solana/keychain')>();
     return {
@@ -29,6 +35,15 @@ describe('runtime guard against managed-broadcast signers', () => {
         chain: 'solana_mainnet',
         privateKeyPem: 'p',
         publicKey: 'x',
+        vaultId: 'v',
+    } as never;
+    const FORDEFI_MANUAL_CONFIG = {
+        accessToken: 't',
+        backend: 'fordefi',
+        chain: 'solana_mainnet',
+        privateKeyPem: 'p',
+        publicKey: 'x',
+        pushMode: 'manual',
         vaultId: 'v',
     } as never;
 
@@ -62,7 +77,7 @@ describe('runtime guard against managed-broadcast signers', () => {
         expect(createKeychainSigner).not.toHaveBeenCalled();
     });
 
-    it('rejects a fordefi native-mode config before constructing the signer', async () => {
+    it('rejects a fordefi native auto-mode config before constructing the signer', async () => {
         const { createKeychainSigner } = await import('@solana/keychain');
         vi.mocked(createKeychainSigner).mockClear();
 
@@ -70,6 +85,19 @@ describe('runtime guard against managed-broadcast signers', () => {
             /cannot serve as a Kit client/,
         );
         expect(createKeychainSigner).not.toHaveBeenCalled();
+    });
+
+    it('lets a fordefi native manual-mode config through to the factory', async () => {
+        const { createKeychainSigner } = await import('@solana/keychain');
+        vi.mocked(createKeychainSigner).mockClear();
+        vi.mocked(createKeychainSigner).mockResolvedValueOnce(FAKE_MODIFYING_SIGNER as never);
+
+        const client = await createClient().use(keychainSigner(FORDEFI_MANUAL_CONFIG));
+
+        expect(createKeychainSigner).toHaveBeenCalled();
+        // Kit runs a modifying signer ahead of the partial signers, so it is a
+        // valid payer/identity and must survive the shape assertion.
+        expect(client.payer).toBe(FAKE_MODIFYING_SIGNER);
     });
 
     it('rejects a factory that returns a signer without partial-signing methods', async () => {

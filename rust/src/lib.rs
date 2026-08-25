@@ -118,8 +118,8 @@ pub use crossmint::{CrossmintSigner, CrossmintSignerConfig};
 pub use dfns::{DfnsSigner, DfnsSignerConfig};
 #[cfg(feature = "fordefi")]
 pub use fordefi::{
-    FordefiPriorityLevel, FordefiRequestSigner, FordefiSigner, FordefiSignerConfig,
-    FordefiSolanaFee, PemRequestSigner, SolanaChainUniqueId,
+    FordefiPriorityLevel, FordefiPushMode, FordefiRequestSigner, FordefiSigner,
+    FordefiSignerConfig, FordefiSolanaFee, PemRequestSigner, SolanaChainUniqueId,
 };
 #[cfg(feature = "openfort")]
 pub use openfort::{OpenfortSigner, OpenfortSignerConfig};
@@ -398,8 +398,10 @@ impl Signer {
     ///
     /// Fetches the vault during initialization and verifies that its authoritative
     /// Solana address matches `config.public_key`. Set `config.chain` to use native
-    /// Solana mode (Fordefi modifies and auto-broadcasts the transaction). Leave it
-    /// `None` for black-box mode (raw EdDSA signing, transaction assembled locally).
+    /// mode; leave it `None` for black-box mode (raw EdDSA signing, transaction
+    /// assembled locally). Within native mode, `config.push_mode` selects whether
+    /// Fordefi broadcasts the transaction ([`FordefiPushMode::Auto`], the default)
+    /// or returns it for the caller to send ([`FordefiPushMode::Manual`]).
     #[cfg(feature = "fordefi")]
     pub async fn from_fordefi(config: FordefiSignerConfig) -> Result<Self, SignerError> {
         Ok(Self::Fordefi(FordefiSigner::from_config(config).await?))
