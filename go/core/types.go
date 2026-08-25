@@ -62,14 +62,19 @@ type Signer interface {
 	IsAvailable(ctx context.Context) bool
 }
 
-// TransactionBroadcaster marks signers whose SignTransaction broadcasts
+// TransactionBroadcaster marks signers whose provider executes the transaction
 // server-side, where a failure does not mean nothing happened; callers must
 // reconcile by provider transaction id before retrying, and SignTransactions
 // rejects them.
 type TransactionBroadcaster interface {
-	// BroadcastsTransactions reports whether SignTransaction broadcasts in
-	// this signer's current configuration.
+	// BroadcastsTransactions reports whether this signer broadcasts in its
+	// current configuration.
 	BroadcastsTransactions() bool
+
+	// SignAndSendTransaction signs tx and broadcasts it through the provider.
+	// The provider may rewrite tx, in which case tx is left untouched and the
+	// returned signature identifies the transaction that actually landed.
+	SignAndSendTransaction(ctx context.Context, tx *solana.Transaction) (solana.Signature, error)
 }
 
 // SignatureDictionary maps a signer address to its signature, a convenience for

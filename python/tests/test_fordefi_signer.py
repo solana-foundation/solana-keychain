@@ -359,7 +359,7 @@ async def test_sign_transaction_native_polling_timeout_is_broadcast_unconfirmed(
         return_value=status_response("waiting_for_signing_trigger")
     )
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id == "tx-1"
 
@@ -372,7 +372,7 @@ async def test_native_submit_server_error_is_unconfirmed_without_a_transaction_i
         return_value=httpx.Response(502, json={"error": "bad gateway"})
     )
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id is None
     assert excinfo.value.status_code == 502
@@ -384,7 +384,7 @@ async def test_native_submit_accepted_without_an_id_is_unconfirmed() -> None:
     signer = make_signer(keypair, chain="solana_devnet")
     respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"state": "pending"}))
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id is None
     assert excinfo.value.status_code is None
@@ -398,7 +398,7 @@ async def test_native_submit_rejected_by_fordefi_stays_a_plain_failure() -> None
         return_value=httpx.Response(401, json={"error": "unauthorized"})
     )
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
 
 
@@ -435,7 +435,7 @@ async def test_cancellation_during_native_submit_warns_without_a_transaction_id(
 
     async def run() -> None:
         try:
-            await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+            await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
         except asyncio.CancelledError as error:
             observed.append(str(error))
             raise
@@ -472,7 +472,7 @@ async def test_sign_transaction_native_cancellation_carries_the_transaction_id(
 
     async def run() -> None:
         try:
-            await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+            await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
         except asyncio.CancelledError as error:
             observed.append(str(error))
             raise
@@ -543,11 +543,9 @@ async def test_sign_transaction_native_success() -> None:
     )
     transaction = create_test_transaction(keypair.pubkey())
 
-    result = await signer.sign_transaction(transaction)
+    result = await signer.sign_and_send_transaction(transaction)
 
-    assert result.signature == signature
-    assert result.encoded_transaction == ""
-    assert result.is_complete
+    assert result == signature
     assert all(sig == Signature.default() for sig in transaction.signatures), (
         "the caller's transaction must be left untouched by provider-chosen bytes"
     )
@@ -572,7 +570,7 @@ async def test_sign_transaction_native_missing_raw_transaction() -> None:
     signer = make_signer(keypair, chain="solana_devnet")
     mock_sign_flow(status_response("completed"))
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id == "tx-1"
 
@@ -587,7 +585,7 @@ async def test_sign_transaction_native_verifies_against_returned_message() -> No
     raw_transaction = base64.b64encode(bytes(returned)).decode("ascii")
     mock_sign_flow(status_response("completed", raw_transaction=raw_transaction))
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(transaction)
+        await signer.sign_and_send_transaction(transaction)
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id == "tx-1"
 
@@ -598,7 +596,7 @@ async def test_sign_transaction_native_rejects_multi_signer_before_submitting() 
     signer = make_signer(keypair, chain="solana_devnet")
     transaction = create_two_signer_transaction(keypair.pubkey(), Keypair().pubkey())
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(transaction)
+        await signer.sign_and_send_transaction(transaction)
     assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
     assert not respx.calls
 

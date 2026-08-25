@@ -203,7 +203,8 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 // rebuilt transaction derives a different id and is broadcast again.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if s.chain != "" {
-		return s.signTransactionNative(ctx, tx)
+		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
+			"Fordefi native mode broadcasts through its own API; call SignAndSendTransaction instead")
 	}
 	messageBytes, err := tx.Message.MarshalBinary()
 	if err != nil {
@@ -217,6 +218,22 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, err
 	}
 	return core.AttachSignature(tx, s.pubkey, signature)
+}
+
+// SignAndSendTransaction signs tx and lets Fordefi broadcast it, which only
+// native mode does. Fordefi replaces the blockhash (and optionally fees) and
+// signs its own bytes, so tx is left untouched and the returned signature
+// identifies the transaction that landed.
+func (s *Signer) SignAndSendTransaction(ctx context.Context, tx *solana.Transaction) (solana.Signature, error) {
+	if s.chain == "" {
+		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
+			"Fordefi black-box mode only signs; sign the transaction and broadcast the result")
+	}
+	signed, err := s.signTransactionNative(ctx, tx)
+	if err != nil {
+		return solana.Signature{}, err
+	}
+	return signed.Signature, nil
 }
 
 // IsAvailable reports whether the vault is reachable with the bearer token and

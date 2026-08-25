@@ -199,14 +199,18 @@ they can sign arbitrary bytes. Managed-broadcast signers implement
 `core.TransactionBroadcaster`, whose `BroadcastsTransactions()` reports the first
 at runtime; the second is fixed per backend:
 
-| Backend | `BroadcastsTransactions()` | `SignTransaction` | `SignMessage` |
-|---------|----------------------------|-------------------|---------------|
-| memory, vault, privy, turnkey, awskms, fireblocks, gcpkms, dfns, para, openfort | not implemented | yes | yes |
-| cdp | not implemented | yes | UTF-8 payloads only, otherwise `CodeSerializationError` |
-| crossmint | `true` | provider broadcasts | `CodeSigningFailed` |
-| utila | not implemented | yes | `CodeSigningFailed` |
-| fordefi (black-box mode) | `false` | yes | yes |
-| fordefi (native mode) | `true` | provider broadcasts | yes |
+| Backend | `BroadcastsTransactions()` | `SignTransaction` | `SignAndSendTransaction` | `SignMessage` |
+|---------|----------------------------|-------------------|--------------------------|---------------|
+| memory, vault, privy, turnkey, awskms, fireblocks, gcpkms, dfns, para, openfort | not implemented | yes | not implemented | yes |
+| cdp | not implemented | yes | not implemented | UTF-8 payloads only, otherwise `CodeSerializationError` |
+| crossmint | `true` | yes | yes | `CodeSigningFailed` |
+| utila | not implemented | yes | not implemented | `CodeSigningFailed` |
+| fordefi (black-box mode) | `false` | yes | `CodeSigningFailed` | yes |
+| fordefi (native mode) | `true` | `CodeSigningFailed` | yes | yes |
+
+Crossmint supports both: it decides per request whether to rewrite and broadcast
+the transaction or to sign the caller's exact bytes, and `SignTransaction`
+exposes that distinction through an empty `EncodedTransaction`.
 
 ### Sign and Send
 

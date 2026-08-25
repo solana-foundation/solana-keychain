@@ -41,6 +41,9 @@ class StubSigner(SolanaSigner):
             is_complete=self._is_complete,
         )
 
+    async def sign_and_send_transaction(self, transaction: VersionedTransaction) -> Signature:
+        return self._signature
+
     async def sign_message(self, message: bytes) -> Signature:
         return self._signature
 

@@ -43,6 +43,11 @@ type broadcastingSigner struct {
 
 func (b *broadcastingSigner) BroadcastsTransactions() bool { return b.broadcasts }
 
+func (b *broadcastingSigner) SignAndSendTransaction(context.Context, *solana.Transaction) (solana.Signature, error) {
+	b.calls.Add(1)
+	return solana.Signature{}, nil
+}
+
 func (b *broadcastingSigner) SignTransaction(context.Context, *solana.Transaction) (SignedTransaction, error) {
 	b.calls.Add(1)
 	return SignedTransaction{}, nil

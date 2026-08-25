@@ -50,15 +50,15 @@ type SendTransactionFn func(ctx context.Context, encodedTransaction string) (sol
 func SignAndSendTransaction(ctx context.Context, s Signer, tx *solana.Transaction, send SendTransactionFn) (solana.Signature, error) {
 	broadcaster, ok := s.(TransactionBroadcaster)
 	if ok && broadcaster.BroadcastsTransactions() {
-		signed, err := s.SignTransaction(ctx, tx)
+		sig, err := broadcaster.SignAndSendTransaction(ctx, tx)
 		if err != nil {
 			return solana.Signature{}, err
 		}
-		if signed.Signature == (solana.Signature{}) {
+		if sig == (solana.Signature{}) {
 			return solana.Signature{}, NewSignerError(CodeSigningFailed,
 				"signer returned no signature for the transaction it broadcast")
 		}
-		return signed.Signature, nil
+		return sig, nil
 	}
 
 	if send == nil {

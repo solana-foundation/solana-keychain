@@ -630,18 +630,12 @@ func TestSignTransactionNativeSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.SignTransaction(context.Background(), tx)
+	res, err := s.SignAndSendTransaction(context.Background(), tx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.EncodedTransaction != "" {
-		t.Error("native mode auto-broadcasts; EncodedTransaction must be empty")
-	}
-	if res.Signature != signature {
-		t.Errorf("signature = %s, want %s", res.Signature, signature)
-	}
-	if !res.IsComplete() {
-		t.Error("returned transaction is fully signed, want Complete")
+	if res != signature {
+		t.Errorf("signature = %s, want %s", res, signature)
 	}
 	for _, sig := range tx.Signatures {
 		if !sig.IsZero() {
@@ -661,7 +655,7 @@ func TestSignTransactionNativeWaitsForCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	if err == nil {
 		t.Fatal("expected polling timeout when a pushable transaction never completes")
 	}
@@ -696,7 +690,7 @@ func TestSignTransactionNativeSubmitServerErrorIsUnconfirmedWithoutID(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	if err == nil {
 		t.Fatal("expected a failed submit to be reported")
 	}
@@ -715,7 +709,7 @@ func TestSignTransactionNativeSubmitWithoutIDIsUnconfirmed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	if err == nil {
 		t.Fatal("expected an accepted submit without an id to be reported")
 	}
@@ -734,7 +728,7 @@ func TestSignTransactionNativeSubmitRejectionStaysPlainFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	if code, _ := core.CodeOf(err); code != core.CodeRemoteAPIError {
 		t.Errorf("got %s, want REMOTE_API_ERROR", code)
 	}
@@ -790,7 +784,7 @@ func TestSignTransactionNativeRejectsMultiSigner(t *testing.T) {
 		t.Fatal(err)
 	}
 	tx.Message.Header.NumRequiredSignatures = 2
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	if err == nil {
 		t.Fatal("expected multi-signer transaction to be rejected")
 	}
@@ -811,7 +805,7 @@ func TestSignTransactionNativeMissingRawTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	if err == nil {
 		t.Fatal("expected error when raw_transaction is missing")
 	}
@@ -836,7 +830,7 @@ func TestSignTransactionNativeUndecodableRawTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	if err == nil {
 		t.Fatal("expected error for an undecodable wire transaction")
 	}

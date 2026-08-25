@@ -29,13 +29,13 @@ async def sign_and_send_transaction(
     returns no signature or the signed transaction is still missing signatures.
     """
     if signer.broadcasts_transactions:
-        signed = await signer.sign_transaction(transaction)
-        if signed.signature == Signature.default():
+        signature = await signer.sign_and_send_transaction(transaction)
+        if signature == Signature.default():
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED,
                 "signer returned no signature for the transaction it broadcast",
             )
-        return signed.signature
+        return signature
 
     if send_transaction is None:
         raise SignerError(

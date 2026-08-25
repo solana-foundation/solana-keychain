@@ -58,6 +58,22 @@ class SolanaSigner(ABC):
 
         Accepts legacy, v0 and v1."""
 
+    async def sign_and_send_transaction(self, transaction: VersionedTransaction) -> Signature:
+        """Sign ``transaction`` and broadcast it through the provider.
+
+        Implemented only by signers whose provider executes the transaction
+        server-side; ``broadcasts_transactions`` reports which shape a signer has
+        in its current configuration. The provider may rewrite the transaction, in
+        which case ``transaction`` is left untouched and the returned signature
+        identifies the transaction that actually landed.
+
+        Raises ``SIGNING_FAILED`` when this signer cannot broadcast.
+        """
+        raise SignerError(
+            SignerErrorCode.SIGNING_FAILED,
+            "this signer cannot broadcast transactions; sign it and broadcast the result",
+        )
+
     @abstractmethod
     async def sign_message(self, message: bytes) -> Signature:
         """Sign arbitrary message bytes."""

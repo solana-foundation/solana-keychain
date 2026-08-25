@@ -141,14 +141,18 @@ Backends differ in whether the provider broadcasts the transaction and in whethe
 they can sign arbitrary bytes. `broadcasts_transactions` reports the first at
 runtime; the second is fixed per backend:
 
-| Backend | `broadcasts_transactions` | `sign_transaction` | `sign_message` |
-|---------|---------------------------|--------------------|----------------|
-| memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | False | yes | yes |
-| cdp | False | yes | UTF-8 payloads only, otherwise `SERIALIZATION_ERROR` |
-| crossmint | True | provider broadcasts | `SIGNING_FAILED` |
-| utila | False | yes | `SIGNING_FAILED` |
-| fordefi (black-box mode) | False | yes | yes |
-| fordefi (native mode) | True | provider broadcasts | yes |
+| Backend | `broadcasts_transactions` | `sign_transaction` | `sign_and_send_transaction` | `sign_message` |
+|---------|---------------------------|--------------------|-----------------------------|----------------|
+| memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | False | yes | `SIGNING_FAILED` | yes |
+| cdp | False | yes | `SIGNING_FAILED` | UTF-8 payloads only, otherwise `SERIALIZATION_ERROR` |
+| crossmint | True | yes | yes | `SIGNING_FAILED` |
+| utila | False | yes | `SIGNING_FAILED` | `SIGNING_FAILED` |
+| fordefi (black-box mode) | False | yes | `SIGNING_FAILED` | yes |
+| fordefi (native mode) | True | `SIGNING_FAILED` | yes | yes |
+
+Crossmint supports both: it decides per request whether to rewrite and broadcast
+the transaction or to sign the caller's exact bytes, and `sign_transaction`
+exposes that distinction through an empty ``encoded_transaction``.
 
 ### Sign and Send
 

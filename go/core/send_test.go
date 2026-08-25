@@ -30,6 +30,14 @@ func (s *sendingSigner) IsAvailable(context.Context) bool { return true }
 
 func (s *sendingSigner) BroadcastsTransactions() bool { return s.broadcasts }
 
+func (s *sendingSigner) SignAndSendTransaction(ctx context.Context, tx *solana.Transaction) (solana.Signature, error) {
+	signed, err := s.SignTransaction(ctx, tx)
+	if err != nil {
+		return solana.Signature{}, err
+	}
+	return signed.Signature, nil
+}
+
 func completeSignature(first byte) SignedTransaction {
 	var sig solana.Signature
 	sig[0] = first

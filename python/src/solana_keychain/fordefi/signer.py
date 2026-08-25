@@ -111,7 +111,8 @@ class FordefiSigner(SolanaSigner):
 
     Black-box mode (default) signs the caller's exact message bytes and the
     caller broadcasts. Native mode (``chain`` set) lets Fordefi replace the
-    blockhash and fees, sign, and auto-broadcast; see ``sign_transaction``.
+    blockhash and fees, sign, and auto-broadcast; see
+    ``sign_and_send_transaction``.
     """
 
     def __init__(self, config: FordefiSignerConfig) -> None:
@@ -337,27 +338,15 @@ class FordefiSigner(SolanaSigner):
         ``transaction`` in place, and returns the encoded transaction for the
         caller to broadcast.
 
-        Native mode (``chain`` set) submits the message for signing with
-        ``push_mode: auto``: Fordefi replaces the blockhash (and optionally
-        fees), signs, and broadcasts the transaction itself. The returned
-        ``encoded_transaction`` is therefore empty and ``transaction`` is left
-        unmodified — the returned signature identifies the on-chain
-        transaction. Only legacy transactions whose sole required signer is
-        the configured vault are supported.
-
-        Native mode is not retry-safe: any failure after Fordefi accepts the
-        submission raises ``BROADCAST_UNCONFIRMED`` carrying
-        ``provider_transaction_id``; check that transaction with Fordefi
-        before retrying. A submission that fails without a usable response
-        raises ``BROADCAST_UNCONFIRMED`` with no ``provider_transaction_id``.
-
-        Each native create carries an ``x-idempotence-id`` derived from the
-        message bytes, so replaying these exact bytes cannot create a second
-        transaction; a rebuilt transaction derives a different id and is
-        broadcast again.
+        Native mode (``chain`` set) broadcasts through Fordefi, so it raises
+        ``SIGNING_FAILED`` here; call ``sign_and_send_transaction`` instead.
         """
         if self._chain is not None:
-            return await self._sign_transaction_native(transaction)
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi native mode broadcasts through its own API; call "
+                "sign_and_send_transaction instead",
+            )
         message_data = signed_message_bytes(transaction.message)
         signature = await self._sign_black_box(message_data)
         verify_returned_signature(signature, self._public_key, message_data)
@@ -365,6 +354,35 @@ class FordefiSigner(SolanaSigner):
         return classify_signed_transaction(
             transaction, serialize_transaction(transaction), signature
         )
+
+    async def sign_and_send_transaction(self, transaction: VersionedTransaction) -> Signature:
+        """Sign ``transaction`` and let Fordefi broadcast it (native mode only).
+
+        Submits the message for signing with ``push_mode: auto``: Fordefi
+        replaces the blockhash (and optionally fees), signs, and broadcasts the
+        transaction itself, so ``transaction`` is left unmodified and the
+        returned signature identifies the on-chain transaction. Only legacy
+        transactions whose sole required signer is the configured vault are
+        supported.
+
+        Not retry-safe: any failure after Fordefi accepts the submission raises
+        ``BROADCAST_UNCONFIRMED`` carrying ``provider_transaction_id``; check
+        that transaction with Fordefi before retrying. A submission that fails
+        without a usable response raises ``BROADCAST_UNCONFIRMED`` with no
+        ``provider_transaction_id``.
+
+        Each create carries an ``x-idempotence-id`` derived from the message
+        bytes, so replaying these exact bytes cannot create a second
+        transaction; a rebuilt transaction derives a different id and is
+        broadcast again.
+        """
+        if self._chain is None:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi black-box mode only signs; sign the transaction and broadcast the result",
+            )
+        signed = await self._sign_transaction_native(transaction)
+        return signed.signature
 
     def _require_sole_required_signer(self, transaction: VersionedTransaction) -> None:
         account_keys = transaction.message.account_keys
