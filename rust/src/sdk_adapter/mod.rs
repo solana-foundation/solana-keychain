@@ -35,9 +35,8 @@ compile_error!("Must enable one of sdk-v2, sdk-v3, or sdk-v4 feature.");
 mod tests {
     use super::COMPUTE_BUDGET_PROGRAM_ID;
 
-    /// Pins the locally-declared Compute Budget ID to its canonical bytes, so a
-    /// typo in the base58 literal cannot silently disable fee-instruction
-    /// recognition on any SDK version.
+    /// A typo in the base58 literal would silently stop fee instructions being
+    /// recognized, so pin the decoded bytes.
     #[test]
     fn compute_budget_program_id_matches_the_canonical_bytes() {
         assert_eq!(

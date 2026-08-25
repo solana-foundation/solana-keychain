@@ -13,9 +13,8 @@ import type { KeychainSignerConfig } from './types.js';
 
 /**
  * Distributes over unions, unlike a bare `Omit`, which would merge the members
- * into one object type and optional-ize the properties that discriminate them.
- * Fordefi relies on this: its auto and manual configs differ only by `chain` and
- * `pushMode`, which a merged `Omit` would widen until neither branch matched.
+ * and optional-ize the properties that discriminate them — widening Fordefi's
+ * `chain`/`pushMode` until neither the auto nor the manual branch matched.
  */
 type StripBackend<T> = T extends { backend: string } ? Omit<T, 'backend'> : never;
 

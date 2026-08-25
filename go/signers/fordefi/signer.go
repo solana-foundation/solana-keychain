@@ -224,16 +224,13 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 // transaction id.
 //
 // Native manual mode submits an unsigned message with push_mode "manual".
-// Fordefi may replace its recent blockhash and, unless it already sets a
-// compute-unit price, manage SetComputeUnitPrice/SetComputeUnitLimit. It signs
-// but does not broadcast. After validating that all content outside the
-// documented blockhash and fee mutation set is unchanged, SignTransaction
-// replaces tx and returns its non-empty base64 encoding. Fordefi must be the
-// fee payer and manual signing must happen before any other signer. A
-// sole-signer result is Complete; a multisigner result is Partial so downstream
-// signers can update tx before the caller broadcasts it.
-// Fordefi does not provide the replacement blockhash's lastValidBlockHeight, so
-// manual results should be broadcast promptly.
+// Fordefi may replace the blockhash and, unless the caller set a compute-unit
+// price, manage SetComputeUnitPrice/SetComputeUnitLimit; it signs but does not
+// broadcast. Once every other field is validated unchanged, SignTransaction
+// replaces tx and returns its base64 encoding. Fordefi must be the fee payer
+// and must sign before any other signer. A sole-signer result is Complete, a
+// multisigner result Partial. Fordefi does not return the replacement
+// blockhash's lastValidBlockHeight, so broadcast promptly.
 //
 // Native creates carry deterministic x-idempotence-id values. Auto mode retains
 // its message-only key; manual mode namespaces its key by mode, chain, and vault.
@@ -420,8 +417,7 @@ func (s *Signer) finishNativeBroadcast(ctx context.Context, txID string) (core.S
 }
 
 // signTransactionNativeManual asks Fordefi to modify and sign tx without
-// broadcasting. The caller's transaction is replaced only after the returned
-// wire transaction has passed every validation step.
+// broadcasting. tx is replaced only once the result passes every check.
 func (s *Signer) signTransactionNativeManual(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if err := s.validateNativeManualInput(tx); err != nil {
 		return core.SignedTransaction{}, err
@@ -472,7 +468,7 @@ func (s *Signer) validateNativeManualInput(tx *solana.Transaction) error {
 }
 
 // finishNativeManual validates Fordefi's candidate replacement transaction,
-// then atomically transfers it to the caller and returns its canonical wire form.
+// then transfers it to the caller and returns its canonical wire form.
 func (s *Signer) finishNativeManual(ctx context.Context, txID string, original *solana.Transaction) (core.SignedTransaction, error) {
 	result, err := s.pollForResult(ctx, txID, false)
 	if err != nil {

@@ -304,8 +304,8 @@ func TestValidateManualFeeCeiling(t *testing.T) {
 	})
 
 	t.Run("a caller-authored price is never subject to the ceiling", func(t *testing.T) {
-		// The caller set the price themselves, so the message is compared
-		// byte-for-byte and Fordefi has no discretion left to bound.
+		// The caller set the price, so the message is compared byte-for-byte
+		// and Fordefi has no discretion to bound.
 		original := cloneManualTestTransaction(base)
 		prependManualComputeBudgetInstruction(original, setComputeUnitLimitDiscriminator, maxComputeUnitLimit)
 		prependManualComputeBudgetInstruction(original, setComputeUnitPriceDiscriminator, math.MaxUint64)

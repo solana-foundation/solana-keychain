@@ -207,8 +207,7 @@ export function isSolanaSendingSigner<TAddress extends string>(value: {
 }
 
 /**
- * Checks if the given value is a SolanaModifyingSigner (a signer that rewrites
- * the transaction before signing it). Such signers expose
+ * Checks if the given value is a SolanaModifyingSigner. Such signers expose
  * `modifyAndSignTransactions` and, by design, no `signTransactions`, so they are
  * never also a {@link SolanaSigner}.
  * @param value - The value to check

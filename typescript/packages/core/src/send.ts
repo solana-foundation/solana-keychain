@@ -98,8 +98,8 @@ export async function signAndSendTransaction<TAddress extends string>(
     }
 
     if (isSolanaModifyingSigner(signer)) {
-        // The signer rewrote the message, so only what it returned matches the
-        // signature; the caller's original transaction is now stale.
+        // Only what the signer returned matches the signature; `transaction` is
+        // now stale.
         const [modifiedTransaction] = await signer.modifyAndSignTransactions([transaction], { abortSignal });
         if (!modifiedTransaction) {
             throwSignerError(SignerErrorCode.SIGNING_FAILED, {
@@ -126,10 +126,7 @@ export async function signAndSendTransaction<TAddress extends string>(
     return await broadcast(signer.address, signedTransaction, sendTransaction, abortSignal);
 }
 
-/**
- * Rejects a transaction that is still missing signatures, broadcasts the rest,
- * and identifies it by the fee payer's signature when the sender returns none.
- */
+/** Falls back to the fee payer's signature when the sender returns none. */
 async function broadcast(
     address: Address,
     transaction: SignableTransaction,

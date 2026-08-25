@@ -49,7 +49,7 @@ async function createClientSigner(config: KeychainKitPluginConfig) {
     }
     const signer = await createKeychainSigner(config);
     // A modifying signer is a valid payer/identity; anything else must be a
-    // partial signer, which also rejects a sending signer slipping through.
+    // partial signer, which also catches a sending signer slipping through.
     if (!isSolanaModifyingSigner(signer)) {
         assertIsSolanaSigner(signer);
     }

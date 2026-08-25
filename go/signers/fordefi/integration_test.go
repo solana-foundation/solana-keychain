@@ -35,10 +35,9 @@ func integrationSigner(t *testing.T) *Signer {
 	return s
 }
 
-// integrationNativeManualSigner builds a manual native signer when the regular
-// Solana Fordefi vault credentials are present. Unlike the black-box integration
-// helper, this is optional so developers with only black-box credentials can
-// still run the integration suite.
+// integrationNativeManualSigner builds a manual native signer when the Solana
+// vault credentials are present. Optional, unlike the black-box helper, so a
+// black-box-only setup can still run the suite.
 func integrationNativeManualSigner(t *testing.T) *Signer {
 	t.Helper()
 	required := []string{

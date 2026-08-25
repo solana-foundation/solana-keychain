@@ -20,10 +20,9 @@ const (
 	DefaultPollInterval = 2 * time.Second
 	// DefaultMaxPollAttempts bounds how many status polls run before timing out.
 	DefaultMaxPollAttempts = 50
-	// DefaultMaxPriorityFeeLamports bounds the priority fee Fordefi may
-	// introduce on its own initiative during native manual signing. It applies
-	// whenever the caller has not stated a bound of their own, so a compromised
-	// or malfunctioning API response cannot drain the fee payer. Raise it via
+	// DefaultMaxPriorityFeeLamports is the default ceiling on a priority fee
+	// Fordefi introduces itself during native manual signing, so a compromised
+	// or malfunctioning response cannot drain the fee payer. Override via
 	// Config.MaxPriorityFeeLamports.
 	DefaultMaxPriorityFeeLamports uint64 = 100_000_000
 )
@@ -126,16 +125,11 @@ type Config struct {
 	// Fee is the native-mode fee configuration. Requires Chain.
 	Fee *Fee
 
-	// MaxPriorityFeeLamports caps the priority fee Fordefi may introduce on its
-	// own initiative during native manual signing, in lamports. Nil applies
-	// DefaultMaxPriorityFeeLamports unless Fee states a custom priority_fee, in
-	// which case that bound governs. Set this to raise or lower the ceiling;
-	// math.MaxUint64 lifts it past any payable amount, being many times the
-	// total SOL supply.
-	//
-	// The ceiling never applies to a compute-unit price the caller placed in the
-	// transaction themselves, because those requests are validated byte-for-byte
-	// and carry no Fordefi discretion.
+	// MaxPriorityFeeLamports is the ceiling, in lamports, on a priority fee
+	// Fordefi introduces itself during native manual signing. Nil applies
+	// DefaultMaxPriorityFeeLamports, unless Fee sets a custom priority_fee,
+	// which governs instead. Never applies to a compute-unit price the caller
+	// set, since those messages are compared byte-for-byte.
 	MaxPriorityFeeLamports *uint64
 
 	// HTTPClientConfig holds optional HTTP timeouts; the zero value uses the

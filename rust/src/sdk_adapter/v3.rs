@@ -40,11 +40,8 @@ pub fn keypair_sign_message(keypair: &Keypair, message: &[u8]) -> Signature {
     keypair.sign_message(message)
 }
 
-/// The Compute Budget program ID, `ComputeBudget111111111111111111111111111111`.
-///
-/// Declared locally rather than pulled from `solana-compute-budget-interface`:
-/// the ID is fixed and consensus-critical, and depending on that crate would add
-/// it to every consumer's tree, including those enabling only `memory`.
+/// Declared locally rather than pulled from `solana-compute-budget-interface`,
+/// which would add that crate to every consumer's tree for one fixed ID.
 #[allow(dead_code)]
 pub const COMPUTE_BUDGET_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("ComputeBudget111111111111111111111111111111");

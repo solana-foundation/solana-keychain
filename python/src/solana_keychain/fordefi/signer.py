@@ -53,12 +53,9 @@ DEFAULT_POLL_INTERVAL_MS = 2000
 DEFAULT_MAX_POLL_ATTEMPTS = 50
 
 DEFAULT_MAX_PRIORITY_FEE_LAMPORTS = 100_000_000
-"""Default bound on the priority fee Fordefi may introduce on its own initiative
-during native manual signing, in lamports.
-
-It applies whenever the caller has not stated a bound of their own, so a
-compromised or malfunctioning API response cannot drain the fee payer. Raise it
-via ``FordefiSignerConfig.max_priority_fee_lamports``.
+"""Default ceiling, in lamports, on a priority fee Fordefi introduces itself
+during native manual signing, so a compromised or malfunctioning response cannot
+drain the fee payer. Override via ``FordefiSignerConfig.max_priority_fee_lamports``.
 """
 SUPPORTED_CHAINS = ("solana_devnet", "solana_mainnet")
 SOLANA_PACKET_DATA_SIZE = 1232
@@ -224,11 +221,7 @@ def _normalize_manual_fee_message(
 
 
 def _effective_priority_fee_lamports(fee: _ManualFeeInstructions) -> int:
-    """Convert a compute-unit price into the lamports it can actually cost.
-
-    Rounds up, and charges a message with no explicit limit at the maximum the
-    runtime allows.
-    """
+    """Round up, and charge an absent limit at the runtime maximum."""
     price = fee.price or 0
     limit = fee.limit or _MAX_COMPUTE_UNIT_LIMIT
     return (price * limit + _MICRO_LAMPORTS_PER_LAMPORT - 1) // _MICRO_LAMPORTS_PER_LAMPORT
@@ -691,11 +684,7 @@ class FordefiSigner(SolanaSigner):
                 raise ValueError("returned priority fee exceeds the configured custom priority_fee")
 
     def _manual_priority_fee_ceiling(self) -> int | None:
-        """Absolute lamport bound for a Fordefi-introduced priority fee.
-
-        Returns ``None`` when the caller already stated their own total bound
-        through a custom ``priority_fee``.
-        """
+        """Return ``None`` when a custom ``priority_fee`` already bounds the total."""
         if self._max_priority_fee_lamports is not None:
             return self._max_priority_fee_lamports
         if (
@@ -707,11 +696,7 @@ class FordefiSigner(SolanaSigner):
         return DEFAULT_MAX_PRIORITY_FEE_LAMPORTS
 
     def _validate_manual_fee_ceiling(self, fee: _ManualFeeInstructions) -> None:
-        """Bound a priority fee Fordefi introduced on its own initiative.
-
-        Keeps a compromised or malfunctioning response from draining the fee
-        payer even when no custom fee bound is configured.
-        """
+        """Enforce ``DEFAULT_MAX_PRIORITY_FEE_LAMPORTS`` or the configured override."""
         if fee.price is None:
             return
         ceiling = self._manual_priority_fee_ceiling()
@@ -761,8 +746,7 @@ class FordefiSigner(SolanaSigner):
             return
 
         normalized_returned, returned_fee = _normalize_manual_fee_message(returned.message)
-        # The caller set no compute-unit price, so any price here is Fordefi's own
-        # and is bounded by the absolute ceiling as well as any custom fee config.
+        # No caller price, so any price here is Fordefi's own.
         self._validate_manual_fee_ceiling(returned_fee)
         self._validate_manual_custom_fee(returned_fee)
         if not _messages_match_with_blockhash_policy(

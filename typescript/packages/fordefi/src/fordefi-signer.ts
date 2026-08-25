@@ -84,19 +84,15 @@ const SET_COMPUTE_UNIT_PRICE = 3;
 const MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
 const MICRO_LAMPORTS_PER_LAMPORT = 1_000_000n;
 /**
- * Default bound on the priority fee Fordefi may introduce on its own initiative
- * during native manual signing, in lamports.
- *
- * It applies whenever the caller has not stated a bound of their own, so a
- * compromised or malfunctioning API response cannot drain the fee payer. Raise
- * it via {@link FordefiSignerConfig.maxPriorityFeeLamports}.
+ * Default ceiling, in lamports, on a priority fee Fordefi introduces itself
+ * during native manual signing, so a compromised or malfunctioning response
+ * cannot drain the fee payer. Override via
+ * {@link FordefiSignerConfig.maxPriorityFeeLamports}.
  */
 export const DEFAULT_MAX_PRIORITY_FEE_LAMPORTS = 100_000_000n;
 
-/**
- * Native Solana push modes this signer can honor. Validated at runtime because
- * an unrecognized value would otherwise fall through to auto and broadcast.
- */
+// Validated at runtime: an unrecognized value would fall through to auto and
+// broadcast.
 const PUSH_MODES = new Set(['auto', 'manual']);
 /** Terminal success states for pushable transactions (solana_transaction with push_mode auto). */
 const PUSHABLE_SUCCESS_STATES = new Set(['completed']);
@@ -230,32 +226,21 @@ function normalizeManualFeeMessage(message: LegacyOrV0CompiledMessage): {
     return { fees, message: normalized };
 }
 
-/**
- * Converts a compute-unit price into the lamports it can actually cost, rounding
- * up. A message with no explicit limit is charged at the runtime maximum.
- */
+/** Rounds up, and charges an absent limit at the runtime maximum. */
 function effectivePriorityFeeLamports(fee: ManualFeeInstructions): bigint {
     const price = fee.price ?? 0n;
     const limit = BigInt(fee.limit ?? MAX_COMPUTE_UNIT_LIMIT);
     return (price * limit + MICRO_LAMPORTS_PER_LAMPORT - 1n) / MICRO_LAMPORTS_PER_LAMPORT;
 }
 
-/**
- * Absolute lamport bound for a Fordefi-introduced priority fee, or `undefined`
- * when the caller already stated their own total bound via a custom
- * `priority_fee`.
- */
+/** `undefined` when a custom `priority_fee` already bounds the total. */
 function manualPriorityFeeCeiling(policy: ManualFeePolicy): bigint | undefined {
     if (policy.maxPriorityFeeLamports !== undefined) return policy.maxPriorityFeeLamports;
     if (policy.fee?.type === 'custom' && policy.fee.priority_fee !== undefined) return undefined;
     return DEFAULT_MAX_PRIORITY_FEE_LAMPORTS;
 }
 
-/**
- * Bounds a priority fee Fordefi introduced on its own initiative, so a
- * compromised or malfunctioning response cannot drain the fee payer even when no
- * custom fee bound is configured.
- */
+/** Enforces {@link DEFAULT_MAX_PRIORITY_FEE_LAMPORTS} or the configured override. */
 function validateManualFeeCeiling(policy: ManualFeePolicy, returned: ManualFeeInstructions): void {
     if (returned.price === undefined) return;
     const ceiling = manualPriorityFeeCeiling(policy);
@@ -375,16 +360,11 @@ export interface FordefiSignerConfig {
     /** Positive integer max polling attempts before timeout (default: 50) */
     maxPollAttempts?: number;
     /**
-     * Bound, in lamports, on the priority fee Fordefi may introduce on its own
-     * initiative during native manual signing.
-     *
-     * Omitted applies {@link DEFAULT_MAX_PRIORITY_FEE_LAMPORTS} unless `fee`
-     * states a custom `priority_fee`, in which case that bound governs. Set this
-     * to raise or lower the ceiling.
-     *
-     * The ceiling never applies to a compute-unit price the caller placed in the
-     * transaction themselves, because those requests are validated byte-for-byte
-     * and carry no Fordefi discretion.
+     * Ceiling, in lamports, on a priority fee Fordefi introduces itself during
+     * native manual signing. Omitted applies
+     * {@link DEFAULT_MAX_PRIORITY_FEE_LAMPORTS}, unless `fee` sets a custom
+     * `priority_fee`, which governs instead. Never applies to a compute-unit
+     * price the caller set, since those messages are compared byte-for-byte.
      */
     maxPriorityFeeLamports?: bigint | number;
     /** Non-negative integer polling interval in ms (default: 2000) */
@@ -415,13 +395,7 @@ export interface FordefiSignerConfig {
     vaultId: string;
 }
 
-/**
- * Configuration for Fordefi native signing without managed broadcasting.
- *
- * This is a separate exported config so the direct Fordefi package can expose
- * manual mode without making the umbrella `@solana/keychain` factory claim it
- * returns a sending signer for this new runtime shape.
- */
+/** Configuration for Fordefi native signing without managed broadcasting. */
 export type FordefiManualSignerConfig = Omit<FordefiSignerConfig, 'chain' | 'pushMode'> & {
     chain: SolanaChainUniqueId;
     pushMode: 'manual';
@@ -454,10 +428,9 @@ export interface FordefiNativeSigner<TAddress extends string = string>
 /**
  * Fordefi signer shape returned for native Solana `push_mode: 'manual'`.
  *
- * Current requests are unsigned, so Fordefi may replace the recent blockhash
- * and manage narrowly scoped priority-fee instructions. It returns the signed
- * transaction without broadcasting it; the caller may apply any remaining
- * partial signatures and owns submission to the network.
+ * Requests are unsigned, so Fordefi may replace the recent blockhash and manage
+ * priority-fee instructions. It signs without broadcasting; the caller applies
+ * any remaining signatures and owns submission.
  */
 export interface FordefiNativeManualSigner<TAddress extends string = string>
     extends SolanaModifyingSigner<TAddress>, MessagePartialSigner<TAddress> {}
@@ -476,10 +449,8 @@ export async function createFordefiSigner<TAddress extends string = string>(
 export async function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig & { chain?: undefined },
 ): Promise<SolanaSigner<TAddress>>;
-// The catch-all covers a config whose mode is not statically known — the shape
-// the `@solana/keychain` umbrella forwards — so its return spans all three
-// signer shapes. Callers with a concrete config hit one of the narrower
-// overloads above and get a single precise type.
+// Catch-all for a config whose mode is not statically known, as the
+// `@solana/keychain` umbrella forwards. Concrete configs hit an overload above.
 export async function createFordefiSigner<TAddress extends string = string>(
     config: AnyFordefiSignerConfig,
 ): Promise<FordefiNativeManualSigner<TAddress> | FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>>;
@@ -842,11 +813,9 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
     }
 
     /**
-     * Native manual path for Kit's TransactionModifyingSigner contract.
-     *
-     * Fordefi signs first so it may safely replace the lifetime token and
-     * manage priority-fee instructions. Remaining signers can sign the
-     * validated returned transaction before the caller broadcasts it.
+     * Native manual path for Kit's TransactionModifyingSigner contract. Fordefi
+     * signs first so it may replace the lifetime token and manage priority-fee
+     * instructions; remaining signers then sign the validated result.
      */
     private async modifyAndSignNativeTransactions(
         transactions: readonly (Transaction | (Transaction & TransactionWithLifetime))[],

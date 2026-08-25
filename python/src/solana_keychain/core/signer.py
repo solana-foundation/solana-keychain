@@ -33,12 +33,10 @@ class SignedTransaction:
     to sign.
 
     ``transaction`` is the authoritative signed transaction. Most backends sign the
-    caller's object in place and return that same object, but a provider may return
-    a rewritten message (Fordefi native manual mode replaces the recent blockhash and
-    the priority-fee instructions), which ``solders`` cannot apply in place. Always
-    continue from ``transaction`` rather than the object passed to
-    ``sign_transaction``; only the former is guaranteed to match
-    ``encoded_transaction`` and the bytes ``signature`` covers.
+    caller's object in place and return it, but a provider may return a rewritten
+    message that ``solders`` cannot apply in place. Always continue from
+    ``transaction``: only it is guaranteed to match ``encoded_transaction`` and the
+    bytes ``signature`` covers.
     """
 
     encoded_transaction: str

@@ -88,8 +88,8 @@ def classify_signed_transaction(
 ) -> SignedTransaction:
     """Build a SignedTransaction marked complete or partial.
 
-    ``transaction`` is carried through as the authoritative signed transaction,
-    so callers never have to know whether a backend signed in place.
+    Carries ``transaction`` through, so callers never have to know whether a
+    backend signed in place.
     """
     return SignedTransaction(
         encoded_transaction=encoded_transaction,

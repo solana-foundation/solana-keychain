@@ -43,12 +43,10 @@ const SET_COMPUTE_UNIT_LIMIT: u8 = 2;
 const SET_COMPUTE_UNIT_PRICE: u8 = 3;
 const MAX_COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
 const MICRO_LAMPORTS_PER_LAMPORT: u128 = 1_000_000;
-/// Default bound on the priority fee Fordefi may introduce on its own
-/// initiative during native manual signing, in lamports.
-///
-/// It applies whenever the caller has not stated a bound of their own, so a
-/// compromised or malfunctioning API response cannot drain the fee payer. Raise
-/// it via [`FordefiSignerConfig::max_priority_fee_lamports`].
+/// Default ceiling, in lamports, on a priority fee Fordefi introduces itself
+/// during native manual signing, so a compromised or malfunctioning response
+/// cannot drain the fee payer. Override via
+/// [`FordefiSignerConfig::max_priority_fee_lamports`].
 pub const DEFAULT_MAX_PRIORITY_FEE_LAMPORTS: u64 = 100_000_000;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -167,9 +165,7 @@ fn normalize_manual_fee_components(
     Ok(fees)
 }
 
-/// Converts a compute-unit price into the lamports it can actually cost,
-/// rounding up. A message with no explicit limit is charged at the maximum the
-/// runtime allows.
+/// Rounds up, and charges an absent limit at the runtime maximum.
 fn effective_manual_priority_fee_lamports(fee: ManualFeeInstructions) -> u128 {
     let price = fee.price.unwrap_or(0) as u128;
     let limit = fee.limit.unwrap_or(MAX_COMPUTE_UNIT_LIMIT) as u128;
@@ -267,17 +263,11 @@ pub struct FordefiSignerConfig {
     /// Who broadcasts a native Solana transaction. `None` is equivalent to
     /// [`FordefiPushMode::Auto`]; [`FordefiPushMode::Manual`] requires `chain`.
     pub push_mode: Option<FordefiPushMode>,
-    /// Bound, in lamports, on the priority fee Fordefi may introduce on its own
-    /// initiative during native manual signing.
-    ///
-    /// `None` applies [`DEFAULT_MAX_PRIORITY_FEE_LAMPORTS`] unless `fee` states a
-    /// custom `priority_fee`, in which case that bound governs. Set this to raise
-    /// or lower the ceiling; `u64::MAX` lifts it past any payable amount, being
-    /// many times the total SOL supply.
-    ///
-    /// The ceiling never applies to a compute-unit price the caller placed in the
-    /// transaction themselves, because those requests are validated byte-for-byte
-    /// and carry no Fordefi discretion.
+    /// Ceiling, in lamports, on a priority fee Fordefi introduces itself during
+    /// native manual signing. `None` applies
+    /// [`DEFAULT_MAX_PRIORITY_FEE_LAMPORTS`], unless `fee` sets a custom
+    /// `priority_fee`, which governs instead. Never applies to a compute-unit
+    /// price the caller set, since those messages are compared byte-for-byte.
     pub max_priority_fee_lamports: Option<u64>,
 }
 
@@ -832,8 +822,7 @@ impl FordefiSigner {
         }
         let serialized_transaction = STANDARD.encode(canonical_wire);
 
-        // Do not mutate caller-owned state until every remote response check and
-        // local serialization step has succeeded.
+        // Only now that every check has passed.
         *transaction = returned_tx;
         Ok((serialized_transaction, signature))
     }
@@ -879,8 +868,7 @@ impl FordefiSigner {
 
         let (mut normalized_returned, returned_fee) =
             normalize_manual_fee_message(&returned_tx.message)?;
-        // The caller set no compute-unit price, so any price here is Fordefi's
-        // own and is bounded by the absolute ceiling as well as any custom fee.
+        // No caller price, so any price here is Fordefi's own.
         self.validate_manual_fee_ceiling(returned_fee)?;
         self.validate_manual_custom_fee(returned_fee)?;
         normalized_returned.set_recent_blockhash(*normalized_original.recent_blockhash());
@@ -929,9 +917,7 @@ impl FordefiSigner {
         Ok(())
     }
 
-    /// Absolute lamport bound for a Fordefi-introduced priority fee, or `None`
-    /// when the caller already stated their own total bound through a custom
-    /// `priority_fee`.
+    /// `None` when a custom `priority_fee` already bounds the total.
     fn manual_priority_fee_ceiling(&self) -> Option<u128> {
         if let Some(configured) = self.max_priority_fee_lamports {
             return Some(configured as u128);
@@ -946,9 +932,7 @@ impl FordefiSigner {
         Some(DEFAULT_MAX_PRIORITY_FEE_LAMPORTS as u128)
     }
 
-    /// Bound a priority fee Fordefi introduced on its own initiative, so a
-    /// compromised or malfunctioning response cannot drain the fee payer even
-    /// when no custom fee bound is configured.
+    /// Enforces [`DEFAULT_MAX_PRIORITY_FEE_LAMPORTS`] or the configured override.
     fn validate_manual_fee_ceiling(
         &self,
         returned_fee: ManualFeeInstructions,
