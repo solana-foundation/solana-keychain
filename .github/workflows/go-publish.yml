@@ -1,0 +1,202 @@
+name: Publish Go Modules (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, without the leading v (e.g. 2.0.0)'
+        required: true
+        type: string
+      create-github-release:
+        description: 'Create GitHub release'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-go
+  cancel-in-progress: false
+
+env:
+  MODULE_PREFIX: github.com/solana-foundation/solana-keychain
+
+jobs:
+  guard-allowed-branch:
+    name: Guard allowed source branch for release publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard allowed source branch for release publish
+        run: |
+          case "${{ github.ref }}" in
+            refs/heads/main|refs/heads/hotfix/*) ;;
+            *)
+              echo "::error::Publish Go Modules must be run from main or hotfix/*. Current ref: ${{ github.ref }}"
+              exit 1
+              ;;
+          esac
+
+  publish:
+    name: Tag and release Go modules
+    runs-on: ubuntu-latest
+    needs: guard-allowed-branch
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go/core/go.mod
+          cache-dependency-path: go/**/go.sum
+
+      - name: Validate version
+        id: version
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version '$VERSION' is not semver (expected e.g. 2.0.0 or 2.0.0-rc.1)"
+            exit 1
+          fi
+          MAJOR="${VERSION%%.*}"
+          if [ "$MAJOR" -ge 2 ]; then
+            SUFFIX="/v$MAJOR"
+          else
+            SUFFIX=""
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$VERSION (expected module path suffix: '${SUFFIX:-none}')"
+
+      - name: Discover modules
+        id: modules
+        run: |
+          find go -name go.mod -not -path '*/.*' -printf '%h\n' | sort > modules.txt
+          echo "Found $(wc -l < modules.txt) modules:"
+          cat modules.txt
+
+      - name: Verify modules are publishable
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SUFFIX="${{ steps.version.outputs.suffix }}"
+          FAILED=0
+
+          while read -r DIR; do
+            JSON=$(go mod edit -json "$DIR/go.mod")
+
+            ACTUAL=$(jq -r '.Module.Path' <<<"$JSON")
+            EXPECTED="$MODULE_PREFIX/$DIR$SUFFIX"
+            if [ "$ACTUAL" != "$EXPECTED" ]; then
+              echo "::error file=$DIR/go.mod::module path is '$ACTUAL', expected '$EXPECTED' for v$VERSION"
+              FAILED=1
+            fi
+
+            # A replace is dropped when the module is consumed as a dependency, so
+            # every internal require must name the version this run tags.
+            jq -r --arg p "$MODULE_PREFIX/" \
+              '.Require // [] | .[] | select(.Path | startswith($p)) | "\(.Path) \(.Version)"' <<<"$JSON" \
+            | while read -r RPATH RVERSION; do
+                if [ "$RVERSION" != "v$VERSION" ]; then
+                  echo "::error file=$DIR/go.mod::requires $RPATH at $RVERSION, expected v$VERSION"
+                fi
+              done
+            if jq -e --arg p "$MODULE_PREFIX/" --arg v "v$VERSION" \
+              '.Require // [] | any((.Path | startswith($p)) and .Version != $v)' <<<"$JSON" >/dev/null; then
+              FAILED=1
+            fi
+          done < modules.txt
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::One or more modules are not publishable at v$VERSION"
+            exit 1
+          fi
+          echo "✓ all modules publishable at v$VERSION"
+
+      - name: Create tags
+        id: tags
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          TAGS=()
+          while read -r DIR; do
+            TAG="$DIR/v$VERSION"
+            if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+              TAGGED=$(git rev-parse "$TAG^{commit}")
+              if [ "$TAGGED" != "$GITHUB_SHA" ]; then
+                echo "::error::$TAG already points at $TAGGED but this run releases $GITHUB_SHA — bump the version instead of retagging"
+                exit 1
+              fi
+              echo "· tag $TAG already points at this commit"
+            else
+              git tag "$TAG"
+              echo "✓ created tag $TAG"
+            fi
+            TAGS+=("$TAG")
+          done < modules.txt
+
+          git push origin --atomic "${TAGS[@]}"
+          printf '%s\n' "${TAGS[@]}" > tags.txt
+          echo "primary=go/core/v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: ${{ inputs.create-github-release }}
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const version = '${{ steps.version.outputs.version }}';
+            const suffix = '${{ steps.version.outputs.suffix }}';
+            const tagName = '${{ steps.tags.outputs.primary }}';
+            const tags = fs.readFileSync('tags.txt', 'utf8').trim().split('\n');
+
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: tagName,
+              });
+              console.log(`· release ${tagName} already exists, skipping`);
+              return;
+            } catch (e) {
+              if (e.status !== 404) throw e;
+            }
+
+            const modules = tags
+              .map((t) => t.replace(new RegExp(`/v${version}$`), ''))
+              .map((d) => `- \`go get github.com/${context.repo.owner}/${context.repo.repo}/${d}${suffix}@v${version}\``)
+              .join('\n');
+
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tagName,
+              name: `solana-keychain (Go) v${version}`,
+              body: `Release of solana-keychain v${version} (Go)\n\n${tags.length} modules tagged:\n\n${modules}`,
+              draft: false,
+              prerelease: version.includes('-'),
+            });
+
+            console.log(`✓ created release ${tagName}`);
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## solana-keychain (Go) Published"
+            echo ""
+            echo "**Version**: \`v${{ steps.version.outputs.version }}\`"
+            echo ""
+            if [ -f tags.txt ]; then
+              echo "**Tags** ($(wc -l < tags.txt)):"
+              echo ""
+              sed 's/^/- `/;s/$/`/' tags.txt
+            else
+              echo "No tags were pushed."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
