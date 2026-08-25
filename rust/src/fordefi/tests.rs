@@ -63,6 +63,7 @@ fn base_test_config() -> FordefiSignerConfig {
         http_client_config: None,
         chain: None,
         fee: None,
+        push_mode: None,
         max_priority_fee_lamports: None,
     }
 }
@@ -436,20 +437,32 @@ fn test_fordefi_config_with_chain_valid() {
 
 #[test]
 fn test_fordefi_manual_config_requires_chain() {
-    let result = FordefiSigner::build_with_push_mode(base_test_config(), FordefiPushMode::Manual);
+    let result = FordefiSigner::build(FordefiSignerConfig {
+        push_mode: Some(FordefiPushMode::Manual),
+        ..base_test_config()
+    });
     assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
 }
 
 #[test]
 fn test_fordefi_manual_config_with_chain_valid() {
-    let result = FordefiSigner::build_with_push_mode(
-        FordefiSignerConfig {
-            chain: Some(SolanaChainUniqueId::SolanaDevnet),
-            ..base_test_config()
-        },
-        FordefiPushMode::Manual,
-    );
+    let result = FordefiSigner::build(FordefiSignerConfig {
+        chain: Some(SolanaChainUniqueId::SolanaDevnet),
+        push_mode: Some(FordefiPushMode::Manual),
+        ..base_test_config()
+    });
     assert_eq!(result.unwrap().push_mode, FordefiPushMode::Manual);
+}
+
+#[test]
+fn test_fordefi_config_defaults_to_auto_push_mode() {
+    let signer = FordefiSigner::build(FordefiSignerConfig {
+        chain: Some(SolanaChainUniqueId::SolanaDevnet),
+        ..base_test_config()
+    })
+    .expect("config is valid");
+    assert_eq!(signer.push_mode, FordefiPushMode::Auto);
+    assert!(signer.broadcasts_transactions());
 }
 
 #[test]

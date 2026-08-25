@@ -396,9 +396,10 @@ impl Signer {
     ///
     /// Fetches the vault during initialization and verifies that its authoritative
     /// Solana address matches `config.public_key`. Set `config.chain` to use native
-    /// auto mode (Fordefi modifies and broadcasts the transaction). Leave it
-    /// `None` for black-box mode (raw EdDSA signing, transaction assembled locally).
-    /// Use [`FordefiSigner::from_config_with_push_mode`] directly for native manual mode.
+    /// mode; leave it `None` for black-box mode (raw EdDSA signing, transaction
+    /// assembled locally). Within native mode, `config.push_mode` selects whether
+    /// Fordefi broadcasts the transaction ([`FordefiPushMode::Auto`], the default)
+    /// or returns it for the caller to send ([`FordefiPushMode::Manual`]).
     #[cfg(feature = "fordefi")]
     pub async fn from_fordefi(config: FordefiSignerConfig) -> Result<Self, SignerError> {
         Ok(Self::Fordefi(FordefiSigner::from_config(config).await?))

@@ -331,6 +331,8 @@ Fordefi supports three signing modes, which differ in whether Fordefi modifies o
 
 A priority fee Fordefi introduces on its own initiative is capped at `DEFAULT_MAX_PRIORITY_FEE_LAMPORTS` (0.1 SOL), so a compromised or malfunctioning response cannot drain the fee payer. Set `max_priority_fee_lamports` to raise or lower that ceiling; a custom `priority_fee` governs instead when set. The ceiling never applies to a compute-unit price the caller placed in the transaction themselves, since those requests are validated byte-for-byte.
 
+The two fee instructions are asymmetric by design. A compute-unit *price* you set yourself is protected: the whole message is then compared byte-for-byte, so Fordefi can only replace the blockhash. A compute-unit *limit* you set with no price is **not** preserved — Fordefi manages the limit in manual mode, and the returned limit is only bounded indirectly, through the lamport ceiling above. Set a compute-unit price alongside your limit if you need the limit held exactly.
+
 Construction is async because it fetches the Fordefi vault and verifies that its
 authoritative address matches the configured `public_key` before returning.
 
@@ -354,6 +356,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_client_config: None,
         chain: None,
         fee: None,
+        push_mode: None,
         max_priority_fee_lamports: None,
     })
     .await?;
@@ -389,6 +392,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fee: Some(FordefiSolanaFee::Priority {
             priority_level: FordefiPriorityLevel::Medium,
         }),
+        // None is equivalent to Some(FordefiPushMode::Auto).
+        push_mode: None,
         max_priority_fee_lamports: None,
     })
     .await?;
@@ -412,24 +417,22 @@ use solana_keychain::{
     SignTransactionResult, SolanaChainUniqueId, SolanaSigner,
 };
 
-let signer = FordefiSigner::from_config_with_push_mode(
-    FordefiSignerConfig {
-        access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
-        vault_id: std::env::var("FORDEFI_VAULT_ID")?,
-        private_key_pem: Some(pem),
-        request_signer: None,
-        public_key: std::env::var("FORDEFI_PUBLIC_KEY")?,
-        api_base_url: None,
-        poll_interval_ms: None,
-        max_poll_attempts: None,
-        http_client_config: None,
-        chain: Some(SolanaChainUniqueId::SolanaMainnet),
-        fee: None,
-        // Cap a Fordefi-introduced priority fee; None applies the 0.1 SOL default.
-        max_priority_fee_lamports: None,
-    },
-    FordefiPushMode::Manual,
-)
+let signer = FordefiSigner::from_config(FordefiSignerConfig {
+    access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
+    vault_id: std::env::var("FORDEFI_VAULT_ID")?,
+    private_key_pem: Some(pem),
+    request_signer: None,
+    public_key: std::env::var("FORDEFI_PUBLIC_KEY")?,
+    api_base_url: None,
+    poll_interval_ms: None,
+    max_poll_attempts: None,
+    http_client_config: None,
+    chain: Some(SolanaChainUniqueId::SolanaMainnet),
+    fee: None,
+    push_mode: Some(FordefiPushMode::Manual),
+    // Cap a Fordefi-introduced priority fee; None applies the 0.1 SOL default.
+    max_priority_fee_lamports: None,
+})
 .await?;
 
 let result = signer.sign_transaction(&mut transaction).await?;
@@ -493,6 +496,7 @@ let signer = FordefiSigner::from_config(FordefiSignerConfig {
     http_client_config: None,
     chain: None,
     fee: None,
+    push_mode: None,
     max_priority_fee_lamports: None,
 })
 .await?;

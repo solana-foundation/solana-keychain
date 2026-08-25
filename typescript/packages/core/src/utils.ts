@@ -4,6 +4,7 @@ import { getBase64Encoder } from '@solana/codecs-strings';
 import { SignatureBytes, verifySignature } from '@solana/keys';
 import {
     isMessagePartialSigner,
+    isTransactionModifyingSigner,
     isTransactionPartialSigner,
     isTransactionSendingSigner,
     SignatureDictionary,
@@ -11,7 +12,7 @@ import {
 import { Base64EncodedWireTransaction, getTransactionDecoder } from '@solana/transactions';
 
 import { SignerErrorCode, throwSignerError } from './errors.js';
-import { SolanaSendingSigner, SolanaSigner } from './types.js';
+import { SolanaModifyingSigner, SolanaSendingSigner, SolanaSigner } from './types.js';
 
 /**
  * A UUID derived from SHA-256(message bytes), so a retry of the same bytes
@@ -206,11 +207,27 @@ export function isSolanaSendingSigner<TAddress extends string>(value: {
 }
 
 /**
+ * Checks if the given value is a SolanaModifyingSigner (a signer that rewrites
+ * the transaction before signing it). Such signers expose
+ * `modifyAndSignTransactions` and, by design, no `signTransactions`, so they are
+ * never also a {@link SolanaSigner}.
+ * @param value - The value to check
+ * @returns True if the value is a SolanaModifyingSigner, false otherwise
+ */
+export function isSolanaModifyingSigner<TAddress extends string>(value: {
+    address: Address<TAddress>;
+}): value is SolanaModifyingSigner<TAddress> {
+    return 'address' in value && 'isAvailable' in value && isTransactionModifyingSigner(value);
+}
+
+/**
  * The signing methods a signer actually exposes. Kit classifies signers by
  * method presence, so this reports what a signer can be used for rather than
  * which interface it nominally implements.
  */
 export type SignerCapabilities = Readonly<{
+    /** The signer rewrites the transaction and returns the signed result. */
+    canModifyAndSignTransactions: boolean;
     /** The signer signs and broadcasts through its provider. */
     canSignAndSend: boolean;
     /** The signer signs off-chain messages. */
@@ -225,6 +242,7 @@ export type SignerCapabilities = Readonly<{
  */
 export function signerCapabilities(signer: { address: Address }): SignerCapabilities {
     return Object.freeze({
+        canModifyAndSignTransactions: isTransactionModifyingSigner(signer),
         canSignAndSend: isTransactionSendingSigner(signer),
         canSignMessages: isMessagePartialSigner(signer),
         canSignTransactions: isTransactionPartialSigner(signer),

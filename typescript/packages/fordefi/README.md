@@ -42,6 +42,8 @@ Set `chain` and `pushMode: 'manual'` to let Fordefi replace the recent blockhash
 
 A priority fee Fordefi introduces on its own initiative is capped at `DEFAULT_MAX_PRIORITY_FEE_LAMPORTS` (0.1 SOL), so a compromised or malfunctioning response cannot drain the fee payer. Set `maxPriorityFeeLamports` to raise or lower that ceiling; a custom `priority_fee` governs instead when set. The ceiling never applies to a compute-unit price the caller placed in the transaction themselves, since those requests are validated byte-for-byte.
 
+The two fee instructions are asymmetric by design. A compute-unit *price* you set yourself is protected: the whole message is then compared byte-for-byte, so Fordefi can only replace the blockhash. A compute-unit *limit* you set with no price is **not** preserved — Fordefi manages the limit in manual mode, and the returned limit is only bounded indirectly, through the lamport ceiling above. Set a compute-unit price alongside your limit if you need the limit held exactly.
+
 Fordefi must be the transaction fee payer and must sign before any other signer. The validated transaction retains unsigned slots for downstream partial signers, which can sign the blockhash-updated message before the caller submits it.
 
 ```typescript

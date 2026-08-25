@@ -30,17 +30,21 @@ class SignedTransaction:
 
     ``encoded_transaction`` is ``base64(bincode(tx))``. ``is_complete`` is True when
     every required signature slot is populated, False when other signers still need
-    to sign. ``transaction`` is the authoritative in-memory transaction when a
-    provider returns modified bytes that cannot be applied to the caller's solders
-    object in place.
+    to sign.
+
+    ``transaction`` is the authoritative signed transaction. Most backends sign the
+    caller's object in place and return that same object, but a provider may return
+    a rewritten message (Fordefi native manual mode replaces the recent blockhash and
+    the priority-fee instructions), which ``solders`` cannot apply in place. Always
+    continue from ``transaction`` rather than the object passed to
+    ``sign_transaction``; only the former is guaranteed to match
+    ``encoded_transaction`` and the bytes ``signature`` covers.
     """
 
     encoded_transaction: str
     signature: Signature
     is_complete: bool
-    transaction: VersionedTransaction | None = field(
-        default=None, repr=False, compare=False, kw_only=True
-    )
+    transaction: VersionedTransaction = field(repr=False, compare=False)
 
 
 class SolanaSigner(ABC):
@@ -61,9 +65,10 @@ class SolanaSigner(ABC):
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         """Sign ``transaction`` and return the encoded result.
 
-        Most signers modify the input in place. When a provider returns an
-        authoritative replacement that cannot be applied in place, it is exposed
-        as ``SignedTransaction.transaction``. Accepts legacy, v0 and v1."""
+        Most backends sign the input in place, but a provider may return a
+        rewritten message instead, so continue from
+        ``SignedTransaction.transaction`` rather than the object passed in.
+        Accepts legacy, v0 and v1."""
 
     @abstractmethod
     async def sign_message(self, message: bytes) -> Signature:

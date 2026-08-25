@@ -136,6 +136,14 @@ malfunctioning response cannot drain the fee payer. Set
 compute-unit price the caller placed in the transaction themselves, since those
 requests are validated byte-for-byte.
 
+The two fee instructions are asymmetric by design. A compute-unit *price*
+you set yourself is protected: the whole message is then compared
+byte-for-byte, so Fordefi can only replace the blockhash. A compute-unit
+*limit* you set with no price is **not** preserved — Fordefi manages the limit
+in manual mode, and the returned limit is only bounded indirectly, through the
+lamport ceiling above. Set a compute-unit price alongside your limit if you
+need the limit held exactly.
+
 ```python
 import os
 

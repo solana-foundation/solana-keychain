@@ -180,6 +180,14 @@ raise or lower that ceiling; a custom `priority_fee` governs instead when set.
 The ceiling never applies to a compute-unit price the caller placed in the
 transaction themselves, since those requests are validated byte-for-byte.
 
+The two fee instructions are asymmetric by design. A compute-unit *price*
+you set yourself is protected: the whole message is then compared
+byte-for-byte, so Fordefi can only replace the blockhash. A compute-unit
+*limit* you set with no price is **not** preserved — Fordefi manages the limit
+in manual mode, and the returned limit is only bounded indirectly, through the
+lamport ceiling above. Set a compute-unit price alongside your limit if you
+need the limit held exactly.
+
 Manual mode must run first with the Fordefi vault as fee payer. Single-signer
 results are complete and ready for caller-managed broadcasting. Multisigner
 results are partial: add every downstream signature to the replaced `tx`, then

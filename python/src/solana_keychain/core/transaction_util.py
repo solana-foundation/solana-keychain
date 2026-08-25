@@ -86,9 +86,14 @@ def has_all_required_signatures(transaction: VersionedTransaction) -> bool:
 def classify_signed_transaction(
     transaction: VersionedTransaction, encoded_transaction: str, signature: Signature
 ) -> SignedTransaction:
-    """Build a SignedTransaction marked complete or partial."""
+    """Build a SignedTransaction marked complete or partial.
+
+    ``transaction`` is carried through as the authoritative signed transaction,
+    so callers never have to know whether a backend signed in place.
+    """
     return SignedTransaction(
         encoded_transaction=encoded_transaction,
         signature=signature,
         is_complete=has_all_required_signatures(transaction),
+        transaction=transaction,
     )

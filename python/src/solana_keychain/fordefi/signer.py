@@ -40,7 +40,6 @@ from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
     get_signing_keypair_position,
-    has_all_required_signatures,
     idempotency_key_from_message,
     serialize_transaction,
     signed_message_bytes,
@@ -868,11 +867,8 @@ class FordefiSigner(SolanaSigner):
                 "Fordefi manual wire transaction exceeds the Solana size limit",
             )
 
-        return SignedTransaction(
-            encoded_transaction=base64.b64encode(canonical_wire).decode("ascii"),
-            signature=signature,
-            is_complete=has_all_required_signatures(returned),
-            transaction=returned,
+        return classify_signed_transaction(
+            returned, base64.b64encode(canonical_wire).decode("ascii"), signature
         )
 
     async def _finish_native_broadcast(self, transaction_id: str) -> SignedTransaction:

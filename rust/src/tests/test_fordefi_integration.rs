@@ -59,16 +59,13 @@ mod tests {
             http_client_config: None,
             chain,
             fee: None,
+            push_mode: Some(push_mode),
             max_priority_fee_lamports: None,
         };
 
-        match push_mode {
-            FordefiPushMode::Auto => FordefiSigner::from_config(config).await,
-            FordefiPushMode::Manual => {
-                FordefiSigner::from_config_with_push_mode(config, push_mode).await
-            }
-        }
-        .expect("Failed to create Fordefi signer")
+        FordefiSigner::from_config(config)
+            .await
+            .expect("Failed to create Fordefi signer")
     }
 
     /// Black box signer — uses the dedicated black box vault (`FORDEFI_BB_*`),

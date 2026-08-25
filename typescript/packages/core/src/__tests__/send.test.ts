@@ -40,6 +40,27 @@ function createPartialSigner(overrides?: { signatures?: SignatureDictionary }) {
     };
 }
 
+/**
+ * A modifying signer rewrites the message, so the transaction it returns is a
+ * different object from the one passed in.
+ */
+function createModifyingSigner(overrides?: { returned?: SignableTransaction[] }) {
+    return {
+        address: SIGNER_ADDRESS,
+        isAvailable: async () => true,
+        modifyAndSignTransactions: vi.fn(async () => overrides?.returned ?? [createModifiedTransaction()]),
+    };
+}
+
+function createModifiedTransaction(): SignableTransaction {
+    return {
+        '"__transactionSize:@solana/kit"': 100,
+        lifetimeConstraint: { blockhash: 'Blockhash22222222222222222222222222222222222', lastValidBlockHeight: 200n },
+        messageBytes: new Uint8Array([9, 9, 9, 9]),
+        signatures: { [FEE_PAYER]: FEE_PAYER_SIGNATURE, [SIGNER_ADDRESS]: SIGNER_SIGNATURE },
+    } as unknown as SignableTransaction;
+}
+
 function createSendingSigner() {
     return {
         address: SIGNER_ADDRESS,
@@ -126,5 +147,73 @@ describe('signAndSendTransaction', () => {
         await signAndSendTransaction(partialSigner, createTransaction(), { abortSignal, sendTransaction });
         expect(partialSigner.signTransactions).toHaveBeenCalledWith(expect.anything(), { abortSignal });
         expect(sendTransaction).toHaveBeenCalledWith(expect.anything(), { abortSignal });
+    });
+
+    describe('modifying signer', () => {
+        it('broadcasts the transaction the signer returned, not the one passed in', async () => {
+            const signer = createModifyingSigner();
+            const transaction = createTransaction();
+            const sendTransaction = vi.fn<SendTransactionFn>(async () => SENT_SIGNATURE);
+
+            const signature = await signAndSendTransaction(signer, transaction, { sendTransaction });
+
+            expect(signature).toBe(SENT_SIGNATURE);
+            expect(signer.modifyAndSignTransactions).toHaveBeenCalledWith([transaction], { abortSignal: undefined });
+            // The rewritten message is what the signature covers.
+            const [sent] = sendTransaction.mock.calls[0]!;
+            expect(sent).not.toBe(transaction);
+            expect(sent.messageBytes).toEqual(new Uint8Array([9, 9, 9, 9]));
+        });
+
+        it('identifies the transaction by the fee payer signature when the sender returns none', async () => {
+            const sendTransaction = vi.fn<SendTransactionFn>(async () => undefined);
+
+            const signature = await signAndSendTransaction(createModifyingSigner(), createTransaction(), {
+                sendTransaction,
+            });
+
+            expect(signature).toBe(FEE_PAYER_SIGNATURE);
+        });
+
+        it('rejects before broadcasting when the signer left a slot unsigned', async () => {
+            const partiallySigned = {
+                ...createModifiedTransaction(),
+                signatures: { [FEE_PAYER]: FEE_PAYER_SIGNATURE, [SIGNER_ADDRESS]: null },
+            } as unknown as SignableTransaction;
+            const sendTransaction = vi.fn<SendTransactionFn>(async () => SENT_SIGNATURE);
+
+            await expect(
+                signAndSendTransaction(createModifyingSigner({ returned: [partiallySigned] }), createTransaction(), {
+                    sendTransaction,
+                }),
+            ).rejects.toMatchObject({ code: SignerErrorCode.SIGNING_FAILED });
+            expect(sendTransaction).not.toHaveBeenCalled();
+        });
+
+        it('throws when the signer returns no transaction', async () => {
+            await expect(
+                signAndSendTransaction(createModifyingSigner({ returned: [] }), createTransaction(), {
+                    sendTransaction: async () => SENT_SIGNATURE,
+                }),
+            ).rejects.toMatchObject({ code: SignerErrorCode.SIGNING_FAILED });
+        });
+
+        it('requires sendTransaction, since it does not broadcast on its own', async () => {
+            await expect(signAndSendTransaction(createModifyingSigner(), createTransaction())).rejects.toMatchObject({
+                code: SignerErrorCode.CONFIG_ERROR,
+            });
+        });
+
+        it('forwards the abort signal', async () => {
+            const signer = createModifyingSigner();
+            const abortSignal = new AbortController().signal;
+
+            await signAndSendTransaction(signer, createTransaction(), {
+                abortSignal,
+                sendTransaction: async () => SENT_SIGNATURE,
+            });
+
+            expect(signer.modifyAndSignTransactions).toHaveBeenCalledWith([expect.anything()], { abortSignal });
+        });
     });
 });

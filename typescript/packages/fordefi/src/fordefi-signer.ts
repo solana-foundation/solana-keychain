@@ -21,6 +21,7 @@ import {
     providerStatus,
     signBatchStaggered,
     SignerErrorCode,
+    SolanaModifyingSigner,
     SolanaSendingSigner,
     SolanaSigner,
     throwSignerError,
@@ -459,9 +460,7 @@ export interface FordefiNativeSigner<TAddress extends string = string>
  * partial signatures and owns submission to the network.
  */
 export interface FordefiNativeManualSigner<TAddress extends string = string>
-    extends TransactionModifyingSigner<TAddress>, MessagePartialSigner<TAddress> {
-    isAvailable(): Promise<boolean>;
-}
+    extends SolanaModifyingSigner<TAddress>, MessagePartialSigner<TAddress> {}
 
 /**
  * Create and initialize a Fordefi-backed signer.
@@ -477,15 +476,13 @@ export async function createFordefiSigner<TAddress extends string = string>(
 export async function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig & { chain?: undefined },
 ): Promise<SolanaSigner<TAddress>>;
-// The catch-all deliberately covers only `FordefiSignerConfig`, whose `pushMode`
-// cannot be 'manual'. Manual mode stays reachable through the
-// `FordefiManualSignerConfig` overload above. Widening this to
-// `AnyFordefiSignerConfig` leaks `FordefiNativeManualSigner` into every
-// structurally-typed caller — including the `@solana/keychain` umbrella factory,
-// whose declared `SolanaSigner | SolanaSendingSigner` return then fails to build.
+// The catch-all covers a config whose mode is not statically known — the shape
+// the `@solana/keychain` umbrella forwards — so its return spans all three
+// signer shapes. Callers with a concrete config hit one of the narrower
+// overloads above and get a single precise type.
 export async function createFordefiSigner<TAddress extends string = string>(
-    config: FordefiSignerConfig,
-): Promise<FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>>;
+    config: AnyFordefiSignerConfig,
+): Promise<FordefiNativeManualSigner<TAddress> | FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>>;
 export async function createFordefiSigner<TAddress extends string = string>(
     config: AnyFordefiSignerConfig,
 ): Promise<FordefiNativeManualSigner<TAddress> | FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>> {

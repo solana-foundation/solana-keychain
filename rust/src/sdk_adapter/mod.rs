@@ -30,3 +30,26 @@ compile_error!("Cannot enable more than one of sdk-v2, sdk-v3, sdk-v4. Choose on
 
 #[cfg(not(any(feature = "sdk-v2", feature = "sdk-v3", feature = "sdk-v4")))]
 compile_error!("Must enable one of sdk-v2, sdk-v3, or sdk-v4 feature.");
+
+#[cfg(test)]
+mod tests {
+    use super::COMPUTE_BUDGET_PROGRAM_ID;
+
+    /// Pins the locally-declared Compute Budget ID to its canonical bytes, so a
+    /// typo in the base58 literal cannot silently disable fee-instruction
+    /// recognition on any SDK version.
+    #[test]
+    fn compute_budget_program_id_matches_the_canonical_bytes() {
+        assert_eq!(
+            COMPUTE_BUDGET_PROGRAM_ID.to_bytes(),
+            [
+                3, 6, 70, 111, 229, 33, 23, 50, 255, 236, 173, 186, 114, 195, 155, 231, 188, 140,
+                229, 187, 197, 247, 18, 107, 44, 67, 155, 58, 64, 0, 0, 0
+            ]
+        );
+        assert_eq!(
+            COMPUTE_BUDGET_PROGRAM_ID.to_string(),
+            "ComputeBudget111111111111111111111111111111"
+        );
+    }
+}

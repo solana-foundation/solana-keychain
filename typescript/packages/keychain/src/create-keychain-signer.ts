@@ -1,12 +1,26 @@
-import type { SolanaSendingSigner, SolanaSigner } from '@solana/keychain-core';
+import type { SolanaModifyingSigner, SolanaSendingSigner, SolanaSigner } from '@solana/keychain-core';
 import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 import type { CrossmintSendingSigner, CrossmintSignerConfig } from '@solana/keychain-crossmint';
-import type { FordefiNativeSigner, FordefiSignerConfig, SolanaChainUniqueId } from '@solana/keychain-fordefi';
+import type {
+    FordefiManualSignerConfig,
+    FordefiNativeManualSigner,
+    FordefiNativeSigner,
+    FordefiSignerConfig,
+    SolanaChainUniqueId,
+} from '@solana/keychain-fordefi';
 
 import type { KeychainSignerConfig } from './types.js';
 
-function stripBackend<T extends { backend: string }>({ backend: _, ...rest }: T): Omit<T, 'backend'> {
-    return rest;
+/**
+ * Distributes over unions, unlike a bare `Omit`, which would merge the members
+ * into one object type and optional-ize the properties that discriminate them.
+ * Fordefi relies on this: its auto and manual configs differ only by `chain` and
+ * `pushMode`, which a merged `Omit` would widen until neither branch matched.
+ */
+type StripBackend<T> = T extends { backend: string } ? Omit<T, 'backend'> : never;
+
+function stripBackend<T extends { backend: string }>({ backend: _, ...rest }: T): StripBackend<T> {
+    return rest as StripBackend<T>;
 }
 
 /**
@@ -31,6 +45,9 @@ export function createKeychainSigner(
     config: CrossmintSignerConfig & { backend: 'crossmint' },
 ): Promise<CrossmintSendingSigner>;
 export function createKeychainSigner(
+    config: FordefiManualSignerConfig & { backend: 'fordefi' },
+): Promise<FordefiNativeManualSigner>;
+export function createKeychainSigner(
     config: FordefiSignerConfig & { backend: 'fordefi'; chain: SolanaChainUniqueId },
 ): Promise<FordefiNativeSigner>;
 export function createKeychainSigner(
@@ -38,8 +55,12 @@ export function createKeychainSigner(
         | Exclude<KeychainSignerConfig, { backend: 'crossmint' | 'fordefi' }>
         | (FordefiSignerConfig & { backend: 'fordefi'; chain?: undefined }),
 ): Promise<SolanaSigner>;
-export function createKeychainSigner(config: KeychainSignerConfig): Promise<SolanaSendingSigner | SolanaSigner>;
-export async function createKeychainSigner(config: KeychainSignerConfig): Promise<SolanaSendingSigner | SolanaSigner> {
+export function createKeychainSigner(
+    config: KeychainSignerConfig,
+): Promise<SolanaModifyingSigner | SolanaSendingSigner | SolanaSigner>;
+export async function createKeychainSigner(
+    config: KeychainSignerConfig,
+): Promise<SolanaModifyingSigner | SolanaSendingSigner | SolanaSigner> {
     switch (config.backend) {
         case 'aws-kms': {
             const { createAwsKmsSigner } = await import('@solana/keychain-aws-kms');

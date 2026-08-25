@@ -574,7 +574,8 @@ async def test_sign_transaction_black_box_success() -> None:
     assert result.is_complete
     assert result.signature == signature
     assert result.encoded_transaction
-    assert result.transaction is None
+    # Black-box mode signs in place, so the authoritative object is the caller's.
+    assert result.transaction is transaction
     assert list(transaction.signatures) == [signature]
 
 
@@ -956,7 +957,10 @@ async def test_sign_transaction_native_success() -> None:
     assert result.signature == signature
     assert result.encoded_transaction == ""
     assert result.is_complete
-    assert result.transaction is None
+    # Fordefi broadcast its own rewritten transaction and left the caller's
+    # object untouched, so the authoritative one is what Fordefi returned.
+    assert result.transaction is not transaction
+    assert bytes(result.transaction) == base64.b64decode(raw_transaction)
     assert all(sig == Signature.default() for sig in transaction.signatures), (
         "the caller's transaction must be left untouched by provider-chosen bytes"
     )

@@ -264,6 +264,9 @@ pub struct FordefiSignerConfig {
     pub chain: Option<SolanaChainUniqueId>,
     /// Fee configuration for native Solana transactions (only used when `chain` is set).
     pub fee: Option<FordefiSolanaFee>,
+    /// Who broadcasts a native Solana transaction. `None` is equivalent to
+    /// [`FordefiPushMode::Auto`]; [`FordefiPushMode::Manual`] requires `chain`.
+    pub push_mode: Option<FordefiPushMode>,
     /// Bound, in lamports, on the priority fee Fordefi may introduce on its own
     /// initiative during native manual signing.
     ///
@@ -327,22 +330,11 @@ impl FordefiSigner {
     /// Provide exactly one request-signing mechanism: a PEM-encoded ECDSA P-256
     /// key in `config.private_key_pem`, or a custom [`FordefiRequestSigner`] in
     /// `config.request_signer` for KMS/HSM-backed signing.
+    ///
+    /// Set `config.push_mode` to [`FordefiPushMode::Manual`] for native signing
+    /// without broadcasting; it requires `config.chain`.
     pub async fn from_config(config: FordefiSignerConfig) -> Result<Self, SignerError> {
         let signer = Self::build(config)?;
-        signer.verify_vault_address_with_timeout().await?;
-        Ok(signer)
-    }
-
-    /// Create a FordefiSigner with an explicit native transaction push mode.
-    ///
-    /// `Manual` requires `config.chain` and returns validated blockhash/fee-
-    /// updated signed transactions without broadcasting them. `Auto` preserves
-    /// the behavior of [`Self::from_config`].
-    pub async fn from_config_with_push_mode(
-        config: FordefiSignerConfig,
-        push_mode: FordefiPushMode,
-    ) -> Result<Self, SignerError> {
-        let signer = Self::build_with_push_mode(config, push_mode)?;
         signer.verify_vault_address_with_timeout().await?;
         Ok(signer)
     }
@@ -350,13 +342,7 @@ impl FordefiSigner {
     /// Shared construction: validate config, resolve the request-signing
     /// mechanism, and assemble the signer.
     fn build(config: FordefiSignerConfig) -> Result<Self, SignerError> {
-        Self::build_with_push_mode(config, FordefiPushMode::Auto)
-    }
-
-    fn build_with_push_mode(
-        config: FordefiSignerConfig,
-        push_mode: FordefiPushMode,
-    ) -> Result<Self, SignerError> {
+        let push_mode = config.push_mode.unwrap_or(FordefiPushMode::Auto);
         if config.access_token.is_empty() {
             return Err(SignerError::ConfigError(
                 "access_token must not be empty".to_string(),
