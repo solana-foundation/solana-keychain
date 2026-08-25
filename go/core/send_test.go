@@ -83,6 +83,20 @@ func TestSignAndSendTransactionRequiresASenderBeforeSigning(t *testing.T) {
 	}
 }
 
+// The signature a broadcasting provider returns is the only handle on the
+// transaction it just put on chain, so an empty one cannot be passed off as one.
+func TestSignAndSendTransactionRejectsABroadcastWithoutASignature(t *testing.T) {
+	s := &sendingSigner{
+		broadcasts: true,
+		signed:     SignedTransaction{EncodedTransaction: "encoded", Completeness: Complete},
+	}
+
+	_, err := SignAndSendTransaction(context.Background(), s, &solana.Transaction{}, nil)
+	if code, ok := CodeOf(err); !ok || code != CodeSigningFailed {
+		t.Errorf("got code %q (ok=%v), want CodeSigningFailed", code, ok)
+	}
+}
+
 // A partially signed transaction cannot land, so it must not reach the sender.
 func TestSignAndSendTransactionRejectsPartialSignatures(t *testing.T) {
 	s := &sendingSigner{signed: SignedTransaction{EncodedTransaction: "encoded", Completeness: Partial}}

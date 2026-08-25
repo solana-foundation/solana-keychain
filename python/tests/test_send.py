@@ -14,13 +14,16 @@ from solana_keychain.core import (
 from tests.util import create_test_transaction
 
 ENCODED = "encoded-transaction"
-SIGNATURE = Signature.default()
+SIGNATURE = Signature.from_bytes(bytes([7] * 64))
 
 
 class StubSigner(SolanaSigner):
-    def __init__(self, *, broadcasts: bool, is_complete: bool) -> None:
+    def __init__(
+        self, *, broadcasts: bool, is_complete: bool, signature: Signature = SIGNATURE
+    ) -> None:
         self._broadcasts = broadcasts
         self._is_complete = is_complete
+        self._signature = signature
         self._pubkey = Keypair().pubkey()
 
     @property
@@ -34,12 +37,12 @@ class StubSigner(SolanaSigner):
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         return SignedTransaction(
             encoded_transaction=ENCODED,
-            signature=SIGNATURE,
+            signature=self._signature,
             is_complete=self._is_complete,
         )
 
     async def sign_message(self, message: bytes) -> Signature:
-        return SIGNATURE
+        return self._signature
 
     async def is_available(self) -> bool:
         return True
@@ -81,6 +84,19 @@ async def test_missing_sender_is_rejected_before_signing() -> None:
     with pytest.raises(SignerError) as excinfo:
         await sign_and_send_transaction(signer, create_test_transaction(signer.pubkey))
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
+
+
+async def test_broadcasting_signer_without_a_signature_is_rejected() -> None:
+    """The signature a broadcasting provider returns is the only handle on the
+    transaction it just put on chain, so an empty one cannot be passed off as one."""
+    signer = StubSigner(broadcasts=True, is_complete=True, signature=Signature.default())
+
+    async def send(encoded: str) -> Signature:
+        raise AssertionError("send must not run for a signer that broadcasts")
+
+    with pytest.raises(SignerError) as excinfo:
+        await sign_and_send_transaction(signer, create_test_transaction(signer.pubkey), send)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
 
 
 async def test_partial_signature_is_rejected_before_broadcast() -> None:

@@ -16,8 +16,9 @@ use crate::traits::{SignTransactionResult, SolanaSigner};
 ///
 /// # Errors
 ///
-/// [`SignerError::SigningFailed`] when the transaction is still partially signed.
-/// Backend signing errors and anything `send` returns propagate unchanged.
+/// [`SignerError::SigningFailed`] when a broadcasting signer returns no signature,
+/// or when the transaction is still partially signed. Backend signing errors and
+/// anything `send` returns propagate unchanged.
 pub async fn sign_and_send<S, F, Fut>(
     signer: &S,
     tx: &mut VersionedTransaction,
@@ -28,14 +29,20 @@ where
     F: FnOnce(String) -> Fut,
     Fut: Future<Output = Result<Signature, SignerError>>,
 {
-    let result = signer.sign_transaction(tx).await?;
-    let broadcasts = signer.broadcasts_transactions();
-    let is_complete = matches!(result, SignTransactionResult::Complete(_));
-    let (encoded_transaction, signature) = result.into_signed_transaction();
-
-    if broadcasts {
+    if signer.broadcasts_transactions() {
+        let (_, signature) = signer.sign_transaction(tx).await?.into_signed_transaction();
+        if signature == Signature::default() {
+            return Err(SignerError::SigningFailed(
+                "Signer returned no signature for the transaction it broadcast".to_string(),
+            ));
+        }
         return Ok(signature);
     }
+
+    let result = signer.sign_transaction(tx).await?;
+    let is_complete = matches!(result, SignTransactionResult::Complete(_));
+    let (encoded_transaction, _) = result.into_signed_transaction();
+
     if !is_complete {
         return Err(SignerError::SigningFailed(
             "Transaction is still missing signatures after signing and cannot be broadcast"

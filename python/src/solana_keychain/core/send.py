@@ -25,23 +25,28 @@ async def sign_and_send_transaction(
     ``send_transaction`` broadcasts the encoded result.
 
     Raises ``CONFIG_ERROR`` when a signer that cannot broadcast is given no
-    ``send_transaction``, and ``SIGNING_FAILED`` when the signed transaction is
-    still missing signatures.
+    ``send_transaction``, and ``SIGNING_FAILED`` when the broadcasting signer
+    returns no signature or the signed transaction is still missing signatures.
     """
-    if not signer.broadcasts_transactions:
-        if send_transaction is None:
-            raise SignerError(
-                SignerErrorCode.CONFIG_ERROR,
-                "this signer cannot broadcast transactions; supply send_transaction to "
-                "broadcast the signed one",
-            )
+    if signer.broadcasts_transactions:
         signed = await signer.sign_transaction(transaction)
-        if not signed.is_complete:
+        if signed.signature == Signature.default():
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED,
-                "transaction is still missing signatures after signing and cannot be broadcast",
+                "signer returned no signature for the transaction it broadcast",
             )
-        return await send_transaction(signed.encoded_transaction)
+        return signed.signature
 
+    if send_transaction is None:
+        raise SignerError(
+            SignerErrorCode.CONFIG_ERROR,
+            "this signer cannot broadcast transactions; supply send_transaction to "
+            "broadcast the signed one",
+        )
     signed = await signer.sign_transaction(transaction)
-    return signed.signature
+    if not signed.is_complete:
+        raise SignerError(
+            SignerErrorCode.SIGNING_FAILED,
+            "transaction is still missing signatures after signing and cannot be broadcast",
+        )
+    return await send_transaction(signed.encoded_transaction)

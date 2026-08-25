@@ -49,8 +49,19 @@ type SendTransactionFn func(ctx context.Context, encodedTransaction string) (sol
 // send is checked before signing so a missing one cannot waste a signature.
 func SignAndSendTransaction(ctx context.Context, s Signer, tx *solana.Transaction, send SendTransactionFn) (solana.Signature, error) {
 	broadcaster, ok := s.(TransactionBroadcaster)
-	broadcasts := ok && broadcaster.BroadcastsTransactions()
-	if !broadcasts && send == nil {
+	if ok && broadcaster.BroadcastsTransactions() {
+		signed, err := s.SignTransaction(ctx, tx)
+		if err != nil {
+			return solana.Signature{}, err
+		}
+		if signed.Signature == (solana.Signature{}) {
+			return solana.Signature{}, NewSignerError(CodeSigningFailed,
+				"signer returned no signature for the transaction it broadcast")
+		}
+		return signed.Signature, nil
+	}
+
+	if send == nil {
 		return solana.Signature{}, NewSignerError(CodeConfigError,
 			"this signer cannot broadcast transactions; supply a SendTransactionFn to broadcast the signed one")
 	}
@@ -58,9 +69,6 @@ func SignAndSendTransaction(ctx context.Context, s Signer, tx *solana.Transactio
 	signed, err := s.SignTransaction(ctx, tx)
 	if err != nil {
 		return solana.Signature{}, err
-	}
-	if broadcasts {
-		return signed.Signature, nil
 	}
 	if !signed.IsComplete() {
 		return solana.Signature{}, NewSignerError(CodeSigningFailed,

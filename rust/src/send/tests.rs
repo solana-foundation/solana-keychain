@@ -86,6 +86,23 @@ async fn sign_only_signer_broadcasts_the_encoded_transaction() {
     assert_eq!(signature, broadcast_signature);
 }
 
+/// The signature a broadcasting provider returns is the only handle on the
+/// transaction it just put on chain, so an empty one cannot be passed off as one.
+#[tokio::test]
+async fn broadcasting_signer_without_a_signature_is_rejected() {
+    let mut signer = StubSigner::new(true, true);
+    signer.signature = Signature::default();
+    let mut tx = create_test_transaction(&Pubkey::new_unique());
+
+    let error = sign_and_send(&signer, &mut tx, |_| async {
+        panic!("send must not run for a signer that broadcasts");
+    })
+    .await
+    .unwrap_err();
+
+    assert!(matches!(error, SignerError::SigningFailed(_)));
+}
+
 /// A partially signed transaction cannot land, so it must never be broadcast.
 #[tokio::test]
 async fn partial_signature_is_rejected_before_broadcast() {
