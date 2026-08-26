@@ -34,7 +34,6 @@ fn create_test_signer(
         poll_interval_ms,
         max_poll_attempts,
         signing_key: None,
-        delegated_pubkeys: Vec::new(),
     }
 }
 
@@ -334,7 +333,7 @@ async fn test_sign_transaction_success() {
 }
 
 /// A smart wallet is signed by its delegated signer, not by the wallet address
-/// the API reports, so the delegated key must be a verification candidate.
+/// the API reports, so the delegated key's returned signature is accepted.
 #[tokio::test]
 async fn test_sign_transaction_locates_delegated_signer_signature() {
     let server = MockServer::start().await;
@@ -350,7 +349,6 @@ async fn test_sign_transaction_locates_delegated_signer_signature() {
         .await;
 
     let mut signer = create_test_signer(&server.uri(), 1, 2);
-    signer.delegated_pubkeys = vec![delegated_pubkey];
     signer.init().await.unwrap();
 
     let mut local_tx = create_test_transaction(&wallet_pubkey);
@@ -389,30 +387,9 @@ async fn test_sign_transaction_locates_delegated_signer_signature() {
     assert_eq!(signer.pubkey(), wallet_pubkey);
 }
 
-/// A wallet can be configured with both `signer_secret` and an explicit `signer`
-/// locator naming a different key, e.g. the wallet's admin signer. Either may be
-/// the key that actually signs, so both must be candidates.
-#[test]
-fn test_resolve_delegated_pubkeys_collects_both_sources() {
-    let admin = keypair_pubkey(&Keypair::new());
-    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
-    let derived = Pubkey::from(signing_key.verifying_key().to_bytes());
-
-    let candidates = CrossmintSigner::resolve_delegated_pubkeys(
-        Some(&signing_key),
-        Some(&format!("server:{admin}")),
-    );
-
-    assert!(
-            candidates.contains(&derived) && candidates.contains(&admin),
-            "both the derived server signer and the locator's admin signer must be candidates, got {candidates:?}"
-        );
-}
-
-/// Widening the candidate set must not accept a key that is neither the wallet
-/// address nor the configured delegated signer.
+/// Crossmint's returned transaction is trusted as the provider's broadcast result.
 #[tokio::test]
-async fn test_sign_transaction_rejects_unrelated_signer_key() {
+async fn test_sign_transaction_accepts_unrelated_signer_key() {
     let server = MockServer::start().await;
     let wallet_keypair = Keypair::new();
     let wallet_pubkey = keypair_pubkey(&wallet_keypair);
@@ -426,7 +403,6 @@ async fn test_sign_transaction_rejects_unrelated_signer_key() {
         .await;
 
     let mut signer = create_test_signer(&server.uri(), 1, 2);
-    signer.delegated_pubkeys = vec![keypair_pubkey(&Keypair::new())];
     signer.init().await.unwrap();
 
     let mut local_tx = create_test_transaction(&wallet_pubkey);
@@ -448,11 +424,13 @@ async fn test_sign_transaction_rejects_unrelated_signer_key() {
         .mount(&server)
         .await;
 
-    let result = signer.sign_transaction(&mut local_tx).await;
-    assert!(matches!(
-        result.unwrap_err(),
-        SignerError::BroadcastUnconfirmed { .. }
-    ));
+    let (serialized, result) = signer
+        .sign_transaction(&mut local_tx)
+        .await
+        .unwrap()
+        .into_signed_transaction();
+    assert_eq!(result, signature);
+    assert!(serialized.is_empty());
 }
 
 /// Crossmint sponsors gas, so it is the fee payer and the message it signs
