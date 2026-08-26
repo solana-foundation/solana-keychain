@@ -145,11 +145,8 @@ pub struct TransactionStatusResponse {
     pub raw_transaction: Option<String>,
 }
 
-/// Response from GET /api/v1/vaults/{id}.
-///
-/// Only used as a readiness probe (`is_available`): the configured
-/// `public_key` is the source of truth for the vault's Solana address, so no
-/// key material is read from this response.
+/// Response from GET /api/v1/vaults/{id}. Only used as a readiness probe
+/// (`is_available`); no key material is read from it.
 #[derive(Deserialize)]
 pub struct VaultResponse {
     #[allow(dead_code)]

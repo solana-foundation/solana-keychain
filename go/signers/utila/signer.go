@@ -217,8 +217,8 @@ func terminalStateError(state transactionState) error {
 }
 
 // extractSignatureFromRawTransaction decodes the base64 wire transaction Utila
-// returned, locates this wallet's required-signer position, and verifies the
-// signature against the locally requested message before surfacing it.
+// returned and extracts this wallet's signature, verified against the locally
+// requested message.
 func (s *Signer) extractSignatureFromRawTransaction(rawTransaction string, expectedMessage []byte) (solana.Signature, error) {
 	raw, err := base64.StdEncoding.DecodeString(rawTransaction)
 	if err != nil {

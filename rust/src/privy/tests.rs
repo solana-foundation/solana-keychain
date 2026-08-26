@@ -67,8 +67,6 @@ async fn test_privy_sign_message_rejects_oversized_response_body() {
     let mock_server = MockServer::start().await;
     let keypair = create_test_keypair();
 
-    // A body just past the 1 MiB cap: the bounded body reader in post_rpc
-    // must refuse it before any parsing happens.
     let oversized_body = vec![b'a'; crate::remote_util::MAX_RESPONSE_BYTES + 1];
     Mock::given(method("POST"))
         .and(path("/wallets/test-wallet-id/rpc"))

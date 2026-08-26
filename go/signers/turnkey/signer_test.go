@@ -316,8 +316,6 @@ func TestSignUnauthorized(t *testing.T) {
 	if !errors.As(err, &se) {
 		t.Fatalf("expected *core.SignerError, got %T", err)
 	}
-	// The sanitized response body lands in the (opt-in) detail only; Error()
-	// stays generic.
 	if !strings.Contains(se.Detail(), "API error 401") || !strings.Contains(se.Detail(), "Unauthorized") {
 		t.Errorf("detail = %q, want the status code and the sanitized body", se.Detail())
 	}
@@ -618,8 +616,6 @@ func TestCreateStamp(t *testing.T) {
 	}
 }
 
-// TestNewValidatesAPIKeyMaterial checks that malformed P-256 API-key material
-// is rejected at construction time with CONFIG_ERROR, before any request.
 func TestNewValidatesAPIKeyMaterial(t *testing.T) {
 	cases := map[string]func(cfg *Config){
 		"private key not hex": func(cfg *Config) { cfg.APIPrivateKey = "zz-not-hex" },

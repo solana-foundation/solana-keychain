@@ -241,8 +241,6 @@ func TestSignMessageAPIError(t *testing.T) {
 	s := newTestSigner(t, srv, testPubkeyStr)
 	_, err := s.SignMessage(context.Background(), []byte("test"))
 	testutils.AssertCode(t, err, core.CodeRemoteAPIError)
-	// The sanitized response body lands in the (opt-in) detail only; Error()
-	// stays generic.
 	testutils.AssertDetailContains(t, err, "CDP API error 401")
 	testutils.AssertDetailContains(t, err, "bad credentials")
 	if strings.Contains(err.Error(), "credentials") {

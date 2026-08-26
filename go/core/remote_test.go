@@ -49,9 +49,8 @@ func TestSleepContextUnconfirmedReturnsNilWhenTheWaitCompletes(t *testing.T) {
 	}
 }
 
-// SendRequest must accept a body of exactly MaxResponseBytes and reject
-// anything larger with an explicit error instead of silently truncating it
-// (a truncated body would otherwise surface as a confusing JSON parse error).
+// A silently truncated body would surface as a confusing JSON parse error, so
+// anything over MaxResponseBytes must be rejected explicitly.
 func TestSendRequestRejectsOversizedBody(t *testing.T) {
 	cases := map[string]struct {
 		size    int
@@ -100,8 +99,6 @@ func TestSendRequestRejectsOversizedBody(t *testing.T) {
 	}
 }
 
-// NewRemoteAPIError puts the context, status, and sanitized body in the
-// (opt-in) detail while Error() stays generic.
 func TestNewRemoteAPIError(t *testing.T) {
 	err := NewRemoteAPIError("acme API error", 503, []byte("boom\x01\ttoday"))
 

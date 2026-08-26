@@ -392,7 +392,6 @@ func TestSignUnauthorized(t *testing.T) {
 	}
 }
 
-// A non-2xx body lands sanitized in the (opt-in) detail; Error() stays generic.
 func TestSignErrorBodySanitizedIntoDetail(t *testing.T) {
 	api := newMockAPI(t, testPubkey, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

@@ -102,8 +102,6 @@ describe('createFordefiSigner', () => {
         });
 
         it('should use the configured publicKey without a vault fetch', async () => {
-            // The provider is trusted: the configured publicKey is the source
-            // of truth, so construction performs no network call.
             const signer = await createFordefiSigner(mockConfig);
             expect(signer.address).toBe(MOCK_ADDRESS);
             expect(fetch).not.toHaveBeenCalled();

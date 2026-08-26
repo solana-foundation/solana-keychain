@@ -216,8 +216,7 @@ func assembleSignature(rHex, sHex string) (solana.Signature, error) {
 }
 
 // post sends a stamped JSON POST to the Turnkey API and returns the response
-// body on 2xx. Non-2xx responses map to RemoteApiError whose detail carries
-// the status code and the sanitized response body (never rendered by Error()).
+// body on 2xx. Non-2xx responses map to RemoteApiError.
 func (s *Signer) post(ctx context.Context, path string, body []byte) ([]byte, error) {
 	stamp, err := s.createStamp(string(body))
 	if err != nil {

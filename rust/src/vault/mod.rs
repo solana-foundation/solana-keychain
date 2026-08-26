@@ -109,14 +109,13 @@ impl VaultSigner {
     /// `Client::builder().add_root_certificate(..)` when talking to a
     /// development Vault instance.
     ///
-    /// The builder is finished with this crate's no-redirect policy applied
-    /// (it takes a builder rather than a built `Client` precisely so the
-    /// policy cannot be bypassed): requests carry `X-Vault-Token`, and a
-    /// client that followed redirects would replay it to the redirect
-    /// target. `https_only` is deliberately *not* forced here — Vault is
-    /// routinely reached over plain-HTTP loopback (e.g. `vault server
-    /// -dev`), so transport security stays the caller's choice for this
-    /// constructor.
+    /// The builder is finished with this crate's no-redirect policy (a
+    /// builder rather than a built `Client` so the policy cannot be
+    /// bypassed): requests carry `X-Vault-Token`, and a redirect-following
+    /// client would replay it to the redirect target. `https_only` is
+    /// deliberately not forced — Vault is routinely reached over plain-HTTP
+    /// loopback (e.g. `vault server -dev`), so transport security stays the
+    /// caller's choice.
     ///
     /// To avoid pulling `reqwest` into your own dependency tree at a
     /// version that may diverge from `solana-keychain`'s, prefer

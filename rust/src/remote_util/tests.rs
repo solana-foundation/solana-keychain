@@ -4,7 +4,6 @@ use wiremock::{
     Mock, MockServer, ResponseTemplate,
 };
 
-/// Stand up a mock returning `body` on GET /body and fetch the raw response.
 async fn respond_with_body(body: Vec<u8>) -> reqwest::Response {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -42,8 +41,7 @@ async fn test_read_body_capped_rejects_oversized_body() {
 
 #[tokio::test]
 async fn test_parse_json_response_rejects_oversized_body() {
-    // A syntactically valid JSON body that exceeds the cap: the size check
-    // must fire before any parsing happens.
+    // Valid JSON past the cap: rejected before any parsing happens.
     let mut body = Vec::with_capacity(MAX_RESPONSE_BYTES + 16);
     body.push(b'"');
     body.resize(MAX_RESPONSE_BYTES + 15, b'a');

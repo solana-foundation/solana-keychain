@@ -249,8 +249,7 @@ fn test_fordefi_config_strips_trailing_slash() {
 
 #[tokio::test]
 async fn test_fordefi_from_config_trusts_configured_public_key() {
-    // The configured public_key is the source of truth: construction makes no
-    // network calls, so no server needs to exist at the base URL.
+    // No server exists at this base URL: construction must not touch the network.
     let public_key = keypair_pubkey(&create_test_keypair());
 
     let signer =

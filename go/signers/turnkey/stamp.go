@@ -25,9 +25,7 @@ const (
 )
 
 // validateAPIKeyMaterial rejects malformed Turnkey API-key material at
-// construction time instead of at stamp-creation time: both keys must be valid
-// hex, the public key a 33-byte compressed P-256 point that decompresses to a
-// valid curve point, and the private key 32 bytes.
+// construction time instead of at stamp-creation time.
 func validateAPIKeyMaterial(privateKeyHex, publicKeyHex string) error {
 	publicKeyBytes, err := hex.DecodeString(publicKeyHex)
 	if err != nil {

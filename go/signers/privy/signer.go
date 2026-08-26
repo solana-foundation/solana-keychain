@@ -229,9 +229,7 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 }
 
 // do executes the request and returns the response body, mapping transport
-// failures to CodeHTTPError and non-2xx statuses to CodeRemoteAPIError whose
-// detail carries the status code and the sanitized response body (never
-// rendered by Error()).
+// failures to CodeHTTPError and non-2xx statuses to CodeRemoteAPIError.
 func (s *Signer) do(req *http.Request, what string) ([]byte, error) {
 	status, body, err := core.SendRequest(s.client, req, "privy")
 	if err != nil {

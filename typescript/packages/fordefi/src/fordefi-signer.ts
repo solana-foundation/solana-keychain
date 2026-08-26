@@ -317,9 +317,8 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
             });
         }
 
-        // The configured publicKey is the source of truth for the vault's
-        // Solana address; under the project's trust model the provider is
-        // trusted, so no init-time vault fetch is needed to confirm it.
+        // Trusted provider: the configured publicKey is authoritative, so no
+        // init-time vault fetch is needed to confirm it.
         return new FordefiSigner<TAddress>(config, config.publicKey as Address<TAddress>);
     }
 

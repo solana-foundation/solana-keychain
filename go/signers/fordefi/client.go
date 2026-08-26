@@ -231,9 +231,9 @@ func extractSignature(response transactionStatusResponse) (solana.Signature, err
 	return core.DecodeSignatureBase64(response.Signatures[0].Data, "fordefi")
 }
 
-// probeVault fetches the configured vault from Fordefi as a reachability and
-// authentication check. The response body is not interpreted: the configured
-// public key is the source of truth for the signer's identity.
+// probeVault fetches the configured vault as a reachability and authentication
+// check. The body is not interpreted: the configured public key is the source
+// of truth for the signer's identity.
 func (s *Signer) probeVault(ctx context.Context) error {
 	status, body, err := s.doGet(ctx, "/api/v1/vaults/"+url.PathEscape(s.vaultID))
 	if err != nil {

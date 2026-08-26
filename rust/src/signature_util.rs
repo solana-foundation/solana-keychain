@@ -53,11 +53,8 @@ pub fn signature_from_hex(encoded: &str) -> Result<Signature, SignerError> {
 /// Extract and verify this signer's signature from a fully-signed transaction
 /// returned by a provider.
 ///
-/// Deserializes `returned_tx_bytes` via the shared wire codec, locates the
-/// required-signer slot for `public_key` on the returned transaction, rejects
-/// a missing or default signature, and verifies the signature against the
-/// original locally-serialized message bytes. The verification against
-/// `original_message_bytes` is what guarantees the signature applies to the
+/// Rejects a missing or default signature in the signer's slot. Verifying
+/// against `original_message_bytes` guarantees the signature applies to the
 /// transaction we submitted, so no byte-equality check of the returned
 /// message is needed.
 #[cfg(any(
