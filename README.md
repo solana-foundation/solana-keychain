@@ -6,7 +6,7 @@
 
 ## Implementations
 
-This repository contains three implementations:
+This repository contains four implementations:
 
 ### [Rust](rust/)
 
@@ -31,6 +31,20 @@ Async signer library built on [`solders`](https://pypi.org/project/solders/) for
 - **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila, Fordefi
 - **Features**: Async/await, optional extras so heavy provider SDKs stay out of the base install, strict typing
 - [View Python Documentation →](python/README.md)
+
+### [Go](go/)
+
+Async-free signer library built on [`solana-go`](https://github.com/solana-foundation/solana-go), with one Go module per backend so your module graph contains only the backends you import.
+
+- **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila, Fordefi
+- **Features**: Per-backend modules, golden wire-format vectors, redacted errors matched by stable code
+- [View Go Documentation →](go/README.md)
+
+## Security Model
+
+`solana-keychain` is a signing adapter: it validates the signing hop, not what your transaction does. Backends come in two shapes, and only one of them signs the bytes you built. [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) is the short version, worth reading before putting a signer on a path that moves value.
+
+To report a vulnerability, follow [SECURITY.md](SECURITY.md) rather than opening an issue.
 
 ## Security Audit
 

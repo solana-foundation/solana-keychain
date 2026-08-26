@@ -1092,8 +1092,36 @@ let decoded = STANDARD.decode(&api_response.signature).expect("decode failed");
 return Err(SignerError::RemoteApiError(format!("API error: {error_body}")));
 ```
 
-### Security Best Practices
+### Security Requirements
 
+These are not suggestions. Consumers pick a backend on the strength of them, so
+a new backend that skips one silently breaks what the rest of the library
+guarantees. If your provider makes one impossible, say so in the PR and in
+[SECURITY_MODEL.md](SECURITY_MODEL.md).
+
+- **Verify what the provider signed.** Compute the message bytes locally, and
+  verify the returned signature against them before attaching it. If the
+  provider returns a whole signed transaction, deserialize it, take the signature
+  at your signer's required-signer position, and verify that. A signature that
+  does not verify must fail, never be attached.
+- **Declare whether the provider broadcasts.** If it executes server-side,
+  implement the sending shape (`broadcasts_transactions` true,
+  `SolanaSendingSigner` in TypeScript, `core.TransactionBroadcaster` in Go) and
+  return the signature that identifies the landed transaction. If the provider
+  has no sign-only endpoint at all, make the backend sending-only: fail the
+  sign-only entry point rather than submitting behind the caller's back.
+- **Never mutate the caller's transaction with a signature that does not cover
+  it.** A provider that rewrites the transaction produces a signature over its
+  own bytes; leave the caller's transaction untouched.
+- **Report broadcast uncertainty as such.** A failure after submission may still
+  have landed. Surface `BROADCAST_UNCONFIRMED` rather than a generic error a
+  caller might blindly retry into a duplicate spend, and carry the provider
+  transaction id whenever you have one. If the create itself failed there is no
+  id to carry, so send a message-derived idempotency key on every create: that
+  is what makes a byte-identical resend safe.
+- **Never sign before init.** Hold the public key as an optional value and fail
+  with a config error if signing is attempted first; never fall back to the zero
+  address.
 - **Never log sensitive data** (private keys, API secrets, raw API responses)
 - **Use `Debug` impl that hides sensitive fields** — both `Debug` and `Display` on `SignerError` are redacted by default; do not rely on error messages containing details
 - **Validate all inputs** (public keys, signatures)
