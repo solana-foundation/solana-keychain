@@ -4,8 +4,8 @@ go 1.25.0
 
 require (
 	github.com/solana-foundation/solana-go/v2 v2.0.0
-	github.com/solana-foundation/solana-keychain/go/core/v2 v2.0.0
-	github.com/solana-foundation/solana-keychain/go/testutils/v2 v2.0.0
+	github.com/solana-foundation/solana-keychain/go/core/v2 v2.0.0-beta.1
+	github.com/solana-foundation/solana-keychain/go/testutils/v2 v2.0.0-beta.1
 	golang.org/x/crypto v0.53.0
 )
 

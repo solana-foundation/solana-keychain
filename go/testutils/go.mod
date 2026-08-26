@@ -22,7 +22,7 @@ require (
 	github.com/mitchellh/go-testing-interface v1.14.1 // indirect
 	github.com/mostynb/zstdpool-freelist v0.0.0-20201229113212-927304c0c3b1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
-	github.com/solana-foundation/solana-keychain/go/core/v2 v2.0.0
+	github.com/solana-foundation/solana-keychain/go/core/v2 v2.0.0-beta.1
 	github.com/streamingfast/logging v0.0.0-20250404134358-92b15d2fbd2e // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect

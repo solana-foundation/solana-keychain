@@ -8,8 +8,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.26
 	github.com/aws/aws-sdk-go-v2/service/kms v1.53.6
 	github.com/solana-foundation/solana-go/v2 v2.0.0
-	github.com/solana-foundation/solana-keychain/go/core/v2 v2.0.0
-	github.com/solana-foundation/solana-keychain/go/testutils/v2 v2.0.0
+	github.com/solana-foundation/solana-keychain/go/core/v2 v2.0.0-beta.1
+	github.com/solana-foundation/solana-keychain/go/testutils/v2 v2.0.0-beta.1
 )
 
 require (
