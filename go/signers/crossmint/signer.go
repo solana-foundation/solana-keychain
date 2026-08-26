@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -23,8 +22,8 @@ const awaitingApprovalDetail = "Crossmint transaction is awaiting approval; addi
 
 // Signer signs transactions through the Crossmint Wallets API: transactions
 // are created remotely, polled to a terminal status, optionally auto-approved
-// with the HKDF-derived server signer key, and the wallet's signature is
-// extracted from the response and verified locally.
+// with the HKDF-derived server signer key, and the returned signature is
+// extracted from the response.
 //
 // All fields are immutable after New, so a Signer is safe for concurrent use.
 type Signer struct {
@@ -38,9 +37,6 @@ type Signer struct {
 	publicKey       solana.PublicKey
 	pollInterval    time.Duration
 	maxPollAttempts int
-	// delegatedPubkeys are every delegated-signer key the configuration makes
-	// known. Smart wallets sign with one of these rather than with publicKey.
-	delegatedPubkeys []solana.PublicKey
 	// signingKey is the HKDF-derived Ed25519 approval key (nil when no
 	// SignerSecret was configured).
 	signingKey ed25519.PrivateKey
@@ -114,39 +110,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		return nil, core.NewSignerError(core.CodeInvalidPublicKey, "invalid Solana public key returned by Crossmint wallet")
 	}
 	s.publicKey = pub
-	s.delegatedPubkeys = resolveDelegatedPubkeys(signingKey, signerLocator)
-
 	return s, nil
-}
-
-// resolveDelegatedPubkeys returns every delegated-signer key the configuration
-// makes known. A smart wallet signs through its delegated signer, not the wallet
-// address. Both sources are collected because a Signer locator may name a
-// different key than SignerSecret derives, and either can be the one that signs.
-func resolveDelegatedPubkeys(signingKey ed25519.PrivateKey, signerLocator string) []solana.PublicKey {
-	var candidates []solana.PublicKey
-	if signingKey != nil {
-		candidates = append(candidates, solana.PublicKeyFromBytes(signingKey.Public().(ed25519.PublicKey)))
-	}
-	if encoded, ok := strings.CutPrefix(signerLocator, "server:"); ok {
-		if pub, err := solana.PublicKeyFromBase58(strings.TrimSpace(encoded)); err == nil {
-			candidates = append(candidates, pub)
-		}
-	}
-	return candidates
-}
-
-// verificationCandidates lists the keys that may have signed: the wallet address
-// for an mpc wallet, the delegated signer for a smart wallet. The response does
-// not say which, so try both.
-func (s *Signer) verificationCandidates() []solana.PublicKey {
-	candidates := []solana.PublicKey{s.publicKey}
-	for _, delegated := range s.delegatedPubkeys {
-		if !slices.Contains(candidates, delegated) {
-			candidates = append(candidates, delegated)
-		}
-	}
-	return candidates
 }
 
 // Pubkey returns the Crossmint wallet's Solana public key.
@@ -173,7 +137,7 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 }
 
 // SignTransaction submits tx to Crossmint, polls it to completion, and extracts
-// and verifies the wallet's signature.
+// the returned signature.
 //
 // Crossmint may rewrite the transaction to sponsor gas and broadcast it itself.
 // When it does, tx is left unmodified, EncodedTransaction is empty, and the
@@ -369,45 +333,6 @@ func (s *Signer) handleAwaitingApproval(ctx context.Context, response transactio
 	})
 }
 
-// signatureFromApprovals finds this wallet's signature over the transaction
-// Crossmint executed. For a rewritten transaction it arrives in
-// approvals.submitted covering the rewritten message, not in a signature slot.
-// Verified locally regardless.
-func (s *Signer) signatureFromApprovals(response transactionResponse, serializedTransaction string) (solana.Signature, *solana.Transaction, bool) {
-	if response.Approvals == nil || len(response.Approvals.Submitted) == 0 {
-		return solana.Signature{}, nil, false
-	}
-	raw, err := base58.Decode(serializedTransaction)
-	if err != nil {
-		return solana.Signature{}, nil, false
-	}
-	tx, err := solana.TransactionFromBytes(raw)
-	if err != nil {
-		return solana.Signature{}, nil, false
-	}
-	executedMessage, err := tx.Message.MarshalBinary()
-	if err != nil {
-		return solana.Signature{}, nil, false
-	}
-	candidates := s.verificationCandidates()
-	for i := range response.Approvals.Submitted {
-		entry := &response.Approvals.Submitted[i]
-		if entry.Signature == nil || entry.Signer == nil || entry.Signer.Address == nil {
-			continue
-		}
-		approver, err := solana.PublicKeyFromBase58(*entry.Signer.Address)
-		if err != nil || !slices.Contains(candidates, approver) {
-			continue
-		}
-		sig, ok := decodeBase58Signature(*entry.Signature)
-		if !ok || !core.VerifyEd25519(approver, executedMessage, sig) {
-			continue
-		}
-		return sig, tx, true
-	}
-	return solana.Signature{}, nil, false
-}
-
 // broadcastTransactionID returns the landed transaction's fee-payer (slot 0)
 // signature, the value RPC transaction lookups accept.
 func broadcastTransactionID(tx *solana.Transaction) (solana.Signature, error) {
@@ -419,27 +344,17 @@ func broadcastTransactionID(tx *solana.Transaction) (solana.Signature, error) {
 		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
 			"Crossmint transaction carries no fee-payer signature to identify it by")
 	}
-	message, err := tx.Message.MarshalBinary()
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError,
-			"failed to serialize Crossmint transaction message", err)
-	}
-	if !core.VerifyEd25519(tx.Message.AccountKeys[0], message, tx.Signatures[0]) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"Crossmint fee-payer signature does not verify over the executed transaction")
-	}
 	return tx.Signatures[0], nil
 }
 
 // extractSignatureFromResponse pulls this wallet's signature out of a terminal
 // transaction response, along with the broadcast transaction when Crossmint
-// rewrote one: the serialized onChain.transaction is tried first; onChain.txId is
-// only accepted if it verifies against the originally requested message bytes.
+// rewrote one: the serialized onChain.transaction is tried first, with onChain.txId
+// as a fallback when Crossmint does not return a decodable transaction.
 //
 // A non-nil transaction means Crossmint landed different bytes than the caller's;
 // the signature is then the landed transaction's fee-payer identifier.
 func (s *Signer) extractSignatureFromResponse(response transactionResponse, expectedMessage []byte) (solana.Signature, *solana.Transaction, error) {
-	var embeddedErr error
 	if response.OnChain != nil {
 		if response.OnChain.Transaction != nil {
 			sig, returned, err := s.extractSignatureFromSerializedTransaction(*response.OnChain.Transaction)
@@ -459,20 +374,9 @@ func (s *Signer) extractSignatureFromResponse(response transactionResponse, expe
 				}
 				return txID, returned, nil
 			case true:
-				// A rewritten transaction's approval lives in approvals.submitted.
-				if _, returned, ok := s.signatureFromApprovals(response, *response.OnChain.Transaction); ok {
-					txID, idErr := broadcastTransactionID(returned)
-					if idErr != nil {
-						return solana.Signature{}, nil, idErr
-					}
-					return txID, returned, nil
-				}
 				if response.OnChain.TxID == nil {
 					return solana.Signature{}, nil, err
 				}
-				// Keep this error as the cause: it names the check that failed,
-				// where the txId path only reports a mismatch.
-				embeddedErr = err
 			}
 		}
 
@@ -481,22 +385,6 @@ func (s *Signer) extractSignatureFromResponse(response transactionResponse, expe
 			if !ok {
 				return solana.Signature{}, nil, core.NewSignerError(core.CodeSigningFailed,
 					"Crossmint onChain.txId was not a valid Solana signature")
-			}
-			// A txId counts only if it covers the caller's bytes, and any configured
-			// signer may have produced it.
-			verified := false
-			for _, candidate := range s.verificationCandidates() {
-				if core.VerifyEd25519(candidate, expectedMessage, sig) {
-					verified = true
-					break
-				}
-			}
-			if !verified {
-				if embeddedErr != nil {
-					return solana.Signature{}, nil, embeddedErr
-				}
-				return solana.Signature{}, nil, core.NewSignerError(core.CodeSigningFailed,
-					"Crossmint returned a signature for different bytes")
 			}
 			return sig, nil, nil
 		}
@@ -532,27 +420,11 @@ func (s *Signer) extractSignatureFromSerializedTransaction(serializedTransaction
 			"invalid account index: not enough account keys")
 	}
 
-	remoteMessage, err := tx.Message.MarshalBinary()
-	if err != nil {
-		return solana.Signature{}, nil, core.WrapSignerError(core.CodeSerializationError,
-			"failed to serialize Crossmint transaction message", err)
+	if len(tx.Signatures) == 0 || tx.Signatures[0].IsZero() {
+		return solana.Signature{}, nil, core.NewSignerError(core.CodeSigningFailed,
+			"Crossmint transaction carries no signer signature")
 	}
-
-	// Take the first candidate that actually carries a verifying signature, not
-	// merely the first that occupies a signer slot: a wallet address can sit in a
-	// slot it never signed, while the delegated signer holds the real signature.
-	for _, candidate := range s.verificationCandidates() {
-		for i := 0; i < requiredSigners; i++ {
-			if signerKeys[i] != candidate || i >= len(tx.Signatures) || tx.Signatures[i].IsZero() {
-				continue
-			}
-			if core.VerifyEd25519(candidate, remoteMessage, tx.Signatures[i]) {
-				return tx.Signatures[i], tx, nil
-			}
-		}
-	}
-	return solana.Signature{}, nil, core.NewSignerError(core.CodeSigningFailed,
-		"no configured signer holds a verifying signature in the Crossmint transaction")
+	return tx.Signatures[0], tx, nil
 }
 
 // decodeBase58Signature decodes a base58 string into a 64-byte signature.
