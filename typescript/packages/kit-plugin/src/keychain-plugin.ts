@@ -1,4 +1,10 @@
-import type { FordefiManualSignerConfig, FordefiSignerConfig, KeychainSignerConfig } from '@solana/keychain';
+import type {
+    FordefiManualSignerConfig,
+    FordefiSignerConfig,
+    KeychainSignerConfig,
+    SolanaModifyingSigner,
+    SolanaSigner,
+} from '@solana/keychain';
 import {
     assertIsSolanaSigner,
     createKeychainSigner,
@@ -6,6 +12,7 @@ import {
     SignerErrorCode,
     throwSignerError,
 } from '@solana/keychain';
+import type { MessagePartialSigner } from '@solana/kit';
 import { extendClient } from '@solana/kit';
 
 /**
@@ -29,13 +36,28 @@ export type KeychainKitPluginConfig =
     | (FordefiSignerConfig & { backend: 'fordefi'; chain?: undefined });
 
 /**
+ * The client-facing signer shape a plugin config produces. Only Fordefi native
+ * manual mode yields a modifying signer — which also signs messages, matching
+ * the factory's return type; every other accepted backend is a partial signer,
+ * and its statically known `signTransactions`/`signMessages` must survive on
+ * `client.payer`/`client.identity`.
+ */
+type ClientSigner<TConfig extends KeychainKitPluginConfig> = TConfig extends FordefiManualSignerConfig & {
+    backend: 'fordefi';
+}
+    ? MessagePartialSigner & SolanaModifyingSigner
+    : SolanaSigner;
+
+/**
  * The managed-broadcast exclusion above only protects TypeScript callers, so
  * the config is also rejected at runtime — before `createKeychainSigner`
  * runs, since the excluded backends authenticate against their provider
  * during construction. The signer-shape assertion afterwards is the backstop
  * for any future backend whose factory returns a sending signer.
  */
-async function createClientSigner(config: KeychainKitPluginConfig) {
+async function createClientSigner<TConfig extends KeychainKitPluginConfig>(
+    config: TConfig,
+): Promise<ClientSigner<TConfig>> {
     const { backend } = config as KeychainSignerConfig;
     const broadcastsServerSide =
         backend === 'crossmint' ||
@@ -53,7 +75,23 @@ async function createClientSigner(config: KeychainKitPluginConfig) {
     if (!isSolanaModifyingSigner(signer)) {
         assertIsSolanaSigner(signer);
     }
-    return signer;
+    return signer as ClientSigner<TConfig>;
+}
+
+/**
+ * Fordefi native manual signing requires the vault to be the transaction fee
+ * payer, so an identity-only installation would fail on its first real sign.
+ * {@link keychainIdentity} rejects that config here; its parameter type
+ * excludes it as well.
+ */
+function assertServesAsIdentityAlone(config: KeychainKitPluginConfig): void {
+    const { backend } = config as KeychainSignerConfig;
+    if (backend === 'fordefi' && (config as { pushMode?: unknown }).pushMode === 'manual') {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message:
+                'Fordefi native manual mode must be the transaction fee payer and cannot serve as an identity-only signer. Install it with keychainSigner() or keychainPayer() instead.',
+        });
+    }
 }
 
 /**
@@ -83,7 +121,7 @@ async function createClientSigner(config: KeychainKitPluginConfig) {
  * @see {@link keychainPayer}
  * @see {@link keychainIdentity}
  */
-export function keychainSigner(config: KeychainKitPluginConfig) {
+export function keychainSigner<TConfig extends KeychainKitPluginConfig>(config: TConfig) {
     return async <TClient extends object>(client: TClient) => {
         const signer = await createClientSigner(config);
         return extendClient(client, { identity: signer, payer: signer });
@@ -112,7 +150,7 @@ export function keychainSigner(config: KeychainKitPluginConfig) {
  * @see {@link keychainIdentity}
  * @see {@link keychainSigner}
  */
-export function keychainPayer(config: KeychainKitPluginConfig) {
+export function keychainPayer<TConfig extends KeychainKitPluginConfig>(config: TConfig) {
     return async <TClient extends object>(client: TClient) => {
         const payer = await createClientSigner(config);
         return extendClient(client, { payer });
@@ -126,6 +164,10 @@ export function keychainPayer(config: KeychainKitPluginConfig) {
  * The identity is the signer representing the wallet that owns things in
  * the application, such as the authority over accounts, tokens, or other
  * on-chain assets.
+ *
+ * Fordefi native manual mode is not accepted here: it requires the vault to
+ * be the transaction fee payer, so install it with {@link keychainSigner} or
+ * {@link keychainPayer} instead.
  *
  * @param config - The backend-tagged keychain signer configuration.
  *
@@ -142,8 +184,11 @@ export function keychainPayer(config: KeychainKitPluginConfig) {
  * @see {@link keychainPayer}
  * @see {@link keychainSigner}
  */
-export function keychainIdentity(config: KeychainKitPluginConfig) {
+export function keychainIdentity(
+    config: Exclude<KeychainKitPluginConfig, FordefiManualSignerConfig & { backend: 'fordefi' }>,
+) {
     return async <TClient extends object>(client: TClient) => {
+        assertServesAsIdentityAlone(config);
         const identity = await createClientSigner(config);
         return extendClient(client, { identity });
     };

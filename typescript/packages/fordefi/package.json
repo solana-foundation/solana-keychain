@@ -41,11 +41,12 @@
         "test:treeshakability": "agadoo dist/index.js"
     },
     "dependencies": {
-        "@solana-program/compute-budget": "^0.18.0",
         "@solana/keychain-core": "workspace:*"
     },
     "peerDependencies": {
         "@solana/addresses": ">=8.0.0",
+        "@solana/codecs-core": ">=8.0.0",
+        "@solana/codecs-numbers": ">=8.0.0",
         "@solana/codecs-strings": ">=8.0.0",
         "@solana/keys": ">=8.0.0",
         "@solana/signers": ">=8.0.0",
@@ -57,6 +58,8 @@
     },
     "devDependencies": {
         "@solana/addresses": "8.0.0",
+        "@solana/codecs-core": "8.0.0",
+        "@solana/codecs-numbers": "8.0.0",
         "@solana/codecs-strings": "8.0.0",
         "@solana/keychain-test-utils": "workspace:*",
         "@solana/keys": "8.0.0",

@@ -65,18 +65,19 @@ client.payer; // SolanaSigner — also a Kit TransactionSigner
 
 ## Signer capabilities
 
-Backends come in two shapes. Most sign a transaction you own and hand back signatures (`SolanaSigner`). Managed-broadcast backends rewrite and broadcast the transaction themselves, so they expose only `signAndSendTransactions` (`SolanaSendingSigner`) — Kit classifies signers by method presence, so they deliberately do not expose `signTransactions`.
+Backends come in three shapes, mirroring Kit's signer taxonomy. Most sign a transaction you own and hand back signatures (`SolanaSigner`). Managed-broadcast backends rewrite and broadcast the transaction themselves, so they expose only `signAndSendTransactions` (`SolanaSendingSigner`). Modifying backends rewrite the transaction — a fresh blockhash, managed fee instructions — and sign it but leave broadcasting to the caller, exposing only `modifyAndSignTransactions` (`SolanaModifyingSigner`); always continue from the transaction they return, never the one you passed in. Kit classifies signers by method presence, so each shape deliberately exposes exactly the transaction method it can honor.
 
-| Backend | Interface | `signTransactions` | `signAndSendTransactions` | `signMessages` |
-|---------|-----------|--------------------|---------------------------|----------------|
-| memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | `SolanaSigner` | yes | no | yes |
-| cdp | `SolanaSigner` | yes | no | yes (UTF-8 payloads only) |
-| utila | `SolanaSigner` | yes | no | throws at runtime |
-| crossmint | `SolanaSendingSigner` | no | yes | not exposed |
-| fordefi (black-box mode) | `SolanaSigner` | yes | no | yes |
-| fordefi (native mode) | `SolanaSendingSigner` | no | yes | yes |
+| Backend | Interface | `signTransactions` | `modifyAndSignTransactions` | `signAndSendTransactions` | `signMessages` |
+|---------|-----------|--------------------|-----------------------------|---------------------------|----------------|
+| memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | `SolanaSigner` | yes | no | no | yes |
+| cdp | `SolanaSigner` | yes | no | no | yes (UTF-8 payloads only) |
+| utila | `SolanaSigner` | yes | no | no | throws at runtime |
+| crossmint | `SolanaSendingSigner` | no | no | yes | not exposed |
+| fordefi (black-box mode) | `SolanaSigner` | yes | no | no | yes |
+| fordefi (native auto mode) | `SolanaSendingSigner` | no | no | yes | yes |
+| fordefi (native manual mode) | `SolanaModifyingSigner` | no | yes | no | yes |
 
-`signAndSendTransaction()` from `@solana/keychain-core` gets a transaction on chain through either shape. Signers that cannot broadcast use the send function you inject — core has no RPC dependency:
+`signAndSendTransaction()` from `@solana/keychain-core` gets a transaction on chain through any of the three shapes. Signers that cannot broadcast use the send function you inject — core has no RPC dependency:
 
 ```typescript
 import { signAndSendTransaction } from '@solana/keychain-core';
@@ -88,7 +89,7 @@ const signature = await signAndSendTransaction(signer, transaction, {
 
 Every signing method — `signMessages`, `signTransactions`, `signAndSendTransactions` — takes Kit's optional config as its second argument, so `{ abortSignal }` cancels an in-flight signing request on any backend.
 
-Use `signerCapabilities(signer)` to inspect a signer at runtime — it returns `{ canSignTransactions, canSignMessages, canSignAndSend }`.
+Use `signerCapabilities(signer)` to inspect a signer at runtime — it returns `{ canSignTransactions, canModifyAndSignTransactions, canSignMessages, canSignAndSend }`.
 
 ## Packages
 

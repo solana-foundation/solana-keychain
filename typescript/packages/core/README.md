@@ -33,7 +33,7 @@ interface SolanaSigner {
 
 `address`, `signMessages()` and `signTransactions()` are inherited from Kit's `MessagePartialSigner` and `TransactionPartialSigner`, so every signing method takes Kit's optional config — including `{ abortSignal }` to cancel an in-flight signing request.
 
-**`SolanaSendingSigner`** - Interface for managed-broadcast backends. A backend belongs in this category when it rewrites the transaction message and/or broadcasts server-side, so its signature cannot be applied to the caller's transaction. Such signers expose `signAndSendTransactions()` (Kit's `TransactionSendingSigner`) and deliberately **no** `signTransactions` or `signMessages` — Kit classifies signers by duck-typed method presence, and a present-but-throwing method would make Kit misroute the transaction and fail at runtime. Backends that also support message signing intersect `MessagePartialSigner` per package:
+**`SolanaSendingSigner`** - Interface for managed-broadcast backends. A backend belongs in this category when it broadcasts server-side (usually after rewriting the transaction message), so its signature cannot be applied to the caller's transaction and the caller never holds the signed bytes. A backend that rewrites but lets the caller broadcast belongs in `SolanaModifyingSigner` below instead. Such signers expose `signAndSendTransactions()` (Kit's `TransactionSendingSigner`) and deliberately **no** `signTransactions` or `signMessages` — Kit classifies signers by duck-typed method presence, and a present-but-throwing method would make Kit misroute the transaction and fail at runtime. Backends that also support message signing intersect `MessagePartialSigner` per package:
 
 ```typescript
 import { SolanaSendingSigner } from '@solana/keychain-core';
@@ -45,7 +45,22 @@ interface SolanaSendingSigner {
 }
 ```
 
-Runtime guards: `isSolanaSigner()`, `assertIsSolanaSigner()`, and `isSolanaSendingSigner()`.
+**`SolanaModifyingSigner`** - Interface for backends that rewrite the transaction before signing it — a fresh blockhash, managed Compute Budget fee instructions — but leave broadcasting to the caller (Fordefi native manual mode). Such signers expose `modifyAndSignTransactions()` (Kit's `TransactionModifyingSigner`) and, like `SolanaSendingSigner`, deliberately **no** `signTransactions`: Kit runs modifying signers ahead of the partial signers in its normal signing pipeline. The transaction they return is what the signature covers, so downstream signers and the send must use that object, not the one passed in. Backends that also support message signing intersect `MessagePartialSigner` per package:
+
+```typescript
+import { SolanaModifyingSigner } from '@solana/keychain-core';
+
+interface SolanaModifyingSigner {
+    address: Address;
+    isAvailable(): Promise<boolean>;
+    modifyAndSignTransactions(
+        transactions: readonly Transaction[],
+        config?: TransactionModifyingSignerConfig,
+    ): Promise<readonly Transaction[]>;
+}
+```
+
+Runtime guards: `isSolanaSigner()`, `assertIsSolanaSigner()`, `isSolanaSendingSigner()`, and `isSolanaModifyingSigner()`. `signerCapabilities(signer)` reports the methods a signer actually exposes: `{ canSignTransactions, canModifyAndSignTransactions, canSignAndSend, canSignMessages }`.
 
 ### Error Handling
 

@@ -6,15 +6,10 @@ export type { BackendName, KeychainSignerConfig } from './types.js';
 
 export type { AwsKmsSignerConfig } from '@solana/keychain-aws-kms';
 export type { CdpSignerConfig } from '@solana/keychain-cdp';
-export type { CrossmintSendingSigner, CrossmintSignerConfig } from '@solana/keychain-crossmint';
+export type { CrossmintSignerConfig } from '@solana/keychain-crossmint';
 export type { DfnsSignerConfig } from '@solana/keychain-dfns';
 export type { FireblocksSignerConfig } from '@solana/keychain-fireblocks';
-export type {
-    FordefiManualSignerConfig,
-    FordefiNativeManualSigner,
-    FordefiNativeSigner,
-    FordefiSignerConfig,
-} from '@solana/keychain-fordefi';
+export type { FordefiManualSignerConfig, FordefiSignerConfig } from '@solana/keychain-fordefi';
 export type { GcpKmsSignerConfig } from '@solana/keychain-gcp-kms';
 export type { MemorySignerConfig } from '@solana/keychain-memory';
 export type { OpenfortSignerConfig } from '@solana/keychain-openfort';

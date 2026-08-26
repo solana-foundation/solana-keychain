@@ -40,12 +40,7 @@ import {
     TransactionSendingSigner,
     TransactionSendingSignerConfig,
 } from '@solana/signers';
-import {
-    type CompiledTransactionMessage,
-    type CompiledTransactionMessageWithLifetime,
-    getCompiledTransactionMessageDecoder,
-    getCompiledTransactionMessageEncoder,
-} from '@solana/transaction-messages';
+import { getCompiledTransactionMessageDecoder } from '@solana/transaction-messages';
 import {
     assertIsTransactionWithinSizeLimit,
     Base64EncodedWireTransaction,
@@ -56,8 +51,8 @@ import {
     TransactionWithinSizeLimit,
     TransactionWithLifetime,
 } from '@solana/transactions';
-import { COMPUTE_BUDGET_PROGRAM_ADDRESS } from '@solana-program/compute-budget';
 
+import { manualMessagesMatchFordefiMutationPolicy } from './manual-mutation-policy.js';
 import type {
     FordefiBlackBoxSignatureRequest,
     FordefiCreateTransactionResponse,
@@ -69,6 +64,8 @@ import type {
     SolanaChainUniqueId,
 } from './types.js';
 
+export { DEFAULT_MAX_PRIORITY_FEE_LAMPORTS } from './manual-mutation-policy.js';
+
 const DEFAULT_BASE_URL = 'https://api.fordefi.com';
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 
@@ -79,18 +76,6 @@ let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
 let utf8Encoder: ReturnType<typeof getUtf8Encoder> | undefined;
 const DEFAULT_MAX_POLL_ATTEMPTS = 50;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-const SET_COMPUTE_UNIT_LIMIT = 2;
-const SET_COMPUTE_UNIT_PRICE = 3;
-const MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
-const MICRO_LAMPORTS_PER_LAMPORT = 1_000_000n;
-/**
- * Default ceiling, in lamports, on a priority fee Fordefi introduces itself
- * during native manual signing, so a compromised or malfunctioning response
- * cannot drain the fee payer. Override via
- * {@link FordefiSignerConfig.maxPriorityFeeLamports}.
- */
-export const DEFAULT_MAX_PRIORITY_FEE_LAMPORTS = 100_000_000n;
-
 // Validated at runtime: an unrecognized value would fall through to auto and
 // broadcast.
 const PUSH_MODES = new Set(['auto', 'manual']);
@@ -109,207 +94,6 @@ const FAILURE_STATES = new Set([
     'insufficient_funds',
     'mined_reverted',
 ]);
-
-type DecodedCompiledMessage = CompiledTransactionMessage & CompiledTransactionMessageWithLifetime;
-type LegacyOrV0CompiledMessage = Extract<DecodedCompiledMessage, { version: 'legacy' | 0 }>;
-type MutableCompiledInstruction = {
-    accountIndices?: number[];
-    data?: Uint8Array;
-    programAddressIndex: number;
-};
-type ManualFeeInstructions = { limit?: number; price?: bigint };
-type ManualFeePolicy = { fee?: FordefiSolanaFee; maxPriorityFeeLamports?: bigint };
-
-function bytesEqual(left: ArrayLike<number>, right: ArrayLike<number>): boolean {
-    if (left.length !== right.length) return false;
-    for (let index = 0; index < left.length; index++) {
-        if (left[index] !== right[index]) return false;
-    }
-    return true;
-}
-
-function encodeCompiledMessage(message: DecodedCompiledMessage): ArrayLike<number> {
-    return getCompiledTransactionMessageEncoder().encode(message);
-}
-
-function compareManualMessagesExactly(
-    original: DecodedCompiledMessage,
-    returned: DecodedCompiledMessage,
-    allowBlockhashReplacement: boolean,
-): boolean {
-    const comparable = allowBlockhashReplacement
-        ? ({ ...returned, lifetimeToken: original.lifetimeToken } as DecodedCompiledMessage)
-        : returned;
-    return bytesEqual(encodeCompiledMessage(original), encodeCompiledMessage(comparable));
-}
-
-function normalizeManualFeeMessage(message: LegacyOrV0CompiledMessage): {
-    fees: ManualFeeInstructions;
-    message: LegacyOrV0CompiledMessage;
-} {
-    const normalized = {
-        ...message,
-        header: { ...message.header },
-        instructions: message.instructions.map(instruction => ({
-            ...instruction,
-            accountIndices: instruction.accountIndices ? [...instruction.accountIndices] : undefined,
-            data: instruction.data ? new Uint8Array(instruction.data) : undefined,
-        })),
-        staticAccounts: [...message.staticAccounts],
-    } as LegacyOrV0CompiledMessage & {
-        header: {
-            numReadonlyNonSignerAccounts: number;
-            numReadonlySignerAccounts: number;
-            numSignerAccounts: number;
-        };
-        instructions: MutableCompiledInstruction[];
-        staticAccounts: Address[];
-    };
-    const fees: ManualFeeInstructions = {};
-    const retained: MutableCompiledInstruction[] = [];
-
-    for (const instruction of normalized.instructions) {
-        const programAddress = normalized.staticAccounts[instruction.programAddressIndex];
-        const opcode = instruction.data?.[0];
-        if (
-            programAddress !== COMPUTE_BUDGET_PROGRAM_ADDRESS ||
-            (opcode !== SET_COMPUTE_UNIT_LIMIT && opcode !== SET_COMPUTE_UNIT_PRICE)
-        ) {
-            retained.push(instruction);
-            continue;
-        }
-        if ((instruction.accountIndices?.length ?? 0) !== 0) {
-            throw new Error('Fordefi returned an account-bearing Compute Budget fee instruction');
-        }
-        if (opcode === SET_COMPUTE_UNIT_LIMIT) {
-            if (instruction.data?.length !== 5 || fees.limit !== undefined) {
-                throw new Error('Fordefi returned a malformed or duplicate compute-unit limit');
-            }
-            const limit = Buffer.from(instruction.data).readUInt32LE(1);
-            if (limit === 0 || limit > MAX_COMPUTE_UNIT_LIMIT) {
-                throw new Error('Fordefi returned an out-of-range compute-unit limit');
-            }
-            fees.limit = limit;
-        } else {
-            if (instruction.data?.length !== 9 || fees.price !== undefined) {
-                throw new Error('Fordefi returned a malformed or duplicate compute-unit price');
-            }
-            fees.price = Buffer.from(instruction.data).readBigUInt64LE(1);
-        }
-    }
-    normalized.instructions = retained;
-
-    const computeBudgetPositions = normalized.staticAccounts.flatMap((address, index) =>
-        address === COMPUTE_BUDGET_PROGRAM_ADDRESS ? [index] : [],
-    );
-    if (computeBudgetPositions.length === 1) {
-        const index = computeBudgetPositions[0]!;
-        const readonlyNonSignerStart =
-            normalized.staticAccounts.length - normalized.header.numReadonlyNonSignerAccounts;
-        const referenced = normalized.instructions.some(
-            instruction =>
-                instruction.programAddressIndex === index || instruction.accountIndices?.includes(index) === true,
-        );
-        if (index >= normalized.header.numSignerAccounts && index >= readonlyNonSignerStart && !referenced) {
-            normalized.staticAccounts.splice(index, 1);
-            normalized.header.numReadonlyNonSignerAccounts--;
-            for (const instruction of normalized.instructions) {
-                if (instruction.programAddressIndex > index) {
-                    instruction.programAddressIndex--;
-                }
-                instruction.accountIndices = instruction.accountIndices?.map(accountIndex =>
-                    accountIndex > index ? accountIndex - 1 : accountIndex,
-                );
-            }
-        }
-    }
-    return { fees, message: normalized };
-}
-
-/** Rounds up, and charges an absent limit at the runtime maximum. */
-function effectivePriorityFeeLamports(fee: ManualFeeInstructions): bigint {
-    const price = fee.price ?? 0n;
-    const limit = BigInt(fee.limit ?? MAX_COMPUTE_UNIT_LIMIT);
-    return (price * limit + MICRO_LAMPORTS_PER_LAMPORT - 1n) / MICRO_LAMPORTS_PER_LAMPORT;
-}
-
-/** `undefined` when a custom `priority_fee` already bounds the total. */
-function manualPriorityFeeCeiling(policy: ManualFeePolicy): bigint | undefined {
-    if (policy.maxPriorityFeeLamports !== undefined) return policy.maxPriorityFeeLamports;
-    if (policy.fee?.type === 'custom' && policy.fee.priority_fee !== undefined) return undefined;
-    return DEFAULT_MAX_PRIORITY_FEE_LAMPORTS;
-}
-
-/** Enforces {@link DEFAULT_MAX_PRIORITY_FEE_LAMPORTS} or the configured override. */
-function validateManualFeeCeiling(policy: ManualFeePolicy, returned: ManualFeeInstructions): void {
-    if (returned.price === undefined) return;
-    const ceiling = manualPriorityFeeCeiling(policy);
-    if (ceiling === undefined) return;
-    if (effectivePriorityFeeLamports(returned) > ceiling) {
-        throw new Error(
-            'Fordefi returned a priority fee above the configured maximum; raise maxPriorityFeeLamports to allow it',
-        );
-    }
-}
-
-function validateManualCustomFee(fee: FordefiSolanaFee | undefined, returned: ManualFeeInstructions): void {
-    if (fee?.type !== 'custom') return;
-    if (fee.unit_price !== undefined) {
-        const configuredPrice = BigInt(fee.unit_price);
-        if (returned.price === undefined || returned.price !== configuredPrice) {
-            throw new Error(
-                'Fordefi returned a compute-unit price that does not match the configured custom unit_price',
-            );
-        }
-    }
-    if (fee.priority_fee !== undefined && returned.price !== undefined) {
-        if (effectivePriorityFeeLamports(returned) > BigInt(fee.priority_fee)) {
-            throw new Error('Fordefi returned a priority fee above the configured custom priority_fee');
-        }
-    }
-}
-
-/** Validate the mutation set Fordefi documents for an unsigned native manual request. */
-async function manualMessagesMatchFordefiMutationPolicy(
-    originalMessageBytes: Uint8Array,
-    returnedMessageBytes: Uint8Array,
-    policy: ManualFeePolicy,
-): Promise<boolean> {
-    const decoder = getCompiledTransactionMessageDecoder();
-    const original = decoder.decode(originalMessageBytes);
-    const returned = decoder.decode(returnedMessageBytes);
-    if (original.version !== returned.version) {
-        return false;
-    }
-    const originalLifetime = await getTransactionLifetimeConstraintFromCompiledTransactionMessage(original);
-    if ('nonce' in originalLifetime) {
-        if (!bytesEqual(originalMessageBytes, returnedMessageBytes)) return false;
-        if (original.version !== 1) {
-            validateManualCustomFee(policy.fee, normalizeManualFeeMessage(original).fees);
-        }
-        return true;
-    }
-    if (original.version === 1 || returned.version === 1) {
-        return compareManualMessagesExactly(original, returned, true);
-    }
-
-    const normalizedOriginal = normalizeManualFeeMessage(original);
-    if (normalizedOriginal.fees.price !== undefined) {
-        if (!compareManualMessagesExactly(original, returned, true)) return false;
-        validateManualCustomFee(policy.fee, normalizedOriginal.fees);
-        return true;
-    }
-    const normalizedReturned = normalizeManualFeeMessage(returned);
-    // The caller set no compute-unit price, so any price here is Fordefi's own
-    // and is bounded by the absolute ceiling as well as any custom fee config.
-    validateManualFeeCeiling(policy, normalizedReturned.fees);
-    validateManualCustomFee(policy.fee, normalizedReturned.fees);
-    const comparableReturned = {
-        ...normalizedReturned.message,
-        lifetimeToken: normalizedOriginal.message.lifetimeToken,
-    } as LegacyOrV0CompiledMessage;
-    return bytesEqual(encodeCompiledMessage(normalizedOriginal.message), encodeCompiledMessage(comparableReturned));
-}
 
 /**
  * Signs Fordefi API-request payloads for the `x-signature` header.
@@ -355,16 +139,30 @@ export interface FordefiSignerConfig {
      * transactions, `solana_message` for messages) instead of `black_box_signature`.
      */
     chain?: SolanaChainUniqueId;
-    /** Solana fee configuration for native mode transactions. Only used when `chain` is set. */
+    /**
+     * Solana fee configuration for native mode transactions. Only used when
+     * `chain` is set.
+     *
+     * Durable-nonce transactions in manual mode must round-trip byte-for-byte,
+     * so Fordefi cannot inject fee instructions into them: a custom
+     * `unit_price` is honored only when the transaction already carries a
+     * matching `SetComputeUnitPrice` instruction, and signing rejects
+     * otherwise.
+     */
     fee?: FordefiSolanaFee;
     /** Positive integer max polling attempts before timeout (default: 50) */
     maxPollAttempts?: number;
     /**
      * Ceiling, in lamports, on a priority fee Fordefi introduces itself during
-     * native manual signing. Omitted applies
-     * {@link DEFAULT_MAX_PRIORITY_FEE_LAMPORTS}, unless `fee` sets a custom
-     * `priority_fee`, which governs instead. Never applies to a compute-unit
-     * price the caller set, since those messages are compared byte-for-byte.
+     * native manual signing. Omitted applies the default of 100,000,000
+     * lamports (0.1 SOL), unless `fee` sets a custom `priority_fee`, which
+     * governs instead. Never applies to a compute-unit price the caller set,
+     * since those messages are compared byte-for-byte.
+     *
+     * The ceiling bounds the product of compute-unit price and limit, not the
+     * limit itself: Fordefi manages the `SetComputeUnitLimit` instruction in
+     * manual mode, and a caller-set limit with no caller-set price is not
+     * preserved exactly.
      */
     maxPriorityFeeLamports?: bigint | number;
     /** Non-negative integer polling interval in ms (default: 2000) */
@@ -404,15 +202,23 @@ export type FordefiManualSignerConfig = Omit<FordefiSignerConfig, 'chain' | 'pus
 type AnyFordefiSignerConfig = FordefiManualSignerConfig | FordefiSignerConfig;
 
 /**
- * Fordefi signer shape returned when `chain` enables native Solana mode.
+ * Create and initialize a Fordefi-backed signer.
  *
- * Native mode may replace the recent blockhash and fees before signing and
- * broadcasts with `push_mode: 'auto'`, so it must be used through Kit's
- * {@link TransactionSendingSigner} flow rather than as a partial signer.
- * Native instances expose no `signTransactions` — Kit classifies signers by
- * duck-typed method presence — but do sign messages.
+ * Native *manual* mode (`chain` and `pushMode: 'manual'`) sends the request
+ * unsigned, so Fordefi may replace the recent blockhash and manage the
+ * Compute Budget fee instructions — both the compute-unit price and the
+ * compute-unit limit. It signs without broadcasting; the caller applies any
+ * remaining signatures and owns submission. The returned signer is a Kit
+ * {@link TransactionModifyingSigner} that also signs messages.
  *
- * Native mode is not retry-safe: any failure after Fordefi accepts the
+ * Native *auto* mode (`chain` set, `pushMode` omitted) may replace the recent
+ * blockhash and fees before signing and broadcasts with `push_mode: 'auto'`,
+ * so it must be used through Kit's {@link TransactionSendingSigner} flow
+ * rather than as a partial signer. Native instances expose no
+ * `signTransactions` — Kit classifies signers by duck-typed method presence —
+ * but do sign messages.
+ *
+ * Native auto mode is not retry-safe: any failure after Fordefi accepts the
  * submission rejects with `BROADCAST_UNCONFIRMED` carrying
  * `context.providerTransactionId`; check that transaction with Fordefi before
  * retrying. A submission that fails without a usable response rejects with
@@ -421,31 +227,15 @@ type AnyFordefiSignerConfig = FordefiManualSignerConfig | FordefiSignerConfig;
  * Each native create carries an `x-idempotence-id` derived from the message
  * bytes, so replaying these exact bytes cannot create a second transaction; a
  * rebuilt transaction derives a different id and is broadcast again.
- */
-export interface FordefiNativeSigner<TAddress extends string = string>
-    extends SolanaSendingSigner<TAddress>, MessagePartialSigner<TAddress> {}
-
-/**
- * Fordefi signer shape returned for native Solana `push_mode: 'manual'`.
- *
- * Requests are unsigned, so Fordefi may replace the recent blockhash and manage
- * priority-fee instructions. It signs without broadcasting; the caller applies
- * any remaining signatures and owns submission.
- */
-export interface FordefiNativeManualSigner<TAddress extends string = string>
-    extends SolanaModifyingSigner<TAddress>, MessagePartialSigner<TAddress> {}
-
-/**
- * Create and initialize a Fordefi-backed signer.
  *
  * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
  */
 export async function createFordefiSigner<TAddress extends string = string>(
     config: FordefiManualSignerConfig,
-): Promise<FordefiNativeManualSigner<TAddress>>;
+): Promise<MessagePartialSigner<TAddress> & SolanaModifyingSigner<TAddress>>;
 export async function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig & { chain: SolanaChainUniqueId },
-): Promise<FordefiNativeSigner<TAddress>>;
+): Promise<MessagePartialSigner<TAddress> & SolanaSendingSigner<TAddress>>;
 export async function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig & { chain?: undefined },
 ): Promise<SolanaSigner<TAddress>>;
@@ -453,14 +243,19 @@ export async function createFordefiSigner<TAddress extends string = string>(
 // `@solana/keychain` umbrella forwards. Concrete configs hit an overload above.
 export async function createFordefiSigner<TAddress extends string = string>(
     config: AnyFordefiSignerConfig,
-): Promise<FordefiNativeManualSigner<TAddress> | FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>>;
+): Promise<
+    | SolanaSigner<TAddress>
+    | (MessagePartialSigner<TAddress> & SolanaModifyingSigner<TAddress>)
+    | (MessagePartialSigner<TAddress> & SolanaSendingSigner<TAddress>)
+>;
 export async function createFordefiSigner<TAddress extends string = string>(
     config: AnyFordefiSignerConfig,
-): Promise<FordefiNativeManualSigner<TAddress> | FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>> {
-    // The instance's own properties expose the mode-appropriate signing
-    // method, which the class type cannot express statically.
-    return (await FordefiSigner.create(config)) as unknown as
-        FordefiNativeManualSigner<TAddress> | FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>;
+): Promise<
+    | SolanaSigner<TAddress>
+    | (MessagePartialSigner<TAddress> & SolanaModifyingSigner<TAddress>)
+    | (MessagePartialSigner<TAddress> & SolanaSendingSigner<TAddress>)
+> {
+    return (await FordefiSigner.create(config))
 }
 
 /**
@@ -520,10 +315,10 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
     /** Create a FordefiSigner with the provided configuration. */
     static async create<TAddress extends string = string>(
         config: FordefiManualSignerConfig,
-    ): Promise<FordefiNativeManualSigner<TAddress> & FordefiSigner<TAddress>>;
+    ): Promise<FordefiSigner<TAddress> & SolanaModifyingSigner<TAddress>>;
     static async create<TAddress extends string = string>(
         config: FordefiSignerConfig & { chain: SolanaChainUniqueId },
-    ): Promise<FordefiNativeSigner<TAddress> & FordefiSigner<TAddress>>;
+    ): Promise<FordefiSigner<TAddress> & SolanaSendingSigner<TAddress>>;
     static async create<TAddress extends string = string>(
         config: FordefiSignerConfig & { chain?: undefined },
     ): Promise<FordefiSigner<TAddress> & SolanaSigner<TAddress>>;
@@ -531,7 +326,7 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
         config: AnyFordefiSignerConfig,
     ): Promise<
         FordefiSigner<TAddress> &
-            (FordefiNativeManualSigner<TAddress> | FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>)
+            (SolanaModifyingSigner<TAddress> | SolanaSendingSigner<TAddress> | SolanaSigner<TAddress>)
     >;
     static async create<TAddress extends string = string>(
         config: AnyFordefiSignerConfig,
@@ -584,6 +379,7 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
         );
         validateRequestDelayMs(config.requestDelayMs ?? 0);
         FordefiSigner.validateRequestTimeoutMs(config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
+        FordefiSigner.validateMaxPriorityFeeLamports(config.maxPriorityFeeLamports);
 
         const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl ?? DEFAULT_BASE_URL);
         assertHttpsUrl(apiBaseUrl, 'apiBaseUrl');
@@ -814,8 +610,9 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
 
     /**
      * Native manual path for Kit's TransactionModifyingSigner contract. Fordefi
-     * signs first so it may replace the lifetime token and manage priority-fee
-     * instructions; remaining signers then sign the validated result.
+     * signs first so it may replace the lifetime token and manage the Compute
+     * Budget fee instructions — compute-unit price and compute-unit limit;
+     * remaining signers then sign the validated result.
      */
     private async modifyAndSignNativeTransactions(
         transactions: readonly (Transaction | (Transaction & TransactionWithLifetime))[],
@@ -841,6 +638,7 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
                 return await this.finishNativeManualSigning(txId, transaction, config);
             },
             this.requestDelayMs,
+            config?.abortSignal,
         );
     }
 
@@ -1365,6 +1163,18 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
         if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 0) {
             throwSignerError(SignerErrorCode.CONFIG_ERROR, {
                 message: 'pollIntervalMs must be a non-negative integer',
+            });
+        }
+    }
+
+    private static validateMaxPriorityFeeLamports(maxPriorityFeeLamports: bigint | number | undefined): void {
+        if (maxPriorityFeeLamports === undefined) return;
+        if (
+            (typeof maxPriorityFeeLamports === 'number' && !Number.isSafeInteger(maxPriorityFeeLamports)) ||
+            BigInt(maxPriorityFeeLamports) < 0n
+        ) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'maxPriorityFeeLamports must be a non-negative integer',
             });
         }
     }
