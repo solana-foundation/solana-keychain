@@ -1,7 +1,7 @@
 {
     "name": "@solana/keychain-gcp-kms",
     "author": "Solana Foundation",
-    "version": "1.4.0",
+    "version": "2.0.0-beta.1",
     "description": "Google Cloud KMS-based signer for Solana transactions using EdDSA (Ed25519)",
     "license": "MIT",
     "repository": "https://github.com/solana-foundation/solana-keychain",

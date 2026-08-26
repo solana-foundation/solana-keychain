@@ -1,7 +1,7 @@
 {
     "name": "@solana/keychain-fireblocks",
     "author": "Solana Foundation",
-    "version": "1.4.0",
+    "version": "2.0.0-beta.1",
     "description": "Fireblocks-based signer for Solana transactions",
     "license": "MIT",
     "repository": "https://github.com/solana-foundation/solana-keychain",
