@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gagliardetto/solana-go"
+	"github.com/solana-foundation/solana-go/v2"
 )
 
 // sendingSigner is a minimal in-package Signer stub: it records that it signed

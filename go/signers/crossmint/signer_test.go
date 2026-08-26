@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/base58"
+	"github.com/solana-foundation/solana-go/v2"
+	"github.com/solana-foundation/solana-go/v2/base58"
 
 	"github.com/solana-foundation/solana-keychain/go/core/v2"
 	"github.com/solana-foundation/solana-keychain/go/testutils/v2"

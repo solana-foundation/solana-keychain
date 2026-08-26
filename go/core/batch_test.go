@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gagliardetto/solana-go"
+	"github.com/solana-foundation/solana-go/v2"
 )
 
 // countingSigner is a minimal in-package Signer stub for batch tests: it

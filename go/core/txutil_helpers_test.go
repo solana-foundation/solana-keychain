@@ -3,8 +3,8 @@ package core
 import (
 	"crypto/ed25519"
 
-	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/programs/system"
+	"github.com/solana-foundation/solana-go/v2"
+	"github.com/solana-foundation/solana-go/v2/programs/system"
 )
 
 // This file inlines the one testutils helper core's tests need, so the core

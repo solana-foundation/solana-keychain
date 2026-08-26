@@ -7,7 +7,7 @@ package testutils
 import (
 	"crypto/ed25519"
 
-	"github.com/gagliardetto/solana-go"
+	"github.com/solana-foundation/solana-go/v2"
 )
 
 // testSeed is a fixed 32-byte Ed25519 seed so the derived keypair is deterministic
