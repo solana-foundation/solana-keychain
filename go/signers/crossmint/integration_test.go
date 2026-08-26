@@ -51,7 +51,7 @@ func TestIntegrationSignMessageNotSupported(t *testing.T) {
 // Signs a minimal empty-instruction transaction with a real blockhash: the
 // backend validates and finalizes the transaction server-side, so this stays
 // focused on remote signing behavior rather than balance/program execution.
-func TestIntegrationSignTransaction(t *testing.T) {
+func TestIntegrationSignAndSendTransaction(t *testing.T) {
 	s := integrationSigner(t)
 
 	rpcURL := os.Getenv("SOLANA_RPC_URL")
@@ -71,24 +71,14 @@ func TestIntegrationSignTransaction(t *testing.T) {
 		},
 	}
 
-	res, err := s.SignTransaction(context.Background(), tx)
+	sig, err := s.SignAndSendTransaction(context.Background(), tx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v", err)
+		t.Fatalf("SignAndSendTransaction: %v", err)
 	}
-	if len(res.Signature) != core.SignatureLength {
-		t.Fatalf("signature length = %d, want %d", len(res.Signature), core.SignatureLength)
+	if len(sig) != core.SignatureLength {
+		t.Fatalf("signature length = %d, want %d", len(sig), core.SignatureLength)
 	}
-	// Crossmint sponsors gas, so it rewrites the transaction, signs its own bytes
-	// and broadcasts server-side. The signature identifies what it landed and
-	// there is nothing left for the caller to send.
-	if res.EncodedTransaction != "" {
-		t.Error("a Crossmint-broadcast transaction leaves nothing for the caller to send")
-	}
-	for _, sig := range tx.Signatures {
-		if !sig.IsZero() {
-			t.Error("the caller's transaction must not carry a signature over other bytes")
-		}
-	}
+	assertCallerTransactionUntouched(t, tx)
 }
 
 func TestIntegrationIsAvailable(t *testing.T) {

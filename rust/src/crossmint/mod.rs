@@ -8,7 +8,7 @@ use crate::signature_util::signature_from_base58;
 use crate::traits::SignTransactionResult;
 use crate::transaction_util::{
     deserialize_wire_transaction, idempotency_key_from_message, serialize_wire_transaction,
-    unconfirmed_unless_rejected, TransactionUtil,
+    unconfirmed_unless_rejected,
 };
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use std::fmt::Write;
@@ -590,24 +590,24 @@ impl CrossmintSigner {
         Ok((signature, transaction))
     }
 
-    /// The signing result, plus the broadcast transaction when Crossmint rewrote one.
+    /// The signature identifying the transaction Crossmint landed.
     ///
-    /// `Some` means Crossmint landed different bytes than the caller's; the
-    /// signature is then the landed transaction's fee-payer identifier.
+    /// When Crossmint landed different bytes than the caller's, this is the
+    /// landed transaction's fee-payer identifier rather than a signature over
+    /// the caller's message.
     fn extract_signature_from_response(
         &self,
         response: &TransactionResponse,
         expected_message: &[u8],
-    ) -> Result<(Signature, Option<VersionedTransaction>), SignerError> {
+    ) -> Result<Signature, SignerError> {
         if let Some(on_chain) = &response.on_chain {
             if let Some(serialized_transaction) = &on_chain.transaction {
                 match self.extract_signature_from_serialized_transaction(serialized_transaction) {
                     Ok((signature, returned)) => {
                         if returned.message.serialize() == expected_message {
-                            return Ok((signature, None));
+                            return Ok(signature);
                         }
-                        let transaction_id = Self::broadcast_transaction_id(&returned)?;
-                        return Ok((transaction_id, Some(returned)));
+                        return Self::broadcast_transaction_id(&returned);
                     }
                     Err(error) => {
                         if on_chain.tx_id.is_none() {
@@ -623,7 +623,7 @@ impl CrossmintSigner {
                         "Crossmint onChain.txId was not a valid Solana signature".to_string(),
                     )
                 })?;
-                return Ok((signature, None));
+                return Ok(signature);
             }
         }
 
@@ -632,13 +632,13 @@ impl CrossmintSigner {
         ))
     }
 
-    /// Sign `transaction` through Crossmint's managed wallet flow.
+    /// Submit `transaction` through Crossmint's managed wallet flow and return the
+    /// signature identifying the transaction Crossmint landed.
     ///
-    /// Crossmint may rewrite the transaction to sponsor gas and broadcast it itself.
-    /// When it does, `transaction` is left unmodified, the returned serialized
-    /// transaction is empty, and the returned signature is the landed transaction's
-    /// fee-payer identifier, usable with RPC transaction lookups. The wallet's own
-    /// signature is placed in `transaction` only when Crossmint signed it as given.
+    /// Crossmint may rewrite the transaction to sponsor gas, so the returned
+    /// signature does not necessarily cover the caller's bytes; it is the landed
+    /// transaction's identifier, usable with RPC transaction lookups.
+    /// `transaction` is never modified.
     ///
     /// Not retry-safe: any failure after the create is accepted returns
     /// [`SignerError::BroadcastUnconfirmed`] carrying the Crossmint transaction id;
@@ -649,11 +649,11 @@ impl CrossmintSigner {
     /// so replaying these exact bytes cannot create a second transaction; a
     /// rebuilt transaction derives a different key and executes as a new
     /// transfer.
-    async fn sign_and_serialize(
+    async fn execute_managed_transaction(
         &self,
-        transaction: &mut VersionedTransaction,
-    ) -> Result<SignTransactionResult, SignerError> {
-        let public_key = self.initialized_pubkey()?;
+        transaction: &VersionedTransaction,
+    ) -> Result<Signature, SignerError> {
+        self.initialized_pubkey()?;
 
         let expected_message = transaction.message.serialize();
         let serialized = serialize_wire_transaction(transaction)?;
@@ -666,37 +666,20 @@ impl CrossmintSigner {
         let provider_tx_id = create_response.id.clone();
         // Post-create failures leave an outcome Crossmint may still execute, so
         // they surface as BroadcastUnconfirmed with the transaction id.
-        let (signature, broadcast) = self
-            .finish_managed_transaction(create_response, &expected_message)
+        self.finish_managed_transaction(create_response, &expected_message)
             .await
             .map_err(|error| SignerError::BroadcastUnconfirmed {
                 provider_tx_id: Some(provider_tx_id),
                 provider_status: None,
                 detail: error.detail_string(),
-            })?;
-
-        if broadcast.is_some() {
-            // Already landed, so complete regardless of the slots the returned copy
-            // shows filled, and nothing is left for the caller to send.
-            return Ok(SignTransactionResult::Complete((String::new(), signature)));
-        }
-
-        TransactionUtil::add_signature_to_transaction(transaction, &public_key, signature)?;
-
-        Ok(TransactionUtil::classify_signed_transaction(
-            transaction,
-            (
-                TransactionUtil::serialize_transaction(transaction)?,
-                signature,
-            ),
-        ))
+            })
     }
 
     async fn finish_managed_transaction(
         &self,
         create_response: TransactionResponse,
         expected_message: &[u8],
-    ) -> Result<(Signature, Option<VersionedTransaction>), SignerError> {
+    ) -> Result<Signature, SignerError> {
         let final_response = self.poll_transaction(create_response).await?;
         self.extract_signature_from_response(&final_response, expected_message)
     }
@@ -720,17 +703,19 @@ impl SolanaSigner for CrossmintSigner {
 
     async fn sign_transaction(
         &self,
-        tx: &mut VersionedTransaction,
+        _tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
-        self.sign_and_serialize(tx).await
+        Err(SignerError::SigningFailed(
+            "Crossmint executes every transaction server-side; call sign_and_send_transaction instead"
+                .to_string(),
+        ))
     }
 
     async fn sign_and_send_transaction(
         &self,
         tx: &mut VersionedTransaction,
     ) -> Result<Signature, SignerError> {
-        let (_, signature) = self.sign_and_serialize(tx).await?.into_signed_transaction();
-        Ok(signature)
+        self.execute_managed_transaction(tx).await
     }
 
     async fn sign_message(&self, _message: &[u8]) -> Result<Signature, SignerError> {

@@ -1,10 +1,18 @@
 use super::*;
 use crate::sdk_adapter::{keypair_pubkey, keypair_sign_message, Keypair};
 use crate::test_util::{create_test_transaction, create_test_transaction_with_recipient};
+use crate::transaction_util::TransactionUtil;
 use wiremock::{
     matchers::{header, method, path},
     Mock, MockServer, ResponseTemplate,
 };
+
+fn assert_caller_transaction_untouched(tx: &VersionedTransaction) {
+    assert!(
+        tx.signatures.iter().all(|s| *s == Signature::default()),
+        "Crossmint broadcasts server-side, so the caller's transaction must stay unsigned"
+    );
+}
 
 fn wallet_response(address: &str) -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -51,6 +59,23 @@ fn create_url_builder_test_signer(wallet_locator: &str) -> CrossmintSigner {
 fn test_broadcasts_transactions() {
     let signer = create_test_signer("https://example.com", 1, 1);
     assert!(signer.broadcasts_transactions());
+}
+
+/// Crossmint has no sign-only API: an approved transaction is always executed
+/// server-side, so a caller asking for signature-only work must be refused
+/// rather than handed a transaction that has already landed.
+#[tokio::test]
+async fn test_sign_transaction_is_rejected() {
+    let keypair = Keypair::new();
+    let signer_pubkey = keypair_pubkey(&keypair);
+    let mut signer = create_test_signer("https://example.com", 1, 1);
+    signer.public_key = Some(signer_pubkey);
+    let mut tx = create_test_transaction(&signer_pubkey);
+
+    let error = signer.sign_transaction(&mut tx).await.unwrap_err();
+
+    assert!(matches!(error, SignerError::SigningFailed(_)));
+    assert_caller_transaction_untouched(&tx);
 }
 
 fn build_url_and_path(wallet_locator: &str, segments: &[&str]) -> (String, String) {
@@ -273,7 +298,7 @@ async fn test_sign_message_not_supported() {
 }
 
 #[tokio::test]
-async fn test_sign_transaction_success() {
+async fn test_sign_and_send_transaction_success() {
     let server = MockServer::start().await;
     let keypair = Keypair::new();
     let signer_pubkey = keypair_pubkey(&keypair);
@@ -322,20 +347,19 @@ async fn test_sign_transaction_success() {
         .mount(&server)
         .await;
 
-    let (_serialized, signature) = signer
-        .sign_transaction(&mut local_tx)
+    let signature = signer
+        .sign_and_send_transaction(&mut local_tx)
         .await
-        .unwrap()
-        .into_signed_transaction();
+        .unwrap();
 
     assert_eq!(signature, expected_signature);
-    assert!(!_serialized.is_empty());
+    assert_caller_transaction_untouched(&local_tx);
 }
 
 /// A smart wallet is signed by its delegated signer, not by the wallet address
 /// the API reports, so the delegated key's returned signature is accepted.
 #[tokio::test]
-async fn test_sign_transaction_locates_delegated_signer_signature() {
+async fn test_sign_and_send_transaction_locates_delegated_signer_signature() {
     let server = MockServer::start().await;
     let wallet_keypair = Keypair::new();
     let wallet_pubkey = keypair_pubkey(&wallet_keypair);
@@ -375,21 +399,20 @@ async fn test_sign_transaction_locates_delegated_signer_signature() {
         .mount(&server)
         .await;
 
-    let (serialized, signature) = signer
-        .sign_transaction(&mut local_tx)
+    let signature = signer
+        .sign_and_send_transaction(&mut local_tx)
         .await
-        .unwrap()
-        .into_signed_transaction();
+        .unwrap();
 
     assert_eq!(signature, expected_signature);
-    assert!(serialized.is_empty());
+    assert_caller_transaction_untouched(&local_tx);
     // The wallet address remains the signer's public identity.
     assert_eq!(signer.pubkey(), wallet_pubkey);
 }
 
 /// Crossmint's returned transaction is trusted as the provider's broadcast result.
 #[tokio::test]
-async fn test_sign_transaction_accepts_unrelated_signer_key() {
+async fn test_sign_and_send_transaction_accepts_unrelated_signer_key() {
     let server = MockServer::start().await;
     let wallet_keypair = Keypair::new();
     let wallet_pubkey = keypair_pubkey(&wallet_keypair);
@@ -424,20 +447,19 @@ async fn test_sign_transaction_accepts_unrelated_signer_key() {
         .mount(&server)
         .await;
 
-    let (serialized, result) = signer
-        .sign_transaction(&mut local_tx)
+    let result = signer
+        .sign_and_send_transaction(&mut local_tx)
         .await
-        .unwrap()
-        .into_signed_transaction();
+        .unwrap();
     assert_eq!(result, signature);
-    assert!(serialized.is_empty());
+    assert_caller_transaction_untouched(&local_tx);
 }
 
 /// Crossmint sponsors gas, so it is the fee payer and the message it signs
 /// differs from the caller's. Its signature must never be placed in the
 /// caller's transaction, which could not verify with it.
 #[tokio::test]
-async fn test_sign_transaction_rewritten_is_reported_as_a_broadcast_result() {
+async fn test_sign_and_send_transaction_rewritten_is_reported_as_a_broadcast_result() {
     let server = MockServer::start().await;
     let keypair = Keypair::new();
     let signer_pubkey = keypair_pubkey(&keypair);
@@ -481,28 +503,19 @@ async fn test_sign_transaction_rewritten_is_reported_as_a_broadcast_result() {
         .mount(&server)
         .await;
 
-    let result = signer.sign_transaction(&mut local_tx).await.unwrap();
-    assert!(matches!(result, SignTransactionResult::Complete(_)));
-    let (serialized, signature) = result.into_signed_transaction();
+    let signature = signer
+        .sign_and_send_transaction(&mut local_tx)
+        .await
+        .unwrap();
 
     assert_eq!(signature, expected_signature);
-    assert!(
-        serialized.is_empty(),
-        "a Crossmint-broadcast transaction leaves nothing for the caller to send"
-    );
-    assert!(
-        local_tx
-            .signatures
-            .iter()
-            .all(|s| *s == Signature::default()),
-        "the caller's transaction must not carry a signature over other bytes"
-    );
+    assert_caller_transaction_untouched(&local_tx);
 }
 
 /// Under sponsorship the returned signature must be the sponsor fee-payer's
 /// slot-0 signature, not the wallet's approval, so RPC lookups resolve.
 #[tokio::test]
-async fn test_sign_transaction_sponsored_returns_fee_payer_transaction_id() {
+async fn test_sign_and_send_transaction_sponsored_returns_fee_payer_transaction_id() {
     let server = MockServer::start().await;
     let wallet_keypair = Keypair::new();
     let wallet_pubkey = keypair_pubkey(&wallet_keypair);
@@ -550,25 +563,20 @@ async fn test_sign_transaction_sponsored_returns_fee_payer_transaction_id() {
     signer.init().await.unwrap();
 
     let mut local_tx = create_test_transaction(&wallet_pubkey);
-    let (serialized, signature) = signer
-        .sign_transaction(&mut local_tx)
+    let signature = signer
+        .sign_and_send_transaction(&mut local_tx)
         .await
-        .unwrap()
-        .into_signed_transaction();
+        .unwrap();
 
     assert_eq!(signature, sponsor_signature);
     assert_ne!(signature, approval_signature);
-    assert!(serialized.is_empty());
-    assert!(local_tx
-        .signatures
-        .iter()
-        .all(|s| *s == Signature::default()));
+    assert_caller_transaction_untouched(&local_tx);
 }
 
 /// A quorum entry carrying neither a top-level address nor signature must not
 /// end the scan: the wallet's approval can follow it.
 #[tokio::test]
-async fn test_sign_transaction_skips_submitted_approvals_without_an_address() {
+async fn test_sign_and_send_transaction_skips_submitted_approvals_without_an_address() {
     let server = MockServer::start().await;
     let wallet_keypair = Keypair::new();
     let wallet_pubkey = keypair_pubkey(&wallet_keypair);
@@ -619,18 +627,17 @@ async fn test_sign_transaction_skips_submitted_approvals_without_an_address() {
     signer.init().await.unwrap();
 
     let mut local_tx = create_test_transaction(&wallet_pubkey);
-    let (serialized, signature) = signer
-        .sign_transaction(&mut local_tx)
+    let signature = signer
+        .sign_and_send_transaction(&mut local_tx)
         .await
-        .unwrap()
-        .into_signed_transaction();
+        .unwrap();
 
     assert_eq!(signature, sponsor_signature);
-    assert!(serialized.is_empty());
+    assert_caller_transaction_untouched(&local_tx);
 }
 
 #[tokio::test]
-async fn test_sign_transaction_rejects_approval_signatures_for_local_transaction_bytes() {
+async fn test_sign_and_send_transaction_rejects_approval_signatures_for_local_transaction_bytes() {
     let server = MockServer::start().await;
     let wallet_keypair = Keypair::new();
     let signer_address = keypair_pubkey(&wallet_keypair).to_string();
@@ -665,7 +672,7 @@ async fn test_sign_transaction_rejects_approval_signatures_for_local_transaction
     signer.init().await.unwrap();
 
     let mut tx = create_test_transaction(&signer.pubkey());
-    let result = signer.sign_transaction(&mut tx).await;
+    let result = signer.sign_and_send_transaction(&mut tx).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -707,7 +714,7 @@ async fn test_create_server_error_is_unconfirmed_without_a_transaction_id() {
     signer.init().await.unwrap();
     let mut tx = create_test_transaction(&signer.pubkey());
 
-    match signer.sign_transaction(&mut tx).await.unwrap_err() {
+    match signer.sign_and_send_transaction(&mut tx).await.unwrap_err() {
         SignerError::BroadcastUnconfirmed {
             provider_tx_id,
             provider_status,
@@ -743,7 +750,7 @@ async fn test_create_accepted_without_an_id_is_unconfirmed() {
     signer.init().await.unwrap();
     let mut tx = create_test_transaction(&signer.pubkey());
 
-    match signer.sign_transaction(&mut tx).await.unwrap_err() {
+    match signer.sign_and_send_transaction(&mut tx).await.unwrap_err() {
         SignerError::BroadcastUnconfirmed {
             provider_tx_id,
             provider_status,
@@ -779,14 +786,14 @@ async fn test_create_rejected_by_crossmint_stays_a_plain_failure() {
     signer.init().await.unwrap();
     let mut tx = create_test_transaction(&signer.pubkey());
 
-    match signer.sign_transaction(&mut tx).await.unwrap_err() {
+    match signer.sign_and_send_transaction(&mut tx).await.unwrap_err() {
         SignerError::RemoteApiError(_) => {}
         other => panic!("Expected RemoteApiError, got: {:?}", other),
     }
 }
 
 #[tokio::test]
-async fn test_sign_transaction_accepts_signature_from_on_chain_transaction_bytes() {
+async fn test_sign_and_send_transaction_accepts_signature_from_on_chain_transaction_bytes() {
     let server = MockServer::start().await;
     let wallet_keypair = Keypair::new();
     let signer_pubkey = keypair_pubkey(&wallet_keypair);
@@ -824,16 +831,16 @@ async fn test_sign_transaction_accepts_signature_from_on_chain_transaction_bytes
     signer.init().await.unwrap();
 
     let mut local_tx = create_test_transaction(&signer_pubkey);
-    let (_serialized, signature) = signer
-        .sign_transaction(&mut local_tx)
+    let signature = signer
+        .sign_and_send_transaction(&mut local_tx)
         .await
-        .unwrap()
-        .into_signed_transaction();
+        .unwrap();
     assert_eq!(signature, remote_signature);
 }
 
 #[tokio::test]
-async fn test_sign_transaction_prefers_on_chain_transaction_signature_over_txid_fallback() {
+async fn test_sign_and_send_transaction_prefers_on_chain_transaction_signature_over_txid_fallback()
+{
     let server = MockServer::start().await;
     let keypair = Keypair::new();
     let signer_pubkey = keypair_pubkey(&keypair);
@@ -876,16 +883,15 @@ async fn test_sign_transaction_prefers_on_chain_transaction_signature_over_txid_
     signer.init().await.unwrap();
 
     let mut local_tx = create_test_transaction(&signer_pubkey);
-    let (_serialized, signature) = signer
-        .sign_transaction(&mut local_tx)
+    let signature = signer
+        .sign_and_send_transaction(&mut local_tx)
         .await
-        .unwrap()
-        .into_signed_transaction();
+        .unwrap();
     assert_eq!(signature, remote_sig);
 }
 
 #[tokio::test]
-async fn test_sign_transaction_awaiting_approval() {
+async fn test_sign_and_send_transaction_awaiting_approval() {
     let server = MockServer::start().await;
     let keypair = Keypair::new();
     let signer_address = keypair_pubkey(&keypair).to_string();
@@ -913,7 +919,7 @@ async fn test_sign_transaction_awaiting_approval() {
     signer.init().await.unwrap();
 
     let mut tx = create_test_transaction(&signer.pubkey());
-    let result = signer.sign_transaction(&mut tx).await;
+    let result = signer.sign_and_send_transaction(&mut tx).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -938,7 +944,7 @@ fn attach_approval_signer(
 }
 
 #[tokio::test]
-async fn test_sign_transaction_submits_approval_once_and_polls_after_async_registration() {
+async fn test_sign_and_send_transaction_submits_approval_once_and_polls_after_async_registration() {
     let server = MockServer::start().await;
     let keypair = Keypair::new();
     let signer_pubkey = keypair_pubkey(&keypair);
@@ -999,16 +1005,12 @@ async fn test_sign_transaction_submits_approval_once_and_polls_after_async_regis
         .mount(&server)
         .await;
 
-    let (_serialized, signature) = signer
-        .sign_transaction(&mut tx)
-        .await
-        .unwrap()
-        .into_signed_transaction();
+    let signature = signer.sign_and_send_transaction(&mut tx).await.unwrap();
     assert_eq!(signature, expected_signature);
 }
 
 #[tokio::test]
-async fn test_sign_transaction_selects_pending_approval_matching_signer_locator() {
+async fn test_sign_and_send_transaction_selects_pending_approval_matching_signer_locator() {
     use ed25519_dalek::Signer as _;
     use wiremock::matchers::body_string_contains;
 
@@ -1072,16 +1074,12 @@ async fn test_sign_transaction_selects_pending_approval_matching_signer_locator(
         .mount(&server)
         .await;
 
-    let (_serialized, signature) = signer
-        .sign_transaction(&mut tx)
-        .await
-        .unwrap()
-        .into_signed_transaction();
+    let signature = signer.sign_and_send_transaction(&mut tx).await.unwrap();
     assert_eq!(signature, expected_tx_signature);
 }
 
 #[tokio::test]
-async fn test_sign_transaction_success_on_last_polled_response() {
+async fn test_sign_and_send_transaction_success_on_last_polled_response() {
     let server = MockServer::start().await;
     let keypair = Keypair::new();
     let signer_pubkey = keypair_pubkey(&keypair);
@@ -1128,10 +1126,6 @@ async fn test_sign_transaction_success_on_last_polled_response() {
     let mut signer = create_test_signer(&server.uri(), 1, 1);
     signer.init().await.unwrap();
 
-    let (_serialized, signature) = signer
-        .sign_transaction(&mut tx)
-        .await
-        .unwrap()
-        .into_signed_transaction();
+    let signature = signer.sign_and_send_transaction(&mut tx).await.unwrap();
     assert_eq!(signature, expected_signature);
 }

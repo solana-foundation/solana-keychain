@@ -11,6 +11,7 @@ import pytest
 import respx
 from solders.keypair import Keypair
 from solders.signature import Signature
+from solders.transaction import VersionedTransaction
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.core import signed_message_bytes
@@ -29,6 +30,12 @@ WALLET_LOCATOR = "email:user@test.com:solana"
 ENCODED_LOCATOR = "email%3Auser%40test.com%3Asolana"
 WALLET_URL = f"{API_BASE_URL}/2025-06-09/wallets/{ENCODED_LOCATOR}"
 TRANSACTIONS_URL = f"{WALLET_URL}/transactions"
+
+
+def assert_caller_transaction_untouched(transaction: VersionedTransaction) -> None:
+    assert all(signature == Signature.default() for signature in transaction.signatures), (
+        "Crossmint broadcasts server-side, so the caller's transaction must stay unsigned"
+    )
 
 
 def make_signer(**overrides: Any) -> CrossmintSigner:
@@ -174,15 +181,30 @@ async def test_sign_message_is_unsupported() -> None:
     assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
 
 
-async def test_uninitialized_sign_transaction_raises_not_initialized() -> None:
+async def test_uninitialized_sign_and_send_transaction_raises_not_initialized() -> None:
     signer = make_signer()
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(create_test_transaction(Keypair().pubkey()))
+        await signer.sign_and_send_transaction(create_test_transaction(Keypair().pubkey()))
     assert excinfo.value.code == SignerErrorCode.NOT_INITIALIZED
 
 
 @respx.mock
-async def test_sign_transaction_success_from_embedded_transaction() -> None:
+async def test_sign_transaction_is_rejected() -> None:
+    """Crossmint has no sign-only API: an approved transaction is always executed
+    server-side, so a caller asking for signature-only work must be refused rather
+    than handed a transaction that has already landed."""
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    transaction = create_test_transaction(keypair.pubkey())
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert_caller_transaction_untouched(transaction)
+
+
+@respx.mock
+async def test_sign_and_send_transaction_success_from_embedded_transaction() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
@@ -200,10 +222,9 @@ async def test_sign_transaction_success_from_embedded_transaction() -> None:
         )
     )
 
-    result = await signer.sign_transaction(transaction)
+    signature = await signer.sign_and_send_transaction(transaction)
 
-    assert result.is_complete
-    assert result.signature == expected_signature
+    assert signature == expected_signature
     create_body = json.loads(respx.calls[1].request.content)
     assert "signer" not in create_body["params"]
     assert base58.b58decode(create_body["params"]["transaction"]) == unsigned_bytes
@@ -216,7 +237,7 @@ async def test_sign_transaction_success_from_embedded_transaction() -> None:
 
 
 @respx.mock
-async def test_sign_transaction_falls_back_to_tx_id() -> None:
+async def test_sign_and_send_transaction_falls_back_to_tx_id() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
@@ -228,12 +249,12 @@ async def test_sign_transaction_falls_back_to_tx_id() -> None:
         )
     )
 
-    result = await signer.sign_transaction(transaction)
-    assert result.signature == signature
+    signature = await signer.sign_and_send_transaction(transaction)
+    assert signature == signature
 
 
 @respx.mock
-async def test_sign_transaction_accepts_provider_tx_id() -> None:
+async def test_sign_and_send_transaction_accepts_provider_tx_id() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
@@ -245,25 +266,25 @@ async def test_sign_transaction_accepts_provider_tx_id() -> None:
         )
     )
 
-    result = await signer.sign_transaction(transaction)
-    assert result.signature == other_signature
+    signature = await signer.sign_and_send_transaction(transaction)
+    assert signature == other_signature
 
 
 @respx.mock
-async def test_sign_transaction_failed_status() -> None:
+async def test_sign_and_send_transaction_failed_status() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     respx.post(TRANSACTIONS_URL).mock(
         return_value=httpx.Response(200, json=tx_response("failed", error={"reason": "boom"}))
     )
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id == "tx-1"
 
 
 @respx.mock
-async def test_sign_transaction_polling_timeout() -> None:
+async def test_sign_and_send_transaction_polling_timeout() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair, max_poll_attempts=2)
     respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json=tx_response("pending")))
@@ -271,7 +292,7 @@ async def test_sign_transaction_polling_timeout() -> None:
         return_value=httpx.Response(200, json=tx_response("pending"))
     )
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id == "tx-1"
 
@@ -284,7 +305,7 @@ async def test_create_server_error_is_unconfirmed_without_a_transaction_id() -> 
         return_value=httpx.Response(503, json={"error": "service unavailable"})
     )
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id is None
     assert excinfo.value.status_code == 503
@@ -296,7 +317,7 @@ async def test_create_accepted_without_an_id_is_unconfirmed() -> None:
     signer = await initialized_signer(keypair)
     respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"status": "pending"}))
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id is None
     assert excinfo.value.status_code is None
@@ -310,7 +331,7 @@ async def test_create_rejected_by_crossmint_stays_a_plain_failure() -> None:
         return_value=httpx.Response(400, json={"error": "invalid transaction"})
     )
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
 
 
@@ -333,7 +354,7 @@ async def test_cancellation_during_create_warns_without_a_transaction_id(
 
     async def run() -> None:
         try:
-            await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+            await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
         except asyncio.CancelledError as error:
             observed.append(str(error))
             raise
@@ -370,7 +391,7 @@ async def test_cancellation_after_create_carries_the_transaction_id(
 
     async def run() -> None:
         try:
-            await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+            await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
         except asyncio.CancelledError as error:
             observed.append(str(error))
             raise
@@ -393,7 +414,7 @@ async def test_awaiting_approval_without_signer_key_fails() -> None:
         return_value=httpx.Response(200, json=tx_response("awaiting-approval"))
     )
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id == "tx-1"
 
@@ -438,9 +459,9 @@ async def test_awaiting_approval_signs_only_our_pending_entry() -> None:
         )
     )
 
-    result = await signer.sign_transaction(transaction)
+    signature = await signer.sign_and_send_transaction(transaction)
 
-    assert result.signature == expected_signature
+    assert signature == expected_signature
     approval_body = json.loads(respx.calls[2].request.content)
     approval = approval_body["approvals"][0]
     assert approval["signer"] == locator
@@ -462,7 +483,7 @@ async def test_awaiting_approval_with_no_matching_entry_fails() -> None:
         )
     )
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(create_test_transaction(keypair.pubkey()))
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id == "tx-1"
 
@@ -491,11 +512,9 @@ async def test_rewritten_transaction_is_reported_as_a_broadcast_result() -> None
         )
     )
 
-    result = await signer.sign_transaction(transaction)
+    signature = await signer.sign_and_send_transaction(transaction)
 
-    assert result.signature == expected_signature
-    assert result.is_complete
-    assert result.encoded_transaction == ""
+    assert signature == expected_signature
     assert all(sig == Signature.default() for sig in transaction.signatures)
     assert not expected_signature.verify(
         keypair.pubkey(), signed_message_bytes(transaction.message)
@@ -526,10 +545,9 @@ async def test_delegated_signer_signature_is_located_and_verified() -> None:
         )
     )
 
-    result = await signer.sign_transaction(transaction)
+    signature = await signer.sign_and_send_transaction(transaction)
 
-    assert result.signature == expected_signature
-    assert result.encoded_transaction == ""
+    assert signature == expected_signature
     # The wallet address is still the signer's public identity.
     assert signer.pubkey == wallet_keypair.pubkey()
 
@@ -562,10 +580,9 @@ async def test_explicit_locator_signer_is_a_candidate_alongside_the_derived_key(
         )
     )
 
-    result = await signer.sign_transaction(transaction)
+    signature = await signer.sign_and_send_transaction(transaction)
 
-    assert result.signature == expected_signature
-    assert result.encoded_transaction == ""
+    assert signature == expected_signature
 
 
 @respx.mock
@@ -594,10 +611,9 @@ async def test_wallet_address_in_an_unsigned_slot_does_not_shadow_the_delegated_
         )
     )
 
-    result = await signer.sign_transaction(transaction)
+    signature = await signer.sign_and_send_transaction(transaction)
 
-    assert result.signature == expected_signature
-    assert result.encoded_transaction == ""
+    assert signature == expected_signature
 
 
 @respx.mock
@@ -618,9 +634,9 @@ async def test_tx_id_signed_by_the_delegated_signer_is_accepted() -> None:
         )
     )
 
-    result = await signer.sign_transaction(transaction)
+    signature = await signer.sign_and_send_transaction(transaction)
 
-    assert result.signature == expected_signature
+    assert signature == expected_signature
 
 
 @respx.mock
@@ -668,11 +684,10 @@ async def test_rewritten_transaction_approval_yields_the_fee_payer_transaction_i
         )
     )
 
-    result = await signer.sign_transaction(transaction)
+    signature = await signer.sign_and_send_transaction(transaction)
 
-    assert result.signature == fee_payer_signature
-    assert result.signature != approval_signature
-    assert result.encoded_transaction == ""
+    assert signature == fee_payer_signature
+    assert signature != approval_signature
     assert all(sig == Signature.default() for sig in transaction.signatures)
 
 
@@ -714,9 +729,8 @@ async def test_provider_transaction_is_trusted_without_approval_verification() -
         )
     )
 
-    result = await signer.sign_transaction(transaction)
-    assert result.signature == executed.signatures[0]
-    assert result.encoded_transaction == ""
+    signature = await signer.sign_and_send_transaction(transaction)
+    assert signature == executed.signatures[0]
 
 
 @respx.mock
@@ -739,13 +753,12 @@ async def test_provider_rewritten_transaction_is_trusted() -> None:
         )
     )
 
-    result = await signer.sign_transaction(transaction)
-    assert result.signature == rewritten.signatures[0]
-    assert result.encoded_transaction == ""
+    signature = await signer.sign_and_send_transaction(transaction)
+    assert signature == rewritten.signatures[0]
 
 
 @respx.mock
-async def test_unrewritten_returned_transaction_is_placed_in_the_caller_transaction() -> None:
+async def test_unrewritten_returned_transaction_is_not_placed_in_the_caller_transaction() -> None:
     """When Crossmint returns the submitted message unchanged, the signature does
     cover the caller's bytes, so it belongs in the caller's transaction."""
     keypair = Keypair()
@@ -763,17 +776,16 @@ async def test_unrewritten_returned_transaction_is_placed_in_the_caller_transact
         )
     )
 
-    result = await signer.sign_transaction(transaction)
+    signature = await signer.sign_and_send_transaction(transaction)
 
-    assert result.signature == expected_signature
-    assert result.encoded_transaction
-    assert list(transaction.signatures) == [expected_signature]
+    assert signature == expected_signature
+    assert_caller_transaction_untouched(transaction)
 
 
 @respx.mock
-async def test_caller_exact_signature_is_placed_in_the_caller_transaction() -> None:
-    """When Crossmint signs the submitted bytes unchanged, the signature belongs
-    in the caller's transaction and the caller can broadcast it."""
+async def test_caller_exact_signature_is_returned_without_touching_the_transaction() -> None:
+    """Even when Crossmint signs the submitted bytes unchanged, it has already
+    executed them, so the caller's transaction is left alone."""
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
@@ -785,12 +797,10 @@ async def test_caller_exact_signature_is_placed_in_the_caller_transaction() -> N
         )
     )
 
-    result = await signer.sign_transaction(transaction)
+    signature = await signer.sign_and_send_transaction(transaction)
 
-    assert result.signature == expected_signature
-    assert result.encoded_transaction
-    assert list(transaction.signatures) == [expected_signature]
-    assert expected_signature.verify(keypair.pubkey(), signed_message_bytes(transaction.message))
+    assert signature == expected_signature
+    assert_caller_transaction_untouched(transaction)
 
 
 @respx.mock
@@ -812,9 +822,8 @@ async def test_signature_not_covering_returned_transaction_is_trusted() -> None:
         )
     )
 
-    result = await signer.sign_transaction(transaction)
-    assert result.signature == returned.signatures[0]
-    assert result.encoded_transaction == ""
+    signature = await signer.sign_and_send_transaction(transaction)
+    assert signature == returned.signatures[0]
 
 
 @respx.mock
@@ -830,7 +839,7 @@ async def test_embedded_transaction_without_signer_signature_falls_through() -> 
         )
     )
     with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(transaction)
+        await signer.sign_and_send_transaction(transaction)
     assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
     assert excinfo.value.provider_transaction_id == "tx-1"
 

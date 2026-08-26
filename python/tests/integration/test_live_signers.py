@@ -14,6 +14,7 @@ import pytest
 from solana_keychain.core.signer import SolanaSigner
 from tests.integration.conftest import (
     assert_message_roundtrip,
+    assert_send_transaction_roundtrip,
     assert_transaction_roundtrip,
     optional_env,
     require_env,
@@ -282,18 +283,23 @@ async def test_live_sign_message(backend: str) -> None:
     await assert_message_roundtrip(signer)
 
 
-# Broadcast-managed services rewrite the transaction before signing, so their
-# signature covers their bytes rather than the caller's.
-_REWRITES_TRANSACTION = frozenset({"crossmint"})
+# Broadcast-managed services execute the transaction themselves and expose no
+# sign-only path.
+_BROADCAST_MANAGED = frozenset({"crossmint"})
 
 
-@pytest.mark.parametrize("backend", sorted(_ALL_BACKENDS))
+@pytest.mark.parametrize("backend", sorted(_ALL_BACKENDS.keys() - _BROADCAST_MANAGED))
 async def test_live_sign_transaction(backend: str) -> None:
     _skip_unless_selected(backend)
     signer = await _ALL_BACKENDS[backend]()
-    await assert_transaction_roundtrip(
-        signer, signs_caller_bytes=backend not in _REWRITES_TRANSACTION
-    )
+    await assert_transaction_roundtrip(signer)
+
+
+@pytest.mark.parametrize("backend", sorted(_BROADCAST_MANAGED))
+async def test_live_sign_and_send_transaction(backend: str) -> None:
+    _skip_unless_selected(backend)
+    signer = await _ALL_BACKENDS[backend]()
+    await assert_send_transaction_roundtrip(signer)
 
 
 @pytest.mark.parametrize("backend", sorted(_ALL_BACKENDS))

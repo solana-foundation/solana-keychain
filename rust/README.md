@@ -331,14 +331,16 @@ runtime; the second is fixed per backend:
 |---------|-----------------------------|--------------------|-----------------------------|----------------|
 | memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | `false` | yes | `SigningFailed` | yes |
 | cdp | `false` | yes | `SigningFailed` | UTF-8 payloads only, otherwise `SerializationError` |
-| crossmint | `true` | yes | yes | `SigningFailed` |
+| crossmint | `true` | `SigningFailed` | yes | `SigningFailed` |
 | utila | `false` | yes | `SigningFailed` | `SigningFailed` |
 | fordefi (black-box mode) | `false` | yes | `SigningFailed` | yes |
 | fordefi (native mode) | `true` | `SigningFailed` | yes | yes |
 
-Crossmint supports both: it decides per request whether to rewrite and broadcast
-the transaction or to sign the caller's exact bytes, and `sign_transaction`
-exposes that distinction through an empty encoded transaction.
+Crossmint executes every approved transaction server-side and exposes no
+sign-only API, so it offers `sign_and_send_transaction` only. It may rewrite the
+transaction to sponsor gas, in which case the returned signature identifies the
+transaction it landed rather than covering the caller's bytes; the caller's
+transaction is never modified.
 
 ### Sign and Send
 

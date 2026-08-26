@@ -30,10 +30,7 @@ from solana_keychain.core.signer import (
 )
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
-    add_signature_to_transaction,
-    classify_signed_transaction,
     idempotency_key_from_message,
-    serialize_transaction,
     signed_message_bytes,
 )
 from solana_keychain.crossmint.derive import derive_signing_key
@@ -422,12 +419,12 @@ class CrossmintSigner(SolanaSigner):
 
     def _extract_signature_from_response(
         self, response: dict[str, Any], expected_message: bytes
-    ) -> tuple[Signature, VersionedTransaction | None]:
-        """The signing result, plus the broadcast transaction when Crossmint rewrote one.
+    ) -> Signature:
+        """The signature identifying the transaction Crossmint landed.
 
-        A non-``None`` transaction means Crossmint changed the message before
-        signing and broadcast the result server-side; the signature is then the
-        landed transaction's fee-payer identifier.
+        When Crossmint changed the message before signing, this is the landed
+        transaction's fee-payer identifier rather than a signature over the
+        caller's message.
         """
         on_chain = response.get("onChain")
         if isinstance(on_chain, dict):
@@ -442,8 +439,8 @@ class CrossmintSigner(SolanaSigner):
                         raise
                 else:
                     if self._executed_message_bytes(returned) == expected_message:
-                        return signature, None
-                    return self._broadcast_transaction_id(returned), returned
+                        return signature
+                    return self._broadcast_transaction_id(returned)
 
             tx_id = on_chain.get("txId")
             if isinstance(tx_id, str):
@@ -457,7 +454,7 @@ class CrossmintSigner(SolanaSigner):
                         SignerErrorCode.SIGNING_FAILED,
                         "Crossmint onChain.txId was not a valid Solana signature",
                     ) from None
-                return signature, None
+                return signature
 
         raise SignerError(
             SignerErrorCode.SIGNING_FAILED,
@@ -465,32 +462,14 @@ class CrossmintSigner(SolanaSigner):
         )
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
-        """Sign ``transaction`` through Crossmint's managed wallet flow.
+        raise SignerError(
+            SignerErrorCode.SIGNING_FAILED,
+            "Crossmint executes every transaction server-side; "
+            "call sign_and_send_transaction instead",
+        )
 
-        Crossmint may rewrite the transaction (it sponsors gas, so it becomes the
-        fee payer) and broadcast it itself. When it does, ``transaction`` is left
-        unmodified and ``encoded_transaction`` is empty: the returned signature is
-        the landed transaction's fee-payer signature, usable with RPC transaction
-        lookups, and it does not cover the caller's message. Only when Crossmint
-        signs the caller's exact bytes is the signature placed in ``transaction``.
-
-        Not retry-safe: any failure after the create is accepted raises
-        ``BROADCAST_UNCONFIRMED`` carrying ``provider_transaction_id``; check
-        that transaction with Crossmint before retrying. A create that fails
-        without a usable response raises ``BROADCAST_UNCONFIRMED`` with no
-        ``provider_transaction_id``.
-
-        Each create carries an ``x-idempotency-key`` derived from the message
-        bytes, so replaying these exact bytes cannot create a second
-        transaction; a rebuilt transaction derives a different key and executes
-        as a new transfer.
-        """
-        return await self._execute_managed_transaction(transaction)
-
-    async def _execute_managed_transaction(
-        self, transaction: VersionedTransaction
-    ) -> SignedTransaction:
-        public_key = self._initialized_pubkey()
+    async def _execute_managed_transaction(self, transaction: VersionedTransaction) -> Signature:
+        self._initialized_pubkey()
         expected_message = signed_message_bytes(transaction.message)
         transaction_b58 = base58.b58encode(bytes(transaction)).decode("ascii")
 
@@ -501,9 +480,7 @@ class CrossmintSigner(SolanaSigner):
         # Post-create failures leave an outcome Crossmint may still execute, so
         # they surface as BROADCAST_UNCONFIRMED with the transaction id.
         try:
-            return await self._finish_managed_transaction(
-                create_response, transaction, expected_message, public_key
-            )
+            return await self._finish_managed_transaction(create_response, expected_message)
         except asyncio.CancelledError as error:
             # Awaiting a cancelled task strips the raised instance, so the id is
             # also logged; the re-raise must stay a CancelledError for asyncio.
@@ -523,32 +500,31 @@ class CrossmintSigner(SolanaSigner):
             ) from None
 
     async def _finish_managed_transaction(
-        self,
-        create_response: dict[str, Any],
-        transaction: VersionedTransaction,
-        expected_message: bytes,
-        public_key: Pubkey,
-    ) -> SignedTransaction:
+        self, create_response: dict[str, Any], expected_message: bytes
+    ) -> Signature:
         final_response = await self._poll_transaction(create_response)
-        signature, broadcast_transaction = self._extract_signature_from_response(
-            final_response, expected_message
-        )
-
-        if broadcast_transaction is not None:
-            # Crossmint has already landed this transaction, so the operation is
-            # finished whether or not the copy it returns shows every signature
-            # slot filled, and there is nothing left for the caller to send.
-            return SignedTransaction(encoded_transaction="", signature=signature, is_complete=True)
-
-        add_signature_to_transaction(transaction, public_key, signature)
-        return classify_signed_transaction(
-            transaction, serialize_transaction(transaction), signature
-        )
+        return self._extract_signature_from_response(final_response, expected_message)
 
     async def sign_and_send_transaction(self, transaction: VersionedTransaction) -> Signature:
-        """Sign ``transaction`` and let Crossmint execute it."""
-        signed = await self._execute_managed_transaction(transaction)
-        return signed.signature
+        """Submit ``transaction`` through Crossmint's managed wallet flow.
+
+        Crossmint may rewrite the transaction (it sponsors gas, so it becomes the
+        fee payer), in which case the returned signature identifies the landed
+        transaction rather than covering the caller's message. ``transaction`` is
+        never modified.
+
+        Not retry-safe: any failure after the create is accepted raises
+        ``BROADCAST_UNCONFIRMED`` carrying ``provider_transaction_id``; check
+        that transaction with Crossmint before retrying. A create that fails
+        without a usable response raises ``BROADCAST_UNCONFIRMED`` with no
+        ``provider_transaction_id``.
+
+        Each create carries an ``x-idempotency-key`` derived from the message
+        bytes, so replaying these exact bytes cannot create a second
+        transaction; a rebuilt transaction derives a different key and executes
+        as a new transfer.
+        """
+        return await self._execute_managed_transaction(transaction)
 
     async def sign_message(self, message: bytes) -> Signature:
         raise SignerError(

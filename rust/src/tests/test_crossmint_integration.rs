@@ -66,7 +66,7 @@ mod tests {
 
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
-    async fn test_crossmint_sign_transaction() {
+    async fn test_crossmint_sign_and_send_transaction() {
         let signer = get_signer().await;
 
         let rpc_url = env::var("SOLANA_RPC_URL")
@@ -81,21 +81,13 @@ mod tests {
         message.recent_blockhash = latest_blockhash;
         let mut transaction: VersionedTransaction = Transaction::new_unsigned(message).into();
 
-        let (base64_txn, signature) = signer
-            .sign_transaction(&mut transaction)
+        let signature = signer
+            .sign_and_send_transaction(&mut transaction)
             .await
-            .expect("Failed to sign transaction with Crossmint")
-            .into_signed_transaction();
+            .expect("Failed to sign and send transaction with Crossmint");
 
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
 
-        // Crossmint sponsors gas, so it rewrites the transaction, signs its own
-        // bytes and broadcasts server-side. The signature identifies what it
-        // landed and there is nothing left for the caller to send.
-        assert!(
-            base64_txn.is_empty(),
-            "a Crossmint-broadcast transaction leaves nothing for the caller to send"
-        );
         assert!(
             transaction
                 .signatures

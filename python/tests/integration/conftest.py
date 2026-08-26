@@ -101,26 +101,31 @@ async def fetch_latest_blockhash() -> Hash:
     return Hash.from_string(response.json()["result"]["value"]["blockhash"])
 
 
-async def assert_transaction_roundtrip(
-    signer: SolanaSigner, *, signs_caller_bytes: bool = True
-) -> None:
+async def _unsigned_transaction(signer: SolanaSigner) -> VersionedTransaction:
+    message = Message.new_with_blockhash([], signer.pubkey, await fetch_latest_blockhash())
+    return VersionedTransaction.from_legacy(Transaction.new_unsigned(message))
+
+
+async def assert_transaction_roundtrip(signer: SolanaSigner) -> None:
     """An instruction-free transaction keeps this focused on remote signing rather
     than balances or program execution.
-
-    ``signs_caller_bytes=False`` for broadcast-managed services that rewrite the
-    transaction before signing and broadcast it themselves: their signature covers
-    their own bytes, so only its shape can be checked, and there is nothing left
-    for the caller to send. Each signer verifies the signature against the bytes it
-    actually covers internally.
     """
-    message = Message.new_with_blockhash([], signer.pubkey, await fetch_latest_blockhash())
-    transaction = VersionedTransaction.from_legacy(Transaction.new_unsigned(message))
+    transaction = await _unsigned_transaction(signer)
     result = await signer.sign_transaction(transaction)
 
     assert result.is_complete
     assert len(bytes(result.signature)) == 64
-    if signs_caller_bytes:
-        assert Transaction.from_bytes(base64.b64decode(result.encoded_transaction))
-        assert result.signature.verify(signer.pubkey, signed_message_bytes(transaction.message))
-    else:
-        assert result.encoded_transaction == ""
+    assert Transaction.from_bytes(base64.b64decode(result.encoded_transaction))
+    assert result.signature.verify(signer.pubkey, signed_message_bytes(transaction.message))
+
+
+async def assert_send_transaction_roundtrip(signer: SolanaSigner) -> None:
+    """Broadcast-managed services rewrite the transaction before signing and
+    execute it themselves, so the returned signature covers their bytes rather
+    than the caller's and only its shape can be checked. Each signer verifies the
+    signature against the bytes it actually covers internally.
+    """
+    transaction = await _unsigned_transaction(signer)
+    signature = await signer.sign_and_send_transaction(transaction)
+
+    assert len(bytes(signature)) == 64

@@ -94,6 +94,34 @@ func newTestSigner(t *testing.T, cfg Config) *Signer {
 	return s
 }
 
+func assertCallerTransactionUntouched(t *testing.T, tx *solana.Transaction) {
+	t.Helper()
+	for _, sig := range tx.Signatures {
+		if !sig.IsZero() {
+			t.Error("Crossmint broadcasts server-side, so the caller's transaction must stay unsigned")
+		}
+	}
+}
+
+// Crossmint has no sign-only API: an approved transaction is always executed
+// server-side, so a caller asking for signature-only work must be refused
+// rather than handed a transaction that has already landed.
+func TestSignTransactionIsRejected(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.TestPublicKey().String()))
+	srv := testutils.StartTLSServer(t, mux)
+	s := newTestSigner(t, baseConfig(srv))
+
+	tx, err := testutils.CreateTestTransaction(testutils.TestPublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.SignTransaction(context.Background(), tx)
+	testutils.AssertCode(t, err, core.CodeSigningFailed)
+	assertCallerTransactionUntouched(t, tx)
+}
+
 // TestBuildWalletsAPIURL: raw slashes, dot segments, pre-encoded traversal
 // sequences, and query/fragment metacharacters in a wallet locator must all
 // stay inside a single encoded path segment.
@@ -310,7 +338,7 @@ func TestSignMessageNotSupported(t *testing.T) {
 	}
 }
 
-func TestSignTransactionSuccess(t *testing.T) {
+func TestSignAndSendTransactionSuccess(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := testutils.PubkeyOf(priv)
 
@@ -357,26 +385,14 @@ func TestSignTransactionSuccess(t *testing.T) {
 	srv := testutils.StartTLSServer(t, mux)
 
 	s := newTestSigner(t, baseConfig(srv))
-	res, err := s.SignTransaction(context.Background(), localTx)
+	sig, err := s.SignAndSendTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+		t.Fatalf("SignAndSendTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
-	if res.Signature != expectedSignature {
-		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
+	if sig != expectedSignature {
+		t.Errorf("signature = %s, want %s", sig, expectedSignature)
 	}
-	if res.EncodedTransaction == "" {
-		t.Error("encoded transaction should not be empty")
-	}
-	if !res.IsComplete() {
-		t.Error("single-signer transaction should be Complete")
-	}
-	decoded, err := solana.TransactionFromBase64(res.EncodedTransaction)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decoded.Signatures[0] != expectedSignature {
-		t.Error("encoded transaction signature mismatch at position 0")
-	}
+	assertCallerTransactionUntouched(t, localTx)
 }
 
 // createStatusSigner points a signer at a create endpoint answering status/body.
@@ -413,7 +429,7 @@ func TestCreateServerErrorIsUnconfirmedWithoutID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	assertUnconfirmedWithoutID(t, err, http.StatusServiceUnavailable)
 }
 
@@ -423,7 +439,7 @@ func TestCreateAcceptedWithoutIDIsUnconfirmed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	assertUnconfirmedWithoutID(t, err, 0)
 }
 
@@ -433,14 +449,14 @@ func TestCreateRejectionStaysPlainFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	testutils.AssertCode(t, err, core.CodeRemoteAPIError)
 }
 
 // TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes:
 // approval signatures (over Crossmint's internal payload) must never be used
 // as the transaction signature.
-func TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes(t *testing.T) {
+func TestSignAndSendTransactionRejectsApprovalSignaturesForLocalTransactionBytes(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := testutils.PubkeyOf(priv)
 
@@ -464,7 +480,7 @@ func TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	testutils.AssertCode(t, err, core.CodeBroadcastUnconfirmed)
 	if detail := testutils.Detail(t, err); !strings.Contains(detail, "unable to extract signature") {
 		t.Errorf("detail = %q, want it to contain %q", detail, "unable to extract signature")
@@ -473,7 +489,7 @@ func TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes(t *tes
 
 // TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes extracts the
 // returned fee-payer signature even when Crossmint modified the transaction.
-func TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes(t *testing.T) {
+func TestSignAndSendTransactionAcceptsSignatureFromOnChainTransactionBytes(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := testutils.PubkeyOf(priv)
 
@@ -498,31 +514,24 @@ func TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.SignTransaction(context.Background(), localTx)
+	sig, err := s.SignAndSendTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+		t.Fatalf("SignAndSendTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
-	if res.Signature != remoteSignature {
-		t.Errorf("signature = %s, want %s", res.Signature, remoteSignature)
+	if sig != remoteSignature {
+		t.Errorf("signature = %s, want %s", sig, remoteSignature)
 	}
 	// Crossmint sponsors gas, so it is the fee payer and the message it signs
 	// differs from the caller's. Its signature must never be placed in the
 	// caller's transaction, which could not verify with it.
-	if res.EncodedTransaction != "" {
-		t.Error("a Crossmint-broadcast transaction leaves nothing for the caller to send")
-	}
-	for _, sig := range localTx.Signatures {
-		if !sig.IsZero() {
-			t.Error("the caller's transaction must not carry a signature over other bytes")
-		}
-	}
+	assertCallerTransactionUntouched(t, localTx)
 }
 
 // A returned transaction whose message matches the submitted one really is signed
 // over the caller's bytes, so the signature belongs in the caller's transaction.
 // A smart wallet is signed by its delegated signer, not by the wallet address the
 // API reports, so the delegated key's returned signature is accepted.
-func TestSignTransactionLocatesDelegatedSignerSignature(t *testing.T) {
+func TestSignAndSendTransactionLocatesDelegatedSignerSignature(t *testing.T) {
 	secret := signerSecretPrefix + strings.Repeat("ab", 32)
 	derivableAPIKey := "sk_staging_" + base58.Encode([]byte("proj:sig"))
 	delegatedPriv, err := deriveSigningKey(secret, derivableAPIKey)
@@ -569,12 +578,12 @@ func TestSignTransactionLocatesDelegatedSignerSignature(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.SignTransaction(context.Background(), localTx)
+	sig, err := s.SignAndSendTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+		t.Fatalf("SignAndSendTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
-	if res.Signature != expectedSignature {
-		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
+	if sig != expectedSignature {
+		t.Errorf("signature = %s, want %s", sig, expectedSignature)
 	}
 	if !s.Pubkey().Equals(walletPub) {
 		t.Error("the wallet address remains the signer's public identity")
@@ -583,7 +592,7 @@ func TestSignTransactionLocatesDelegatedSignerSignature(t *testing.T) {
 
 // Under sponsorship the returned signature must be the sponsor fee-payer's
 // slot-0 signature, not the wallet's approval, so RPC lookups resolve.
-func TestSignTransactionSponsoredReturnsFeePayerTransactionID(t *testing.T) {
+func TestSignAndSendTransactionSponsoredReturnsFeePayerTransactionID(t *testing.T) {
 	secret := signerSecretPrefix + strings.Repeat("cd", 32)
 	derivableAPIKey := "sk_staging_" + base58.Encode([]byte("proj:sig"))
 	delegatedPriv, err := deriveSigningKey(secret, derivableAPIKey)
@@ -630,25 +639,23 @@ func TestSignTransactionSponsoredReturnsFeePayerTransactionID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.SignTransaction(context.Background(), localTx)
+	sig, err := s.SignAndSendTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+		t.Fatalf("SignAndSendTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
-	if res.Signature != feePayerSignature {
-		t.Errorf("signature = %s, want fee payer %s", res.Signature, feePayerSignature)
+	if sig != feePayerSignature {
+		t.Errorf("signature = %s, want fee payer %s", sig, feePayerSignature)
 	}
-	if res.Signature == approvalSignature {
+	if sig == approvalSignature {
 		t.Error("the approval signature must not be returned as the transaction id")
 	}
-	if res.EncodedTransaction != "" {
-		t.Error("a Crossmint-broadcast transaction leaves nothing for the caller to send")
-	}
+	assertCallerTransactionUntouched(t, localTx)
 }
 
 // A wallet can be configured with both SignerSecret and an explicit Signer locator
 // naming a different key, e.g. the wallet's admin signer. Either may be the key
 // that actually signs, so either returned signature is accepted.
-func TestSignTransactionExplicitLocatorSignerIsACandidate(t *testing.T) {
+func TestSignAndSendTransactionExplicitLocatorSignerIsACandidate(t *testing.T) {
 	walletPub := testutils.TestPublicKey()
 	adminPriv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x7c}, ed25519.SeedSize))
 	admin := solana.PublicKeyFromBytes(adminPriv.Public().(ed25519.PublicKey))
@@ -688,17 +695,17 @@ func TestSignTransactionExplicitLocatorSignerIsACandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.SignTransaction(context.Background(), localTx)
+	sig, err := s.SignAndSendTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+		t.Fatalf("SignAndSendTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
-	if res.Signature != expectedSignature {
-		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
+	if sig != expectedSignature {
+		t.Errorf("signature = %s, want %s", sig, expectedSignature)
 	}
 }
 
 // Crossmint's returned transaction is trusted as the provider's broadcast result.
-func TestSignTransactionAcceptsUnrelatedSignerKey(t *testing.T) {
+func TestSignAndSendTransactionAcceptsUnrelatedSignerKey(t *testing.T) {
 	walletPub := testutils.TestPublicKey()
 	strangerPriv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x5a}, ed25519.SeedSize))
 	stranger := solana.PublicKeyFromBytes(strangerPriv.Public().(ed25519.PublicKey))
@@ -738,19 +745,17 @@ func TestSignTransactionAcceptsUnrelatedSignerKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.SignTransaction(context.Background(), localTx)
+	sig, err := s.SignAndSendTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+		t.Fatalf("SignAndSendTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
-	if res.Signature != signature {
-		t.Errorf("signature = %s, want %s", res.Signature, signature)
+	if sig != signature {
+		t.Errorf("signature = %s, want %s", sig, signature)
 	}
-	if res.EncodedTransaction != "" {
-		t.Error("a Crossmint-broadcast transaction leaves nothing for the caller to send")
-	}
+	assertCallerTransactionUntouched(t, localTx)
 }
 
-func TestSignTransactionUnrewrittenTransactionSignsCallerBytes(t *testing.T) {
+func TestSignAndSendTransactionUnrewrittenTransactionSignsCallerBytes(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := testutils.PubkeyOf(priv)
 
@@ -776,19 +781,17 @@ func TestSignTransactionUnrewrittenTransactionSignsCallerBytes(t *testing.T) {
 	cfg.MaxPollAttempts = 1
 	s := newTestSigner(t, cfg)
 
-	res, err := s.SignTransaction(context.Background(), localTx)
+	sig, err := s.SignAndSendTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+		t.Fatalf("SignAndSendTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
-	if res.EncodedTransaction == "" {
-		t.Error("an unrewritten transaction is the caller's to broadcast")
+	if sig != expectedSignature {
+		t.Errorf("signature = %s, want %s", sig, expectedSignature)
 	}
-	if len(localTx.Signatures) == 0 || localTx.Signatures[0] != expectedSignature {
-		t.Error("the signature covers the caller's bytes and belongs in its transaction")
-	}
+	assertCallerTransactionUntouched(t, localTx)
 }
 
-func TestSignTransactionPrefersOnChainTransactionSignatureOverTxIDFallback(t *testing.T) {
+func TestSignAndSendTransactionPrefersOnChainTransactionSignatureOverTxIDFallback(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := testutils.PubkeyOf(priv)
 
@@ -815,18 +818,18 @@ func TestSignTransactionPrefersOnChainTransactionSignatureOverTxIDFallback(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.SignTransaction(context.Background(), localTx)
+	sig, err := s.SignAndSendTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+		t.Fatalf("SignAndSendTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
-	if res.Signature != remoteSignature {
-		t.Errorf("signature = %s, want %s", res.Signature, remoteSignature)
+	if sig != remoteSignature {
+		t.Errorf("signature = %s, want %s", sig, remoteSignature)
 	}
 }
 
 // TestSignTransactionAwaitingApproval: without a configured signer secret,
 // awaiting-approval is a terminal failure.
-func TestSignTransactionAwaitingApproval(t *testing.T) {
+func TestSignAndSendTransactionAwaitingApproval(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.TestPublicKey().String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
@@ -840,7 +843,7 @@ func TestSignTransactionAwaitingApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	testutils.AssertCode(t, err, core.CodeBroadcastUnconfirmed)
 	if detail := testutils.Detail(t, err); !strings.Contains(detail, "awaiting approval") {
 		t.Errorf("detail = %q, want it to contain %q", detail, "awaiting approval")
@@ -849,7 +852,7 @@ func TestSignTransactionAwaitingApproval(t *testing.T) {
 
 // TestSignTransactionSuccessOnLastPolledResponse: a success arriving on the
 // final poll attempt is still honored.
-func TestSignTransactionSuccessOnLastPolledResponse(t *testing.T) {
+func TestSignAndSendTransactionSuccessOnLastPolledResponse(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := testutils.PubkeyOf(priv)
 
@@ -881,18 +884,18 @@ func TestSignTransactionSuccessOnLastPolledResponse(t *testing.T) {
 	cfg.MaxPollAttempts = 1
 	s := newTestSigner(t, cfg)
 
-	res, err := s.SignTransaction(context.Background(), tx)
+	sig, err := s.SignAndSendTransaction(context.Background(), tx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+		t.Fatalf("SignAndSendTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
-	if res.Signature != expectedSignature {
-		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
+	if sig != expectedSignature {
+		t.Errorf("signature = %s, want %s", sig, expectedSignature)
 	}
 }
 
 // TestSignTransactionFailedStatus covers the "failed" terminal status: the
 // remote error payload is surfaced (sanitized) in the SigningFailed detail.
-func TestSignTransactionFailedStatus(t *testing.T) {
+func TestSignAndSendTransactionFailedStatus(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.TestPublicKey().String()))
 	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
@@ -906,7 +909,7 @@ func TestSignTransactionFailedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	testutils.AssertCode(t, err, core.CodeBroadcastUnconfirmed)
 	detail := testutils.Detail(t, err)
 	if !strings.Contains(detail, "Crossmint transaction failed") || !strings.Contains(detail, "insufficient funds") {
@@ -915,7 +918,7 @@ func TestSignTransactionFailedStatus(t *testing.T) {
 }
 
 // TestSignTransactionPollingTimesOut covers the poll-exhaustion path.
-func TestSignTransactionPollingTimesOut(t *testing.T) {
+func TestSignAndSendTransactionPollingTimesOut(t *testing.T) {
 	pending := `{"id":"tx-123","status":"pending"}`
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.TestPublicKey().String()))
@@ -932,7 +935,7 @@ func TestSignTransactionPollingTimesOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	testutils.AssertCode(t, err, core.CodeBroadcastUnconfirmed)
 	if detail := testutils.Detail(t, err); !strings.Contains(detail, "polling timed out after 2 attempts") {
 		t.Errorf("detail = %q, want it to contain %q", detail, "polling timed out after 2 attempts")
@@ -973,7 +976,7 @@ func TestCreateTransactionRemoteAPIError(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = s.SignTransaction(context.Background(), tx)
+			_, err = s.SignAndSendTransaction(context.Background(), tx)
 			testutils.AssertCode(t, err, core.CodeRemoteAPIError)
 			if detail := testutils.Detail(t, err); !strings.Contains(detail, tc.wantIn) {
 				t.Errorf("detail = %q, want it to contain %q", detail, tc.wantIn)
@@ -1014,7 +1017,7 @@ func TestRemoteAPIErrorSanitizesHostileBody(t *testing.T) {
 // flow: HKDF key derivation from the signer secret + API key, the
 // "server:<pubkey>" locator, and approval submission for an awaiting-approval
 // transaction.
-func TestSignTransactionSubmitsApprovalWithDerivedKey(t *testing.T) {
+func TestSignAndSendTransactionSubmitsApprovalWithDerivedKey(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := testutils.PubkeyOf(priv)
 
@@ -1089,12 +1092,12 @@ func TestSignTransactionSubmitsApprovalWithDerivedKey(t *testing.T) {
 	cfg.MaxPollAttempts = 3
 	s := newTestSigner(t, cfg)
 
-	res, err := s.SignTransaction(context.Background(), localTx)
+	sig, err := s.SignAndSendTransaction(context.Background(), localTx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+		t.Fatalf("SignAndSendTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
-	if res.Signature != expectedSignature {
-		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
+	if sig != expectedSignature {
+		t.Errorf("signature = %s, want %s", sig, expectedSignature)
 	}
 	if got := approvalCalls.Load(); got != 1 {
 		t.Errorf("approval endpoint called %d times, want 1", got)
@@ -1104,7 +1107,7 @@ func TestSignTransactionSubmitsApprovalWithDerivedKey(t *testing.T) {
 // TestSignTransactionAwaitingApprovalNoPendingMessage: with a derived signer
 // key and a pending challenge addressed to it but carrying no message, signing
 // fails.
-func TestSignTransactionAwaitingApprovalNoPendingMessage(t *testing.T) {
+func TestSignAndSendTransactionAwaitingApprovalNoPendingMessage(t *testing.T) {
 	apiKey := "sk_staging_" + base58.Encode([]byte("project-123:signature-data"))
 	secret := signerSecretPrefix + strings.Repeat("4d", 32)
 	derivedKey, err := deriveSigningKey(secret, apiKey)
@@ -1131,7 +1134,7 @@ func TestSignTransactionAwaitingApprovalNoPendingMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), tx)
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
 	testutils.AssertCode(t, err, core.CodeBroadcastUnconfirmed)
 	if detail := testutils.Detail(t, err); !strings.Contains(detail, "no pending message found") {
 		t.Errorf("detail = %q, want it to contain %q", detail, "no pending message found")
@@ -1149,7 +1152,7 @@ func attachApprovalSigner(s *Signer, locator string, key ed25519.PrivateKey) {
 // when Crossmint acknowledges the approval but still reports awaiting-approval
 // (async registration), the signer must not re-submit; it keeps polling until
 // the transaction succeeds.
-func TestSignTransactionSubmitsApprovalOnceAndPollsAfterAsyncRegistration(t *testing.T) {
+func TestSignAndSendTransactionSubmitsApprovalOnceAndPollsAfterAsyncRegistration(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := testutils.PubkeyOf(priv)
 	locator := "server:test-approver"
@@ -1193,12 +1196,12 @@ func TestSignTransactionSubmitsApprovalOnceAndPollsAfterAsyncRegistration(t *tes
 	s := newTestSigner(t, cfg)
 	attachApprovalSigner(s, locator, approvalKey)
 
-	res, err := s.SignTransaction(context.Background(), tx)
+	sig, err := s.SignAndSendTransaction(context.Background(), tx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+		t.Fatalf("SignAndSendTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
-	if res.Signature != expectedSignature {
-		t.Errorf("signature = %s, want %s", res.Signature, expectedSignature)
+	if sig != expectedSignature {
+		t.Errorf("signature = %s, want %s", sig, expectedSignature)
 	}
 	if got := approvalCalls.Load(); got != 1 {
 		t.Errorf("approval endpoint called %d times, want 1", got)
@@ -1208,7 +1211,7 @@ func TestSignTransactionSubmitsApprovalOnceAndPollsAfterAsyncRegistration(t *tes
 // TestSignTransactionSelectsPendingApprovalMatchingSignerLocator: on a
 // multi-approver wallet only the pending challenge addressed to this signer's
 // locator is signed, never pending[0].
-func TestSignTransactionSelectsPendingApprovalMatchingSignerLocator(t *testing.T) {
+func TestSignAndSendTransactionSelectsPendingApprovalMatchingSignerLocator(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := testutils.PubkeyOf(priv)
 	locator := "server:test-approver"
@@ -1271,12 +1274,12 @@ func TestSignTransactionSelectsPendingApprovalMatchingSignerLocator(t *testing.T
 	s := newTestSigner(t, cfg)
 	attachApprovalSigner(s, locator, approvalKey)
 
-	res, err := s.SignTransaction(context.Background(), tx)
+	sig, err := s.SignAndSendTransaction(context.Background(), tx)
 	if err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+		t.Fatalf("SignAndSendTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
-	if res.Signature != expectedTxSignature {
-		t.Errorf("signature = %s, want %s", res.Signature, expectedTxSignature)
+	if sig != expectedTxSignature {
+		t.Errorf("signature = %s, want %s", sig, expectedTxSignature)
 	}
 	if got := approvalCalls.Load(); got != 1 {
 		t.Errorf("approval endpoint called %d times, want 1", got)
@@ -1399,7 +1402,7 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 // An unsigned transaction is serialized as a zero placeholder signature per
 // required signer followed by the message bytes; the transaction posted to
 // Crossmint must use exactly that wire encoding.
-func TestSignTransactionSendsPlaceholderSignatures(t *testing.T) {
+func TestSignAndSendTransactionSendsPlaceholderSignatures(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := testutils.PubkeyOf(priv)
 
@@ -1435,8 +1438,8 @@ func TestSignTransactionSendsPlaceholderSignatures(t *testing.T) {
 	srv := testutils.StartTLSServer(t, mux)
 
 	s := newTestSigner(t, baseConfig(srv))
-	if _, err := s.SignTransaction(context.Background(), localTx); err != nil {
-		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+	if _, err := s.SignAndSendTransaction(context.Background(), localTx); err != nil {
+		t.Fatalf("SignAndSendTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
 	}
 
 	posted, err := base58.Decode(postedB58)
