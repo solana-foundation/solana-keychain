@@ -3,7 +3,19 @@ import { decodeJwt, decodeProtectedHeader, importPKCS8, SignJWT } from 'jose';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
-    return { ...mod, assertSignatureValid: vi.fn() };
+    return {
+        ...mod,
+        extractAndVerifyReturnedSignature: vi.fn(
+            async ({
+                returnedTransactionBytes,
+                signerAddress,
+            }: Parameters<typeof mod.extractAndVerifyReturnedSignature>[0]) =>
+                mod.extractSignatureFromTransactionBytes({
+                    signerAddress,
+                    transactionBytes: returnedTransactionBytes,
+                })[signerAddress],
+        ),
+    };
 });
 
 vi.mock('@solana/transactions', async importOriginal => {
@@ -15,7 +27,7 @@ vi.mock('@solana/transactions', async importOriginal => {
     };
 });
 
-import { assertIsSolanaSigner, assertSignatureValid } from '@solana/keychain-core';
+import { assertIsSolanaSigner, extractAndVerifyReturnedSignature } from '@solana/keychain-core';
 import { getTransactionDecoder } from '@solana/transactions';
 import { createUtilaAccessToken, createUtilaSigner } from '../utila-signer.js';
 import { TEST_EMAIL, TEST_RSA_PRIVATE_KEY } from './setup.js';
@@ -78,7 +90,6 @@ function fetchCall(index: number): [string, RequestInit] {
 describe('UtilaSigner', () => {
     beforeEach(() => {
         vi.resetAllMocks();
-        vi.mocked(assertSignatureValid).mockResolvedValue(undefined);
         vi.mocked(getTransactionDecoder).mockReturnValue({
             decode: vi.fn(() => createDecodedTransaction()),
         } as any);
@@ -225,11 +236,12 @@ describe('UtilaSigner', () => {
 
             expect(results).toHaveLength(1);
             expect(results[0]![signer.address]).toEqual(MOCK_SIGNATURE_BYTES);
-            expect(assertSignatureValid).toHaveBeenCalledWith({
-                data: MOCK_MESSAGE_BYTES,
-                signature: MOCK_SIGNATURE_BYTES,
-                signerAddress: signer.address,
-            });
+            expect(extractAndVerifyReturnedSignature).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    originalMessageBytes: MOCK_MESSAGE_BYTES,
+                    signerAddress: signer.address,
+                }),
+            );
 
             const [url, init] = fetchCall(1);
             expect(url).toBe('https://api.test.utila.io/v2/vaults/vault-test/transactions:initiate');

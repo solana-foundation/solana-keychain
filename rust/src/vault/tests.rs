@@ -51,10 +51,10 @@ fn test_create_vault_signer() {
 }
 
 #[tokio::test]
-async fn test_with_client_uses_supplied_client() {
-    // Prove that a caller-built client is actually the one used for
-    // outbound requests: stand up a mock, hand a plain http client
-    // to `with_client`, and assert the mock sees the call.
+async fn test_with_client_builder_uses_supplied_builder() {
+    // Prove that a caller-configured builder is actually the one used for
+    // outbound requests: stand up a mock, hand a plain http builder
+    // to `with_client_builder`, and assert the mock sees the call.
     let mock_server = MockServer::start().await;
     let keypair = Keypair::new();
     let message = b"with-client-message";
@@ -75,23 +75,60 @@ async fn test_with_client_uses_supplied_client() {
         .await;
 
     // The test uses plain http, so we cannot flip `https_only` —
-    // which is precisely the point of `with_client`: the caller
+    // which is precisely the point of `with_client_builder`: the caller
     // owns the TLS (or lack thereof) policy.
-    let client = Client::builder()
-        .build()
-        .expect("failed to build test client");
-    let signer = VaultSigner::with_client(
-        client,
+    let signer = VaultSigner::with_client_builder(
+        Client::builder(),
         mock_server.uri(),
         TEST_VAULT_TOKEN.to_string(),
         TEST_KEY_NAME.to_string(),
         keypair.pubkey().to_string(),
     )
-    .expect("with_client should accept a pre-built client");
+    .expect("with_client_builder should accept a caller-configured builder");
 
     let result = signer.sign_message(message).await;
     assert!(result.is_ok(), "sign_message failed: {:?}", result.err());
     assert_eq!(result.unwrap(), signature);
+}
+
+#[tokio::test]
+async fn test_with_client_builder_enforces_no_redirect_policy() {
+    // Even a builder configured to follow redirects must be overridden:
+    // requests carry X-Vault-Token, so a redirect has to fail the request
+    // instead of replaying the token to the redirect target.
+    let target = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/collect"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&target)
+        .await;
+
+    let origin = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/transit/sign/test-key"))
+        .respond_with(
+            ResponseTemplate::new(307)
+                .insert_header("Location", format!("{}/collect", target.uri()).as_str()),
+        )
+        .expect(1)
+        .mount(&origin)
+        .await;
+
+    let signer = VaultSigner::with_client_builder(
+        Client::builder().redirect(reqwest::redirect::Policy::limited(10)),
+        origin.uri(),
+        TEST_VAULT_TOKEN.to_string(),
+        TEST_KEY_NAME.to_string(),
+        TEST_PUBKEY.to_string(),
+    )
+    .unwrap();
+
+    let result = signer.sign_message(b"redirect-message").await;
+    assert!(matches!(
+        result.unwrap_err(),
+        SignerError::RemoteApiError(_)
+    ));
 }
 
 #[test]

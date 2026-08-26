@@ -1,6 +1,7 @@
 """HTTPS-enforcing HTTP pipeline for remote signer backends."""
 
 import asyncio
+import json
 import os
 import re
 from collections.abc import Awaitable, Callable
@@ -14,6 +15,7 @@ from solana_keychain.core.errors import SignerError, SignerErrorCode
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 60.0
 AVAILABILITY_TIMEOUT_SECONDS = 5.0
 DEFAULT_REMOTE_ERROR_RESPONSE_MAX_LENGTH = 256
+MAX_RESPONSE_BYTES = 1024 * 1024
 
 _LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -109,6 +111,7 @@ async def fetch_signer_json(
     - non-2xx status → ``REMOTE_API_ERROR`` with the sanitized response body in
       the (redacted) detail
     - invalid JSON body → ``PARSING_ERROR``
+    - body (success or error) larger than ``MAX_RESPONSE_BYTES`` → ``PARSING_ERROR``
 
     ``json_body`` and ``content`` are mutually exclusive. Use ``content`` when the
     request bytes must match a signature computed over them exactly (request-stamping
@@ -156,32 +159,61 @@ async def _request_json(
     content: bytes | None,
     timeout_seconds: float,
 ) -> Any:
+    request = client.build_request(
+        method,
+        url,
+        headers=headers,
+        json=json_body,
+        content=content,
+        timeout=timeout_seconds,
+    )
     try:
-        response = await client.request(
-            method,
-            url,
-            headers=headers,
-            json=json_body,
-            content=content,
-            timeout=timeout_seconds,
-            follow_redirects=False,
-        )
+        response = await client.send(request, stream=True, follow_redirects=False)
     except httpx.HTTPError as error:
         raise SignerError(
             SignerErrorCode.HTTP_ERROR, f"{provider_name} network request failed: {error}"
         ) from None
-    if 300 <= response.status_code < 400:
-        raise SignerError(SignerErrorCode.HTTP_ERROR, f"{provider_name} response was a redirect")
+    try:
+        if 300 <= response.status_code < 400:
+            raise SignerError(
+                SignerErrorCode.HTTP_ERROR, f"{provider_name} response was a redirect"
+            )
+        body = await _read_bounded_body(response, provider_name)
+    finally:
+        await response.aclose()
     if not response.is_success:
+        error_text = body.decode(response.encoding or "utf-8", errors="replace")
         raise SignerError(
             SignerErrorCode.REMOTE_API_ERROR,
             f"{provider_name} API error: {response.status_code}: "
-            f"{sanitize_remote_error_response(response.text)}",
+            f"{sanitize_remote_error_response(error_text)}",
             status_code=response.status_code,
         )
     try:
-        return response.json()
+        return json.loads(body)
     except ValueError:
         raise SignerError(
             SignerErrorCode.PARSING_ERROR, f"Failed to parse {provider_name} response"
         ) from None
+
+
+async def _read_bounded_body(response: httpx.Response, provider_name: str) -> bytes:
+    """Stream the response body, never buffering more than ``MAX_RESPONSE_BYTES``.
+
+    Applies to success and error bodies alike so a misbehaving remote cannot
+    exhaust memory before the status/JSON handling sees the payload.
+    """
+    body = bytearray()
+    try:
+        async for chunk in response.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > MAX_RESPONSE_BYTES:
+                raise SignerError(
+                    SignerErrorCode.PARSING_ERROR,
+                    f"{provider_name} response exceeded maximum size",
+                )
+    except httpx.HTTPError as error:
+        raise SignerError(
+            SignerErrorCode.HTTP_ERROR, f"{provider_name} network request failed: {error}"
+        ) from None
+    return bytes(body)

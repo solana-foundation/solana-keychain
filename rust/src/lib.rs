@@ -396,10 +396,10 @@ impl Signer {
 
     /// Create a Fordefi signer.
     ///
-    /// Fetches the vault during initialization and verifies that its authoritative
-    /// Solana address matches `config.public_key`. Set `config.chain` to use native
-    /// Solana mode (Fordefi modifies and auto-broadcasts the transaction). Leave it
-    /// `None` for black-box mode (raw EdDSA signing, transaction assembled locally).
+    /// `config.public_key` is trusted as the vault's Solana address; construction
+    /// performs no network calls. Set `config.chain` to use native Solana mode
+    /// (Fordefi modifies and auto-broadcasts the transaction). Leave it `None`
+    /// for black-box mode (raw EdDSA signing, transaction assembled locally).
     #[cfg(feature = "fordefi")]
     pub async fn from_fordefi(config: FordefiSignerConfig) -> Result<Self, SignerError> {
         Ok(Self::Fordefi(FordefiSigner::from_config(config).await?))

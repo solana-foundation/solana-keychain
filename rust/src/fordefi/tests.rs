@@ -25,27 +25,12 @@ fn test_request_signer() -> Arc<dyn FordefiRequestSigner> {
     Arc::new(PemRequestSigner::from_pem(&test_pem_key()).unwrap())
 }
 
-/// Exercise the synchronous local-validation/build phase without the public
-/// constructor's authoritative Fordefi vault round-trip.
+/// Exercise the synchronous local-validation/build phase directly, without
+/// going through the async public constructor.
 fn build_test_signer_from_config(
     config: FordefiSignerConfig,
 ) -> Result<FordefiSigner, SignerError> {
     FordefiSigner::build(config)
-}
-
-/// `from_config` against a plain-HTTP wiremock server: the production
-/// client is HTTPS-only, so the vault round-trip needs a test client
-/// (which keeps the no-redirect policy).
-async fn from_config_with_test_client(
-    config: FordefiSignerConfig,
-) -> Result<FordefiSigner, SignerError> {
-    let mut signer = FordefiSigner::build(config)?;
-    signer.client = reqwest::Client::builder()
-        .redirect(crate::http_client_config::no_redirect_policy())
-        .build()
-        .expect("Failed to build test HTTP client");
-    signer.verify_vault_address_with_timeout().await?;
-    Ok(signer)
 }
 
 fn base_test_config() -> FordefiSignerConfig {
@@ -64,7 +49,7 @@ fn base_test_config() -> FordefiSignerConfig {
     }
 }
 
-fn verified_test_config(base_url: &str, public_key: Pubkey) -> FordefiSignerConfig {
+fn test_config(base_url: &str, public_key: Pubkey) -> FordefiSignerConfig {
     FordefiSignerConfig {
         public_key: public_key.to_string(),
         api_base_url: Some(base_url.to_string()),
@@ -260,170 +245,20 @@ fn test_fordefi_config_strips_trailing_slash() {
     assert_eq!(result.unwrap().api_base_url, "https://custom.api.com");
 }
 
-// --- Authoritative vault verification tests ---
+// --- Construction trust-model tests ---
 
 #[tokio::test]
-async fn test_fordefi_constructor_verifies_chain_specific_vault_address() {
-    let mock_server = MockServer::start().await;
+async fn test_fordefi_from_config_trusts_configured_public_key() {
+    // The configured public_key is the source of truth: construction makes no
+    // network calls, so no server needs to exist at the base URL.
     let public_key = keypair_pubkey(&create_test_keypair());
 
-    Mock::given(method("GET"))
-        .and(path("/api/v1/vaults/test-vault-id"))
-        .and(header("Authorization", "Bearer test-token"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "address": public_key.to_string(),
-            "id": "test-vault-id",
-            "type": "solana"
-        })))
-        .expect(1)
-        .mount(&mock_server)
-        .await;
-
-    let signer = from_config_with_test_client(verified_test_config(&mock_server.uri(), public_key))
-        .await
-        .unwrap();
+    let signer =
+        FordefiSigner::from_config(test_config("https://api.test.fordefi.com", public_key))
+            .await
+            .unwrap();
 
     assert_eq!(signer.pubkey(), public_key);
-}
-
-#[tokio::test]
-async fn test_fordefi_constructor_derives_black_box_vault_address() {
-    let mock_server = MockServer::start().await;
-    let public_key = keypair_pubkey(&create_test_keypair());
-    let public_key_compressed = STANDARD.encode(public_key.to_bytes());
-
-    Mock::given(method("GET"))
-        .and(path("/api/v1/vaults/test-vault-id"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": "test-vault-id",
-            "public_key_compressed": public_key_compressed,
-            "type": "black_box"
-        })))
-        .expect(1)
-        .mount(&mock_server)
-        .await;
-
-    let signer = from_config_with_test_client(verified_test_config(&mock_server.uri(), public_key))
-        .await
-        .unwrap();
-
-    assert_eq!(signer.pubkey(), public_key);
-}
-
-#[tokio::test]
-async fn test_fordefi_constructor_rejects_vault_address_mismatch() {
-    let mock_server = MockServer::start().await;
-    let configured_public_key = keypair_pubkey(&create_test_keypair());
-    let remote_public_key = keypair_pubkey(&create_test_keypair());
-
-    Mock::given(method("GET"))
-        .and(path("/api/v1/vaults/test-vault-id"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "address": remote_public_key.to_string(),
-            "id": "test-vault-id"
-        })))
-        .expect(1)
-        .mount(&mock_server)
-        .await;
-
-    let result = from_config_with_test_client(verified_test_config(
-        &mock_server.uri(),
-        configured_public_key,
-    ))
-    .await;
-
-    assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
-}
-
-#[tokio::test]
-async fn test_fordefi_constructor_rejects_vault_without_public_key() {
-    let mock_server = MockServer::start().await;
-    let public_key = keypair_pubkey(&create_test_keypair());
-
-    Mock::given(method("GET"))
-        .and(path("/api/v1/vaults/test-vault-id"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": "test-vault-id" })),
-        )
-        .expect(1)
-        .mount(&mock_server)
-        .await;
-
-    let result =
-        from_config_with_test_client(verified_test_config(&mock_server.uri(), public_key)).await;
-
-    assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
-}
-
-#[tokio::test]
-async fn test_fordefi_constructor_rejects_invalid_black_box_public_key() {
-    let mock_server = MockServer::start().await;
-    let public_key = keypair_pubkey(&create_test_keypair());
-
-    Mock::given(method("GET"))
-        .and(path("/api/v1/vaults/test-vault-id"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": "test-vault-id",
-            "public_key_compressed": STANDARD.encode([1_u8; 31]),
-            "type": "black_box"
-        })))
-        .expect(1)
-        .mount(&mock_server)
-        .await;
-
-    let result =
-        from_config_with_test_client(verified_test_config(&mock_server.uri(), public_key)).await;
-
-    assert!(matches!(
-        result.unwrap_err(),
-        SignerError::InvalidPublicKey(_)
-    ));
-}
-
-#[tokio::test]
-async fn test_fordefi_constructor_rejects_invalid_black_box_base64() {
-    let mock_server = MockServer::start().await;
-    let public_key = keypair_pubkey(&create_test_keypair());
-
-    Mock::given(method("GET"))
-        .and(path("/api/v1/vaults/test-vault-id"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": "test-vault-id",
-            "public_key_compressed": "not-base64",
-            "type": "black_box"
-        })))
-        .expect(1)
-        .mount(&mock_server)
-        .await;
-
-    let result =
-        from_config_with_test_client(verified_test_config(&mock_server.uri(), public_key)).await;
-
-    assert!(matches!(
-        result.unwrap_err(),
-        SignerError::SerializationError(_)
-    ));
-}
-
-#[tokio::test]
-async fn test_fordefi_constructor_propagates_vault_api_error() {
-    let mock_server = MockServer::start().await;
-    let public_key = keypair_pubkey(&create_test_keypair());
-
-    Mock::given(method("GET"))
-        .and(path("/api/v1/vaults/test-vault-id"))
-        .respond_with(ResponseTemplate::new(401))
-        .expect(1)
-        .mount(&mock_server)
-        .await;
-
-    let result =
-        from_config_with_test_client(verified_test_config(&mock_server.uri(), public_key)).await;
-
-    assert!(matches!(
-        result.unwrap_err(),
-        SignerError::RemoteApiError(_)
-    ));
 }
 
 // --- sign_message tests ---
@@ -1349,24 +1184,13 @@ async fn test_fordefi_custom_request_signer_error_propagates() {
 
 #[tokio::test]
 async fn test_fordefi_config_uses_custom_request_signer() {
-    let mock_server = MockServer::start().await;
     let public_key = keypair_pubkey(&create_test_keypair());
 
-    let mut config = verified_test_config(&mock_server.uri(), public_key);
+    let mut config = test_config("https://api.test.fordefi.com", public_key);
     config.private_key_pem = None;
     config.request_signer = Some(Arc::new(CannedSigner("x")));
 
-    Mock::given(method("GET"))
-        .and(path("/api/v1/vaults/test-vault-id"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "address": public_key.to_string(),
-            "id": "test-vault-id"
-        })))
-        .expect(1)
-        .mount(&mock_server)
-        .await;
-
-    let signer = from_config_with_test_client(config).await.unwrap();
+    let signer = FordefiSigner::from_config(config).await.unwrap();
     assert_eq!(
         signer
             .sign_request("/api/v1/vaults", 123, "")
@@ -1379,7 +1203,7 @@ async fn test_fordefi_config_uses_custom_request_signer() {
 #[test]
 fn test_fordefi_config_rejects_both_request_signing_mechanisms() {
     let public_key = keypair_pubkey(&create_test_keypair());
-    let mut config = verified_test_config("https://api.test.fordefi.com", public_key);
+    let mut config = test_config("https://api.test.fordefi.com", public_key);
     config.request_signer = Some(Arc::new(CannedSigner("x")));
 
     let result = FordefiSigner::build(config);
@@ -1390,7 +1214,7 @@ fn test_fordefi_config_rejects_both_request_signing_mechanisms() {
 #[test]
 fn test_fordefi_config_rejects_missing_request_signing_mechanism() {
     let public_key = keypair_pubkey(&create_test_keypair());
-    let mut config = verified_test_config("https://api.test.fordefi.com", public_key);
+    let mut config = test_config("https://api.test.fordefi.com", public_key);
     config.private_key_pem = None;
 
     let result = FordefiSigner::build(config);

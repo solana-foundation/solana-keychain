@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"unicode/utf8"
 
 	"github.com/gagliardetto/solana-go"
@@ -131,11 +130,6 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,
 			"failed to serialize transaction message", err)
 	}
-	pos, err := core.SigningPosition(tx, s.pubkey)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-
 	// Serialize the full transaction (Solana wire format): the wire encoding
 	// carries one slot per required signature, so pad a copy with zero-filled
 	// slots.
@@ -158,26 +152,15 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, err
 	}
 
-	// Decode and deserialize the returned signed transaction.
+	// Decode the returned signed transaction, then extract only our signature
+	// from it and apply it to the original transaction.
 	signedBytes, err := base64.StdEncoding.DecodeString(resp.SignedTransaction)
 	if err != nil {
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,
 			"failed to decode base64 signed transaction from CDP", err)
 	}
-	signedTx, err := solana.TransactionFromBytes(signedBytes)
+	sig, err := core.ExtractAndVerifyReturnedSignature(signedBytes, s.pubkey, msgBytes, "CDP")
 	if err != nil {
-		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,
-			"failed to deserialize signed transaction from CDP", err)
-	}
-
-	// Extract only our signature from the response and apply it to the original
-	// transaction.
-	if pos >= len(signedTx.Signatures) {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-			"signature not found at expected position in CDP response")
-	}
-	sig := signedTx.Signatures[pos]
-	if err := core.VerifySignature(s.pubkey, msgBytes, sig); err != nil {
 		return core.SignedTransaction{}, err
 	}
 
@@ -235,10 +218,10 @@ func (s *Signer) doPost(ctx context.Context, path string, body map[string]any, o
 		return err
 	}
 
-	// Only the status code goes into the error; the response body is never
-	// attached.
+	// The sanitized response body goes into the (opt-in) detail only; Error()
+	// stays generic.
 	if !core.IsSuccess(status) {
-		return core.NewSignerError(core.CodeRemoteAPIError, "CDP API error "+strconv.Itoa(status))
+		return core.NewRemoteAPIError("CDP API error", status, respBody)
 	}
 
 	if err := json.Unmarshal(respBody, out); err != nil {

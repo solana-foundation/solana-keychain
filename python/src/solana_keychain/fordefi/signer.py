@@ -50,8 +50,6 @@ DEFAULT_POLL_INTERVAL_MS = 2000
 DEFAULT_MAX_POLL_ATTEMPTS = 50
 SUPPORTED_CHAINS = ("solana_devnet", "solana_mainnet")
 
-_VAULT_VERIFICATION_TIMEOUT_SECONDS = 10.0
-
 _PUSHABLE_SUCCESS_STATES = frozenset({"completed"})
 _NON_PUSHABLE_SUCCESS_STATES = frozenset({"signed", "completed"})
 _TERMINAL_FAILURE_STATES = frozenset(
@@ -105,9 +103,9 @@ class FordefiSignerConfig:
 class FordefiSigner(SolanaSigner):
     """Signer backed by a Fordefi vault.
 
-    ``init()`` must be awaited before use — it fetches the vault from Fordefi
-    and verifies that the configured ``public_key`` actually belongs to
-    ``vault_id``. ``create_fordefi_signer()`` does this for you.
+    The configured ``public_key`` is the source of truth for the vault's
+    Solana address; Fordefi is trusted as a provider and no remote lookup is
+    performed at construction time.
 
     Black-box mode (default) signs the caller's exact message bytes and the
     caller broadcasts. Native mode (``chain`` set) lets Fordefi replace the
@@ -174,20 +172,6 @@ class FordefiSigner(SolanaSigner):
 
     def __repr__(self) -> str:
         return f"FordefiSigner(pubkey={self._public_key}, vault_id={self._vault_id})"
-
-    async def init(self) -> None:
-        """Verify that the configured public key belongs to the configured vault.
-
-        Without this check a valid-but-wrong address would pass configuration
-        and later be returned by ``pubkey``, creating a funds-routing risk.
-        """
-        vault = await self._fetch_vault(_VAULT_VERIFICATION_TIMEOUT_SECONDS)
-        remote_public_key = self._vault_public_key(vault)
-        if remote_public_key != self._public_key:
-            raise SignerError(
-                SignerErrorCode.CONFIG_ERROR,
-                f"Configured public_key does not match Fordefi vault {self._vault_id}",
-            )
 
     @property
     def pubkey(self) -> Pubkey:
@@ -496,43 +480,6 @@ class FordefiSigner(SolanaSigner):
             raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
         return response
 
-    @staticmethod
-    def _vault_public_key(vault: dict[str, Any]) -> Pubkey:
-        """The authoritative Solana public key of a Fordefi vault.
-
-        Chain-specific vaults expose a base58 ``address``; black-box vaults
-        expose the same 32-byte Ed25519 key as base64 ``public_key_compressed``.
-        """
-        address = vault.get("address")
-        if isinstance(address, str) and address:
-            try:
-                return Pubkey.from_string(address)
-            except Exception:
-                raise SignerError(
-                    SignerErrorCode.INVALID_PUBLIC_KEY,
-                    "Fordefi vault returned an invalid Solana address",
-                ) from None
-        compressed = vault.get("public_key_compressed")
-        if not isinstance(compressed, str):
-            raise SignerError(
-                SignerErrorCode.CONFIG_ERROR,
-                "Fordefi vault response included neither address nor public_key_compressed; "
-                "cannot verify public_key ownership",
-            )
-        try:
-            key_bytes = base64.b64decode(compressed, validate=True)
-        except Exception:
-            raise SignerError(
-                SignerErrorCode.SERIALIZATION_ERROR,
-                "Failed to decode Fordefi vault public_key_compressed as base64",
-            ) from None
-        if len(key_bytes) != 32:
-            raise SignerError(
-                SignerErrorCode.INVALID_PUBLIC_KEY,
-                "Fordefi vault public_key_compressed must decode to 32 bytes",
-            )
-        return Pubkey.from_bytes(key_bytes)
-
     async def is_available(self) -> bool:
         """Readiness probe: the vault is reachable with the bearer token and the
         request signer can produce an ``x-signature`` value."""
@@ -546,7 +493,5 @@ class FordefiSigner(SolanaSigner):
 
 
 async def create_fordefi_signer(config: FordefiSignerConfig) -> FordefiSigner:
-    """Create a ready-to-use Fordefi signer (awaits ``init()``)."""
-    signer = FordefiSigner(config)
-    await signer.init()
-    return signer
+    """Create a ready-to-use Fordefi signer."""
+    return FordefiSigner(config)

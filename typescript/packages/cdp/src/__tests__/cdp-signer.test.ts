@@ -16,6 +16,16 @@ vi.mock('@solana/keychain-core', async importOriginal => {
     return {
         ...mod,
         assertSignatureValid: vi.fn(),
+        extractAndVerifyReturnedSignature: vi.fn(
+            async ({
+                returnedTransactionBytes,
+                signerAddress,
+            }: Parameters<typeof mod.extractAndVerifyReturnedSignature>[0]) =>
+                mod.extractSignatureFromTransactionBytes({
+                    signerAddress,
+                    transactionBytes: returnedTransactionBytes,
+                })[signerAddress],
+        ),
         sanitizeRemoteErrorResponse:
             mod.sanitizeRemoteErrorResponse ??
             ((text: string) =>

@@ -2,9 +2,7 @@ package fordefi
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -85,14 +83,6 @@ type transactionStatusResponse struct {
 	RawTransaction string           `json:"raw_transaction"`
 }
 
-// vaultResponse is GET /api/v1/vaults/{id}. Chain-specific vaults expose a
-// base58 address; black-box vaults expose the same 32-byte Ed25519 key as
-// base64 public_key_compressed.
-type vaultResponse struct {
-	Address             string `json:"address"`
-	PublicKeyCompressed string `json:"public_key_compressed"`
-}
-
 func (s *Signer) newRequest(ctx context.Context, method, path, body string) (*http.Request, error) {
 	var reader io.Reader
 	if body != "" {
@@ -166,7 +156,7 @@ func (s *Signer) submitTransaction(ctx context.Context, request transactionReque
 		return "", classify(status, err)
 	}
 	if !core.IsSuccess(status) {
-		return "", classify(status, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status)))
+		return "", classify(status, core.NewRemoteAPIError("API error", status, respBody))
 	}
 
 	var created createTransactionResponse
@@ -183,7 +173,7 @@ func (s *Signer) getTransaction(ctx context.Context, txID string) (transactionSt
 		return transactionStatusResponse{}, err
 	}
 	if !core.IsSuccess(status) {
-		return transactionStatusResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status))
+		return transactionStatusResponse{}, core.NewRemoteAPIError("API error", status, body)
 	}
 
 	var tx transactionStatusResponse
@@ -241,47 +231,16 @@ func extractSignature(response transactionStatusResponse) (solana.Signature, err
 	return core.DecodeSignatureBase64(response.Signatures[0].Data, "fordefi")
 }
 
-// fetchVault fetches the configured vault from Fordefi.
-func (s *Signer) fetchVault(ctx context.Context) (vaultResponse, error) {
+// probeVault fetches the configured vault from Fordefi as a reachability and
+// authentication check. The response body is not interpreted: the configured
+// public key is the source of truth for the signer's identity.
+func (s *Signer) probeVault(ctx context.Context) error {
 	status, body, err := s.doGet(ctx, "/api/v1/vaults/"+url.PathEscape(s.vaultID))
 	if err != nil {
-		return vaultResponse{}, err
+		return err
 	}
 	if !core.IsSuccess(status) {
-		return vaultResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status))
+		return core.NewRemoteAPIError("API error", status, body)
 	}
-
-	var vault vaultResponse
-	if err := json.Unmarshal(body, &vault); err != nil {
-		return vaultResponse{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse response", err)
-	}
-	return vault, nil
-}
-
-// vaultPublicKey resolves the authoritative Solana public key of a Fordefi
-// vault: chain-specific vaults expose a base58 address, black-box vaults
-// expose the same 32-byte Ed25519 key as base64 public_key_compressed.
-func vaultPublicKey(vault vaultResponse) (solana.PublicKey, error) {
-	if vault.Address != "" {
-		pubkey, err := solana.PublicKeyFromBase58(vault.Address)
-		if err != nil {
-			return solana.PublicKey{}, core.WrapSignerError(core.CodeInvalidPublicKey,
-				"fordefi vault returned an invalid Solana address", err)
-		}
-		return pubkey, nil
-	}
-	if vault.PublicKeyCompressed == "" {
-		return solana.PublicKey{}, core.NewSignerError(core.CodeConfigError,
-			"fordefi vault response included neither address nor public_key_compressed; cannot verify public_key ownership")
-	}
-	keyBytes, err := base64.StdEncoding.DecodeString(vault.PublicKeyCompressed)
-	if err != nil {
-		return solana.PublicKey{}, core.WrapSignerError(core.CodeSerializationError,
-			"failed to decode fordefi vault public_key_compressed as base64", err)
-	}
-	if len(keyBytes) != solana.PublicKeyLength {
-		return solana.PublicKey{}, core.NewSignerError(core.CodeInvalidPublicKey,
-			"fordefi vault public_key_compressed must decode to 32 bytes")
-	}
-	return solana.PublicKeyFromBytes(keyBytes), nil
+	return nil
 }

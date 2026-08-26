@@ -1,7 +1,7 @@
 import { createPrivateKey, createSign, type KeyObject } from 'node:crypto';
 
 import { Address, assertIsAddress } from '@solana/addresses';
-import { getBase58Decoder, getBase58Encoder, getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
+import { getBase58Encoder, getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
     abortableDelay,
     assertHttpsUrl,
@@ -54,7 +54,6 @@ import type {
 const DEFAULT_BASE_URL = 'https://api.fordefi.com';
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 
-let base58Decoder: ReturnType<typeof getBase58Decoder> | undefined;
 let base58Encoder: ReturnType<typeof getBase58Encoder> | undefined;
 let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
 let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
@@ -176,15 +175,19 @@ export interface FordefiNativeSigner<TAddress extends string = string>
 /**
  * Create and initialize a Fordefi-backed signer.
  *
+ * Construction is synchronous (the configured `publicKey` is the source of
+ * truth for the vault address), but the factory keeps its `Promise` return
+ * type for parity with the other backends.
+ *
  * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
  */
-export async function createFordefiSigner<TAddress extends string = string>(
+export function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig & { chain: SolanaChainUniqueId },
 ): Promise<FordefiNativeSigner<TAddress>>;
-export async function createFordefiSigner<TAddress extends string = string>(
+export function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig & { chain?: undefined },
 ): Promise<SolanaSigner<TAddress>>;
-export async function createFordefiSigner<TAddress extends string = string>(
+export function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig,
 ): Promise<FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>>;
 export async function createFordefiSigner<TAddress extends string = string>(
@@ -192,7 +195,7 @@ export async function createFordefiSigner<TAddress extends string = string>(
 ): Promise<FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>> {
     // The instance's own properties expose the mode-appropriate signing
     // method, which the class type cannot express statically.
-    return (await FordefiSigner.create(config)) as unknown as SolanaSigner<TAddress>;
+    return await Promise.resolve(FordefiSigner.create(config) as unknown as SolanaSigner<TAddress>);
 }
 
 /**
@@ -243,18 +246,16 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
     }
 
     /** Create a FordefiSigner with the provided configuration. */
-    static async create<TAddress extends string = string>(
+    static create<TAddress extends string = string>(
         config: FordefiSignerConfig & { chain: SolanaChainUniqueId },
-    ): Promise<FordefiNativeSigner<TAddress> & FordefiSigner<TAddress>>;
-    static async create<TAddress extends string = string>(
+    ): FordefiNativeSigner<TAddress> & FordefiSigner<TAddress>;
+    static create<TAddress extends string = string>(
         config: FordefiSignerConfig & { chain?: undefined },
-    ): Promise<FordefiSigner<TAddress> & SolanaSigner<TAddress>>;
-    static async create<TAddress extends string = string>(
+    ): FordefiSigner<TAddress> & SolanaSigner<TAddress>;
+    static create<TAddress extends string = string>(
         config: FordefiSignerConfig,
-    ): Promise<FordefiSigner<TAddress> & (FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>)>;
-    static async create<TAddress extends string = string>(
-        config: FordefiSignerConfig,
-    ): Promise<FordefiSigner<TAddress>> {
+    ): FordefiSigner<TAddress> & (FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>);
+    static create<TAddress extends string = string>(config: FordefiSignerConfig): FordefiSigner<TAddress> {
         if (!config.accessToken) {
             return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
                 message: 'accessToken must not be empty',
@@ -316,85 +317,10 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
             });
         }
 
-        // Authoritative check: fetch the vault from Fordefi and verify that
-        // `config.publicKey` actually belongs to `config.vaultId`. Without this
-        // a valid-but-wrong address would pass configuration and later be
-        // returned by resolveAddress(), creating a funds-routing risk.
-        const verifiedAddress = await FordefiSigner.fetchAndVerifyVaultAddress({
-            accessToken: config.accessToken,
-            apiBaseUrl,
-            expectedPublicKey: config.publicKey,
-            vaultId: config.vaultId,
-        });
-
-        return new FordefiSigner<TAddress>(config, verifiedAddress as Address<TAddress>);
-    }
-
-    /**
-     * Fetch the vault from Fordefi and assert the returned Solana address
-     * matches `expectedPublicKey`.
-     */
-    private static async fetchAndVerifyVaultAddress({
-        accessToken,
-        apiBaseUrl,
-        expectedPublicKey,
-        vaultId,
-    }: {
-        accessToken: string;
-        apiBaseUrl: string;
-        expectedPublicKey: string;
-        vaultId: string;
-    }): Promise<Address> {
-        const url = `${apiBaseUrl}/api/v1/vaults/${vaultId}`;
-        const vault = await fetchSignerJson<FordefiVaultResponse>({
-            init: {
-                headers: { Authorization: `Bearer ${accessToken}` },
-                method: 'GET',
-            },
-            providerName: 'Fordefi',
-            timeoutMs: 10_000,
-            url,
-        });
-
-        // Regular Fordefi Solana vaults expose `address` directly; black_box vaults
-        // only provide `public_key_compressed` (base64-encoded Ed25519 key).
-        let remoteAddress = vault.address;
-        if (!remoteAddress && vault.public_key_compressed) {
-            try {
-                base64Encoder ||= getBase64Encoder();
-                base58Decoder ||= getBase58Decoder();
-                const keyBytes = base64Encoder.encode(vault.public_key_compressed);
-                remoteAddress = base58Decoder.decode(keyBytes);
-            } catch (error) {
-                return throwSignerError(SignerErrorCode.PARSING_ERROR, {
-                    cause: error,
-                    message: 'Failed to derive Solana address from vault public_key_compressed',
-                });
-            }
-        }
-        if (!remoteAddress) {
-            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message:
-                    'Fordefi vault response included neither `address` nor `public_key_compressed`; cannot verify publicKey ownership',
-            });
-        }
-
-        if (remoteAddress !== expectedPublicKey) {
-            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-                message: `Configured publicKey does not match Fordefi vault ${vaultId}: expected ${remoteAddress}`,
-            });
-        }
-
-        try {
-            assertIsAddress(remoteAddress);
-        } catch (error) {
-            return throwSignerError(SignerErrorCode.INVALID_PUBLIC_KEY, {
-                cause: error,
-                message: 'Fordefi vault returned an invalid Solana address',
-            });
-        }
-
-        return remoteAddress;
+        // The configured publicKey is the source of truth for the vault's
+        // Solana address; under the project's trust model the provider is
+        // trusted, so no init-time vault fetch is needed to confirm it.
+        return new FordefiSigner<TAddress>(config, config.publicKey as Address<TAddress>);
     }
 
     /**

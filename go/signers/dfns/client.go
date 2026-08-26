@@ -5,7 +5,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"strconv"
 
 	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
@@ -41,8 +40,7 @@ func (s *Signer) do(ctx context.Context, method, path string, body []byte, extra
 		return nil, err
 	}
 	if !core.IsSuccess(status) {
-		return nil, core.NewSignerError(core.CodeRemoteAPIError,
-			errPrefix+" "+strconv.Itoa(status)+": "+core.SanitizeRemoteResponse(string(data)))
+		return nil, core.NewRemoteAPIError(errPrefix, status, data)
 	}
 	return data, nil
 }

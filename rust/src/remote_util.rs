@@ -50,6 +50,29 @@ where
     Err(timeout_error())
 }
 
+/// Maximum number of response-body bytes read from a remote signer API
+/// (1 MiB, matching Go's `core.MaxResponseBytes`).
+pub(crate) const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+
+/// Read a response body in chunks, refusing anything larger than
+/// [`MAX_RESPONSE_BYTES`] so a hostile or broken endpoint cannot exhaust
+/// memory. Every remote-signer body read must go through this instead of
+/// `Response::text()`/`bytes()`/`json()`.
+pub(crate) async fn read_body_capped(
+    mut response: reqwest::Response,
+) -> Result<Vec<u8>, SignerError> {
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
+            return Err(SignerError::SerializationError(
+                "response exceeded maximum size".to_string(),
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
 /// Consume a failed response into a [`SignerError::RemoteApiError`], logging
 /// the status (and, under `unsafe-debug` only, the response body).
 pub(crate) async fn extract_api_error(response: reqwest::Response, context: &str) -> SignerError {
@@ -57,10 +80,10 @@ pub(crate) async fn extract_api_error(response: reqwest::Response, context: &str
 
     #[cfg(feature = "unsafe-debug")]
     {
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Failed to read error response".to_string());
+        let error_text = match read_body_capped(response).await {
+            Ok(body) => String::from_utf8_lossy(&body).into_owned(),
+            Err(_) => "Failed to read error response".to_string(),
+        };
         log::error!("{context} error - status: {status}, response: {error_text}");
     }
 
@@ -86,10 +109,13 @@ where
         return Err(extract_api_error(response, context).await);
     }
 
-    let text = response.text().await.unwrap_or_default();
-    serde_json::from_str(&text).map_err(|_e| {
+    let body = read_body_capped(response).await?;
+    serde_json::from_slice(&body).map_err(|_e| {
         #[cfg(feature = "unsafe-debug")]
         log::error!("Failed to parse {context} response: {_e}");
         SignerError::SerializationError(format!("Failed to parse {context} response"))
     })
 }
+
+#[cfg(test)]
+mod tests;

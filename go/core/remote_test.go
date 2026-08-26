@@ -1,8 +1,12 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -42,5 +46,72 @@ func TestSleepContextUnconfirmedReportsCancellationAsUnconfirmed(t *testing.T) {
 func TestSleepContextUnconfirmedReturnsNilWhenTheWaitCompletes(t *testing.T) {
 	if err := SleepContextUnconfirmed(context.Background(), time.Millisecond, "provider-tx-1"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// SendRequest must accept a body of exactly MaxResponseBytes and reject
+// anything larger with an explicit error instead of silently truncating it
+// (a truncated body would otherwise surface as a confusing JSON parse error).
+func TestSendRequestRejectsOversizedBody(t *testing.T) {
+	cases := map[string]struct {
+		size    int
+		wantErr bool
+	}{
+		"at the cap":    {size: MaxResponseBytes},
+		"one byte over": {size: MaxResponseBytes + 1, wantErr: true},
+		"well over":     {size: MaxResponseBytes * 2, wantErr: true},
+		"well under":    {size: 128},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write(bytes.Repeat([]byte("a"), tc.size))
+			}))
+			defer srv.Close()
+
+			req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, body, err := SendRequest(srv.Client(), req, "test")
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("SendRequest failed: %v", err)
+				}
+				if status != http.StatusOK || len(body) != tc.size {
+					t.Errorf("got status %d, %d body bytes; want 200, %d", status, len(body), tc.size)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected an error for an oversized body")
+			}
+			var se *SignerError
+			if !errors.As(err, &se) {
+				t.Fatalf("expected *SignerError, got %T", err)
+			}
+			if se.Code != CodeSerializationError {
+				t.Errorf("code = %s, want %s", se.Code, CodeSerializationError)
+			}
+			if !strings.Contains(se.Detail(), "response exceeded maximum size") {
+				t.Errorf("detail = %q, want the over-size message", se.Detail())
+			}
+		})
+	}
+}
+
+// NewRemoteAPIError puts the context, status, and sanitized body in the
+// (opt-in) detail while Error() stays generic.
+func TestNewRemoteAPIError(t *testing.T) {
+	err := NewRemoteAPIError("acme API error", 503, []byte("boom\x01\ttoday"))
+
+	if err.Code != CodeRemoteAPIError {
+		t.Errorf("code = %s, want %s", err.Code, CodeRemoteAPIError)
+	}
+	if got, want := err.Detail(), "acme API error 503: boom today"; got != want {
+		t.Errorf("detail = %q, want %q", got, want)
+	}
+	if err.Error() != "Remote API error" {
+		t.Errorf("Error() = %q, want the generic message only", err.Error())
 	}
 }

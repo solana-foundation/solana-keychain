@@ -10,7 +10,7 @@ import {
 } from '@solana/signers';
 import { Base64EncodedWireTransaction, getTransactionDecoder } from '@solana/transactions';
 
-import { SignerErrorCode, throwSignerError } from './errors.js';
+import { SignerError, SignerErrorCode, throwSignerError } from './errors.js';
 import { SolanaSendingSigner, SolanaSigner } from './types.js';
 
 /**
@@ -143,6 +143,64 @@ export function extractSignatureFromWireTransaction({
         signerAddress,
         transactionBytes: getBase64Encoder().encode(base64WireTransaction),
     });
+}
+
+interface ExtractAndVerifyReturnedSignatureOptions {
+    abortSignal?: AbortSignal;
+    originalMessageBytes: ReadonlyUint8Array;
+    returnedTransactionBytes: ReadonlyUint8Array;
+    signerAddress: Address;
+}
+
+/**
+ * Shared pipeline for backends whose provider returns a fully-signed wire
+ * transaction: decodes the returned transaction, extracts this signer's
+ * signature, and verifies it against the ORIGINAL message bytes the caller
+ * submitted. That single verification subsumes any "did the provider modify
+ * the transaction" concern, so no byte-equality check of the returned message
+ * is performed.
+ *
+ * @param returnedTransactionBytes - The wire bytes of the signed transaction returned by the provider (outer base64/base58/hex decoding is the caller's job)
+ * @param signerAddress - The address whose signature slot to extract
+ * @param originalMessageBytes - The message bytes of the transaction the caller asked to sign
+ * @param abortSignal - Optional signal checked before doing any work
+ * @returns The extracted 64-byte signature
+ * @throws {SignerError} SIGNING_FAILED if the returned transaction cannot be
+ * decoded, the signer's slot is missing or unsigned (all-zero), or the
+ * signature does not verify against the original message bytes
+ */
+export async function extractAndVerifyReturnedSignature({
+    abortSignal,
+    originalMessageBytes,
+    returnedTransactionBytes,
+    signerAddress,
+}: ExtractAndVerifyReturnedSignatureOptions): Promise<SignatureBytes> {
+    abortSignal?.throwIfAborted();
+
+    let sigDict: SignatureDictionary;
+    try {
+        sigDict = extractSignatureFromTransactionBytes({
+            signerAddress,
+            transactionBytes: returnedTransactionBytes,
+        });
+    } catch (error) {
+        if (error instanceof SignerError) {
+            throw error;
+        }
+        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+            address: signerAddress,
+            cause: error,
+            message: `Failed to decode returned signed transaction: ${error instanceof Error ? error.message : String(error)}`,
+        });
+    }
+
+    const signature = sigDict[signerAddress]!;
+    await assertSignatureValid({
+        data: originalMessageBytes,
+        signature,
+        signerAddress,
+    });
+    return signature;
 }
 
 interface CreateSignatureDictionaryArgs {

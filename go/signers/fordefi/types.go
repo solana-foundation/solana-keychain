@@ -72,8 +72,9 @@ type Config struct {
 	// VaultID is the Fordefi vault UUID that holds the Solana key.
 	VaultID string
 
-	// PublicKey is the vault's Solana public key (base58). New verifies that it
-	// actually belongs to VaultID before returning.
+	// PublicKey is the vault's Solana public key (base58). It is the source of
+	// truth for the signer's identity; every produced signature is verified
+	// against it.
 	PublicKey string
 
 	// PrivateKeyPEM is the ECDSA P-256 private key (PKCS#8 or SEC1 PEM) used to

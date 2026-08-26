@@ -195,6 +195,34 @@ async fn test_init_success() {
 }
 
 #[tokio::test]
+async fn test_init_rejects_oversized_response_body() {
+    let server = MockServer::start().await;
+
+    // A valid-looking JSON body just past the 1 MiB cap: the bounded body
+    // reader must refuse it before any parsing happens.
+    let padding = "a".repeat(crate::remote_util::MAX_RESPONSE_BYTES);
+    Mock::given(method("GET"))
+        .and(path("/2025-06-09/wallets/test-wallet"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "chainType": "solana",
+            "type": "smart",
+            "address": "11111111111111111111111111111111",
+            "padding": padding
+        })))
+        .mount(&server)
+        .await;
+
+    let mut signer = create_test_signer(
+        &server.uri(),
+        DEFAULT_POLL_INTERVAL_MS,
+        DEFAULT_MAX_POLL_ATTEMPTS,
+    );
+
+    let error = signer.init().await.unwrap_err();
+    assert!(matches!(error, SignerError::SerializationError(_)));
+}
+
+#[tokio::test]
 async fn test_init_url_encodes_wallet_locator() {
     let server = MockServer::start().await;
     let keypair = Keypair::new();

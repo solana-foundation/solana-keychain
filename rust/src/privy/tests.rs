@@ -63,6 +63,35 @@ async fn test_privy_fetch_public_key() {
 }
 
 #[tokio::test]
+async fn test_privy_sign_message_rejects_oversized_response_body() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+
+    // A body just past the 1 MiB cap: the bounded body reader in post_rpc
+    // must refuse it before any parsing happens.
+    let oversized_body = vec![b'a'; crate::remote_util::MAX_RESPONSE_BYTES + 1];
+    Mock::given(method("POST"))
+        .and(path("/wallets/test-wallet-id/rpc"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(oversized_body))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut signer = PrivySigner::new(
+        "test-app-id".to_string(),
+        "test-app-secret".to_string(),
+        "test-wallet-id".to_string(),
+    )
+    .unwrap();
+    signer.client = reqwest::Client::new();
+    signer.api_base_url = mock_server.uri();
+    signer.public_key = Some(keypair.pubkey());
+
+    let error = signer.sign_message(&[1, 2, 3, 4]).await.unwrap_err();
+    assert!(matches!(error, SignerError::SerializationError(_)));
+}
+
+#[tokio::test]
 async fn test_privy_sign_message() {
     let mock_server = MockServer::start().await;
     let keypair = create_test_keypair();

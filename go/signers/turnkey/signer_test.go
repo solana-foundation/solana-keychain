@@ -26,7 +26,7 @@ import (
 )
 
 // newTestAPIKeys generates a P-256 API key pair: hex private scalar and hex
-// uncompressed public point.
+// compressed public point (the format Turnkey issues).
 func newTestAPIKeys(t *testing.T) (pubHex, privHex string, key *ecdsa.PrivateKey) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -34,11 +34,7 @@ func newTestAPIKeys(t *testing.T) (pubHex, privHex string, key *ecdsa.PrivateKey
 		t.Fatal(err)
 	}
 	privHex = hex.EncodeToString(key.D.FillBytes(make([]byte, 32)))
-	ecdhPub, err := key.PublicKey.ECDH()
-	if err != nil {
-		t.Fatal(err)
-	}
-	pubHex = hex.EncodeToString(ecdhPub.Bytes())
+	pubHex = hex.EncodeToString(elliptic.MarshalCompressed(elliptic.P256(), key.X, key.Y))
 	return pubHex, privHex, key
 }
 
@@ -315,6 +311,18 @@ func TestSignUnauthorized(t *testing.T) {
 	}
 	if code, _ := core.CodeOf(err); code != core.CodeRemoteAPIError {
 		t.Errorf("got %s, want REMOTE_API_ERROR", code)
+	}
+	var se *core.SignerError
+	if !errors.As(err, &se) {
+		t.Fatalf("expected *core.SignerError, got %T", err)
+	}
+	// The sanitized response body lands in the (opt-in) detail only; Error()
+	// stays generic.
+	if !strings.Contains(se.Detail(), "API error 401") || !strings.Contains(se.Detail(), "Unauthorized") {
+		t.Errorf("detail = %q, want the status code and the sanitized body", se.Detail())
+	}
+	if strings.Contains(err.Error(), "Unauthorized") {
+		t.Errorf("Error() must not surface the remote body, got %q", err.Error())
 	}
 	if calls != 1 {
 		t.Errorf("sign endpoint called %d times, want 1", calls)
@@ -610,28 +618,64 @@ func TestCreateStamp(t *testing.T) {
 	}
 }
 
-func TestCreateStampInvalidPrivateKey(t *testing.T) {
-	cases := map[string]string{
-		"not hex":      "zz-not-hex",
-		"wrong length": hex.EncodeToString(bytes.Repeat([]byte{1}, 16)),
-		"zero scalar":  hex.EncodeToString(make([]byte, 32)),
-	}
-	for name, privHex := range cases {
-		t.Run(name, func(t *testing.T) {
-			cfg := testConfig(t, testutils.TestPublicKey().String(), nil)
-			cfg.APIPrivateKey = privHex
-			s, err := New(cfg)
+// TestNewValidatesAPIKeyMaterial checks that malformed P-256 API-key material
+// is rejected at construction time with CONFIG_ERROR, before any request.
+func TestNewValidatesAPIKeyMaterial(t *testing.T) {
+	cases := map[string]func(cfg *Config){
+		"private key not hex": func(cfg *Config) { cfg.APIPrivateKey = "zz-not-hex" },
+		"private key wrong length": func(cfg *Config) {
+			cfg.APIPrivateKey = hex.EncodeToString(bytes.Repeat([]byte{1}, 16))
+		},
+		"public key not hex": func(cfg *Config) { cfg.APIPublicKey = "zz-not-hex" },
+		"public key wrong length": func(cfg *Config) {
+			// Uncompressed (65-byte) points are rejected: Turnkey issues
+			// compressed 33-byte public keys.
+			key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = s.createStamp("test")
-			if err == nil {
-				t.Fatal("expected error for invalid api private key")
+			ecdhPub, err := key.PublicKey.ECDH()
+			if err != nil {
+				t.Fatal(err)
 			}
-			if code, _ := core.CodeOf(err); code != core.CodeInvalidPrivateKey {
-				t.Errorf("got %s, want INVALID_PRIVATE_KEY", code)
+			cfg.APIPublicKey = hex.EncodeToString(ecdhPub.Bytes())
+		},
+		"public key not on curve": func(cfg *Config) {
+			// 0x02 prefix with x = 2^256-1 (> the P-256 field prime) can never
+			// decompress to a curve point.
+			cfg.APIPublicKey = hex.EncodeToString(append([]byte{0x02}, bytes.Repeat([]byte{0xff}, 32)...))
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := testConfig(t, testutils.TestPublicKey().String(), nil)
+			mutate(&cfg)
+			_, err := New(cfg)
+			if err == nil {
+				t.Fatal("expected New to reject invalid api key material")
+			}
+			if code, _ := core.CodeOf(err); code != core.CodeConfigError {
+				t.Errorf("got %s, want CONFIG_ERROR", code)
 			}
 		})
+	}
+}
+
+// A zero scalar is valid hex of the right length (so it passes construction,
+// mirroring the other language SDKs) but must still fail at stamp time.
+func TestCreateStampInvalidPrivateKey(t *testing.T) {
+	cfg := testConfig(t, testutils.TestPublicKey().String(), nil)
+	cfg.APIPrivateKey = hex.EncodeToString(make([]byte, 32))
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.createStamp("test")
+	if err == nil {
+		t.Fatal("expected error for invalid api private key")
+	}
+	if code, _ := core.CodeOf(err); code != core.CodeInvalidPrivateKey {
+		t.Errorf("got %s, want INVALID_PRIVATE_KEY", code)
 	}
 }
 

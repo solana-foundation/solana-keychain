@@ -10,12 +10,48 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math/big"
+	"strconv"
 
 	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
 // stampScheme is the signature scheme Turnkey expects for API-key stamps.
 const stampScheme = "SIGNATURE_SCHEME_TK_API_P256"
+
+// P-256 API-key material lengths (hex-decoded).
+const (
+	p256PrivateKeyLength          = 32
+	p256CompressedPublicKeyLength = 33
+)
+
+// validateAPIKeyMaterial rejects malformed Turnkey API-key material at
+// construction time instead of at stamp-creation time: both keys must be valid
+// hex, the public key a 33-byte compressed P-256 point that decompresses to a
+// valid curve point, and the private key 32 bytes.
+func validateAPIKeyMaterial(privateKeyHex, publicKeyHex string) error {
+	publicKeyBytes, err := hex.DecodeString(publicKeyHex)
+	if err != nil {
+		return core.NewSignerError(core.CodeConfigError, "Turnkey API keys must be valid hex strings")
+	}
+	privateKeyBytes, err := hex.DecodeString(privateKeyHex)
+	if err != nil {
+		return core.NewSignerError(core.CodeConfigError, "Turnkey API keys must be valid hex strings")
+	}
+	if len(publicKeyBytes) != p256CompressedPublicKeyLength {
+		return core.NewSignerError(core.CodeConfigError,
+			"public key must be "+strconv.Itoa(p256CompressedPublicKeyLength)+
+				" bytes (compressed P-256 format), got "+strconv.Itoa(len(publicKeyBytes)))
+	}
+	if len(privateKeyBytes) != p256PrivateKeyLength {
+		return core.NewSignerError(core.CodeConfigError,
+			"private key must be "+strconv.Itoa(p256PrivateKeyLength)+
+				" bytes, got "+strconv.Itoa(len(privateKeyBytes)))
+	}
+	if x, _ := elliptic.UnmarshalCompressed(elliptic.P256(), publicKeyBytes); x == nil {
+		return core.NewSignerError(core.CodeConfigError, "public key is not a valid P-256 point")
+	}
+	return nil
+}
 
 // stampPayload is the JSON body of the X-Stamp header. Keys are snake_case and
 // marshal in alphabetical order.

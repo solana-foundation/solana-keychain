@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gagliardetto/solana-go"
@@ -171,8 +170,9 @@ func (s *Signer) signBytes(ctx context.Context, data []byte) (solana.Signature, 
 }
 
 // doRequest performs an authenticated Para API request and returns the raw
-// response body. Non-2xx responses map to CodeRemoteAPIError carrying only the
-// status code; the remote response body is deliberately never surfaced.
+// response body. Non-2xx responses map to CodeRemoteAPIError whose detail
+// carries the status code and the sanitized response body (never rendered by
+// Error()).
 func (s *Signer) doRequest(ctx context.Context, method, url string, requestBody any) ([]byte, error) {
 	var reader io.Reader
 	if requestBody != nil {
@@ -195,7 +195,7 @@ func (s *Signer) doRequest(ctx context.Context, method, url string, requestBody 
 		return nil, err
 	}
 	if !core.IsSuccess(status) {
-		return nil, core.NewSignerError(core.CodeRemoteAPIError, "API error "+strconv.Itoa(status))
+		return nil, core.NewRemoteAPIError("API error", status, body)
 	}
 	return body, nil
 }
