@@ -1,8 +1,8 @@
 package testutils
 
 import (
-	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/programs/system"
+	"github.com/solana-foundation/solana-go/v2"
+	"github.com/solana-foundation/solana-go/v2/programs/system"
 )
 
 // testRecipient is a fixed transfer recipient for deterministic test transactions.

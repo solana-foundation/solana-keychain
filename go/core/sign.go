@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	"github.com/gagliardetto/solana-go"
+	"github.com/solana-foundation/solana-go/v2"
 )
 
 // MessageBytes returns the serialized transaction message, the bytes a Solana

@@ -14,7 +14,7 @@ library offers a consistent API across all signing methods.
 - **Per-backend modules**: each backend is its own Go module, so both your build and your module graph contain only the backends you import
 - **Verified wire format**: golden-vector tests pin the exact serialized transaction bytes, so serialization can never silently drift
 - **Safe errors**: `SignerError` redacts sensitive detail from its message; match on stable codes with `errors.Is`
-- **Minimal core**: built on [`gagliardetto/solana-go`](https://github.com/gagliardetto/solana-go); heavy vendor SDKs land only in the backends that need them
+- **Minimal core**: built on [`solana-foundation/solana-go/v2`](https://github.com/solana-foundation/solana-go); heavy vendor SDKs land only in the backends that need them
 
 ## Supported Backends
 
@@ -48,22 +48,16 @@ go get github.com/solana-foundation/solana-keychain/go/signers/vault/v2@latest
 
 Requires **Go 1.25+** (the `gcpkms` module requires the toolchain floor set by
 `google.golang.org/api`). Built on
-[`github.com/gagliardetto/solana-go`](https://github.com/gagliardetto/solana-go)
+[`github.com/solana-foundation/solana-go/v2`](https://github.com/solana-foundation/solana-go)
 for the on-chain types and canonical transaction serialization.
 
-### v1 transactions pin an unreleased solana-go
+### v1 transactions use solana-go v2
 
-No released solana-go decodes v1
-([PR #481](https://github.com/solana-foundation/solana-go/pull/481) is unmerged),
-so every module carries a `replace` onto that pull request's branch:
+The released solana-go v2 supports v1 transactions, so every module requires:
 
 ```
-replace github.com/gagliardetto/solana-go => github.com/sonicfromnewyoke/solana-go v0.0.0-20260817125726-409ee9873f6d
+require github.com/solana-foundation/solana-go/v2 v2.0.0
 ```
-
-This is a development pin, not a release configuration: the fork branch can be
-rebased or deleted, and `replace` does not reach consumers of a published module.
-Drop the directives and require a released version once PR #481 lands.
 
 Until the first `go/...` version tags are published, `@latest` cannot resolve
 the in-repo `go/core` dependency. The signer modules use `replace` directives

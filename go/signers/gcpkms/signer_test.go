@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"cloud.google.com/go/kms/apiv1/kmspb"
-	"github.com/gagliardetto/solana-go"
 	gax "github.com/googleapis/gax-go/v2"
+	"github.com/solana-foundation/solana-go/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 

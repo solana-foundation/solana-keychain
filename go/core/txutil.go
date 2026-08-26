@@ -3,7 +3,7 @@ package core
 import (
 	"encoding/base64"
 
-	"github.com/gagliardetto/solana-go"
+	"github.com/solana-foundation/solana-go/v2"
 )
 
 // Serialize encodes a transaction to a base64 string in the canonical Solana

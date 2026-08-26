@@ -3,7 +3,7 @@ package core
 import (
 	"crypto/ed25519"
 
-	"github.com/gagliardetto/solana-go"
+	"github.com/solana-foundation/solana-go/v2"
 )
 
 // VerifyEd25519 reports whether sig is a valid Ed25519 signature of message by

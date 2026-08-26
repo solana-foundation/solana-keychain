@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/crypto/hkdf"
 
-	"github.com/gagliardetto/solana-go/base58"
+	"github.com/solana-foundation/solana-go/v2/base58"
 
 	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )

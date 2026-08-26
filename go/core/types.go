@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	"github.com/gagliardetto/solana-go"
+	"github.com/solana-foundation/solana-go/v2"
 )
 
 // Completeness records whether a signed transaction now carries all of its
