@@ -130,6 +130,16 @@ jobs:
         with:
           packages-dir: python/dist
 
+      - name: Resolve previous Python tag
+        id: prev_tag
+        if: ${{ github.event.inputs.create-github-release == 'true' }}
+        run: |
+          CURRENT_TAG="python-v${{ steps.version.outputs.version }}"
+          # Most recent Python release tag that isn't the one we just created
+          PREV_TAG=$(git tag -l 'python-v*' --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -1 || true)
+          echo "previous_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
+          echo "Previous tag: ${PREV_TAG:-none (first release)}"
+
       - name: Create GitHub Release
         if: ${{ github.event.inputs.create-github-release == 'true' }}
         uses: actions/github-script@v9
@@ -138,6 +148,7 @@ jobs:
           script: |
             const version = '${{ steps.version.outputs.version }}';
             const tagName = `python-v${version}`;
+            const previousTag = `${{ steps.prev_tag.outputs.previous_tag }}`;
 
             try {
               await github.rest.repos.getReleaseByTag({
@@ -151,13 +162,19 @@ jobs:
               if (e.status !== 404) throw e;
             }
 
+            const notes = await github.rest.repos.generateReleaseNotes({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tagName,
+              ...(previousTag ? { previous_tag_name: previousTag } : {}),
+            });
+
             await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: tagName,
               name: `solana-keychain (Python) v${version}`,
-              body: `Release of solana-keychain v${version} (Python)\n\n**PyPI:** https://pypi.org/project/solana-keychain/${version}/`,
-              generate_release_notes: true,
+              body: `**PyPI:** https://pypi.org/project/solana-keychain/${version}/\n\n${notes.data.body}`,
               draft: false,
               prerelease: '${{ steps.prerelease.outputs.is_prerelease }}' === 'true',
             });

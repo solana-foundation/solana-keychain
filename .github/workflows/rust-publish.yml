@@ -103,6 +103,17 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates_io_auth.outputs.token }}
 
+      - name: Resolve previous Rust tag
+        id: prev_tag
+        if: ${{ github.event.inputs.create-github-release == 'true' }}
+        working-directory: .
+        run: |
+          CURRENT_TAG="v${{ steps.version.outputs.version }}"
+          # Most recent Rust release tag that isn't the one we just created
+          PREV_TAG=$(git tag -l 'v[0-9]*' --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -1 || true)
+          echo "previous_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
+          echo "Previous tag: ${PREV_TAG:-none (first release)}"
+
       - name: Create GitHub Release
         if: ${{ github.event.inputs.create-github-release == 'true' }}
         uses: actions/github-script@v9
@@ -110,6 +121,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const tagName = `v${{ steps.version.outputs.version }}`;
+            const previousTag = `${{ steps.prev_tag.outputs.previous_tag }}`;
             const releaseName = `solana-keychain v${{ steps.version.outputs.version }}`;
             const isPrerelease = '${{ steps.prerelease.outputs.is_prerelease }}' === 'true';
 
@@ -126,13 +138,24 @@ jobs:
               if (e.status !== 404) throw e;
             }
 
+            const notes = await github.rest.repos.generateReleaseNotes({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tagName,
+              ...(previousTag ? { previous_tag_name: previousTag } : {}),
+            });
+
+            const body = [
+              `**crates.io:** https://crates.io/crates/solana-keychain/${{ steps.version.outputs.version }}`,
+              notes.data.body,
+            ].join('\n\n');
+
             await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: tagName,
               name: releaseName,
-              body: `Release of solana-keychain v${{ steps.version.outputs.version }} (Rust)\n\n**crates.io:** https://crates.io/crates/solana-keychain/${{ steps.version.outputs.version }}`,
-              generate_release_notes: true,
+              body,
               draft: false,
               prerelease: isPrerelease,
             });

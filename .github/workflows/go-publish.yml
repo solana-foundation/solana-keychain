@@ -147,6 +147,16 @@ jobs:
           printf '%s\n' "${TAGS[@]}" > tags.txt
           echo "primary=go/core/v$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve previous Go tag
+        id: prev_tag
+        if: ${{ inputs.create-github-release }}
+        run: |
+          CURRENT_TAG="${{ steps.tags.outputs.primary }}"
+          # Most recent go/core release tag that isn't the one we just created
+          PREV_TAG=$(git tag -l 'go/core/v*' --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -1 || true)
+          echo "previous_tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Previous tag: ${PREV_TAG:-none (first release)}"
+
       - name: Create GitHub Release
         if: ${{ inputs.create-github-release }}
         uses: actions/github-script@v9
@@ -155,6 +165,7 @@ jobs:
           script: |
             const fs = require('fs');
             const version = '${{ steps.version.outputs.version }}';
+            const previousTag = '${{ steps.prev_tag.outputs.previous_tag }}';
             const suffix = '${{ steps.version.outputs.suffix }}';
             const tagName = '${{ steps.tags.outputs.primary }}';
             const tags = fs.readFileSync('tags.txt', 'utf8').trim().split('\n');
@@ -176,12 +187,19 @@ jobs:
               .map((d) => `- \`go get github.com/${context.repo.owner}/${context.repo.repo}/${d}${suffix}@v${version}\``)
               .join('\n');
 
+            const notes = await github.rest.repos.generateReleaseNotes({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tagName,
+              ...(previousTag ? { previous_tag_name: previousTag } : {}),
+            });
+
             await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: tagName,
               name: `solana-keychain (Go) v${version}`,
-              body: `Release of solana-keychain v${version} (Go)\n\n${tags.length} modules tagged:\n\n${modules}`,
+              body: `${tags.length} modules tagged:\n\n${modules}\n\n${notes.data.body}`,
               draft: false,
               prerelease: version.includes('-'),
             });
