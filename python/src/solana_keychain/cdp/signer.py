@@ -24,13 +24,15 @@ from solana_keychain.core.http import (
     normalize_base_url,
     probe_availability,
 )
-from solana_keychain.core.signature_util import verify_returned_signature
+from solana_keychain.core.signature_util import (
+    extract_and_verify_returned_signature,
+    verify_returned_signature,
+)
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
     classify_signed_transaction,
-    get_signing_keypair_position,
     serialize_transaction,
     signed_message_bytes,
 )
@@ -146,8 +148,6 @@ class CdpSigner(SolanaSigner):
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         message_data = signed_message_bytes(transaction.message)
-        position = get_signing_keypair_position(transaction, self._pubkey)
-
         path = f"{BASE_PATH}/{self._pubkey}/sign/transaction"
         encoded_tx = base64.b64encode(bytes(transaction)).decode("ascii")
         response = await self._post_signed(path, {"transaction": encoded_tx})
@@ -165,23 +165,9 @@ class CdpSigner(SolanaSigner):
                 SignerErrorCode.SERIALIZATION_ERROR,
                 "Failed to decode base64 signed transaction from CDP",
             ) from None
-        try:
-            signed_transaction = VersionedTransaction.from_bytes(signed_bytes)
-        except Exception:
-            raise SignerError(
-                SignerErrorCode.SERIALIZATION_ERROR,
-                "Failed to deserialize signed transaction from CDP",
-            ) from None
-
-        signatures = list(signed_transaction.signatures)
-        if position >= len(signatures):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Signature not found at expected position in CDP response",
-            )
-        signature = signatures[position]
-        verify_returned_signature(signature, self._pubkey, message_data)
-
+        signature = extract_and_verify_returned_signature(
+            signed_bytes, self._pubkey, message_data, "CDP"
+        )
         add_signature_to_transaction(transaction, self._pubkey, signature)
         return classify_signed_transaction(
             transaction, serialize_transaction(transaction), signature

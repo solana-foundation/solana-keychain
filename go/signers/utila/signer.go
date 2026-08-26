@@ -1,7 +1,6 @@
 package utila
 
 import (
-	"bytes"
 	"context"
 	"crypto/rsa"
 	"encoding/base64"
@@ -218,46 +217,15 @@ func terminalStateError(state transactionState) error {
 }
 
 // extractSignatureFromRawTransaction decodes the base64 wire transaction Utila
-// returned, requires its message bytes to equal the locally requested message,
-// locates this wallet's required-signer position, and verifies the signature
-// before surfacing it.
+// returned, locates this wallet's required-signer position, and verifies the
+// signature against the locally requested message before surfacing it.
 func (s *Signer) extractSignatureFromRawTransaction(rawTransaction string, expectedMessage []byte) (solana.Signature, error) {
 	raw, err := base64.StdEncoding.DecodeString(rawTransaction)
 	if err != nil {
 		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError,
 			"Failed to decode Utila rawTransaction as base64", err)
 	}
-	tx, err := solana.TransactionFromBytes(raw)
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError,
-			"Failed to deserialize Utila rawTransaction", err)
-	}
-
-	remoteMessage, err := tx.Message.MarshalBinary()
-	if err != nil {
-		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError,
-			"Failed to deserialize Utila rawTransaction", err)
-	}
-	if !bytes.Equal(remoteMessage, expectedMessage) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"Utila returned a signed transaction with different message bytes")
-	}
-
-	position, err := core.SigningPosition(tx, s.pubkey)
-	if err != nil {
-		return solana.Signature{}, err
-	}
-	if position >= len(tx.Signatures) || tx.Signatures[position].IsZero() {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"Utila rawTransaction did not contain a signer signature")
-	}
-	signature := tx.Signatures[position]
-
-	if !core.VerifyEd25519(s.pubkey, expectedMessage, signature) {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"Signature verification failed for Utila rawTransaction")
-	}
-	return signature, nil
+	return core.ExtractAndVerifyReturnedSignature(raw, s.pubkey, expectedMessage, "Utila")
 }
 
 // extractTransactionID returns the trailing segment of a transaction resource

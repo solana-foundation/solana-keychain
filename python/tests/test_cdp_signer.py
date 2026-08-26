@@ -283,10 +283,14 @@ async def test_sign_transaction_accepts_a_v1_transaction() -> None:
 @respx.mock
 async def test_sign_transaction_rejects_tx_where_signer_is_not_required() -> None:
     transaction = create_test_transaction(Keypair().pubkey())
+    respx.post(f"{API_BASE_URL}{BASE_PATH}/sign/transaction").mock(
+        return_value=httpx.Response(
+            200, json={"signedTransaction": signed_transaction_b64(transaction)}
+        )
+    )
     with pytest.raises(SignerError) as excinfo:
         await make_signer().sign_transaction(transaction)
     assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
-    assert not respx.calls
 
 
 @respx.mock

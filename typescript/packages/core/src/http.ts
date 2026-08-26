@@ -4,6 +4,13 @@ import { sanitizeRemoteErrorResponse, SignerError, SignerErrorCode, throwSignerE
 /** Default timeout applied to remote signer API requests. */
 export const DEFAULT_FETCH_TIMEOUT_MS = 60_000;
 
+/**
+ * Maximum number of response-body bytes accepted from a remote signer API
+ * (1 MiB, matching the Go backend). Larger bodies fail with `PARSING_ERROR`
+ * instead of being buffered unbounded.
+ */
+export const MAX_RESPONSE_BYTES = 1024 * 1024;
+
 export interface FetchSignerJsonOptions {
     /**
      * Caller-supplied cancellation, typically the `abortSignal` of a Kit signer
@@ -47,12 +54,68 @@ export function providerMayHaveAccepted(error: unknown): boolean {
     return status === undefined || status < 400 || status >= 500;
 }
 
+function throwResponseTooLarge(providerName: string, status: number): never {
+    throwSignerError(SignerErrorCode.PARSING_ERROR, {
+        maxResponseBytes: MAX_RESPONSE_BYTES,
+        message: `${providerName} response exceeded maximum size`,
+        status,
+    });
+}
+
+/**
+ * Read a response body as text while enforcing {@link MAX_RESPONSE_BYTES}.
+ *
+ * A `Content-Length` header over the cap fails fast, but the cap is always
+ * enforced while streaming too (the header can lie or be absent). Returns
+ * `undefined` when the response exposes no readable body stream, so callers
+ * can fall back to the non-streaming read.
+ */
+async function readCappedResponseText(response: Response, providerName: string): Promise<string | undefined> {
+    const contentLength = Number(response.headers?.get('content-length'));
+    if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
+        throwResponseTooLarge(providerName, response.status);
+    }
+
+    const body = response.body;
+    if (!body) {
+        return undefined;
+    }
+
+    const reader = body.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    try {
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (!value) continue;
+            totalBytes += value.byteLength;
+            if (totalBytes > MAX_RESPONSE_BYTES) {
+                throwResponseTooLarge(providerName, response.status);
+            }
+            chunks.push(value);
+        }
+    } finally {
+        await reader.cancel().catch(() => {});
+    }
+
+    const bytes = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return new TextDecoder().decode(bytes);
+}
+
 /**
  * Perform a remote signer API request and parse the JSON response, mapping
  * failures to the standard signer error pipeline:
  * - network failure or timeout → `HTTP_ERROR`
  * - non-2xx status → `REMOTE_API_ERROR` with the sanitized response body
  * - invalid JSON body → `PARSING_ERROR`
+ * - body over {@link MAX_RESPONSE_BYTES} (either path) → `PARSING_ERROR`
+ *   carrying the provider status
  *
  * Redirects are always rejected and every request carries a timeout unless
  * the caller supplies its own `init.signal`. A caller `abortSignal` propagates
@@ -90,7 +153,15 @@ export async function fetchSignerJson<TResponse>(options: FetchSignerJsonOptions
     }
 
     if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Failed to read error response');
+        let errorText: string;
+        try {
+            errorText = (await readCappedResponseText(response, providerName)) ?? (await response.text());
+        } catch (error) {
+            // An over-cap body is a hard failure; any other read failure keeps
+            // the provider's verdict with a placeholder body.
+            if (error instanceof SignerError) throw error;
+            errorText = 'Failed to read error response';
+        }
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `${providerName} API error: ${response.status}`,
             response: sanitizeRemoteErrorResponse(errorText),
@@ -99,8 +170,11 @@ export async function fetchSignerJson<TResponse>(options: FetchSignerJsonOptions
     }
 
     try {
-        return (await response.json()) as TResponse;
+        const text = await readCappedResponseText(response, providerName);
+        return (text === undefined ? await response.json() : JSON.parse(text)) as TResponse;
     } catch (error) {
+        // The over-cap error is already a fully-classified PARSING_ERROR.
+        if (error instanceof SignerError) throw error;
         abortSignal?.throwIfAborted();
         throwSignerError(SignerErrorCode.PARSING_ERROR, {
             cause: error,

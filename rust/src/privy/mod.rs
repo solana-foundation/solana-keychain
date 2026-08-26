@@ -3,13 +3,13 @@
 mod authorization;
 mod types;
 
-use crate::remote_util::{extract_api_error, parse_json_response};
+use crate::remote_util::{extract_api_error, parse_json_response, read_body_capped};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
-use crate::signature_util::{signature_from_base64, verify_or_reject};
-use crate::traits::{SignTransactionResult, SignedTransaction};
-use crate::transaction_util::{
-    deserialize_wire_transaction, serialize_wire_transaction, TransactionUtil,
+use crate::signature_util::{
+    extract_and_verify_returned_signature, signature_from_base64, verify_or_reject,
 };
+use crate::traits::{SignTransactionResult, SignedTransaction};
+use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use authorization::prepare_privy_authorization_headers;
 pub use authorization::{
@@ -205,7 +205,8 @@ impl PrivySigner {
             return Err(extract_api_error(response, "Privy API rpc").await);
         }
 
-        Ok(response.text().await?)
+        let body = read_body_capped(response).await?;
+        Ok(String::from_utf8_lossy(&body).into_owned())
     }
 
     /// Sign message bytes using Privy API
@@ -259,21 +260,11 @@ impl PrivySigner {
                     "Failed to decode signed transaction returned by Privy".to_string(),
                 )
             })?;
-        let returned: VersionedTransaction =
-            deserialize_wire_transaction(&signed_wire).map_err(|e| {
-                SignerError::SerializationError(format!(
-                    "Failed to deserialize signed transaction returned by Privy: {e}"
-                ))
-            })?;
-
-        let position = TransactionUtil::get_signing_keypair_position(&returned, &public_key)?;
-        let signature = returned.signatures.get(position).copied().ok_or_else(|| {
-            SignerError::SigningFailed(
-                "Privy signature slot missing from returned transaction".to_string(),
-            )
-        })?;
-
-        verify_or_reject(&signature, &public_key, &transaction.message.serialize())?;
+        let signature = extract_and_verify_returned_signature(
+            &signed_wire,
+            &public_key,
+            &transaction.message.serialize(),
+        )?;
 
         TransactionUtil::add_signature_to_transaction(transaction, &public_key, signature)?;
 

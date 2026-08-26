@@ -225,94 +225,28 @@ func TestNewRejectsNonP256PEM(t *testing.T) {
 	}
 }
 
-func TestNewVerifiesVaultOwnership(t *testing.T) {
-	pub := testutils.TestPublicKey()
-	otherKey := make([]byte, 32)
-	otherKey[0] = 1
-
-	cases := map[string]struct {
-		vault    map[string]any
-		wantErr  bool
-		wantCode core.Code
-	}{
-		"address match": {
-			vault: map[string]any{"id": testVaultID, "address": pub.String()},
-		},
-		"compressed key match": {
-			vault: map[string]any{"id": testVaultID, "public_key_compressed": base64.StdEncoding.EncodeToString(pub.Bytes())},
-		},
-		"address mismatch": {
-			vault:    map[string]any{"id": testVaultID, "address": solana.PublicKeyFromBytes(otherKey).String()},
-			wantErr:  true,
-			wantCode: core.CodeConfigError,
-		},
-		"invalid address": {
-			vault:    map[string]any{"id": testVaultID, "address": "not-base58!!"},
-			wantErr:  true,
-			wantCode: core.CodeInvalidPublicKey,
-		},
-		"neither field": {
-			vault:    map[string]any{"id": testVaultID},
-			wantErr:  true,
-			wantCode: core.CodeConfigError,
-		},
-		"compressed key wrong length": {
-			vault:    map[string]any{"id": testVaultID, "public_key_compressed": base64.StdEncoding.EncodeToString([]byte("short"))},
-			wantErr:  true,
-			wantCode: core.CodeInvalidPublicKey,
-		},
-		"compressed key invalid base64": {
-			vault:    map[string]any{"id": testVaultID, "public_key_compressed": "!!!not-base64!!!"},
-			wantErr:  true,
-			wantCode: core.CodeSerializationError,
-		},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			mux := http.NewServeMux()
-			mux.HandleFunc(vaultPath, func(w http.ResponseWriter, _ *http.Request) {
-				testutils.WriteJSON(w, http.StatusOK, tc.vault)
-			})
-			srv := httptest.NewTLSServer(mux)
-			t.Cleanup(srv.Close)
-
-			cfg := baseConfig(t)
-			cfg.APIBaseURL = srv.URL
-			cfg.HTTPClient = srv.Client()
-			_, err := New(context.Background(), cfg)
-			if !tc.wantErr {
-				if err != nil {
-					t.Fatalf("New failed: %v", err)
-				}
-				return
-			}
-			if err == nil {
-				t.Fatal("expected New to fail vault verification")
-			}
-			if code, _ := core.CodeOf(err); code != tc.wantCode {
-				t.Errorf("got %s, want %s", code, tc.wantCode)
-			}
-		})
-	}
-}
-
-func TestNewVaultFetchAPIError(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc(vaultPath, func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-	})
-	srv := httptest.NewTLSServer(mux)
+// Construction is pure: the configured public key is the source of truth, so
+// New must not fetch the vault or compare it against the API-reported address.
+func TestNewDoesNotContactAPI(t *testing.T) {
+	var requests atomic.Int64
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": testVaultID, "address": testutils.TestPublicKey().String()})
+	}))
 	t.Cleanup(srv.Close)
 
 	cfg := baseConfig(t)
 	cfg.APIBaseURL = srv.URL
 	cfg.HTTPClient = srv.Client()
-	_, err := New(context.Background(), cfg)
-	if err == nil {
-		t.Fatal("expected error when the vault fetch fails")
+	s, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
 	}
-	if code, _ := core.CodeOf(err); code != core.CodeRemoteAPIError {
-		t.Errorf("got %s, want REMOTE_API_ERROR", code)
+	if got := requests.Load(); got != 0 {
+		t.Errorf("New must be pure, server saw %d requests", got)
+	}
+	if s.Pubkey() != testutils.TestPublicKey() {
+		t.Errorf("Pubkey() = %s, want the configured public key", s.Pubkey())
 	}
 }
 
@@ -451,7 +385,9 @@ func TestSignMessagePollingTimeout(t *testing.T) {
 	}
 }
 
-func TestSignMessageAPIErrorDoesNotLeakBody(t *testing.T) {
+// A non-2xx body lands sanitized in the (opt-in) detail; Error() stays generic
+// so the hostile text can never leak through logs.
+func TestSignMessageAPIErrorSanitizesBodyIntoDetail(t *testing.T) {
 	hostile := "evil\x01<script>alert(1)</script>"
 	s := newTestSigner(t, baseConfig(t), testutils.TestPublicKey().String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
@@ -471,8 +407,18 @@ func TestSignMessageAPIErrorDoesNotLeakBody(t *testing.T) {
 	if se.Code != core.CodeRemoteAPIError {
 		t.Errorf("got %s, want REMOTE_API_ERROR", se.Code)
 	}
-	if se.Detail() != "API error 500" {
-		t.Errorf("detail = %q, want %q", se.Detail(), "API error 500")
+	if strings.Contains(err.Error(), "evil") {
+		t.Errorf("Error() must not surface the remote body, got %q", err.Error())
+	}
+	detail := se.Detail()
+	if !strings.Contains(detail, "API error 500") {
+		t.Errorf("detail = %q, want the status code", detail)
+	}
+	if !strings.Contains(detail, "evil <script>alert(1)</script>") {
+		t.Errorf("detail = %q, want the sanitized body", detail)
+	}
+	if strings.ContainsRune(detail, '\x01') {
+		t.Errorf("detail contains raw control characters: %q", detail)
 	}
 }
 

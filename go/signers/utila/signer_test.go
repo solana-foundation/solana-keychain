@@ -514,7 +514,9 @@ func TestSignTransactionTimeout(t *testing.T) {
 }
 
 // TestSignTransactionRejectsMismatchedReturnedTransaction verifies a signed
-// transaction whose message bytes differ from the requested ones is rejected.
+// transaction for a different message (here: a different fee payer, so the
+// wallet's pubkey is not among the returned transaction's signers) is
+// rejected.
 func TestSignTransactionRejectsMismatchedReturnedTransaction(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	transaction, unsignedRaw, _, _ := signedTransactionPayload(t, priv)
@@ -537,7 +539,7 @@ func TestSignTransactionRejectsMismatchedReturnedTransaction(t *testing.T) {
 	s := newDirectSigner(t, srv, testutils.PubkeyOf(priv))
 	_, err := s.SignTransaction(context.Background(), transaction)
 	testutils.AssertCode(t, err, core.CodeSigningFailed)
-	testutils.AssertDetailContains(t, err, "different message bytes")
+	testutils.AssertDetailContains(t, err, "not found in transaction signers")
 }
 
 // TestSignTransactionMissingRawTransaction verifies a SIGNED response carrying
@@ -570,11 +572,13 @@ func TestNewWalletErrorPaths(t *testing.T) {
 		wantIn   string
 	}{
 		{
+			// The sanitized response body lands in the (opt-in) detail after
+			// the status code.
 			name:     "remote api error",
 			status:   http.StatusUnauthorized,
 			body:     `{"message":"unauthorized"}`,
 			wantCode: core.CodeRemoteAPIError,
-			wantIn:   "Utila API fetch_wallet error 401",
+			wantIn:   `Utila API fetch_wallet error 401: {"message":"unauthorized"}`,
 		},
 		{
 			name:     "non-json body",

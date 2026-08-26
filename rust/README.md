@@ -363,8 +363,9 @@ Fordefi supports two signing modes, which differ in whether Fordefi broadcasts t
 - **Black box mode** : Signs raw bytes via EdDSA; the wire transaction is assembled locally. Fordefi does **not** broadcast: `sign_transaction` returns the signed serialized transaction, and **you** submit it to an RPC. `sign_and_send_transaction` is rejected in this mode. Use with a Fordefi black box vault.
 - **Native Solana mode** (recommended): Uses Solana-specific API types. Fordefi modifies the transaction (at minimum updating the blockhash, and optionally adding priority fees) and **auto-broadcasts** it on-chain (`push_mode: "auto"`). Call `sign_and_send_transaction`, which returns the signature, the on-chain identifier; do not re-send the transaction. `sign_transaction` is rejected in this mode. The current auto-broadcast request supports only transactions whose sole required signer is the configured Fordefi vault; additional required signers are rejected before submission. Use with a regular Fordefi Solana vault.
 
-Construction is async because it fetches the Fordefi vault and verifies that its
-authoritative address matches the configured `public_key` before returning.
+The configured `public_key` is the source of truth for the vault's Solana
+address: construction performs no network calls, and every signature Fordefi
+returns is verified against this key before being accepted.
 
 ```rust
 use solana_keychain::{FordefiSigner, FordefiSignerConfig, SolanaSigner};

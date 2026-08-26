@@ -3,7 +3,6 @@ package fireblocks
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -125,7 +124,8 @@ func (s *Signer) doRequest(ctx context.Context, method, uri, body string) (int, 
 }
 
 // fetchPublicKey retrieves the vault account's Solana address. A non-2xx
-// response surfaces only the status code, never the body.
+// response maps to CodeRemoteAPIError whose detail carries the status code and
+// the sanitized response body (never rendered by Error()).
 func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 	uri := "/v1/vault/accounts/" + s.vaultAccountID + "/" + s.assetID + "/addresses_paginated"
 	status, body, err := s.doRequest(ctx, http.MethodGet, uri, "")
@@ -133,7 +133,7 @@ func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 		return solana.PublicKey{}, err
 	}
 	if !core.IsSuccess(status) {
-		return solana.PublicKey{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status))
+		return solana.PublicKey{}, core.NewRemoteAPIError("API error", status, body)
 	}
 
 	var addresses vaultAddressesResponse
@@ -192,7 +192,7 @@ func (s *Signer) createTransaction(ctx context.Context, request createTransactio
 		return createTransactionResponse{}, err
 	}
 	if !core.IsSuccess(status) {
-		return createTransactionResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("API error %d", status))
+		return createTransactionResponse{}, core.NewRemoteAPIError("API error", status, respBody)
 	}
 
 	var created createTransactionResponse
@@ -209,7 +209,7 @@ func (s *Signer) getTransaction(ctx context.Context, txID string) (transactionRe
 		return transactionResponse{}, err
 	}
 	if !core.IsSuccess(status) {
-		return transactionResponse{}, core.NewSignerError(core.CodeRemoteAPIError, fmt.Sprintf("Fireblocks API error %d", status))
+		return transactionResponse{}, core.NewRemoteAPIError("Fireblocks API error", status, body)
 	}
 
 	var tx transactionResponse

@@ -4,11 +4,9 @@ mod types;
 
 use crate::remote_util::parse_json_response;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
-use crate::signature_util::verify_or_reject;
+use crate::signature_util::{extract_and_verify_returned_signature, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction};
-use crate::transaction_util::{
-    deserialize_wire_transaction, serialize_wire_transaction, TransactionUtil,
-};
+use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::Engine;
 use p256::ecdsa::signature::Signer as P256Signer;
@@ -223,22 +221,8 @@ impl TurnkeySigner {
                 "Failed to decode signed transaction returned by Turnkey: {e}"
             ))
         })?;
-        let returned: VersionedTransaction =
-            deserialize_wire_transaction(&signed_wire).map_err(|e| {
-                SignerError::SerializationError(format!(
-                    "Failed to deserialize signed transaction returned by Turnkey: {e}"
-                ))
-            })?;
-
-        let position = TransactionUtil::get_signing_keypair_position(&returned, &self.public_key)?;
-        let signature = returned.signatures.get(position).copied().ok_or_else(|| {
-            SignerError::SigningFailed(
-                "Turnkey signature slot missing from returned transaction".to_string(),
-            )
-        })?;
-
-        verify_or_reject(
-            &signature,
+        let signature = extract_and_verify_returned_signature(
+            &signed_wire,
             &self.public_key,
             &transaction.message.serialize(),
         )?;

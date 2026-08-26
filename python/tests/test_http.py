@@ -11,7 +11,7 @@ from solana_keychain.core import (
     normalize_base_url,
     sanitize_remote_error_response,
 )
-from solana_keychain.core.http import probe_availability
+from solana_keychain.core.http import MAX_RESPONSE_BYTES, probe_availability
 
 
 def test_normalize_base_url_strips_whitespace_and_trailing_slashes() -> None:
@@ -102,6 +102,33 @@ async def test_invalid_json_is_parsing_error() -> None:
     with pytest.raises(SignerError) as excinfo:
         await fetch_signer_json(url=URL, provider_name="Test")
     assert excinfo.value.code == SignerErrorCode.PARSING_ERROR
+
+
+@respx.mock
+async def test_oversized_success_body_is_parsing_error() -> None:
+    oversized = b'{"pad": "' + b"x" * MAX_RESPONSE_BYTES + b'"}'
+    respx.get(URL).mock(return_value=httpx.Response(200, content=oversized))
+    with pytest.raises(SignerError) as excinfo:
+        await fetch_signer_json(url=URL, provider_name="Test")
+    assert excinfo.value.code == SignerErrorCode.PARSING_ERROR
+    assert excinfo.value._detail == "Test response exceeded maximum size"
+
+
+@respx.mock
+async def test_oversized_error_body_is_parsing_error() -> None:
+    respx.get(URL).mock(return_value=httpx.Response(500, content=b"x" * (MAX_RESPONSE_BYTES + 1)))
+    with pytest.raises(SignerError) as excinfo:
+        await fetch_signer_json(url=URL, provider_name="Test")
+    assert excinfo.value.code == SignerErrorCode.PARSING_ERROR
+
+
+@respx.mock
+async def test_body_at_the_size_cap_is_accepted() -> None:
+    payload = b'{"pad": "' + b"x" * (MAX_RESPONSE_BYTES - 11) + b'"}'
+    assert len(payload) == MAX_RESPONSE_BYTES
+    respx.get(URL).mock(return_value=httpx.Response(200, content=payload))
+    result = await fetch_signer_json(url=URL, provider_name="Test")
+    assert len(result["pad"]) == MAX_RESPONSE_BYTES - 11
 
 
 @respx.mock

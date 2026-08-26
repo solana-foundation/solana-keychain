@@ -25,6 +25,39 @@ func VerifySignature(pubkey solana.PublicKey, message []byte, sig solana.Signatu
 	return nil
 }
 
+// ExtractAndVerifyReturnedSignature deserializes a signed wire transaction
+// returned by a remote provider, extracts the signature at pubkey's
+// required-signer position, and verifies it against the original
+// locally-computed message bytes. Verifying against the original message is
+// what guarantees the provider signed exactly what was requested. Backends
+// whose remote API returns the whole signed transaction call this after
+// stripping the provider's outer encoding (base64/base58/hex).
+func ExtractAndVerifyReturnedSignature(
+	returnedTxBytes []byte,
+	pubkey solana.PublicKey,
+	originalMessage []byte,
+	provider string,
+) (solana.Signature, error) {
+	returned, err := solana.TransactionFromBytes(returnedTxBytes)
+	if err != nil {
+		return solana.Signature{}, WrapSignerError(CodeSerializationError,
+			"failed to deserialize signed transaction returned by "+provider, err)
+	}
+	pos, err := SigningPosition(returned, pubkey)
+	if err != nil {
+		return solana.Signature{}, err
+	}
+	if pos >= len(returned.Signatures) || returned.Signatures[pos].IsZero() {
+		return solana.Signature{}, NewSignerError(CodeSigningFailed,
+			"signed transaction returned by "+provider+" is missing the signer's signature")
+	}
+	sig := returned.Signatures[pos]
+	if err := VerifySignature(pubkey, originalMessage, sig); err != nil {
+		return solana.Signature{}, err
+	}
+	return sig, nil
+}
+
 // AttachSignature places sig at pubkey's required-signer position and returns the
 // encoded transaction tagged with its completeness.
 func AttachSignature(tx *solana.Transaction, pubkey solana.PublicKey, sig solana.Signature) (SignedTransaction, error) {

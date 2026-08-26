@@ -1,10 +1,10 @@
 //! HashiCorp Vault signer integration
 
 /// Re-export of the [`reqwest`] crate used internally by this module,
-/// so callers of [`VaultSigner::with_client`] can construct a `Client`
-/// at exactly the version this crate links against — avoiding the
-/// version-mismatch footgun of depending on `reqwest` directly in
-/// their own `Cargo.toml`.
+/// so callers of [`VaultSigner::with_client_builder`] can construct a
+/// `ClientBuilder` at exactly the version this crate links against —
+/// avoiding the version-mismatch footgun of depending on `reqwest`
+/// directly in their own `Cargo.toml`.
 pub use reqwest;
 
 use crate::remote_util::parse_json_response;
@@ -91,10 +91,9 @@ impl VaultSigner {
     /// Creates a new Vault signer from a configuration object.
     pub fn from_config(config: VaultSignerConfig) -> Result<Self, SignerError> {
         let http_client_config = config.http_client_config.unwrap_or_default();
-        let client = http_client_config.build_client()?;
 
-        Self::with_client(
-            client,
+        Self::with_client_builder(
+            http_client_config.client_builder(),
             config.api_base_url,
             config.token,
             config.key_name,
@@ -102,7 +101,7 @@ impl VaultSigner {
         )
     }
 
-    /// Creates a Vault signer from a caller-built [`reqwest::Client`].
+    /// Creates a Vault signer from a caller-configured [`reqwest::ClientBuilder`].
     ///
     /// Use this when you need control over TLS configuration, proxies,
     /// timeouts, or other client-level settings that `HttpClientConfig`
@@ -110,31 +109,39 @@ impl VaultSigner {
     /// `Client::builder().add_root_certificate(..)` when talking to a
     /// development Vault instance.
     ///
-    /// The caller is responsible for whatever security posture the
-    /// supplied client carries (HTTPS-only, cert pinning, redirect policy,
-    /// etc.); this constructor does not enforce `https_only` and does not
-    /// replace the client's redirect policy. Requests carry `X-Vault-Token`,
-    /// so a client that follows redirects replays it to the redirect target.
+    /// The builder is finished with this crate's no-redirect policy applied
+    /// (it takes a builder rather than a built `Client` precisely so the
+    /// policy cannot be bypassed): requests carry `X-Vault-Token`, and a
+    /// client that followed redirects would replay it to the redirect
+    /// target. `https_only` is deliberately *not* forced here — Vault is
+    /// routinely reached over plain-HTTP loopback (e.g. `vault server
+    /// -dev`), so transport security stays the caller's choice for this
+    /// constructor.
     ///
     /// To avoid pulling `reqwest` into your own dependency tree at a
     /// version that may diverge from `solana-keychain`'s, prefer
-    /// constructing the client via the re-exported
+    /// constructing the builder via the re-exported
     /// [`solana_keychain::vault::reqwest`] module.
     ///
     /// # Arguments
     ///
-    /// * `client` - A fully-built reqwest `Client`.
+    /// * `client_builder` - A caller-configured reqwest `ClientBuilder`.
     /// * `api_base_url` - Vault server address (e.g., "https://vault.example.com")
     /// * `token` - Vault authentication token
     /// * `key_name` - Vault key name in transit engine
     /// * `public_key` - Base58-encoded public key
-    pub fn with_client(
-        client: Client,
+    pub fn with_client_builder(
+        client_builder: reqwest::ClientBuilder,
         api_base_url: String,
         token: String,
         key_name: String,
         public_key: String,
     ) -> Result<Self, SignerError> {
+        let client = client_builder
+            .redirect(crate::http_client_config::no_redirect_policy())
+            .build()
+            .map_err(|e| SignerError::ConfigError(format!("Failed to build HTTP client: {e}")))?;
+
         let public_key = std::str::FromStr::from_str(&public_key)
             .map_err(|_| SignerError::InvalidPublicKey("Invalid public key".to_string()))?;
 
@@ -235,7 +242,11 @@ impl SolanaSigner for VaultSigner {
             return false;
         }
 
-        let body: serde_json::Value = match response.json().await {
+        let body = match crate::remote_util::read_body_capped(response).await {
+            Ok(body) => body,
+            Err(_) => return false,
+        };
+        let body: serde_json::Value = match serde_json::from_slice(&body) {
             Ok(value) => value,
             Err(_) => return false,
         };

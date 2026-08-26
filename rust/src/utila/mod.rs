@@ -4,10 +4,9 @@ mod types;
 
 use crate::remote_util::parse_json_response;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
+use crate::signature_util::extract_and_verify_returned_signature;
 use crate::traits::{SignTransactionResult, SignedTransaction};
-use crate::transaction_util::{
-    deserialize_wire_transaction, serialize_wire_transaction, TransactionUtil,
-};
+use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{Duration, Utc};
@@ -304,39 +303,7 @@ impl UtilaSigner {
             )
         })?;
 
-        let transaction: VersionedTransaction =
-            deserialize_wire_transaction(&bytes).map_err(|_e| {
-                SignerError::SerializationError(
-                    "Failed to deserialize Utila rawTransaction".to_string(),
-                )
-            })?;
-
-        let remote_message = transaction.message.serialize();
-        if remote_message != expected_message {
-            return Err(SignerError::SigningFailed(
-                "Utila returned a signed transaction with different message bytes".to_string(),
-            ));
-        }
-
-        let position = TransactionUtil::get_signing_keypair_position(&transaction, &public_key)?;
-        let signature = transaction
-            .signatures
-            .get(position)
-            .copied()
-            .filter(|sig| *sig != Signature::default())
-            .ok_or_else(|| {
-                SignerError::SigningFailed(
-                    "Utila rawTransaction did not contain a signer signature".to_string(),
-                )
-            })?;
-
-        if !signature.verify(&public_key.to_bytes(), expected_message) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed for Utila rawTransaction".to_string(),
-            ));
-        }
-
-        Ok(signature)
+        extract_and_verify_returned_signature(&bytes, &public_key, expected_message)
     }
 
     async fn sign_and_serialize(

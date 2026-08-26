@@ -20,7 +20,8 @@ func IsSuccess(status int) bool { return status >= 200 && status < 300 }
 // SendRequest sends req and returns the status code and the size-capped body.
 // Transport failures map to CodeHTTPError, except that a *SignerError raised
 // inside the client (the HTTPS-only transport and the redirect guard) is
-// surfaced as-is so its code survives.
+// surfaced as-is so its code survives. A body larger than MaxResponseBytes is
+// rejected with CodeSerializationError rather than silently truncated.
 func SendRequest(client *http.Client, req *http.Request, provider string) (int, []byte, error) {
 	resp, err := client.Do(req)
 	if err != nil {
@@ -32,11 +33,23 @@ func SendRequest(client *http.Client, req *http.Request, provider string) (int, 
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes+1))
 	if err != nil {
 		return 0, nil, WrapSignerError(CodeHTTPError, "failed to read "+provider+" response body", err)
 	}
+	if len(data) > MaxResponseBytes {
+		return 0, nil, NewSignerError(CodeSerializationError, provider+" response exceeded maximum size")
+	}
 	return resp.StatusCode, data, nil
+}
+
+// NewRemoteAPIError reports a non-2xx provider response as CodeRemoteAPIError.
+// The (opt-in) detail carries opContext, the status code, and the sanitized
+// response body; Error() still renders only the generic message, so the body
+// can never leak through formatted output or logs.
+func NewRemoteAPIError(opContext string, status int, body []byte) *SignerError {
+	return NewSignerError(CodeRemoteAPIError,
+		opContext+" "+strconv.Itoa(status)+": "+SanitizeRemoteResponse(string(body)))
 }
 
 // EncodeURIComponent percent-encodes every byte except the JavaScript

@@ -601,9 +601,9 @@ func TestSignMessageUnauthorized(t *testing.T) {
 	testutils.AssertCode(t, err, core.CodeRemoteAPIError)
 }
 
-// TestSignMessageRemoteErrorBodyDiscarded checks that non-2xx response bodies
-// never reach the error detail: only the status code does.
-func TestSignMessageRemoteErrorBodyDiscarded(t *testing.T) {
+// TestSignMessageRemoteErrorBodySanitized checks that non-2xx response bodies
+// reach the (opt-in) error detail sanitized, while Error() stays generic.
+func TestSignMessageRemoteErrorBodySanitized(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, testutils.TestPublicKey().String())
 	mux.HandleFunc("POST "+rpcPath, func(w http.ResponseWriter, _ *http.Request) {
@@ -614,15 +614,16 @@ func TestSignMessageRemoteErrorBodyDiscarded(t *testing.T) {
 	s := newTestSigner(t, mux)
 	_, err := s.SignMessage(context.Background(), []byte("test"))
 	testutils.AssertCode(t, err, core.CodeRemoteAPIError)
+	if strings.Contains(err.Error(), "thing") {
+		t.Errorf("Error() must not surface the remote body, got %q", err.Error())
+	}
 
 	detail := testutils.Detail(t, err)
 	if !strings.Contains(detail, "API error 500") {
 		t.Errorf("detail %q should mention the status", detail)
 	}
-	// The response body is deliberately discarded on non-2xx; only the status
-	// code may appear in the detail.
-	if strings.Contains(detail, "bad thing") {
-		t.Errorf("detail %q should not embed the remote response body", detail)
+	if !strings.Contains(detail, "bad thing with [31mcontrol chars") {
+		t.Errorf("detail %q should embed the sanitized remote response body", detail)
 	}
 	for _, r := range detail {
 		if r < 0x20 || r == 0x7f {

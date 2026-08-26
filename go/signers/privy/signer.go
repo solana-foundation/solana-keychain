@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/gagliardetto/solana-go"
 
@@ -110,22 +109,8 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, core.NewSignerError(core.CodeSerializationError,
 			"failed to decode signed transaction returned by privy")
 	}
-	returned, err := solana.TransactionFromBytes(signedWire)
+	sig, err := core.ExtractAndVerifyReturnedSignature(signedWire, s.pubkey, msg, "privy")
 	if err != nil {
-		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,
-			"failed to deserialize signed transaction returned by privy", err)
-	}
-
-	position, err := core.SigningPosition(returned, s.pubkey)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	if position >= len(returned.Signatures) {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-			"privy signature slot missing from returned transaction")
-	}
-	sig := returned.Signatures[position]
-	if err := core.VerifySignature(s.pubkey, msg, sig); err != nil {
 		return core.SignedTransaction{}, err
 	}
 
@@ -245,17 +230,15 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 
 // do executes the request and returns the response body, mapping transport
 // failures to CodeHTTPError and non-2xx statuses to CodeRemoteAPIError whose
-// detail carries only the status code ("API error {status}").
+// detail carries the status code and the sanitized response body (never
+// rendered by Error()).
 func (s *Signer) do(req *http.Request, what string) ([]byte, error) {
 	status, body, err := core.SendRequest(s.client, req, "privy")
 	if err != nil {
 		return nil, err
 	}
 	if !core.IsSuccess(status) {
-		// Only the status code goes into the detail; the response body is
-		// deliberately discarded since it may echo request material.
-		return nil, core.NewSignerError(core.CodeRemoteAPIError,
-			what+" failed: API error "+strconv.Itoa(status))
+		return nil, core.NewRemoteAPIError(what+" failed: API error", status, body)
 	}
 	return body, nil
 }

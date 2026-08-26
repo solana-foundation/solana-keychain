@@ -26,12 +26,14 @@ from solana_keychain.core.http import (
     normalize_base_url,
     probe_availability,
 )
-from solana_keychain.core.signature_util import verify_returned_signature
+from solana_keychain.core.signature_util import (
+    extract_and_verify_returned_signature,
+    verify_returned_signature,
+)
 from solana_keychain.core.signer import SignedTransaction, SolanaSigner
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
-    get_signing_keypair_position,
     serialize_transaction,
     signed_message_bytes,
 )
@@ -229,23 +231,15 @@ class TurnkeySigner(SolanaSigner):
         if not isinstance(signed_hex, str):
             raise SignerError(SignerErrorCode.SIGNING_FAILED, "Invalid response from Turnkey API")
         try:
-            signed = VersionedTransaction.from_bytes(bytes.fromhex(signed_hex))
-        except Exception:
+            signed_bytes = bytes.fromhex(signed_hex)
+        except ValueError:
             raise SignerError(
                 SignerErrorCode.SERIALIZATION_ERROR,
                 "Failed to decode signed transaction returned by Turnkey",
             ) from None
 
-        position = get_signing_keypair_position(signed, self._pubkey)
-        signatures = signed.signatures
-        if position >= len(signatures):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Turnkey signature slot missing from returned transaction",
-            )
-        signature = signatures[position]
-        verify_returned_signature(
-            signature, self._pubkey, signed_message_bytes(transaction.message)
+        signature = extract_and_verify_returned_signature(
+            signed_bytes, self._pubkey, signed_message_bytes(transaction.message), "Turnkey"
         )
         add_signature_to_transaction(transaction, self._pubkey, signature)
         return classify_signed_transaction(

@@ -5,9 +5,7 @@ mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
-use crate::transaction_util::{
-    deserialize_wire_transaction, serialize_wire_transaction, TransactionUtil,
-};
+use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use reqwest::header::{HeaderName, HeaderValue};
@@ -19,7 +17,9 @@ use self::types::{SignMessageResponse, SignTransactionResponse};
 use crate::wallet_jwt::extract_host;
 
 use crate::remote_util::parse_json_response;
-use crate::signature_util::{signature_from_base58, verify_or_reject};
+use crate::signature_util::{
+    extract_and_verify_returned_signature, signature_from_base58, verify_or_reject,
+};
 
 const CDP_API_HOST: &str = "api.cdp.coinbase.com";
 const CDP_BASE_PATH: &str = "/platform/v2/solana/accounts";
@@ -284,8 +284,6 @@ impl CdpSigner {
         transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
         let message_data = transaction.message.serialize();
-        let signer_position =
-            TransactionUtil::get_signing_keypair_position(transaction, &self.public_key)?;
 
         // Serialize the full transaction to bytes (Solana wire format)
         let serialized = serialize_wire_transaction(transaction)?;
@@ -304,23 +302,9 @@ impl CdpSigner {
                 )
             })?;
 
-        let signed_tx: VersionedTransaction =
-            deserialize_wire_transaction(&signed_bytes).map_err(|_e| {
-                #[cfg(feature = "unsafe-debug")]
-                log::error!("Failed to deserialize signed transaction: {_e}");
-                SignerError::SerializationError(
-                    "Failed to deserialize signed transaction from CDP".to_string(),
-                )
-            })?;
-
         // Extract only our signature from the response and apply it to the original transaction.
-        let signature = *signed_tx.signatures.get(signer_position).ok_or_else(|| {
-            SignerError::SigningFailed(
-                "Signature not found at expected position in CDP response".to_string(),
-            )
-        })?;
-
-        verify_or_reject(&signature, &self.public_key, &message_data)?;
+        let signature =
+            extract_and_verify_returned_signature(&signed_bytes, &self.public_key, &message_data)?;
 
         TransactionUtil::add_signature_to_transaction(transaction, &self.public_key, signature)?;
 

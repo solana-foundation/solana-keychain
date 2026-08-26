@@ -160,9 +160,8 @@ def test_config_rejects_negative_poll_interval() -> None:
 
 
 @respx.mock
-async def test_factory_verifies_chain_specific_vault_address() -> None:
+async def test_factory_uses_configured_public_key_without_remote_calls() -> None:
     keypair = Keypair()
-    mock_vault({"id": VAULT_ID, "address": str(keypair.pubkey()), "type": "solana"})
     signer = await create_fordefi_signer(
         FordefiSignerConfig(
             access_token=ACCESS_TOKEN,
@@ -173,62 +172,7 @@ async def test_factory_verifies_chain_specific_vault_address() -> None:
         )
     )
     assert signer.pubkey == keypair.pubkey()
-
-
-@respx.mock
-async def test_factory_derives_black_box_vault_address() -> None:
-    keypair = Keypair()
-    compressed = base64.b64encode(bytes(keypair.pubkey())).decode("ascii")
-    mock_vault({"id": VAULT_ID, "public_key_compressed": compressed, "type": "black_box"})
-    signer = make_signer(keypair)
-    await signer.init()
-    assert signer.pubkey == keypair.pubkey()
-
-
-@respx.mock
-async def test_init_rejects_vault_address_mismatch() -> None:
-    mock_vault({"id": VAULT_ID, "address": str(Keypair().pubkey())})
-    signer = make_signer(Keypair())
-    with pytest.raises(SignerError) as excinfo:
-        await signer.init()
-    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
-
-
-@respx.mock
-async def test_init_rejects_vault_without_public_key() -> None:
-    mock_vault({"id": VAULT_ID})
-    signer = make_signer(Keypair())
-    with pytest.raises(SignerError) as excinfo:
-        await signer.init()
-    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
-
-
-@respx.mock
-async def test_init_rejects_undecodable_compressed_key() -> None:
-    mock_vault({"id": VAULT_ID, "public_key_compressed": "not-base64!"})
-    signer = make_signer(Keypair())
-    with pytest.raises(SignerError) as excinfo:
-        await signer.init()
-    assert excinfo.value.code == SignerErrorCode.SERIALIZATION_ERROR
-
-
-@respx.mock
-async def test_init_rejects_wrong_length_compressed_key() -> None:
-    compressed = base64.b64encode(b"\x01" * 31).decode("ascii")
-    mock_vault({"id": VAULT_ID, "public_key_compressed": compressed})
-    signer = make_signer(Keypair())
-    with pytest.raises(SignerError) as excinfo:
-        await signer.init()
-    assert excinfo.value.code == SignerErrorCode.INVALID_PUBLIC_KEY
-
-
-@respx.mock
-async def test_init_propagates_vault_api_error() -> None:
-    mock_vault({"detail": "unauthorized"}, status_code=401)
-    signer = make_signer(Keypair())
-    with pytest.raises(SignerError) as excinfo:
-        await signer.init()
-    assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
+    assert not respx.calls
 
 
 @respx.mock

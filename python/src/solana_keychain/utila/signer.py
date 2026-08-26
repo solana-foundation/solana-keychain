@@ -16,7 +16,6 @@ except ImportError as error:  # pragma: no cover
     ) from error
 
 import httpx
-from solders.message import Message, MessageV0
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
@@ -29,7 +28,7 @@ from solana_keychain.core.http import (
     probe_availability,
 )
 from solana_keychain.core.poll import poll_attempts
-from solana_keychain.core.signature_util import verify_returned_signature
+from solana_keychain.core.signature_util import extract_and_verify_returned_signature
 from solana_keychain.core.signer import (
     SignedTransaction,
     SolanaSigner,
@@ -299,48 +298,9 @@ class UtilaSigner(SolanaSigner):
                 SignerErrorCode.SERIALIZATION_ERROR,
                 "Failed to decode Utila rawTransaction as base64",
             ) from None
-        try:
-            transaction = VersionedTransaction.from_bytes(transaction_bytes)
-        except Exception:
-            raise SignerError(
-                SignerErrorCode.SERIALIZATION_ERROR,
-                "Failed to deserialize Utila rawTransaction",
-            ) from None
-
-        message = transaction.message
-        if not isinstance(message, (Message, MessageV0)):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Utila returned a transaction with an unsupported message version",
-            )
-        if signed_message_bytes(message) != expected_message:
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Utila returned a signed transaction with different message bytes",
-            )
-
-        num_required = message.header.num_required_signatures
-        account_keys = list(message.account_keys)
-        if len(account_keys) < num_required:
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED, "Invalid account index: not enough account keys"
-            )
-        try:
-            position = account_keys[:num_required].index(public_key)
-        except ValueError:
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Failed to locate signer pubkey in Utila transaction",
-            ) from None
-
-        signatures = list(transaction.signatures)
-        if position >= len(signatures) or signatures[position] == Signature.default():
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Utila rawTransaction did not contain a signer signature",
-            )
-        signature = signatures[position]
-        return verify_returned_signature(signature, public_key, expected_message)
+        return extract_and_verify_returned_signature(
+            transaction_bytes, public_key, expected_message, "Utila"
+        )
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         public_key = self._initialized_pubkey()

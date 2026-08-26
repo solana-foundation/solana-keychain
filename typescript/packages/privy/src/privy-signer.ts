@@ -4,7 +4,7 @@ import {
     assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
-    extractSignatureFromWireTransaction,
+    extractAndVerifyReturnedSignature,
     fetchSignerJson,
     signBatchStaggered,
     SignerErrorCode,
@@ -314,16 +314,16 @@ class PrivySigner<TAddress extends string = string> implements SolanaSigner<TAdd
             async transaction => {
                 const wireTransaction = getBase64EncodedWireTransaction(transaction);
                 const signedTx = await this.signTransaction(wireTransaction, config?.abortSignal);
-                const sigDict = extractSignatureFromWireTransaction({
-                    base64WireTransaction: signedTx,
+                const signature = await extractAndVerifyReturnedSignature({
+                    abortSignal: config?.abortSignal,
+                    originalMessageBytes: transaction.messageBytes,
+                    returnedTransactionBytes: getBase64Encoder().encode(signedTx),
                     signerAddress: this.address,
                 });
-                await assertSignatureValid({
-                    data: transaction.messageBytes,
-                    signature: sigDict[this.address],
+                return createSignatureDictionary({
+                    signature,
                     signerAddress: this.address,
                 });
-                return sigDict;
             },
             this.requestDelayMs,
             config?.abortSignal,

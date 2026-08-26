@@ -5,7 +5,7 @@ import {
     assertSignatureValid,
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
-    extractSignatureFromTransactionBytes,
+    extractAndVerifyReturnedSignature,
     fetchSignerJson,
     signBatchStaggered,
     SignerErrorCode,
@@ -313,16 +313,16 @@ class TurnkeySigner<TAddress extends string = string> implements SolanaSigner<TA
 
                 const hexToBytes = getBase16Encoder().encode;
                 const signedTxBytes = hexToBytes(signedTransactionHex);
-                const sigDict = extractSignatureFromTransactionBytes({
-                    signerAddress: this.address,
-                    transactionBytes: signedTxBytes,
-                });
-                await assertSignatureValid({
-                    data: transaction.messageBytes,
-                    signature: sigDict[this.address],
+                const signature = await extractAndVerifyReturnedSignature({
+                    abortSignal: config?.abortSignal,
+                    originalMessageBytes: transaction.messageBytes,
+                    returnedTransactionBytes: signedTxBytes,
                     signerAddress: this.address,
                 });
-                return sigDict;
+                return createSignatureDictionary({
+                    signature,
+                    signerAddress: this.address,
+                });
             },
             this.requestDelayMs,
             config?.abortSignal,

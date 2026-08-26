@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SignerError, SignerErrorCode } from '../errors.js';
-import { fetchSignerJson } from '../http.js';
+import { fetchSignerJson, MAX_RESPONSE_BYTES } from '../http.js';
 
 function mockFetch(impl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) {
     const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(impl as typeof fetch);
@@ -247,6 +247,110 @@ describe('fetchSignerJson', () => {
         expect(error.message).toBe('Test API error: 502');
         expect(error.context?.status).toBe(502);
         expect(error.context?.response).toBe('boom bad');
+    });
+
+    it('accepts a success body of exactly MAX_RESPONSE_BYTES', async () => {
+        // `{"a":"…"}` framing is 9 bytes; pad the value so the body is exactly at the cap.
+        const value = 'x'.repeat(MAX_RESPONSE_BYTES - 9);
+        mockFetch(async () => new Response(`{"a":"${value}"}`, { status: 200 }));
+
+        const result = await fetchSignerJson<{ a: string }>({
+            providerName: 'Test',
+            url: 'https://api.example.com',
+        });
+
+        expect(result.a).toBe(value);
+    });
+
+    it('throws PARSING_ERROR when a success body exceeds MAX_RESPONSE_BYTES', async () => {
+        mockFetch(async () => new Response(`{"a":"${'x'.repeat(MAX_RESPONSE_BYTES)}"}`, { status: 200 }));
+
+        const error = await expectSignerError(
+            fetchSignerJson({ providerName: 'Test', url: 'https://api.example.com' }),
+            SignerErrorCode.PARSING_ERROR,
+        );
+        expect(error.message).toBe('Test response exceeded maximum size');
+        expect(error.context?.maxResponseBytes).toBe(MAX_RESPONSE_BYTES);
+        expect(error.context?.status).toBe(200);
+    });
+
+    it('throws PARSING_ERROR when a non-2xx error body exceeds MAX_RESPONSE_BYTES', async () => {
+        mockFetch(async () => new Response('x'.repeat(MAX_RESPONSE_BYTES + 1), { status: 502 }));
+
+        const error = await expectSignerError(
+            fetchSignerJson({ providerName: 'Test', url: 'https://api.example.com' }),
+            SignerErrorCode.PARSING_ERROR,
+        );
+        expect(error.message).toBe('Test response exceeded maximum size');
+        expect(error.context?.status).toBe(502);
+    });
+
+    it('fails fast on a Content-Length over the cap without reading the body', async () => {
+        const read = vi.fn();
+        mockFetch(
+            async () =>
+                ({
+                    body: { getReader: () => ({ cancel: async () => {}, read }) },
+                    headers: new Headers({ 'content-length': String(MAX_RESPONSE_BYTES + 1) }),
+                    ok: true,
+                    status: 200,
+                }) as unknown as Response,
+        );
+
+        const error = await expectSignerError(
+            fetchSignerJson({ providerName: 'Test', url: 'https://api.example.com' }),
+            SignerErrorCode.PARSING_ERROR,
+        );
+        expect(error.message).toBe('Test response exceeded maximum size');
+        expect(read).not.toHaveBeenCalled();
+    });
+
+    it('enforces the streaming cap even when Content-Length understates the body', async () => {
+        const chunk = new TextEncoder().encode('x'.repeat(64 * 1024));
+        let sent = 0;
+        mockFetch(
+            async () =>
+                ({
+                    body: {
+                        getReader: () => ({
+                            cancel: async () => {},
+                            read: async () => {
+                                sent += chunk.byteLength;
+                                return { done: false, value: chunk };
+                            },
+                        }),
+                    },
+                    headers: new Headers({ 'content-length': '2' }),
+                    ok: true,
+                    status: 200,
+                }) as unknown as Response,
+        );
+
+        const error = await expectSignerError(
+            fetchSignerJson({ providerName: 'Test', url: 'https://api.example.com' }),
+            SignerErrorCode.PARSING_ERROR,
+        );
+        expect(error.message).toBe('Test response exceeded maximum size');
+        expect(sent).toBeLessThanOrEqual(MAX_RESPONSE_BYTES + chunk.byteLength);
+    });
+
+    it('falls back to response.json() when the response exposes no body stream', async () => {
+        mockFetch(
+            async () =>
+                ({
+                    body: null,
+                    json: async () => ({ ok: true }),
+                    ok: true,
+                    status: 200,
+                }) as unknown as Response,
+        );
+
+        const result = await fetchSignerJson<{ ok: boolean }>({
+            providerName: 'Test',
+            url: 'https://api.example.com',
+        });
+
+        expect(result).toEqual({ ok: true });
     });
 
     it('throws PARSING_ERROR on invalid JSON', async () => {

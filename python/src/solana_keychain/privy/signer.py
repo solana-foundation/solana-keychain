@@ -17,7 +17,10 @@ from solana_keychain.core.http import (
     normalize_base_url,
     probe_availability,
 )
-from solana_keychain.core.signature_util import verify_returned_signature
+from solana_keychain.core.signature_util import (
+    extract_and_verify_returned_signature,
+    verify_returned_signature,
+)
 from solana_keychain.core.signer import (
     SignedTransaction,
     SolanaSigner,
@@ -26,7 +29,6 @@ from solana_keychain.core.signer import (
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
-    get_signing_keypair_position,
     serialize_transaction,
     signed_message_bytes,
 )
@@ -192,22 +194,16 @@ class PrivySigner(SolanaSigner):
                 SignerErrorCode.REMOTE_API_ERROR, "No signed_transaction in Privy response"
             )
         try:
-            signed = VersionedTransaction.from_bytes(base64.b64decode(signed_b64, validate=True))
+            signed_bytes = base64.b64decode(signed_b64, validate=True)
         except Exception:
             raise SignerError(
                 SignerErrorCode.SERIALIZATION_ERROR,
                 "Failed to decode signed transaction returned by Privy",
             ) from None
 
-        position = get_signing_keypair_position(signed, public_key)
-        signatures = signed.signatures
-        if position >= len(signatures):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Privy signature slot missing from returned transaction",
-            )
-        signature = signatures[position]
-        verify_returned_signature(signature, public_key, signed_message_bytes(transaction.message))
+        signature = extract_and_verify_returned_signature(
+            signed_bytes, public_key, signed_message_bytes(transaction.message), "Privy"
+        )
         add_signature_to_transaction(transaction, public_key, signature)
         return classify_signed_transaction(
             transaction, serialize_transaction(transaction), signature

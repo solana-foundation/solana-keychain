@@ -2,7 +2,7 @@
 
 mod types;
 
-use crate::remote_util::validate_https_url;
+use crate::remote_util::{read_body_capped, validate_https_url};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::signature_from_base58;
 use crate::traits::SignTransactionResult;
@@ -331,9 +331,9 @@ impl CrossmintSigner {
         T: serde::de::DeserializeOwned,
     {
         let status = response.status().as_u16();
-        let text = response.text().await.unwrap_or_default();
+        let body = read_body_capped(response).await?;
         let value: serde_json::Value =
-            serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+            serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
 
         if status >= 400 {
             let message = Self::extract_error_message(&value)

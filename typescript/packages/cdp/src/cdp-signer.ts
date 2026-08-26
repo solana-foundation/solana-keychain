@@ -6,7 +6,7 @@ import {
     base64UrlDecoder,
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
-    extractSignatureFromWireTransaction,
+    extractAndVerifyReturnedSignature,
     fetchSignerJson,
     normalizeBaseUrl,
     signBatchStaggered,
@@ -450,16 +450,17 @@ class CdpSigner<TAddress extends string = string> implements SolanaSigner<TAddre
             async transaction => {
                 const wireTransaction = getBase64EncodedWireTransaction(transaction);
                 const signedWireTx = await this.callSignTransaction(wireTransaction, config?.abortSignal);
-                const sigDict = extractSignatureFromWireTransaction({
-                    base64WireTransaction: signedWireTx,
+                base64Encoder ||= getBase64Encoder();
+                const signature = await extractAndVerifyReturnedSignature({
+                    abortSignal: config?.abortSignal,
+                    originalMessageBytes: transaction.messageBytes,
+                    returnedTransactionBytes: base64Encoder.encode(signedWireTx),
                     signerAddress: this.address,
                 });
-                await assertSignatureValid({
-                    data: transaction.messageBytes,
-                    signature: sigDict[this.address],
+                return createSignatureDictionary({
+                    signature,
                     signerAddress: this.address,
                 });
-                return sigDict;
             },
             this.requestDelayMs,
             config?.abortSignal,

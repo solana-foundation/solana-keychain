@@ -1,10 +1,11 @@
 import { type Address, assertIsAddress } from '@solana/addresses';
+import { getBase64Encoder } from '@solana/codecs-strings';
 import {
     abortableDelay,
     assertHttpsUrl,
-    assertSignatureValid,
+    createSignatureDictionary,
     createSignerError,
-    extractSignatureFromWireTransaction,
+    extractAndVerifyReturnedSignature,
     fetchSignerJson,
     normalizeBaseUrl,
     normalizePrivateKeyPem,
@@ -21,7 +22,6 @@ import type {
     TransactionPartialSignerConfig,
 } from '@solana/signers';
 import {
-    type Base64EncodedWireTransaction,
     getBase64EncodedWireTransaction,
     type Transaction,
     type TransactionWithinSizeLimit,
@@ -268,16 +268,16 @@ class UtilaSigner<TAddress extends string = string> implements SolanaSigner<TAdd
             });
         }
 
-        const sigDict = extractSignatureFromWireTransaction({
-            base64WireTransaction: rawSignedTransaction as Base64EncodedWireTransaction,
+        const signature = await extractAndVerifyReturnedSignature({
+            abortSignal,
+            originalMessageBytes: transaction.messageBytes,
+            returnedTransactionBytes: getBase64Encoder().encode(rawSignedTransaction),
             signerAddress: this.address,
         });
-        await assertSignatureValid({
-            data: transaction.messageBytes,
-            signature: sigDict[this.address],
+        return createSignatureDictionary({
+            signature,
             signerAddress: this.address,
         });
-        return sigDict;
     }
 
     private async initiateTransaction(rawTransaction: string, abortSignal?: AbortSignal): Promise<UtilaTransaction> {

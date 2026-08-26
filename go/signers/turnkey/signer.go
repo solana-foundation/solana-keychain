@@ -38,10 +38,15 @@ type Signer struct {
 var _ core.Signer = (*Signer)(nil)
 
 // New builds a Turnkey signer from cfg. Construction is pure: no network I/O.
+// The configured P-256 API-key material is validated here so a malformed key
+// fails at construction rather than on the first signing request.
 func New(cfg Config) (*Signer, error) {
 	pubkey, err := solana.PublicKeyFromBase58(cfg.PublicKey)
 	if err != nil {
 		return nil, core.WrapSignerError(core.CodeInvalidPublicKey, "invalid public key", err)
+	}
+	if err := validateAPIKeyMaterial(cfg.APIPrivateKey, cfg.APIPublicKey); err != nil {
+		return nil, err
 	}
 	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 	baseURL, err := core.NormalizeHTTPSBaseURL(cfg.APIBaseURL, DefaultAPIBaseURL, "api_base_url")
@@ -117,22 +122,8 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,
 			"failed to decode signed transaction returned by Turnkey", err)
 	}
-	returned, err := solana.TransactionFromBytes(signedWire)
+	sig, err := core.ExtractAndVerifyReturnedSignature(signedWire, s.publicKey, msg, "Turnkey")
 	if err != nil {
-		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,
-			"failed to deserialize signed transaction returned by Turnkey", err)
-	}
-
-	position, err := core.SigningPosition(returned, s.publicKey)
-	if err != nil {
-		return core.SignedTransaction{}, err
-	}
-	if position >= len(returned.Signatures) {
-		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-			"Turnkey signature slot missing from returned transaction")
-	}
-	sig := returned.Signatures[position]
-	if err := core.VerifySignature(s.publicKey, msg, sig); err != nil {
 		return core.SignedTransaction{}, err
 	}
 
@@ -225,9 +216,8 @@ func assembleSignature(rHex, sHex string) (solana.Signature, error) {
 }
 
 // post sends a stamped JSON POST to the Turnkey API and returns the response
-// body on 2xx. Non-2xx responses map to RemoteApiError carrying only the
-// status code; the response body is deliberately never surfaced (it may echo
-// request material).
+// body on 2xx. Non-2xx responses map to RemoteApiError whose detail carries
+// the status code and the sanitized response body (never rendered by Error()).
 func (s *Signer) post(ctx context.Context, path string, body []byte) ([]byte, error) {
 	stamp, err := s.createStamp(string(body))
 	if err != nil {
@@ -245,7 +235,7 @@ func (s *Signer) post(ctx context.Context, path string, body []byte) ([]byte, er
 		return nil, err
 	}
 	if !core.IsSuccess(status) {
-		return nil, core.NewSignerError(core.CodeRemoteAPIError, "API error "+strconv.Itoa(status))
+		return nil, core.NewRemoteAPIError("API error", status, respBody)
 	}
 	return respBody, nil
 }

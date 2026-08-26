@@ -14,7 +14,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::SignerError;
 use crate::http_client_config::HttpClientConfig;
-use crate::remote_util::{extract_api_error, parse_json_response, poll_until, PollOutcome};
+use crate::remote_util::{
+    extract_api_error, parse_json_response, poll_until, read_body_capped, PollOutcome,
+};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::signature_from_base64;
 use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
@@ -34,7 +36,6 @@ const DEFAULT_BASE_URL: &str = "https://api.fordefi.com";
 const DEFAULT_POLL_INTERVAL_MS: u64 = 2000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 50;
 const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-const VAULT_VERIFICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Configuration for creating a FordefiSigner.
 #[derive(Clone)]
@@ -102,16 +103,16 @@ impl std::fmt::Debug for FordefiSigner {
 impl FordefiSigner {
     /// Create a new FordefiSigner from a configuration object.
     ///
-    /// Fetches the configured Fordefi vault and verifies that its authoritative
-    /// Solana public key matches `config.public_key` before returning.
+    /// `config.public_key` is trusted as the vault's Solana public key (the
+    /// provider is trusted under this crate's model): construction performs no
+    /// network round-trip to cross-check it. Every signature Fordefi returns is
+    /// still verified against this key before being accepted.
     ///
     /// Provide exactly one request-signing mechanism: a PEM-encoded ECDSA P-256
     /// key in `config.private_key_pem`, or a custom [`FordefiRequestSigner`] in
     /// `config.request_signer` for KMS/HSM-backed signing.
     pub async fn from_config(config: FordefiSignerConfig) -> Result<Self, SignerError> {
-        let signer = Self::build(config)?;
-        signer.verify_vault_address_with_timeout().await?;
-        Ok(signer)
+        Self::build(config)
     }
 
     /// Shared construction: validate config, resolve the request-signing
@@ -287,10 +288,11 @@ impl FordefiSigner {
             return Err(classify(Some(status), error));
         }
 
-        let create_response: CreateTransactionResponse = response
-            .json()
+        let body = read_body_capped(response)
             .await
-            .map_err(|error| classify(Some(status), error.into()))?;
+            .map_err(|error| classify(Some(status), error))?;
+        let create_response: CreateTransactionResponse =
+            serde_json::from_slice(&body).map_err(|error| classify(Some(status), error.into()))?;
         Ok(create_response.id)
     }
 
@@ -613,70 +615,6 @@ impl FordefiSigner {
             .await?;
 
         parse_json_response(response, "Fordefi API fetch_vault").await
-    }
-
-    /// Resolve the authoritative Solana public key returned for a Fordefi vault.
-    ///
-    /// Chain-specific vaults expose a base58 `address`; black-box vaults expose
-    /// the same 32-byte Ed25519 public key as base64 in `public_key_compressed`.
-    fn vault_public_key(vault: &VaultResponse) -> Result<Pubkey, SignerError> {
-        if let Some(address) = vault
-            .address
-            .as_deref()
-            .filter(|address| !address.is_empty())
-        {
-            return Pubkey::from_str(address).map_err(|_| {
-                SignerError::InvalidPublicKey(
-                    "Fordefi vault returned an invalid Solana address".to_string(),
-                )
-            });
-        }
-
-        let public_key_compressed = vault.public_key_compressed.as_deref().ok_or_else(|| {
-            SignerError::ConfigError(
-                "Fordefi vault response included neither `address` nor \
-                 `public_key_compressed`; cannot verify public_key ownership"
-                    .to_string(),
-            )
-        })?;
-        let public_key_bytes = STANDARD.decode(public_key_compressed).map_err(|_| {
-            SignerError::SerializationError(
-                "Failed to decode Fordefi vault public_key_compressed as base64".to_string(),
-            )
-        })?;
-        let public_key_bytes: [u8; 32] = public_key_bytes.try_into().map_err(|_| {
-            SignerError::InvalidPublicKey(
-                "Fordefi vault public_key_compressed must decode to 32 bytes".to_string(),
-            )
-        })?;
-
-        Ok(Pubkey::new_from_array(public_key_bytes))
-    }
-
-    /// Verify that the configured public key belongs to the configured Fordefi vault.
-    async fn verify_vault_address(&self) -> Result<(), SignerError> {
-        let vault = self.fetch_vault().await?;
-        let remote_public_key = Self::vault_public_key(&vault)?;
-
-        if remote_public_key != self.public_key {
-            return Err(SignerError::ConfigError(format!(
-                "Configured public_key does not match Fordefi vault {}",
-                self.vault_id
-            )));
-        }
-
-        Ok(())
-    }
-
-    async fn verify_vault_address_with_timeout(&self) -> Result<(), SignerError> {
-        tokio::time::timeout(VAULT_VERIFICATION_TIMEOUT, self.verify_vault_address())
-            .await
-            .map_err(|_| {
-                SignerError::HttpError(format!(
-                    "Fordefi vault verification timed out after {} seconds",
-                    VAULT_VERIFICATION_TIMEOUT.as_secs()
-                ))
-            })?
     }
 }
 
