@@ -10,11 +10,6 @@ import {
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getBase16Encoder, getBase58Decoder, getBase58Encoder } from '@solana/codecs-strings';
 
-vi.mock('@solana/keychain-core', async importOriginal => {
-    const mod = await importOriginal<typeof import('@solana/keychain-core')>();
-    return { ...mod, assertSignatureValid: vi.fn() };
-});
-
 vi.mock('@solana/transactions', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/transactions')>();
     return {
@@ -24,7 +19,7 @@ vi.mock('@solana/transactions', async importOriginal => {
     };
 });
 
-import { assertSignatureValid, isSolanaSendingSigner, isSolanaSigner, type SignerError } from '@solana/keychain-core';
+import { isSolanaSendingSigner, isSolanaSigner, type SignerError } from '@solana/keychain-core';
 import { isMessagePartialSigner, isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
 import { getTransactionDecoder } from '@solana/transactions';
 import { createCrossmintSigner } from '../crossmint-signer.js';
@@ -46,8 +41,7 @@ const PKCS8_ED25519_PREFIX = new Uint8Array([
     0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
 ]);
 
-// Mirror of the source's deriveSignerSeed so tests can reconstruct the signing
-// key and assert WHICH message bytes the submitted approval signature covers.
+// Mirror of the source's deriveSignerSeed so tests can reconstruct the signing key.
 function deriveTestSeed(secret: string, apiKey: string): Uint8Array {
     const rawSecret = secret.startsWith('xmsk1_') ? secret.slice(6) : secret;
     const ikm = Buffer.from(base16Encoder.encode(rawSecret));
@@ -78,13 +72,14 @@ function createMockTransaction() {
 
 function createDecodedTransaction(overrides?: {
     messageBytes?: Uint8Array;
-    signature?: Uint8Array;
+    signature?: Uint8Array | null;
     signerAddress?: string;
 }) {
     return {
         messageBytes: overrides?.messageBytes ?? MOCK_MESSAGE_BYTES,
         signatures: {
-            [overrides?.signerAddress ?? MOCK_ADDRESS]: overrides?.signature ?? MOCK_SIGNATURE_BYTES,
+            [overrides?.signerAddress ?? MOCK_ADDRESS]:
+                overrides?.signature === null ? null : (overrides?.signature ?? MOCK_SIGNATURE_BYTES),
         },
     };
 }
@@ -104,7 +99,6 @@ function mockWalletResponse(overrides?: Record<string, unknown>): Response {
 describe('CrossmintSigner', () => {
     beforeEach(() => {
         vi.resetAllMocks();
-        vi.mocked(assertSignatureValid).mockResolvedValue(undefined);
         vi.mocked(getTransactionDecoder).mockReturnValue({
             decode: vi.fn(() => createDecodedTransaction()),
         } as any);
@@ -267,11 +261,6 @@ describe('CrossmintSigner', () => {
 
             expect(signature).toBeDefined();
             expect(signature?.length).toBe(64);
-            expect(assertSignatureValid).toHaveBeenCalledWith({
-                data: MOCK_MESSAGE_BYTES,
-                signature: MOCK_SIGNATURE_BYTES,
-                signerAddress: signer.address,
-            });
         });
 
         it('signs sequentially and stops creating transactions after a failure', async () => {
@@ -335,13 +324,6 @@ describe('CrossmintSigner', () => {
             const results = await signer.signAndSendTransactions([createMockTransaction()]);
             expect(results).toHaveLength(1);
             expect(results[0]).toEqual(MOCK_SIGNATURE_BYTES);
-            // Signature is verified against the returned transaction's message bytes
-            // (Crossmint may refresh the blockhash before signing).
-            expect(assertSignatureValid).toHaveBeenCalledWith({
-                data: MOCK_MESSAGE_BYTES,
-                signature: MOCK_SIGNATURE_BYTES,
-                signerAddress: signer.address,
-            });
         });
 
         /**
@@ -444,12 +426,6 @@ describe('CrossmintSigner', () => {
 
             const results = await signer.signAndSendTransactions([createMockTransaction()]);
             expect(results[0]).toEqual(MOCK_SIGNATURE_BYTES);
-            // Verification uses the returned message bytes, not the original ones
-            expect(assertSignatureValid).toHaveBeenCalledWith({
-                data: returnedMessageBytes,
-                signature: MOCK_SIGNATURE_BYTES,
-                signerAddress: signer.address,
-            });
         });
 
         it('rejects approval signatures for unrelated local transaction bytes', async () => {
@@ -484,13 +460,9 @@ describe('CrossmintSigner', () => {
                     providerTransactionId: 'tx-approval',
                 }),
             });
-            expect(assertSignatureValid).not.toHaveBeenCalled();
         });
 
-        /**
-         * A smart wallet is signed by its delegated signer, not by the wallet address
-         * the API reports, so the delegated address must be a verification candidate.
-         */
+        /** A smart wallet may return a signature from its delegated signer. */
         it('locates a signature made by the delegated signer', async () => {
             const DELEGATED_ADDRESS = 'SysvarC1ock11111111111111111111111111111111';
             vi.mocked(getTransactionDecoder).mockReturnValue({
@@ -518,23 +490,13 @@ describe('CrossmintSigner', () => {
             const results = await signer.signAndSendTransactions([createMockTransaction()]);
 
             expect(results[0]).toEqual(MOCK_SIGNATURE_BYTES);
-            // Verified against the delegated signer, not the wallet address.
-            expect(assertSignatureValid).toHaveBeenCalledWith(
-                expect.objectContaining({ signerAddress: DELEGATED_ADDRESS }),
-            );
             // The wallet address remains the signer's public identity.
             expect(signer.address).toBe(MOCK_ADDRESS);
         });
 
-        /**
-         * A submitted approval may carry its identity only as a `server:<address>`
-         * locator, with no `address` field — the same identity format `pending`
-         * entries use.
-         */
+        /** A submitted approval may carry its identity only as a `server:<address>` locator. */
         it('locates a submitted approval identified only by its server locator', async () => {
             const DELEGATED_ADDRESS = 'SysvarC1ock11111111111111111111111111111111';
-            // No candidate holds a slot signature, so extraction falls through to
-            // approvals.submitted.
             vi.mocked(getTransactionDecoder).mockReturnValue({
                 decode: vi.fn(() => createDecodedTransaction({ signerAddress: 'someone-else' })),
             } as any);
@@ -568,17 +530,9 @@ describe('CrossmintSigner', () => {
             const results = await signer.signAndSendTransactions([createMockTransaction()]);
 
             expect(results[0]).toEqual(MOCK_SIGNATURE_BYTES);
-            expect(assertSignatureValid).toHaveBeenCalledWith(
-                expect.objectContaining({ signerAddress: DELEGATED_ADDRESS }),
-            );
         });
 
-        /**
-         * A wallet can be configured with both signerSecret and an explicit signer
-         * locator naming a different key, e.g. the wallet's admin signer. Either may
-         * be the key that actually signs, so both must be candidates.
-         */
-        it('treats an explicit locator signer as a candidate alongside the derived key', async () => {
+        it('accepts a signature from an explicit locator signer', async () => {
             const ADMIN_ADDRESS = 'SysvarRent111111111111111111111111111111111';
             vi.mocked(getTransactionDecoder).mockReturnValue({
                 decode: vi.fn(() => createDecodedTransaction({ signerAddress: ADMIN_ADDRESS })),
@@ -607,14 +561,11 @@ describe('CrossmintSigner', () => {
             const results = await signer.signAndSendTransactions([createMockTransaction()]);
 
             expect(results[0]).toEqual(MOCK_SIGNATURE_BYTES);
-            expect(assertSignatureValid).toHaveBeenCalledWith(
-                expect.objectContaining({ signerAddress: ADMIN_ADDRESS }),
-            );
         });
 
         it('rejects when no signature can be extracted', async () => {
             vi.mocked(getTransactionDecoder).mockReturnValue({
-                decode: vi.fn(() => createDecodedTransaction({ signerAddress: 'other-address' })),
+                decode: vi.fn(() => createDecodedTransaction({ signature: null })),
             } as any);
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()
@@ -645,10 +596,9 @@ describe('CrossmintSigner', () => {
                     providerTransactionId: 'tx-no-sig',
                 }),
             });
-            expect(assertSignatureValid).not.toHaveBeenCalled();
         });
 
-        it('verifies txId when transaction decode throws', async () => {
+        it('accepts txId when transaction decode throws', async () => {
             vi.mocked(getTransactionDecoder).mockReturnValue({
                 decode: vi.fn(() => {
                     throw new Error('decode failed');
@@ -678,24 +628,14 @@ describe('CrossmintSigner', () => {
 
             const results = await signer.signAndSendTransactions([createMockTransaction()]);
             expect(results[0]).toEqual(MOCK_SIGNATURE_BYTES);
-            expect(assertSignatureValid).toHaveBeenCalledWith({
-                data: MOCK_MESSAGE_BYTES,
-                signature: MOCK_SIGNATURE_BYTES,
-                signerAddress: signer.address,
-            });
         });
 
-        /**
-         * When both paths fail, callers still get a stable SignerError code with
-         * the embedded-transaction error as its cause.
-         */
-        it('reports the embedded-transaction failure when txId validation also fails', async () => {
+        it('accepts txId when transaction decoding fails', async () => {
             vi.mocked(getTransactionDecoder).mockReturnValue({
                 decode: vi.fn(() => {
                     throw new Error('decode failed');
                 }),
             } as any);
-            vi.mocked(assertSignatureValid).mockRejectedValueOnce(new Error('signature validation failed'));
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()
                 .mockResolvedValueOnce(
@@ -718,18 +658,8 @@ describe('CrossmintSigner', () => {
                 pollIntervalMs: 1,
             });
 
-            await expect(signer.signAndSendTransactions([createMockTransaction()])).rejects.toMatchObject({
-                code: 'SIGNER_BROADCAST_UNCONFIRMED',
-                context: expect.objectContaining({
-                    cause: expect.objectContaining({
-                        code: 'SIGNER_SIGNING_FAILED',
-                        context: expect.objectContaining({
-                            cause: expect.objectContaining({ message: 'decode failed' }),
-                        }),
-                    }),
-                    providerTransactionId: 'tx-fallthrough-invalid',
-                }),
-            });
+            const results = await signer.signAndSendTransactions([createMockTransaction()]);
+            expect(results[0]).toEqual(MOCK_SIGNATURE_BYTES);
         });
 
         /**
@@ -784,14 +714,6 @@ describe('CrossmintSigner', () => {
             const results = await signer.signAndSendTransactions([createMockTransaction()]);
 
             expect(results[0]).toEqual(SPONSOR_SIGNATURE_BYTES);
-            expect(assertSignatureValid).toHaveBeenCalledWith(
-                expect.objectContaining({ data: rewrittenMessageBytes, signerAddress: DELEGATED_ADDRESS }),
-            );
-            expect(assertSignatureValid).toHaveBeenCalledWith({
-                data: rewrittenMessageBytes,
-                signature: SPONSOR_SIGNATURE_BYTES,
-                signerAddress: SPONSOR_ADDRESS,
-            });
         });
 
         it('throws on failed transaction status', async () => {

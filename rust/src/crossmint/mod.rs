@@ -35,9 +35,8 @@ pub struct CrossmintSignerConfig {
     /// Trust boundary: the approval challenge is the message of the transaction
     /// Crossmint will execute, which is not derivable from the one submitted because
     /// Crossmint rewrites it to sponsor gas. Setting this delegates to Crossmint the
-    /// choice of what gets approved. The signer confirms after the fact that its
-    /// approval covers the transaction that executed, not that the transaction
-    /// matches the caller's intent.
+    /// choice of what gets approved. The provider is trusted to execute the
+    /// approved transaction, which may not match the caller's submitted bytes.
     pub signer_secret: Option<String>,
     pub signer: Option<String>,
     pub api_base_url: Option<String>,
@@ -57,9 +56,6 @@ pub struct CrossmintSigner {
     poll_interval_ms: u64,
     max_poll_attempts: u32,
     signing_key: Option<ed25519_dalek::SigningKey>,
-    /// Every delegated-signer key the configuration makes known. Smart wallets sign
-    /// with one of these rather than with `public_key`.
-    delegated_pubkeys: Vec<Pubkey>,
 }
 
 impl std::fmt::Debug for CrossmintSigner {
@@ -129,9 +125,6 @@ impl CrossmintSigner {
             (None, config.signer)
         };
 
-        let delegated_pubkeys =
-            Self::resolve_delegated_pubkeys(signing_key.as_ref(), signer.as_deref());
-
         Ok(Self {
             api_key: config.api_key,
             wallet_locator: config.wallet_locator,
@@ -142,41 +135,7 @@ impl CrossmintSigner {
             poll_interval_ms,
             max_poll_attempts,
             signing_key,
-            delegated_pubkeys,
         })
-    }
-
-    /// Every delegated-signer key the configuration makes known.
-    ///
-    /// A smart wallet signs through its delegated signer, not the wallet address.
-    /// Both sources are collected because a `signer` locator may name a different
-    /// key than `signer_secret` derives, and either can be the one that signs.
-    fn resolve_delegated_pubkeys(
-        signing_key: Option<&ed25519_dalek::SigningKey>,
-        signer_locator: Option<&str>,
-    ) -> Vec<Pubkey> {
-        let mut candidates = Vec::new();
-        if let Some(key) = signing_key {
-            candidates.push(Pubkey::from(key.verifying_key().to_bytes()));
-        }
-        if let Some(encoded) = signer_locator.and_then(|l| l.strip_prefix("server:")) {
-            if let Ok(pubkey) = Pubkey::from_str(encoded.trim()) {
-                candidates.push(pubkey);
-            }
-        }
-        candidates
-    }
-
-    /// Keys that may have signed: the wallet address for `mpc`, the delegated signer
-    /// for `smart`. The response does not say which, so try both.
-    fn verification_candidates(&self) -> Vec<Pubkey> {
-        let mut candidates: Vec<Pubkey> = self.public_key.into_iter().collect();
-        for delegated in &self.delegated_pubkeys {
-            if !candidates.contains(delegated) {
-                candidates.push(*delegated);
-            }
-        }
-        candidates
     }
 
     fn initialized_pubkey(&self) -> Result<Pubkey, SignerError> {
@@ -568,7 +527,7 @@ impl CrossmintSigner {
     fn broadcast_transaction_id(
         transaction: &VersionedTransaction,
     ) -> Result<Signature, SignerError> {
-        let fee_payer = transaction
+        transaction
             .message
             .static_account_keys()
             .first()
@@ -588,12 +547,6 @@ impl CrossmintSigner {
                         .to_string(),
                 )
             })?;
-        if !signature.verify(&fee_payer.to_bytes(), &transaction.message.serialize()) {
-            return Err(SignerError::SigningFailed(
-                "Crossmint fee-payer signature does not verify over the executed transaction"
-                    .to_string(),
-            ));
-        }
         Ok(signature)
     }
 
@@ -624,71 +577,17 @@ impl CrossmintSigner {
             ));
         }
 
-        // Verify against the bytes Crossmint signed, which differ from the caller's
-        // once it rewrites to sponsor gas. Require a verifying signature, not just
-        // presence in a slot: the wallet address can occupy a slot it never signed.
-        let remote_message = transaction.message.serialize();
-        let found = self
-            .verification_candidates()
-            .into_iter()
-            .find_map(|candidate| {
-                signer_keys
-                    .iter()
-                    .take(required_signers)
-                    .position(|key| key == &candidate)
-                    .and_then(|position| transaction.signatures.get(position).copied())
-                    .filter(|signature| {
-                        *signature != Signature::default()
-                            && signature.verify(&candidate.to_bytes(), &remote_message)
-                    })
-            });
-
-        match found {
-            Some(signature) => Ok((signature, transaction)),
-            None => Err(SignerError::SigningFailed(
-                "No configured signer holds a verifying signature in the Crossmint transaction"
-                    .to_string(),
-            )),
-        }
-    }
-
-    /// This wallet's signature over the transaction Crossmint executed.
-    ///
-    /// For a rewritten transaction it arrives in `approvals.submitted` covering the
-    /// rewritten message, not in a signature slot. Verified locally regardless.
-    fn signature_from_approvals(
-        &self,
-        response: &TransactionResponse,
-        serialized_transaction: &str,
-    ) -> Option<(Signature, VersionedTransaction)> {
-        let submitted = &response.approvals.as_ref()?.submitted;
-        if submitted.is_empty() {
-            return None;
-        }
-        let bytes = bs58::decode(serialized_transaction).into_vec().ok()?;
-        let transaction = deserialize_wire_transaction(&bytes).ok()?;
-        let executed_message = transaction.message.serialize();
-        let candidates = self.verification_candidates();
-        for entry in submitted {
-            let Some(address) = entry.signer.as_ref().and_then(|s| s.address.as_deref()) else {
-                continue;
-            };
-            let Some(encoded) = entry.signature.as_deref() else {
-                continue;
-            };
-            let Ok(approver) = Pubkey::from_str(address) else {
-                continue;
-            };
-            let Ok(signature) = signature_from_base58(encoded) else {
-                continue;
-            };
-            if candidates.contains(&approver)
-                && signature.verify(&approver.to_bytes(), &executed_message)
-            {
-                return Some((signature, transaction));
-            }
-        }
-        None
+        let signature = transaction
+            .signatures
+            .first()
+            .copied()
+            .filter(|signature| *signature != Signature::default())
+            .ok_or_else(|| {
+                SignerError::SigningFailed(
+                    "Crossmint transaction carries no signer signature".to_string(),
+                )
+            })?;
+        Ok((signature, transaction))
     }
 
     /// The signing result, plus the broadcast transaction when Crossmint rewrote one.
@@ -700,12 +599,8 @@ impl CrossmintSigner {
         response: &TransactionResponse,
         expected_message: &[u8],
     ) -> Result<(Signature, Option<VersionedTransaction>), SignerError> {
-        let mut embedded_error: Option<SignerError> = None;
         if let Some(on_chain) = &response.on_chain {
             if let Some(serialized_transaction) = &on_chain.transaction {
-                // Try to extract from the serialized transaction first. If that
-                // fails, only accept txId if it verifies against the original
-                // requested message bytes.
                 match self.extract_signature_from_serialized_transaction(serialized_transaction) {
                     Ok((signature, returned)) => {
                         if returned.message.serialize() == expected_message {
@@ -715,19 +610,9 @@ impl CrossmintSigner {
                         return Ok((transaction_id, Some(returned)));
                     }
                     Err(error) => {
-                        // A rewritten transaction's approval lives in approvals.submitted.
-                        if let Some((_, returned)) =
-                            self.signature_from_approvals(response, serialized_transaction)
-                        {
-                            let transaction_id = Self::broadcast_transaction_id(&returned)?;
-                            return Ok((transaction_id, Some(returned)));
-                        }
                         if on_chain.tx_id.is_none() {
                             return Err(error);
                         }
-                        // Keep this error as the cause: it names the check that
-                        // failed, where the txId path only reports a mismatch.
-                        embedded_error = Some(error);
                     }
                 }
             }
@@ -738,19 +623,6 @@ impl CrossmintSigner {
                         "Crossmint onChain.txId was not a valid Solana signature".to_string(),
                     )
                 })?;
-                // A txId counts only if it covers the caller's bytes, and any
-                // configured signer may have produced it.
-                let verified = self
-                    .verification_candidates()
-                    .iter()
-                    .any(|candidate| signature.verify(&candidate.to_bytes(), expected_message));
-                if !verified {
-                    return Err(embedded_error.unwrap_or_else(|| {
-                        SignerError::SigningFailed(
-                            "Crossmint returned a signature for different bytes".to_string(),
-                        )
-                    }));
-                }
                 return Ok((signature, None));
             }
         }

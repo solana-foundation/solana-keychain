@@ -47,15 +47,6 @@ type onChainData struct {
 
 type approvalsData struct {
 	Pending []pendingApproval `json:"pending"`
-	// Submitted carries the approvals Crossmint has already collected. A rewritten
-	// transaction's wallet signature appears here rather than in a signature slot
-	// of the returned transaction.
-	Submitted []submittedApproval `json:"submitted"`
-}
-
-type submittedApproval struct {
-	Signature *string         `json:"signature"`
-	Signer    *approvalSigner `json:"signer"`
 }
 
 type pendingApproval struct {
@@ -66,7 +57,6 @@ type pendingApproval struct {
 // approvalSigner identifies which approver an approval belongs to.
 type approvalSigner struct {
 	Locator *string `json:"locator"`
-	Address *string `json:"address"`
 }
 
 // approvalRequest is the submit-approval request body.

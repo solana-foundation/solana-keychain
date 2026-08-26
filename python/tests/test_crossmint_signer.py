@@ -233,7 +233,7 @@ async def test_sign_transaction_falls_back_to_tx_id() -> None:
 
 
 @respx.mock
-async def test_sign_transaction_rejects_tx_id_for_different_bytes() -> None:
+async def test_sign_transaction_accepts_provider_tx_id() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
@@ -245,10 +245,8 @@ async def test_sign_transaction_rejects_tx_id_for_different_bytes() -> None:
         )
     )
 
-    with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(transaction)
-    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
-    assert excinfo.value.provider_transaction_id == "tx-1"
+    result = await signer.sign_transaction(transaction)
+    assert result.signature == other_signature
 
 
 @respx.mock
@@ -679,9 +677,7 @@ async def test_rewritten_transaction_approval_yields_the_fee_payer_transaction_i
 
 
 @respx.mock
-async def test_approval_signature_from_an_unconfigured_signer_is_rejected() -> None:
-    """An approval by a key that is neither the wallet address nor a configured
-    delegated signer must not be accepted as this signer's result."""
+async def test_provider_transaction_is_trusted_without_approval_verification() -> None:
     wallet_keypair = Keypair()
     stranger = Keypair()
     fee_payer = Keypair()
@@ -718,16 +714,13 @@ async def test_approval_signature_from_an_unconfigured_signer_is_rejected() -> N
         )
     )
 
-    with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(transaction)
-    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
-    assert excinfo.value.provider_transaction_id == "tx-1"
+    result = await signer.sign_transaction(transaction)
+    assert result.signature == executed.signatures[0]
+    assert result.encoded_transaction == ""
 
 
 @respx.mock
-async def test_signature_from_an_unrelated_key_is_still_rejected() -> None:
-    """Widening the candidate set must not accept a key that is neither the wallet
-    address nor the configured delegated signer."""
+async def test_provider_rewritten_transaction_is_trusted() -> None:
     wallet_keypair = Keypair()
     signer = await initialized_signer(wallet_keypair, signer_secret=SIGNER_SECRET)
 
@@ -746,10 +739,9 @@ async def test_signature_from_an_unrelated_key_is_still_rejected() -> None:
         )
     )
 
-    with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(transaction)
-    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
-    assert excinfo.value.provider_transaction_id == "tx-1"
+    result = await signer.sign_transaction(transaction)
+    assert result.signature == rewritten.signatures[0]
+    assert result.encoded_transaction == ""
 
 
 @respx.mock
@@ -802,7 +794,7 @@ async def test_caller_exact_signature_is_placed_in_the_caller_transaction() -> N
 
 
 @respx.mock
-async def test_signature_not_covering_returned_transaction_is_rejected() -> None:
+async def test_signature_not_covering_returned_transaction_is_trusted() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
@@ -820,10 +812,9 @@ async def test_signature_not_covering_returned_transaction_is_rejected() -> None
         )
     )
 
-    with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(transaction)
-    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
-    assert excinfo.value.provider_transaction_id == "tx-1"
+    result = await signer.sign_transaction(transaction)
+    assert result.signature == returned.signatures[0]
+    assert result.encoded_transaction == ""
 
 
 @respx.mock

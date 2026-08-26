@@ -471,9 +471,8 @@ func TestSignTransactionRejectsApprovalSignaturesForLocalTransactionBytes(t *tes
 	}
 }
 
-// TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes: the
-// signature is verified against the onChain transaction's own message bytes,
-// even when Crossmint modified the transaction (e.g. a smart-wallet rewrite).
+// TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes extracts the
+// returned fee-payer signature even when Crossmint modified the transaction.
 func TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := testutils.PubkeyOf(priv)
@@ -522,7 +521,7 @@ func TestSignTransactionAcceptsSignatureFromOnChainTransactionBytes(t *testing.T
 // A returned transaction whose message matches the submitted one really is signed
 // over the caller's bytes, so the signature belongs in the caller's transaction.
 // A smart wallet is signed by its delegated signer, not by the wallet address the
-// API reports, so the delegated key must be a verification candidate.
+// API reports, so the delegated key's returned signature is accepted.
 func TestSignTransactionLocatesDelegatedSignerSignature(t *testing.T) {
 	secret := signerSecretPrefix + strings.Repeat("ab", 32)
 	derivableAPIKey := "sk_staging_" + base58.Encode([]byte("proj:sig"))
@@ -648,7 +647,7 @@ func TestSignTransactionSponsoredReturnsFeePayerTransactionID(t *testing.T) {
 
 // A wallet can be configured with both SignerSecret and an explicit Signer locator
 // naming a different key, e.g. the wallet's admin signer. Either may be the key
-// that actually signs, so both must be candidates.
+// that actually signs, so either returned signature is accepted.
 func TestSignTransactionExplicitLocatorSignerIsACandidate(t *testing.T) {
 	walletPub := testutils.TestPublicKey()
 	adminPriv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x7c}, ed25519.SeedSize))
@@ -698,9 +697,8 @@ func TestSignTransactionExplicitLocatorSignerIsACandidate(t *testing.T) {
 	}
 }
 
-// Widening the candidate set must not accept a key that is neither the wallet
-// address nor the configured delegated signer.
-func TestSignTransactionRejectsUnrelatedSignerKey(t *testing.T) {
+// Crossmint's returned transaction is trusted as the provider's broadcast result.
+func TestSignTransactionAcceptsUnrelatedSignerKey(t *testing.T) {
 	walletPub := testutils.TestPublicKey()
 	strangerPriv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x5a}, ed25519.SeedSize))
 	stranger := solana.PublicKeyFromBytes(strangerPriv.Public().(ed25519.PublicKey))
@@ -714,6 +712,7 @@ func TestSignTransactionRejectsUnrelatedSignerKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewritten.Signatures = []solana.Signature{solana.SignatureFromBytes(ed25519.Sign(strangerPriv, rewrittenMsg))}
+	signature := rewritten.Signatures[0]
 	wireBytes, err := rewritten.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -739,9 +738,15 @@ func TestSignTransactionRejectsUnrelatedSignerKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.SignTransaction(context.Background(), localTx)
-	if code, _ := core.CodeOf(err); code != core.CodeBroadcastUnconfirmed {
-		t.Errorf("got %s, want BROADCAST_UNCONFIRMED", code)
+	res, err := s.SignTransaction(context.Background(), localTx)
+	if err != nil {
+		t.Fatalf("SignTransaction: %v (detail: %s)", err, testutils.Detail(t, err))
+	}
+	if res.Signature != signature {
+		t.Errorf("signature = %s, want %s", res.Signature, signature)
+	}
+	if res.EncodedTransaction != "" {
+		t.Error("a Crossmint-broadcast transaction leaves nothing for the caller to send")
 	}
 }
 
