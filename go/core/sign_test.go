@@ -7,9 +7,6 @@ import (
 	"github.com/gagliardetto/solana-go"
 )
 
-// signedReturnedTxBytes builds the deterministic test transaction, signs its
-// message with the test key, and returns the signed wire bytes together with
-// the message bytes the signature covers.
 func signedReturnedTxBytes(t *testing.T, sign bool) (wire []byte, msg []byte) {
 	t.Helper()
 	tx, err := createTestTransaction(testPublicKey())
@@ -61,7 +58,6 @@ func TestExtractAndVerifyReturnedSignatureAllZeroSignature(t *testing.T) {
 
 func TestExtractAndVerifyReturnedSignatureNonVerifying(t *testing.T) {
 	wire, msg := signedReturnedTxBytes(t, true)
-	// Tamper with the message the signature must cover.
 	tampered := append([]byte{}, msg...)
 	tampered[len(tampered)-1] ^= 0xFF
 	_, err := ExtractAndVerifyReturnedSignature(wire, testPublicKey(), tampered, "test")

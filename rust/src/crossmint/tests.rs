@@ -198,8 +198,6 @@ async fn test_init_success() {
 async fn test_init_rejects_oversized_response_body() {
     let server = MockServer::start().await;
 
-    // A valid-looking JSON body just past the 1 MiB cap: the bounded body
-    // reader must refuse it before any parsing happens.
     let padding = "a".repeat(crate::remote_util::MAX_RESPONSE_BYTES);
     Mock::given(method("GET"))
         .and(path("/2025-06-09/wallets/test-wallet"))

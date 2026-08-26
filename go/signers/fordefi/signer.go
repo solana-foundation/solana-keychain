@@ -43,8 +43,7 @@ var (
 
 // New builds a Fordefi signer from cfg. Construction is pure: no network I/O.
 // The configured PublicKey is the source of truth for the signer's identity
-// (Fordefi is a trusted provider); every produced signature is still verified
-// against it before being returned.
+// (trusted-provider model); every produced signature is verified against it.
 func New(_ context.Context, cfg Config) (*Signer, error) {
 	if cfg.AccessToken == "" {
 		return nil, core.NewSignerError(core.CodeConfigError, "access_token must not be empty")

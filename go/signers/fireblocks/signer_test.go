@@ -635,8 +635,6 @@ func TestSignMessagePollingTimeout(t *testing.T) {
 	}
 }
 
-// A hostile remote error body lands sanitized in the (opt-in) detail; Error()
-// stays generic so it can never leak through logs.
 func TestRemoteErrorBodySanitizedIntoDetail(t *testing.T) {
 	hostile := "evil\x01<script>alert(1)</script>"
 	s := newTestSigner(t, testutils.TestPublicKey().String(), func(mux *http.ServeMux) {

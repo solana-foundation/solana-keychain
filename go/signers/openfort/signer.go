@@ -192,8 +192,7 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 
 // do executes an Openfort API request and returns the response body of a 2xx
 // response. Transport failures map to CodeHTTPError and non-2xx statuses to
-// CodeRemoteAPIError whose detail carries the status code and the sanitized
-// response body (never rendered by Error()).
+// CodeRemoteAPIError.
 func (s *Signer) do(req *http.Request) ([]byte, error) {
 	status, body, err := core.SendRequest(s.client, req, "openfort")
 	if err != nil {

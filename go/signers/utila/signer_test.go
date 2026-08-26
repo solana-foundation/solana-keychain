@@ -572,8 +572,6 @@ func TestNewWalletErrorPaths(t *testing.T) {
 		wantIn   string
 	}{
 		{
-			// The sanitized response body lands in the (opt-in) detail after
-			// the status code.
 			name:     "remote api error",
 			status:   http.StatusUnauthorized,
 			body:     `{"message":"unauthorized"}`,

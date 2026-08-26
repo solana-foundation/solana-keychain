@@ -28,10 +28,8 @@ func VerifySignature(pubkey solana.PublicKey, message []byte, sig solana.Signatu
 // ExtractAndVerifyReturnedSignature deserializes a signed wire transaction
 // returned by a remote provider, extracts the signature at pubkey's
 // required-signer position, and verifies it against the original
-// locally-computed message bytes. Verifying against the original message is
-// what guarantees the provider signed exactly what was requested. Backends
-// whose remote API returns the whole signed transaction call this after
-// stripping the provider's outer encoding (base64/base58/hex).
+// locally-computed message bytes — the guarantee that the provider signed
+// exactly what was requested.
 func ExtractAndVerifyReturnedSignature(
 	returnedTxBytes []byte,
 	pubkey solana.PublicKey,

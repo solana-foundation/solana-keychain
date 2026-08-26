@@ -225,8 +225,8 @@ func TestNewRejectsNonP256PEM(t *testing.T) {
 	}
 }
 
-// Construction is pure: the configured public key is the source of truth, so
-// New must not fetch the vault or compare it against the API-reported address.
+// The configured public key is the source of truth, so New must not fetch the
+// vault to verify it.
 func TestNewDoesNotContactAPI(t *testing.T) {
 	var requests atomic.Int64
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -385,8 +385,6 @@ func TestSignMessagePollingTimeout(t *testing.T) {
 	}
 }
 
-// A non-2xx body lands sanitized in the (opt-in) detail; Error() stays generic
-// so the hostile text can never leak through logs.
 func TestSignMessageAPIErrorSanitizesBodyIntoDetail(t *testing.T) {
 	hostile := "evil\x01<script>alert(1)</script>"
 	s := newTestSigner(t, baseConfig(t), testutils.TestPublicKey().String(), func(mux *http.ServeMux) {

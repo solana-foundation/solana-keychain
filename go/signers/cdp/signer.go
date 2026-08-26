@@ -152,8 +152,6 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 		return core.SignedTransaction{}, err
 	}
 
-	// Decode the returned signed transaction, then extract only our signature
-	// from it and apply it to the original transaction.
 	signedBytes, err := base64.StdEncoding.DecodeString(resp.SignedTransaction)
 	if err != nil {
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,
@@ -218,8 +216,6 @@ func (s *Signer) doPost(ctx context.Context, path string, body map[string]any, o
 		return err
 	}
 
-	// The sanitized response body goes into the (opt-in) detail only; Error()
-	// stays generic.
 	if !core.IsSuccess(status) {
 		return core.NewRemoteAPIError("CDP API error", status, respBody)
 	}

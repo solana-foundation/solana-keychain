@@ -103,9 +103,8 @@ class FordefiSignerConfig:
 class FordefiSigner(SolanaSigner):
     """Signer backed by a Fordefi vault.
 
-    The configured ``public_key`` is the source of truth for the vault's
-    Solana address; Fordefi is trusted as a provider and no remote lookup is
-    performed at construction time.
+    The configured ``public_key`` is trusted as the vault's Solana address;
+    no remote lookup is performed at construction time.
 
     Black-box mode (default) signs the caller's exact message bytes and the
     caller broadcasts. Native mode (``chain`` set) lets Fordefi replace the

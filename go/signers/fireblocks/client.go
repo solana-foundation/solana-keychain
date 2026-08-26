@@ -123,9 +123,7 @@ func (s *Signer) doRequest(ctx context.Context, method, uri, body string) (int, 
 	return core.SendRequest(s.client, req, "fireblocks")
 }
 
-// fetchPublicKey retrieves the vault account's Solana address. A non-2xx
-// response maps to CodeRemoteAPIError whose detail carries the status code and
-// the sanitized response body (never rendered by Error()).
+// fetchPublicKey retrieves the vault account's Solana address.
 func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 	uri := "/v1/vault/accounts/" + s.vaultAccountID + "/" + s.assetID + "/addresses_paginated"
 	status, body, err := s.doRequest(ctx, http.MethodGet, uri, "")

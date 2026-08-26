@@ -130,9 +130,8 @@ func (s *Signer) doRequest(ctx context.Context, method, path string, body any) (
 	return core.SendRequest(s.client, req, "utila")
 }
 
-// parseResponse maps any 4xx/5xx status to RemoteApiError whose detail carries
-// the context, the status code, and the sanitized body (never rendered by
-// Error()), and an undecodable 2xx body to SerializationError.
+// parseResponse maps any 4xx/5xx status to RemoteApiError and an undecodable
+// 2xx body to SerializationError.
 func parseResponse[T any](status int, body []byte, opContext string) (T, error) {
 	var zero T
 	if status >= 400 {

@@ -601,8 +601,6 @@ func TestSignMessageUnauthorized(t *testing.T) {
 	testutils.AssertCode(t, err, core.CodeRemoteAPIError)
 }
 
-// TestSignMessageRemoteErrorBodySanitized checks that non-2xx response bodies
-// reach the (opt-in) error detail sanitized, while Error() stays generic.
 func TestSignMessageRemoteErrorBodySanitized(t *testing.T) {
 	mux := http.NewServeMux()
 	addWalletRoute(t, mux, testutils.TestPublicKey().String())

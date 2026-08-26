@@ -170,9 +170,7 @@ func (s *Signer) signBytes(ctx context.Context, data []byte) (solana.Signature, 
 }
 
 // doRequest performs an authenticated Para API request and returns the raw
-// response body. Non-2xx responses map to CodeRemoteAPIError whose detail
-// carries the status code and the sanitized response body (never rendered by
-// Error()).
+// response body. Non-2xx responses map to CodeRemoteAPIError.
 func (s *Signer) doRequest(ctx context.Context, method, url string, requestBody any) ([]byte, error) {
 	var reader io.Reader
 	if requestBody != nil {

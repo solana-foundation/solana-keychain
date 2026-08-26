@@ -103,10 +103,9 @@ impl std::fmt::Debug for FordefiSigner {
 impl FordefiSigner {
     /// Create a new FordefiSigner from a configuration object.
     ///
-    /// `config.public_key` is trusted as the vault's Solana public key (the
-    /// provider is trusted under this crate's model): construction performs no
-    /// network round-trip to cross-check it. Every signature Fordefi returns is
-    /// still verified against this key before being accepted.
+    /// `config.public_key` is trusted as the vault's Solana public key —
+    /// construction makes no network calls, and every signature Fordefi
+    /// returns is still verified against it.
     ///
     /// Provide exactly one request-signing mechanism: a PEM-encoded ECDSA P-256
     /// key in `config.private_key_pem`, or a custom [`FordefiRequestSigner`] in

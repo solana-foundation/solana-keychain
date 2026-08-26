@@ -52,9 +52,6 @@ fn test_create_vault_signer() {
 
 #[tokio::test]
 async fn test_with_client_builder_uses_supplied_builder() {
-    // Prove that a caller-configured builder is actually the one used for
-    // outbound requests: stand up a mock, hand a plain http builder
-    // to `with_client_builder`, and assert the mock sees the call.
     let mock_server = MockServer::start().await;
     let keypair = Keypair::new();
     let message = b"with-client-message";
@@ -74,9 +71,7 @@ async fn test_with_client_builder_uses_supplied_builder() {
         .mount(&mock_server)
         .await;
 
-    // The test uses plain http, so we cannot flip `https_only` —
-    // which is precisely the point of `with_client_builder`: the caller
-    // owns the TLS (or lack thereof) policy.
+    // Plain-http builder: `with_client_builder` leaves TLS policy to the caller.
     let signer = VaultSigner::with_client_builder(
         Client::builder(),
         mock_server.uri(),
@@ -93,9 +88,7 @@ async fn test_with_client_builder_uses_supplied_builder() {
 
 #[tokio::test]
 async fn test_with_client_builder_enforces_no_redirect_policy() {
-    // Even a builder configured to follow redirects must be overridden:
-    // requests carry X-Vault-Token, so a redirect has to fail the request
-    // instead of replaying the token to the redirect target.
+    // The redirect must fail rather than replay X-Vault-Token to the target.
     let target = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/collect"))

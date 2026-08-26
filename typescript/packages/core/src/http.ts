@@ -114,8 +114,7 @@ async function readCappedResponseText(response: Response, providerName: string):
  * - network failure or timeout → `HTTP_ERROR`
  * - non-2xx status → `REMOTE_API_ERROR` with the sanitized response body
  * - invalid JSON body → `PARSING_ERROR`
- * - body over {@link MAX_RESPONSE_BYTES} (either path) → `PARSING_ERROR`
- *   carrying the provider status
+ * - body over {@link MAX_RESPONSE_BYTES} → `PARSING_ERROR`
  *
  * Redirects are always rejected and every request carries a timeout unless
  * the caller supplies its own `init.signal`. A caller `abortSignal` propagates

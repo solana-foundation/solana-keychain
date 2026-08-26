@@ -111,7 +111,7 @@ async def fetch_signer_json(
     - non-2xx status → ``REMOTE_API_ERROR`` with the sanitized response body in
       the (redacted) detail
     - invalid JSON body → ``PARSING_ERROR``
-    - body (success or error) larger than ``MAX_RESPONSE_BYTES`` → ``PARSING_ERROR``
+    - body larger than ``MAX_RESPONSE_BYTES`` → ``PARSING_ERROR``
 
     ``json_body`` and ``content`` are mutually exclusive. Use ``content`` when the
     request bytes must match a signature computed over them exactly (request-stamping

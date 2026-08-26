@@ -479,8 +479,6 @@ func TestSignMessageVerificationFailure(t *testing.T) {
 }
 
 func TestSignMessageErrorBodySanitizedIntoDetail(t *testing.T) {
-	// Error() output must stay generic; the sanitized API response text lands
-	// in the (opt-in) detail only.
 	pub, _, _ := signFixture(t)
 	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		testutils.WriteJSON(w, http.StatusForbidden, map[string]any{"message": "Wallet is locked"})

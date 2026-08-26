@@ -108,7 +108,6 @@ describe('extractAndVerifyReturnedSignature', () => {
     it('verifies against the ORIGINAL message bytes, not the returned ones', async () => {
         const kp = await createTestKeypair();
         const originalMessageBytes = buildMessageBytes(kp.address);
-        // Provider signs and returns a different message than the caller submitted.
         const tamperedMessageBytes = new Uint8Array(originalMessageBytes);
         tamperedMessageBytes[tamperedMessageBytes.length - 2] ^= 0xff;
         const signature = await kp.sign(tamperedMessageBytes);
@@ -164,7 +163,6 @@ describe('extractAndVerifyReturnedSignature', () => {
         const kp = await createTestKeypair();
         const other = await createTestKeypair();
         const messageBytes = buildMessageBytes(kp.address);
-        // Signature produced by a different key occupies this signer's slot.
         const foreignSignature = (await other.sign(messageBytes)) as SignatureBytes;
         const returnedTransactionBytes = buildWireTransaction(foreignSignature, messageBytes);
 
