@@ -1,3 +1,36 @@
+## 2.0.0-beta.1 - 2026-08-26
+
+First beta of the 2.0 line. Published to crates.io as a pre-release: a `^1`
+or `^2` requirement will not resolve it, so it must be pinned explicitly.
+
+### Breaking Changes
+
+- adopt the trusted-provider model and consolidate remote response handling (#281)
+- make Crossmint a sending-only signer: `sign_transaction` now fails, use `sign_and_send_transaction` (#284)
+- add the broadcast-managed signer capability (`SolanaSigner::broadcasts_transactions`) and `SignerError::BroadcastUnconfirmed` (#269)
+- normalize backend contracts: signature decode failures map to `SerializationError`, length mismatches to `SigningFailed`, remote parse failures to `SerializationError` (#273)
+- bump `ed25519-dalek` to 3.0 (#183)
+
+### Features
+
+- add `sign_and_send_transaction` to the signer contract and every capable backend (#276)
+- support v1 (SIMD-0385) transactions under `sdk-v4` (#269)
+- add the Fordefi signer backend (#202)
+
+### Bug Fixes
+
+- select the Fireblocks vault address by asset instead of taking the first (#252)
+- sign Privy transactions via the policy-aware `signTransaction` RPC (#251)
+- sign Turnkey transactions via the policy-aware `sign_transaction` activity (#250)
+- reject Turnkey signatures from non-completed activities (#240)
+- refuse HTTP redirects and centralize the signer HTTP client builder (#249)
+- use rustls in the Openfort client (#234)
+- make `tokio` optional so the memory signer builds on `wasm32` (#180)
+
+### Refactoring
+
+- move inline unit tests to sibling `tests.rs` files and share signature, response and error helpers across backends (#273)
+
 ## 1.4.0 - 2026-06-29
 
 ### Features
