@@ -14,14 +14,14 @@ We strongly prefer PRs that include the [Rust](#rust), [TypeScript](#typescript)
 
 ### Architecture Overview
 
-The library uses a trait-based architecture where all signers implement the `SolanaSigner` trait defined in [src/traits.rs](../rust/src/traits.rs). The library also provides a unified `Signer` enum that wraps all implementations, allowing runtime selection of signing backends while maintaining a consistent API.
+The library uses a trait-based architecture defined in [src/traits.rs](../rust/src/traits.rs): every signer implements the `SolanaSigner` base trait (`pubkey`, `sign_message`, `is_available`) plus exactly one capability trait matching the provider's shape — `TransactionSigner` (`sign_transaction`, caller broadcasts), `ModifyingSigner` (`modify_and_sign_transaction`, provider rewrites the transaction), or `SendingSigner` (`sign_and_send_transaction`, provider broadcasts). The library also provides a unified `Signer` enum that wraps all implementations, allowing runtime selection of signing backends while maintaining a consistent API.
 
 ### Quick Checklist
 
 - [ ] Create your signer module with implementation
-- [ ] Implement the `SolanaSigner` trait (3 async methods + `pubkey()`)
+- [ ] Implement the `SolanaSigner` base trait plus the capability trait matching your provider's shape (usually `TransactionSigner`)
 - [ ] Add a feature flag in `Cargo.toml`
-- [ ] Update the `Signer` enum in `src/lib.rs` (4 match arms)
+- [ ] Update the `Signer` enum in `src/lib.rs` (variant, `dispatch_signer!` arm, `TransactionSigner` match arm)
 - [ ] Update `src/error.rs` reqwest `From` impl cfg gate (if your signer uses reqwest)
 - [ ] Enforce HTTPS and configure timeouts on HTTP clients
 - [ ] Add comprehensive unit tests (wiremock-based, in your module)
@@ -162,15 +162,15 @@ impl YourServiceSigner {
 }
 ```
 
-### Step 4: Implement the SolanaSigner Trait
+### Step 4: Implement the Signer Traits
 
-The trait has 3 async methods (`sign_transaction`, `sign_message`, `is_available`) plus `pubkey()`. Note that `sign_transaction` returns `SignTransactionResult` — a tagged enum indicating whether the transaction is fully signed or partially signed.
+The `SolanaSigner` base trait has 2 async methods (`sign_message`, `is_available`) plus `pubkey()`; transaction signing goes in the capability trait — `TransactionSigner` for a provider that signs and leaves broadcasting to the caller. Note that `sign_transaction` returns `SignTransactionResult` — a tagged enum indicating whether the transaction is fully signed or partially signed.
 
 Use the shared `TransactionUtil` helpers for signing and serialization instead of implementing your own.
 
 ```rust
 use crate::transaction_util::TransactionUtil;
-use crate::traits::SignTransactionResult;
+use crate::traits::{SignTransactionResult, TransactionSigner};
 
 #[async_trait::async_trait]
 impl SolanaSigner for YourServiceSigner {
@@ -178,6 +178,25 @@ impl SolanaSigner for YourServiceSigner {
         self.public_key
     }
 
+    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        self.sign(message).await
+    }
+
+    async fn is_available(&self) -> bool {
+        // Implement a health check for your service
+        // Example: ping endpoint or check credentials
+        let url = format!("{}/health", self.api_base_url);
+        self.client
+            .get(&url)
+            .send()
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+    }
+}
+
+#[async_trait::async_trait]
+impl TransactionSigner for YourServiceSigner {
     async fn sign_transaction(
         &self,
         tx: &mut Transaction,
@@ -198,22 +217,6 @@ impl SolanaSigner for YourServiceSigner {
             tx,
             (serialized, signature),
         ))
-    }
-
-    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        self.sign(message).await
-    }
-
-    async fn is_available(&self) -> bool {
-        // Implement a health check for your service
-        // Example: ping endpoint or check credentials
-        let url = format!("{}/health", self.api_base_url);
-        self.client
-            .get(&url)
-            .send()
-            .await
-            .map(|r| r.status().is_success())
-            .unwrap_or(false)
     }
 }
 ```
@@ -258,7 +261,7 @@ all = ["memory", "vault", "privy", "turnkey", "your_service"]  # Update all
 
 ### Step 7: Update the Signer Enum
 
-Add your signer to `src/lib.rs`. You need 4 match arms in the `SolanaSigner` impl: `pubkey`, `sign_transaction`, `sign_message`, and `is_available`.
+Add your signer to `src/lib.rs`. The base `SolanaSigner` impl dispatches through the `dispatch_signer!` macro, so add one arm there; `sign_transaction` lives in the explicit `impl TransactionSigner for Signer` match, so add your delegating arm to it as well.
 
 ```rust
 // Add feature-gated module
@@ -301,44 +304,29 @@ impl Signer {
     }
 }
 
-// Update trait implementation — 4 match arms
-#[async_trait::async_trait]
-impl SolanaSigner for Signer {
-    fn pubkey(&self) -> sdk_adapter::Pubkey {
-        match self {
+// Update the dispatch macro — the base SolanaSigner impl uses it for
+// pubkey, sign_message and is_available
+macro_rules! dispatch_signer {
+    ($self:ident, $signer:pat => $body:expr) => {
+        match $self {
             // ... existing variants
             #[cfg(feature = "your_service")]
-            Signer::YourService(s) => s.pubkey(),
+            Signer::YourService($signer) => $body,
         }
-    }
+    };
+}
 
+// Add a delegating arm to the explicit TransactionSigner match
+#[async_trait::async_trait]
+impl TransactionSigner for Signer {
     async fn sign_transaction(
         &self,
-        tx: &mut sdk_adapter::Transaction,
+        tx: &mut sdk_adapter::VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         match self {
             // ... existing variants
             #[cfg(feature = "your_service")]
             Signer::YourService(s) => s.sign_transaction(tx).await,
-        }
-    }
-
-    async fn sign_message(
-        &self,
-        message: &[u8],
-    ) -> Result<sdk_adapter::Signature, SignerError> {
-        match self {
-            // ... existing variants
-            #[cfg(feature = "your_service")]
-            Signer::YourService(s) => s.sign_message(message).await,
-        }
-    }
-
-    async fn is_available(&self) -> bool {
-        match self {
-            // ... existing variants
-            #[cfg(feature = "your_service")]
-            Signer::YourService(s) => s.is_available().await,
         }
     }
 }
@@ -1105,7 +1093,7 @@ guarantees. If your provider makes one impossible, say so in the PR and in
   at your signer's required-signer position, and verify that. A signature that
   does not verify must fail, never be attached.
 - **Declare whether the provider broadcasts.** If it executes server-side,
-  implement the sending shape (`broadcasts_transactions` true,
+  implement the sending shape (`SendingSigner` in Rust,
   `SolanaSendingSigner` in TypeScript, `core.TransactionBroadcaster` in Go) and
   return the signature that identifies the landed transaction. If the provider
   has no sign-only endpoint at all, make the backend sending-only: fail the

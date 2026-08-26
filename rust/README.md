@@ -298,7 +298,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Core API
 
-All signers implement the `SolanaSigner` trait:
+Every backend implements the `SolanaSigner` base trait, plus exactly the
+capability trait matching its provider's shape:
 
 ```rust
 #[async_trait]
@@ -306,48 +307,75 @@ pub trait SolanaSigner: Send + Sync {
     /// Get the public key of this signer
     fn pubkey(&self) -> Pubkey;
 
-    /// Sign a Solana transaction (modifies transaction in place).
-    /// Accepts legacy, v0 and v1; v1 requires the `sdk-v4` feature.
-    async fn sign_transaction(
-        &self,
-        tx: &mut VersionedTransaction,
-    ) -> Result<Signature, SignerError>;
-
     /// Sign arbitrary message bytes
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError>;
 
     /// Check if the signer is available and healthy
     async fn is_available(&self) -> bool;
 }
+
+/// Signs the caller's transaction as given; the caller broadcasts the result.
+/// Accepts legacy, v0 and v1; v1 requires the `sdk-v4` feature.
+#[async_trait]
+pub trait TransactionSigner: SolanaSigner {
+    async fn sign_transaction(
+        &self,
+        tx: &mut VersionedTransaction,
+    ) -> Result<SignTransactionResult, SignerError>;
+}
+
+/// The provider rewrites the transaction before signing it; continue from the
+/// returned transaction, never from the bytes submitted. No backend currently
+/// implements this trait.
+#[async_trait]
+pub trait ModifyingSigner: SolanaSigner {
+    async fn modify_and_sign_transaction(
+        &self,
+        tx: &mut VersionedTransaction,
+    ) -> Result<SignTransactionResult, SignerError>;
+}
+
+/// The provider signs and broadcasts server-side; the caller's transaction is
+/// never mutated, and the returned signature identifies what landed.
+#[async_trait]
+pub trait SendingSigner: SolanaSigner {
+    async fn sign_and_send_transaction(
+        &self,
+        tx: &VersionedTransaction,
+    ) -> Result<Signature, SignerError>;
+}
 ```
 
 ### Signer capabilities
 
-Backends differ in whether the provider broadcasts the transaction and in whether
-they can sign arbitrary bytes. `broadcasts_transactions()` reports the first at
-runtime; the second is fixed per backend:
+The capability trait a backend implements says whether the provider broadcasts;
+whether it can sign arbitrary bytes is fixed per backend:
 
-| Backend | `broadcasts_transactions()` | `sign_transaction` | `sign_and_send_transaction` | `sign_message` |
-|---------|-----------------------------|--------------------|-----------------------------|----------------|
-| memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | `false` | yes | `SigningFailed` | yes |
-| cdp | `false` | yes | `SigningFailed` | UTF-8 payloads only, otherwise `SerializationError` |
-| crossmint | `true` | `SigningFailed` | yes | `SigningFailed` |
-| utila | `false` | yes | `SigningFailed` | `SigningFailed` |
-| fordefi (black-box mode) | `false` | yes | `SigningFailed` | yes |
-| fordefi (native mode) | `true` | `SigningFailed` | yes | yes |
+| Backend | Capability trait | `sign_message` |
+|---------|------------------|----------------|
+| memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | `TransactionSigner` | yes |
+| cdp | `TransactionSigner` | UTF-8 payloads only, otherwise `SerializationError` |
+| utila | `TransactionSigner` | `SigningFailed` |
+| crossmint | `SendingSigner` | `SigningFailed` |
+| fordefi black box (`FordefiBlackBoxSigner`) | `TransactionSigner` | yes |
+| fordefi native (`FordefiNativeAutoSigner`) | `SendingSigner` | yes |
 
 Crossmint executes every approved transaction server-side and exposes no
-sign-only API, so it offers `sign_and_send_transaction` only. It may rewrite the
+sign-only API, so it is a `SendingSigner` only. It may rewrite the
 transaction to sponsor gas, in which case the returned signature identifies the
 transaction it landed rather than covering the caller's bytes; the caller's
 transaction is never modified.
 
+The unified `Signer` enum wraps all backends in one type, so it implements
+every capability trait; calling an entry point the wrapped backend lacks
+returns `SigningFailed`. Direct use of the concrete signer types makes that
+mismatch a compile error instead.
+
 ### Sign and Send
 
-`sign_and_send` gets a transaction on chain with one call. Signers that report
-`broadcasts_transactions()` (Crossmint, Fordefi native mode) broadcast through
-their provider and the send closure is never called; every other signer signs and
-the closure broadcasts the base64-encoded result:
+Getting a transaction on chain with one call depends on the signer's shape. A
+`TransactionSigner` signs and a caller-supplied closure broadcasts the
+base64-encoded result:
 
 ```rust
 use solana_keychain::sign_and_send;
@@ -358,26 +386,30 @@ let signature = sign_and_send(&signer, &mut tx, |encoded| async move {
 .await?;
 ```
 
+A `SendingSigner` broadcasts through its provider: call
+`sign_and_send_transaction` directly. The unified `Signer` enum has its own
+`sign_and_send` method covering both shapes; for a broadcasting backend the
+closure is never called.
+
 ### Fordefi Signer
 
-Fordefi supports two signing modes, which differ in whether Fordefi broadcasts the transaction and in which entry point is available:
+Fordefi comes as two signer types, which differ in whether Fordefi broadcasts the transaction and in which entry point exists. `config.chain` picks the type: `Signer::from_fordefi` builds a `FordefiBlackBoxSigner` when it is `None` and a `FordefiNativeAutoSigner` when it is set, and each type's `from_config` rejects a config meant for the other.
 
-- **Black box mode** : Signs raw bytes via EdDSA; the wire transaction is assembled locally. Fordefi does **not** broadcast: `sign_transaction` returns the signed serialized transaction, and **you** submit it to an RPC. `sign_and_send_transaction` is rejected in this mode. Use with a Fordefi black box vault.
-- **Native Solana mode** (recommended): Uses Solana-specific API types. Fordefi modifies the transaction (at minimum updating the blockhash, and optionally adding priority fees) and **auto-broadcasts** it on-chain (`push_mode: "auto"`). Call `sign_and_send_transaction`, which returns the signature, the on-chain identifier; do not re-send the transaction. `sign_transaction` is rejected in this mode. The current auto-broadcast request supports only transactions whose sole required signer is the configured Fordefi vault; additional required signers are rejected before submission. Use with a regular Fordefi Solana vault.
+- **`FordefiBlackBoxSigner`** (`TransactionSigner`): Signs raw bytes via EdDSA; the wire transaction is assembled locally. Fordefi does **not** broadcast: `sign_transaction` returns the signed serialized transaction, and **you** submit it to an RPC. Use with a Fordefi black box vault.
+- **`FordefiNativeAutoSigner`** (`SendingSigner`, recommended): Uses Solana-specific API types. Fordefi modifies the transaction (at minimum updating the blockhash, and optionally adding priority fees) and **auto-broadcasts** it on-chain (`push_mode: "auto"`). Call `sign_and_send_transaction`, which returns the signature, the on-chain identifier; do not re-send the transaction. The current auto-broadcast request supports only transactions whose sole required signer is the configured Fordefi vault; additional required signers are rejected before submission. Use with a regular Fordefi Solana vault.
 
 The configured `public_key` is the source of truth for the vault's Solana
 address: construction performs no network calls, and every signature Fordefi
 returns is verified against this key before being accepted.
 
 ```rust
-use solana_keychain::{FordefiSigner, FordefiSignerConfig, SolanaSigner};
+use solana_keychain::{FordefiBlackBoxSigner, FordefiSignerConfig, SolanaSigner};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pem = std::fs::read_to_string("path/to/ecdsa-p256-key.pem")?;
 
-    // Black box mode (chain = None)
-    let signer = FordefiSigner::from_config(FordefiSignerConfig {
+    let signer = FordefiBlackBoxSigner::from_config(FordefiSignerConfig {
         access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
         vault_id: std::env::var("FORDEFI_BB_VAULT_ID")?,
         private_key_pem: Some(pem.clone()),
@@ -401,7 +433,7 @@ For native Solana mode, set `chain` and optionally `fee`:
 
 ```rust
 use solana_keychain::{
-    FordefiSigner, FordefiSignerConfig, SolanaChainUniqueId,
+    FordefiNativeAutoSigner, FordefiSignerConfig, SolanaChainUniqueId,
     FordefiSolanaFee, FordefiPriorityLevel, SolanaSigner,
 };
 
@@ -409,7 +441,7 @@ use solana_keychain::{
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pem = std::fs::read_to_string("path/to/ecdsa-p256-key.pem")?;
 
-    let signer = FordefiSigner::from_config(FordefiSignerConfig {
+    let signer = FordefiNativeAutoSigner::from_config(FordefiSignerConfig {
         access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
         vault_id: std::env::var("FORDEFI_VAULT_ID")?,
         private_key_pem: Some(pem),
@@ -446,7 +478,7 @@ DER signature — just base64-encode it).
 
 ```rust
 use std::sync::Arc;
-use solana_keychain::{FordefiRequestSigner, FordefiSigner, FordefiSignerConfig, SignerError};
+use solana_keychain::{FordefiBlackBoxSigner, FordefiRequestSigner, FordefiSignerConfig, SignerError};
 
 struct KmsRequestSigner { /* KMS client, key id, ... */ }
 
@@ -459,7 +491,7 @@ impl FordefiRequestSigner for KmsRequestSigner {
     }
 }
 
-let signer = FordefiSigner::from_config(FordefiSignerConfig {
+let signer = FordefiBlackBoxSigner::from_config(FordefiSignerConfig {
     access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
     vault_id: std::env::var("FORDEFI_VAULT_ID")?,
     private_key_pem: None,

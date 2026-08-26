@@ -5,7 +5,7 @@ mod keypair_util;
 use crate::{
     error::SignerError,
     sdk_adapter::keypair_from_bytes,
-    traits::{SignTransactionResult, SolanaSigner},
+    traits::{SignTransactionResult, SolanaSigner, TransactionSigner},
     transaction_util::TransactionUtil,
 };
 
@@ -80,6 +80,18 @@ impl SolanaSigner for MemorySigner {
         keypair_pubkey(&self.keypair)
     }
 
+    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        Ok(self.sign_bytes(message))
+    }
+
+    async fn is_available(&self) -> bool {
+        // Memory signer is always available
+        true
+    }
+}
+
+#[async_trait::async_trait]
+impl TransactionSigner for MemorySigner {
     async fn sign_transaction(
         &self,
         tx: &mut VersionedTransaction,
@@ -92,15 +104,6 @@ impl SolanaSigner for MemorySigner {
             tx,
             signed_transaction,
         ))
-    }
-
-    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        Ok(self.sign_bytes(message))
-    }
-
-    async fn is_available(&self) -> bool {
-        // Memory signer is always available
-        true
     }
 }
 

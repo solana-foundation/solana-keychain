@@ -44,11 +44,6 @@ fn test_pubkey() {
     assert_eq!(pubkey.to_string(), TEST_PUBKEY);
 }
 
-#[test]
-fn test_does_not_broadcast_transactions() {
-    assert!(!create_test_signer().broadcasts_transactions());
-}
-
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn test_sign_message() {

@@ -5,7 +5,7 @@ mod types;
 use crate::remote_util::parse_json_response;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{extract_and_verify_returned_signature, verify_or_reject};
-use crate::traits::{SignTransactionResult, SignedTransaction};
+use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
 use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::Engine;
@@ -300,6 +300,18 @@ impl SolanaSigner for TurnkeySigner {
         self.public_key
     }
 
+    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        self.sign_bytes(message).await
+    }
+
+    async fn is_available(&self) -> bool {
+        // Verify Turnkey API is reachable and credentials are valid
+        self.check_availability().await
+    }
+}
+
+#[async_trait::async_trait]
+impl TransactionSigner for TurnkeySigner {
     async fn sign_transaction(
         &self,
         tx: &mut VersionedTransaction,
@@ -309,15 +321,6 @@ impl SolanaSigner for TurnkeySigner {
             tx,
             signed_transaction,
         ))
-    }
-
-    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        self.sign_bytes(message).await
-    }
-
-    async fn is_available(&self) -> bool {
-        // Verify Turnkey API is reachable and credentials are valid
-        self.check_availability().await
     }
 }
 

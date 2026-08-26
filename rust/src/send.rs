@@ -1,44 +1,33 @@
-//! Getting a signed transaction on chain, whichever shape the signer has.
+//! Getting a signed transaction on chain.
 
 use std::future::Future;
 
 use crate::error::SignerError;
 use crate::sdk_adapter::{Signature, VersionedTransaction};
-use crate::traits::{SignTransactionResult, SolanaSigner};
+use crate::traits::{SignTransactionResult, TransactionSigner};
 
 /// Sign `tx` and get it on chain with one call.
 ///
-/// A signer that reports [`SolanaSigner::broadcasts_transactions`] broadcasts
-/// through its provider, so its own signature identifies the transaction and `send`
-/// is never called; any other signer signs and `send` broadcasts the encoded wire
-/// transaction. The crate has no RPC client, so the network hop is always
-/// caller-supplied.
+/// The signer signs and `send` broadcasts the encoded wire transaction. The
+/// crate has no RPC client, so the network hop is always caller-supplied.
+/// A [`SendingSigner`](crate::traits::SendingSigner) broadcasts through its
+/// provider instead; call its `sign_and_send_transaction` directly.
 ///
 /// # Errors
 ///
-/// [`SignerError::SigningFailed`] when a broadcasting signer returns no signature,
-/// or when the transaction is still partially signed. Backend signing errors and
-/// anything `send` returns propagate unchanged.
+/// [`SignerError::SigningFailed`] when the transaction is still partially
+/// signed. Backend signing errors and anything `send` returns propagate
+/// unchanged.
 pub async fn sign_and_send<S, F, Fut>(
     signer: &S,
     tx: &mut VersionedTransaction,
     send: F,
 ) -> Result<Signature, SignerError>
 where
-    S: SolanaSigner + ?Sized,
+    S: TransactionSigner + ?Sized,
     F: FnOnce(String) -> Fut,
     Fut: Future<Output = Result<Signature, SignerError>>,
 {
-    if signer.broadcasts_transactions() {
-        let signature = signer.sign_and_send_transaction(tx).await?;
-        if signature == Signature::default() {
-            return Err(SignerError::SigningFailed(
-                "Signer returned no signature for the transaction it broadcast".to_string(),
-            ));
-        }
-        return Ok(signature);
-    }
-
     let result = signer.sign_transaction(tx).await?;
     let is_complete = matches!(result, SignTransactionResult::Complete(_));
     let (encoded_transaction, _) = result.into_signed_transaction();
@@ -50,6 +39,15 @@ where
         ));
     }
     send(encoded_transaction).await
+}
+
+pub(crate) fn require_broadcast_signature(signature: Signature) -> Result<Signature, SignerError> {
+    if signature == Signature::default() {
+        return Err(SignerError::SigningFailed(
+            "Signer returned no signature for the transaction it broadcast".to_string(),
+        ));
+    }
+    Ok(signature)
 }
 
 #[cfg(test)]

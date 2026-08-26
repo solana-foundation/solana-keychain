@@ -5,7 +5,7 @@ mod types;
 use crate::remote_util::{read_body_capped, validate_https_url};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::signature_from_base58;
-use crate::traits::SignTransactionResult;
+use crate::traits::SendingSigner;
 use crate::transaction_util::{
     deserialize_wire_transaction, idempotency_key_from_message, serialize_wire_transaction,
     unconfirmed_unless_rejected,
@@ -697,27 +697,6 @@ impl SolanaSigner for CrossmintSigner {
             .expect("CrossmintSigner is not initialized; call init() first")
     }
 
-    fn broadcasts_transactions(&self) -> bool {
-        true
-    }
-
-    async fn sign_transaction(
-        &self,
-        _tx: &mut VersionedTransaction,
-    ) -> Result<SignTransactionResult, SignerError> {
-        Err(SignerError::SigningFailed(
-            "Crossmint executes every transaction server-side; call sign_and_send_transaction instead"
-                .to_string(),
-        ))
-    }
-
-    async fn sign_and_send_transaction(
-        &self,
-        tx: &mut VersionedTransaction,
-    ) -> Result<Signature, SignerError> {
-        self.execute_managed_transaction(tx).await
-    }
-
     async fn sign_message(&self, _message: &[u8]) -> Result<Signature, SignerError> {
         Err(SignerError::SigningFailed(
             "Crossmint sign_message is not supported for Solana wallets in this signer".to_string(),
@@ -726,6 +705,16 @@ impl SolanaSigner for CrossmintSigner {
 
     async fn is_available(&self) -> bool {
         self.check_availability().await
+    }
+}
+
+#[async_trait::async_trait]
+impl SendingSigner for CrossmintSigner {
+    async fn sign_and_send_transaction(
+        &self,
+        tx: &VersionedTransaction,
+    ) -> Result<Signature, SignerError> {
+        self.execute_managed_transaction(tx).await
     }
 }
 

@@ -86,7 +86,9 @@ pub mod utila;
 pub use error::SignerError;
 pub use http_client_config::HttpClientConfig;
 pub use send::sign_and_send;
-pub use traits::{SignTransactionResult, SolanaSigner};
+pub use traits::{
+    ModifyingSigner, SendingSigner, SignTransactionResult, SolanaSigner, TransactionSigner,
+};
 
 // Re-export signer types
 #[cfg(feature = "memory")]
@@ -118,8 +120,8 @@ pub use crossmint::{CrossmintSigner, CrossmintSignerConfig};
 pub use dfns::{DfnsSigner, DfnsSignerConfig};
 #[cfg(feature = "fordefi")]
 pub use fordefi::{
-    FordefiPriorityLevel, FordefiRequestSigner, FordefiSigner, FordefiSignerConfig,
-    FordefiSolanaFee, PemRequestSigner, SolanaChainUniqueId,
+    FordefiBlackBoxSigner, FordefiNativeAutoSigner, FordefiPriorityLevel, FordefiRequestSigner,
+    FordefiSignerConfig, FordefiSolanaFee, PemRequestSigner, SolanaChainUniqueId,
 };
 #[cfg(feature = "openfort")]
 pub use openfort::{OpenfortSigner, OpenfortSignerConfig};
@@ -185,7 +187,9 @@ pub enum Signer {
     #[cfg(feature = "utila")]
     Utila(UtilaSigner),
     #[cfg(feature = "fordefi")]
-    Fordefi(FordefiSigner),
+    FordefiBlackBox(FordefiBlackBoxSigner),
+    #[cfg(feature = "fordefi")]
+    FordefiNativeAuto(FordefiNativeAutoSigner),
 }
 
 impl Signer {
@@ -402,7 +406,46 @@ impl Signer {
     /// for black-box mode (raw EdDSA signing, transaction assembled locally).
     #[cfg(feature = "fordefi")]
     pub async fn from_fordefi(config: FordefiSignerConfig) -> Result<Self, SignerError> {
-        Ok(Self::Fordefi(FordefiSigner::from_config(config).await?))
+        Ok(if config.chain.is_some() {
+            Self::FordefiNativeAuto(FordefiNativeAutoSigner::from_config(config).await?)
+        } else {
+            Self::FordefiBlackBox(FordefiBlackBoxSigner::from_config(config).await?)
+        })
+    }
+
+    /// Sign `tx` and get it on chain with one call, whichever shape the signer has.
+    ///
+    /// A [`SendingSigner`] backend broadcasts through its provider, so its own
+    /// signature identifies the transaction and `send` is never called; any
+    /// other backend signs and `send` broadcasts the encoded wire transaction.
+    /// The crate has no RPC client, so the network hop is always
+    /// caller-supplied.
+    ///
+    /// # Errors
+    ///
+    /// [`SignerError::SigningFailed`] when a broadcasting backend returns no
+    /// signature, or when the transaction is still partially signed. Backend
+    /// signing errors and anything `send` returns propagate unchanged.
+    pub async fn sign_and_send<F, Fut>(
+        &self,
+        tx: &mut sdk_adapter::VersionedTransaction,
+        send: F,
+    ) -> Result<sdk_adapter::Signature, SignerError>
+    where
+        F: FnOnce(String) -> Fut,
+        Fut: std::future::Future<Output = Result<sdk_adapter::Signature, SignerError>>,
+    {
+        match self {
+            #[cfg(feature = "crossmint")]
+            Signer::Crossmint(signer) => {
+                send::require_broadcast_signature(signer.sign_and_send_transaction(tx).await?)
+            }
+            #[cfg(feature = "fordefi")]
+            Signer::FordefiNativeAuto(signer) => {
+                send::require_broadcast_signature(signer.sign_and_send_transaction(tx).await?)
+            }
+            _ => send::sign_and_send(self, tx, send).await,
+        }
     }
 }
 
@@ -436,7 +479,9 @@ macro_rules! dispatch_signer {
             #[cfg(feature = "utila")]
             Signer::Utila($signer) => $body,
             #[cfg(feature = "fordefi")]
-            Signer::Fordefi($signer) => $body,
+            Signer::FordefiBlackBox($signer) => $body,
+            #[cfg(feature = "fordefi")]
+            Signer::FordefiNativeAuto($signer) => $body,
         }
     };
 }
@@ -445,24 +490,6 @@ macro_rules! dispatch_signer {
 impl SolanaSigner for Signer {
     fn pubkey(&self) -> sdk_adapter::Pubkey {
         dispatch_signer!(self, s => s.pubkey())
-    }
-
-    fn broadcasts_transactions(&self) -> bool {
-        dispatch_signer!(self, s => s.broadcasts_transactions())
-    }
-
-    async fn sign_transaction(
-        &self,
-        tx: &mut sdk_adapter::VersionedTransaction,
-    ) -> Result<SignTransactionResult, SignerError> {
-        dispatch_signer!(self, s => s.sign_transaction(tx).await)
-    }
-
-    async fn sign_and_send_transaction(
-        &self,
-        tx: &mut sdk_adapter::VersionedTransaction,
-    ) -> Result<sdk_adapter::Signature, SignerError> {
-        dispatch_signer!(self, s => s.sign_and_send_transaction(tx).await)
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<sdk_adapter::Signature, SignerError> {
@@ -474,12 +501,81 @@ impl SolanaSigner for Signer {
     }
 }
 
+#[async_trait::async_trait]
+impl TransactionSigner for Signer {
+    async fn sign_transaction(
+        &self,
+        tx: &mut sdk_adapter::VersionedTransaction,
+    ) -> Result<SignTransactionResult, SignerError> {
+        match self {
+            #[cfg(feature = "memory")]
+            Signer::Memory(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "vault")]
+            Signer::Vault(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "privy")]
+            Signer::Privy(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "turnkey")]
+            Signer::Turnkey(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "aws_kms")]
+            Signer::AwsKms(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "fireblocks")]
+            Signer::Fireblocks(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "gcp_kms")]
+            Signer::GcpKms(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "cdp")]
+            Signer::Cdp(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "dfns")]
+            Signer::Dfns(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "openfort")]
+            Signer::Openfort(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "para")]
+            Signer::Para(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "utila")]
+            Signer::Utila(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "fordefi")]
+            Signer::FordefiBlackBox(s) => s.sign_transaction(tx).await,
+            #[cfg(feature = "crossmint")]
+            Signer::Crossmint(_) => Err(SignerError::SigningFailed(
+                "Crossmint executes every transaction server-side; call sign_and_send_transaction instead"
+                    .to_string(),
+            )),
+            #[cfg(feature = "fordefi")]
+            Signer::FordefiNativeAuto(_) => Err(SignerError::SigningFailed(
+                "Fordefi native mode broadcasts through its own API; call sign_and_send_transaction instead"
+                    .to_string(),
+            )),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl SendingSigner for Signer {
+    async fn sign_and_send_transaction(
+        &self,
+        tx: &sdk_adapter::VersionedTransaction,
+    ) -> Result<sdk_adapter::Signature, SignerError> {
+        match self {
+            #[cfg(feature = "crossmint")]
+            Signer::Crossmint(signer) => signer.sign_and_send_transaction(tx).await,
+            #[cfg(feature = "fordefi")]
+            Signer::FordefiNativeAuto(signer) => signer.sign_and_send_transaction(tx).await,
+            #[allow(unreachable_patterns)]
+            _ => Err(SignerError::SigningFailed(
+                "This signer cannot broadcast transactions; sign it and broadcast the result"
+                    .to_string(),
+            )),
+        }
+    }
+}
+
 #[cfg(all(test, feature = "crossmint"))]
 mod signer_tests {
     use super::*;
 
-    #[test]
-    fn unified_signer_surfaces_broadcast_capability() {
+    /// Routing a sending-only backend through the sign-only entry point must
+    /// fail loudly instead of pretending the transaction was signed locally.
+    #[tokio::test]
+    async fn unified_signer_rejects_sign_only_path_for_sending_backend() {
         let signer = Signer::Crossmint(
             CrossmintSigner::new(CrossmintSignerConfig {
                 api_key: "test-api-key".to_string(),
@@ -493,6 +589,8 @@ mod signer_tests {
             .unwrap(),
         );
 
-        assert!(signer.broadcasts_transactions());
+        let mut tx = test_util::create_test_transaction(&sdk_adapter::Pubkey::new_unique());
+        let error = signer.sign_transaction(&mut tx).await.unwrap_err();
+        assert!(matches!(error, SignerError::SigningFailed(_)));
     }
 }

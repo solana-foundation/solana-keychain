@@ -4,7 +4,7 @@ mod jwt;
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
-use crate::traits::{SignTransactionResult, SignedTransaction};
+use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
 use crate::{
     error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner,
     transaction_util, transaction_util::TransactionUtil,
@@ -456,6 +456,19 @@ impl SolanaSigner for FireblocksSigner {
         self.public_key.expect("FireblocksSigner not initialized")
     }
 
+    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        self.sign_raw_bytes(message).await
+    }
+
+    async fn is_available(&self) -> bool {
+        tokio::time::timeout(AVAILABILITY_TIMEOUT, self.check_availability())
+            .await
+            .unwrap_or(false)
+    }
+}
+
+#[async_trait::async_trait]
+impl TransactionSigner for FireblocksSigner {
     async fn sign_transaction(
         &self,
         tx: &mut VersionedTransaction,
@@ -465,16 +478,6 @@ impl SolanaSigner for FireblocksSigner {
             tx,
             signed_transaction,
         ))
-    }
-
-    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        self.sign_raw_bytes(message).await
-    }
-
-    async fn is_available(&self) -> bool {
-        tokio::time::timeout(AVAILABILITY_TIMEOUT, self.check_availability())
-            .await
-            .unwrap_or(false)
     }
 }
 

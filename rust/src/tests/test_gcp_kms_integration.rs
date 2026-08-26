@@ -25,7 +25,7 @@ mod tests {
     use crate::gcp_kms::GcpKmsSigner;
     use crate::test_util::create_test_transaction;
     use crate::tests::litesvm_util::{get_latest_blockhash, simulate_transaction, start_litesvm};
-    use crate::traits::SolanaSigner;
+    use crate::traits::{SolanaSigner, TransactionSigner};
     use crate::transaction_util::deserialize_wire_transaction;
     use std::env;
 

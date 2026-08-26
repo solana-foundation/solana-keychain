@@ -3,7 +3,7 @@
 use crate::error::SignerError;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_bytes, verify_or_reject};
-use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner};
+use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner, TransactionSigner};
 use crate::transaction_util::TransactionUtil;
 use google_cloud_kms_v1::client::KeyManagementService;
 use google_cloud_kms_v1::model::crypto_key_version::CryptoKeyVersionAlgorithm;
@@ -158,6 +158,17 @@ impl SolanaSigner for GcpKmsSigner {
         self.public_key
     }
 
+    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        self.sign_bytes(message).await
+    }
+
+    async fn is_available(&self) -> bool {
+        self.check_availability().await
+    }
+}
+
+#[async_trait::async_trait]
+impl TransactionSigner for GcpKmsSigner {
     async fn sign_transaction(
         &self,
         tx: &mut VersionedTransaction,
@@ -167,14 +178,6 @@ impl SolanaSigner for GcpKmsSigner {
             tx,
             signed_transaction,
         ))
-    }
-
-    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        self.sign_bytes(message).await
-    }
-
-    async fn is_available(&self) -> bool {
-        self.check_availability().await
     }
 }
 

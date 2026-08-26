@@ -1,23 +1,21 @@
 use async_trait::async_trait;
 
-use super::sign_and_send;
+use super::{require_broadcast_signature, sign_and_send};
 use crate::error::SignerError;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::test_util::create_test_transaction;
-use crate::traits::{SignTransactionResult, SolanaSigner};
+use crate::traits::{SignTransactionResult, SolanaSigner, TransactionSigner};
 
 const ENCODED: &str = "encoded-transaction";
 
 struct StubSigner {
-    broadcasts: bool,
     complete: bool,
     signature: Signature,
 }
 
 impl StubSigner {
-    fn new(broadcasts: bool, complete: bool) -> Self {
+    fn new(complete: bool) -> Self {
         Self {
-            broadcasts,
             complete,
             signature: Signature::from([7u8; 64]),
         }
@@ -30,10 +28,17 @@ impl SolanaSigner for StubSigner {
         Pubkey::new_unique()
     }
 
-    fn broadcasts_transactions(&self) -> bool {
-        self.broadcasts
+    async fn sign_message(&self, _message: &[u8]) -> Result<Signature, SignerError> {
+        Ok(self.signature)
     }
 
+    async fn is_available(&self) -> bool {
+        true
+    }
+}
+
+#[async_trait]
+impl TransactionSigner for StubSigner {
     async fn sign_transaction(
         &self,
         _tx: &mut VersionedTransaction,
@@ -45,41 +50,11 @@ impl SolanaSigner for StubSigner {
             SignTransactionResult::Partial(signed)
         })
     }
-
-    async fn sign_and_send_transaction(
-        &self,
-        _tx: &mut VersionedTransaction,
-    ) -> Result<Signature, SignerError> {
-        Ok(self.signature)
-    }
-
-    async fn sign_message(&self, _message: &[u8]) -> Result<Signature, SignerError> {
-        Ok(self.signature)
-    }
-
-    async fn is_available(&self) -> bool {
-        true
-    }
-}
-
-/// A provider that broadcasts server-side already put the transaction on chain.
-#[tokio::test]
-async fn broadcasting_signer_skips_the_injected_send() {
-    let signer = StubSigner::new(true, true);
-    let mut tx = create_test_transaction(&Pubkey::new_unique());
-
-    let signature = sign_and_send(&signer, &mut tx, |_| async {
-        panic!("send must not run for a signer that broadcasts");
-    })
-    .await
-    .unwrap();
-
-    assert_eq!(signature, signer.signature);
 }
 
 #[tokio::test]
 async fn sign_only_signer_broadcasts_the_encoded_transaction() {
-    let signer = StubSigner::new(false, true);
+    let signer = StubSigner::new(true);
     let mut tx = create_test_transaction(&Pubkey::new_unique());
     let broadcast_signature = Signature::from([9u8; 64]);
 
@@ -93,27 +68,10 @@ async fn sign_only_signer_broadcasts_the_encoded_transaction() {
     assert_eq!(signature, broadcast_signature);
 }
 
-/// The signature a broadcasting provider returns is the only handle on the
-/// transaction it just put on chain, so an empty one cannot be passed off as one.
-#[tokio::test]
-async fn broadcasting_signer_without_a_signature_is_rejected() {
-    let mut signer = StubSigner::new(true, true);
-    signer.signature = Signature::default();
-    let mut tx = create_test_transaction(&Pubkey::new_unique());
-
-    let error = sign_and_send(&signer, &mut tx, |_| async {
-        panic!("send must not run for a signer that broadcasts");
-    })
-    .await
-    .unwrap_err();
-
-    assert!(matches!(error, SignerError::SigningFailed(_)));
-}
-
 /// A partially signed transaction cannot land, so it must never be broadcast.
 #[tokio::test]
 async fn partial_signature_is_rejected_before_broadcast() {
-    let signer = StubSigner::new(false, false);
+    let signer = StubSigner::new(false);
     let mut tx = create_test_transaction(&Pubkey::new_unique());
 
     let error = sign_and_send(&signer, &mut tx, |_| async {
@@ -123,4 +81,15 @@ async fn partial_signature_is_rejected_before_broadcast() {
     .unwrap_err();
 
     assert!(matches!(error, SignerError::SigningFailed(_)));
+}
+
+/// The signature a broadcasting provider returns is the only handle on the
+/// transaction it just put on chain, so an empty one cannot be passed off as one.
+#[test]
+fn empty_broadcast_signature_is_rejected() {
+    let error = require_broadcast_signature(Signature::default()).unwrap_err();
+    assert!(matches!(error, SignerError::SigningFailed(_)));
+
+    let signature = Signature::from([9u8; 64]);
+    assert_eq!(require_broadcast_signature(signature).unwrap(), signature);
 }

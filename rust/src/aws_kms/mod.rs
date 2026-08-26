@@ -1,7 +1,7 @@
 //! AWS KMS signer integration using EdDSA (Ed25519) signing
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
-use crate::traits::{SignTransactionResult, SignedTransaction};
+use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
 use crate::{error::SignerError, traits::SolanaSigner, transaction_util::TransactionUtil};
 use aws_config::Region;
 use aws_sdk_kms::{
@@ -221,6 +221,17 @@ impl SolanaSigner for AwsKmsSigner {
         self.public_key
     }
 
+    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        self.sign_bytes(message).await
+    }
+
+    async fn is_available(&self) -> bool {
+        self.check_availability().await
+    }
+}
+
+#[async_trait::async_trait]
+impl TransactionSigner for AwsKmsSigner {
     async fn sign_transaction(
         &self,
         tx: &mut VersionedTransaction,
@@ -230,14 +241,6 @@ impl SolanaSigner for AwsKmsSigner {
             tx,
             signed_transaction,
         ))
-    }
-
-    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        self.sign_bytes(message).await
-    }
-
-    async fn is_available(&self) -> bool {
-        self.check_availability().await
     }
 }
 

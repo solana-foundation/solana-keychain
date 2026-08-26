@@ -26,11 +26,9 @@ fn test_request_signer() -> Arc<dyn FordefiRequestSigner> {
 }
 
 /// Exercise the synchronous local-validation/build phase directly, without
-/// going through the async public constructor.
-fn build_test_signer_from_config(
-    config: FordefiSignerConfig,
-) -> Result<FordefiSigner, SignerError> {
-    FordefiSigner::build(config)
+/// going through the async public constructors.
+fn build_test_signer_from_config(config: FordefiSignerConfig) -> Result<FordefiCore, SignerError> {
+    FordefiCore::build(&config)
 }
 
 fn base_test_config() -> FordefiSignerConfig {
@@ -59,14 +57,13 @@ fn test_config(base_url: &str, public_key: Pubkey) -> FordefiSignerConfig {
     }
 }
 
-/// Build a FordefiSigner for tests with the given request signer and chain.
-fn create_test_signer_with(
+/// Build a FordefiCore for tests with the given request signer.
+fn create_test_core(
     base_url: &str,
     pubkey: Pubkey,
     request_signer: Arc<dyn FordefiRequestSigner>,
-    chain: Option<SolanaChainUniqueId>,
-) -> FordefiSigner {
-    FordefiSigner {
+) -> FordefiCore {
+    FordefiCore {
         access_token: "test-token".to_string(),
         vault_id: "test-vault-id".to_string(),
         request_signer,
@@ -75,31 +72,47 @@ fn create_test_signer_with(
         public_key: pubkey,
         poll_interval_ms: 10,
         max_poll_attempts: 3,
-        chain,
+    }
+}
+
+/// Build a black-box signer for tests with the given request signer.
+fn create_test_signer_with(
+    base_url: &str,
+    pubkey: Pubkey,
+    request_signer: Arc<dyn FordefiRequestSigner>,
+) -> FordefiBlackBoxSigner {
+    FordefiBlackBoxSigner {
+        core: create_test_core(base_url, pubkey, request_signer),
+    }
+}
+
+/// Helper to build a black-box signer for tests with a mock server URL.
+fn create_test_signer(base_url: &str, pubkey: Pubkey) -> FordefiBlackBoxSigner {
+    create_test_signer_with(base_url, pubkey, test_request_signer())
+}
+
+/// Helper to build a native-Solana signer for tests.
+fn create_native_test_signer(base_url: &str, pubkey: Pubkey) -> FordefiNativeAutoSigner {
+    FordefiNativeAutoSigner {
+        core: create_test_core(base_url, pubkey, test_request_signer()),
+        chain: SolanaChainUniqueId::SolanaMainnet,
         fee: None,
     }
 }
 
-/// Helper to build a black-box FordefiSigner for tests with a mock server URL.
-fn create_test_signer(base_url: &str, pubkey: Pubkey) -> FordefiSigner {
-    create_test_signer_with(base_url, pubkey, test_request_signer(), None)
-}
+/// The two signer types reject a config meant for the other, so a
+/// mode-mismatched construction fails instead of silently changing shape.
+#[tokio::test]
+async fn test_fordefi_constructors_reject_mode_mismatched_config() {
+    let native_config = FordefiSignerConfig {
+        chain: Some(SolanaChainUniqueId::SolanaDevnet),
+        ..base_test_config()
+    };
+    let result = FordefiBlackBoxSigner::from_config(native_config).await;
+    assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
 
-/// Helper to build a native-Solana FordefiSigner for tests.
-fn create_native_test_signer(base_url: &str, pubkey: Pubkey) -> FordefiSigner {
-    create_test_signer_with(
-        base_url,
-        pubkey,
-        test_request_signer(),
-        Some(SolanaChainUniqueId::SolanaMainnet),
-    )
-}
-
-#[test]
-fn test_broadcasts_transactions_by_mode() {
-    let pubkey = Pubkey::new_unique();
-    assert!(!create_test_signer("https://example.com", pubkey).broadcasts_transactions());
-    assert!(create_native_test_signer("https://example.com", pubkey).broadcasts_transactions());
+    let result = FordefiNativeAutoSigner::from_config(base_test_config()).await;
+    assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
 }
 
 /// Build a mock wire transaction: [1 byte sig_count][64-byte signature][message bytes]
@@ -181,14 +194,15 @@ fn test_fordefi_config_rejects_malformed_https_url() {
     assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
 }
 
-#[test]
-fn test_fordefi_config_fee_without_chain_rejected() {
-    let result = build_test_signer_from_config(FordefiSignerConfig {
+#[tokio::test]
+async fn test_fordefi_config_fee_without_chain_rejected() {
+    let result = FordefiBlackBoxSigner::from_config(FordefiSignerConfig {
         fee: Some(FordefiSolanaFee::Priority {
             priority_level: FordefiPriorityLevel::High,
         }),
         ..base_test_config()
-    });
+    })
+    .await;
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
 }
@@ -211,12 +225,13 @@ fn test_fordefi_config_zero_max_poll_attempts_rejected() {
     assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
 }
 
-#[test]
-fn test_fordefi_config_with_chain_valid() {
-    let result = build_test_signer_from_config(FordefiSignerConfig {
+#[tokio::test]
+async fn test_fordefi_config_with_chain_valid() {
+    let result = FordefiNativeAutoSigner::from_config(FordefiSignerConfig {
         chain: Some(SolanaChainUniqueId::SolanaDevnet),
         ..base_test_config()
-    });
+    })
+    .await;
     assert!(result.is_ok());
 }
 
@@ -253,7 +268,7 @@ async fn test_fordefi_from_config_trusts_configured_public_key() {
     let public_key = keypair_pubkey(&create_test_keypair());
 
     let signer =
-        FordefiSigner::from_config(test_config("https://api.test.fordefi.com", public_key))
+        FordefiBlackBoxSigner::from_config(test_config("https://api.test.fordefi.com", public_key))
             .await
             .unwrap();
 
@@ -592,12 +607,7 @@ async fn test_fordefi_is_available_success() {
 async fn test_fordefi_is_available_checks_request_signer() {
     let mock_server = MockServer::start().await;
     let public_key = keypair_pubkey(&create_test_keypair());
-    let signer = create_test_signer_with(
-        &mock_server.uri(),
-        public_key,
-        Arc::new(FailingSigner),
-        None,
-    );
+    let signer = create_test_signer_with(&mock_server.uri(), public_key, Arc::new(FailingSigner));
 
     Mock::given(method("GET"))
         .and(path_regex("/api/v1/vaults/.*"))
@@ -659,7 +669,7 @@ fn test_fordefi_debug_hides_secrets() {
     let debug_str = format!("{:?}", signer);
     assert!(!debug_str.contains("test-token"));
     assert!(!debug_str.contains("test-vault-id"));
-    assert!(debug_str.contains("FordefiSigner"));
+    assert!(debug_str.contains("FordefiBlackBoxSigner"));
 }
 
 #[tokio::test]
@@ -717,7 +727,7 @@ fn test_fordefi_native_rejects_multiple_required_signers_before_submit() {
     let mut tx = create_test_transaction(&keypair_pubkey(&fee_payer));
     add_required_signer(&mut tx, fordefi_pubkey);
 
-    let result = signer.validate_native_auto_transaction(&tx);
+    let result = signer.validate_transaction(&tx);
     assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
 }
 
@@ -763,8 +773,7 @@ async fn test_fordefi_native_sign_transaction_success() {
         .mount(&mock_server)
         .await;
 
-    let mut tx = tx;
-    let result = signer.sign_and_send_transaction(&mut tx).await;
+    let result = signer.sign_and_send_transaction(&tx).await;
     assert!(
         result.is_ok(),
         "native sign_and_send_transaction failed: {:?}",
@@ -803,8 +812,8 @@ async fn test_fordefi_native_sign_transaction_missing_raw_transaction() {
         .mount(&mock_server)
         .await;
 
-    let mut tx = create_test_transaction(&pubkey);
-    let result = signer.sign_and_send_transaction(&mut tx).await;
+    let tx = create_test_transaction(&pubkey);
+    let result = signer.sign_and_send_transaction(&tx).await;
     match result.unwrap_err() {
         SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
             assert_eq!(provider_tx_id.as_deref(), Some("native-tx-no-raw"));
@@ -825,8 +834,8 @@ async fn test_native_submit_server_error_is_unconfirmed_without_a_transaction_id
         .mount(&mock_server)
         .await;
 
-    let mut tx = create_test_transaction(&pubkey);
-    match signer.sign_and_send_transaction(&mut tx).await.unwrap_err() {
+    let tx = create_test_transaction(&pubkey);
+    match signer.sign_and_send_transaction(&tx).await.unwrap_err() {
         SignerError::BroadcastUnconfirmed {
             provider_tx_id,
             provider_status,
@@ -853,8 +862,8 @@ async fn test_native_submit_accepted_without_an_id_is_unconfirmed() {
         .mount(&mock_server)
         .await;
 
-    let mut tx = create_test_transaction(&pubkey);
-    match signer.sign_and_send_transaction(&mut tx).await.unwrap_err() {
+    let tx = create_test_transaction(&pubkey);
+    match signer.sign_and_send_transaction(&tx).await.unwrap_err() {
         SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
             assert_eq!(provider_tx_id, None);
         }
@@ -874,8 +883,8 @@ async fn test_native_submit_rejected_by_fordefi_stays_a_plain_failure() {
         .mount(&mock_server)
         .await;
 
-    let mut tx = create_test_transaction(&pubkey);
-    match signer.sign_and_send_transaction(&mut tx).await.unwrap_err() {
+    let tx = create_test_transaction(&pubkey);
+    match signer.sign_and_send_transaction(&tx).await.unwrap_err() {
         SignerError::RemoteApiError(_) => {}
         other => panic!("Expected RemoteApiError, got: {other:?}"),
     }
@@ -926,8 +935,8 @@ async fn test_fordefi_native_sign_transaction_failed_state() {
         .mount(&mock_server)
         .await;
 
-    let mut tx = create_test_transaction(&pubkey);
-    let result = signer.sign_and_send_transaction(&mut tx).await;
+    let tx = create_test_transaction(&pubkey);
+    let result = signer.sign_and_send_transaction(&tx).await;
     match result.unwrap_err() {
         SignerError::BroadcastUnconfirmed {
             provider_tx_id,
@@ -1041,8 +1050,8 @@ async fn test_fordefi_native_sign_transaction_poll_timeout_is_broadcast_unconfir
         .mount(&mock_server)
         .await;
 
-    let mut tx = create_test_transaction(&pubkey);
-    let result = signer.sign_and_send_transaction(&mut tx).await;
+    let tx = create_test_transaction(&pubkey);
+    let result = signer.sign_and_send_transaction(&tx).await;
     match result.unwrap_err() {
         SignerError::BroadcastUnconfirmed {
             provider_tx_id,
@@ -1090,8 +1099,8 @@ async fn test_fordefi_native_sign_transaction_malformed_raw_transaction() {
         .mount(&mock_server)
         .await;
 
-    let mut tx = create_test_transaction(&pubkey);
-    let result = signer.sign_and_send_transaction(&mut tx).await;
+    let tx = create_test_transaction(&pubkey);
+    let result = signer.sign_and_send_transaction(&tx).await;
     match result.unwrap_err() {
         SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
             assert_eq!(provider_tx_id.as_deref(), Some("native-tx-malformed"));
@@ -1131,7 +1140,6 @@ async fn test_fordefi_custom_request_signer_sets_signature_header() {
         &mock_server.uri(),
         pubkey,
         Arc::new(CannedSigner("canned-sig-value")),
-        None,
     );
 
     let message = b"custom signer message";
@@ -1173,7 +1181,7 @@ async fn test_fordefi_custom_request_signer_error_propagates() {
     let mock_server = MockServer::start().await;
     let keypair = create_test_keypair();
     let pubkey = keypair_pubkey(&keypair);
-    let signer = create_test_signer_with(&mock_server.uri(), pubkey, Arc::new(FailingSigner), None);
+    let signer = create_test_signer_with(&mock_server.uri(), pubkey, Arc::new(FailingSigner));
 
     // Signing fails before any HTTP request is made, so no mock is needed.
     let result = signer.sign_message(b"test").await;
@@ -1189,9 +1197,10 @@ async fn test_fordefi_config_uses_custom_request_signer() {
     config.private_key_pem = None;
     config.request_signer = Some(Arc::new(CannedSigner("x")));
 
-    let signer = FordefiSigner::from_config(config).await.unwrap();
+    let signer = FordefiBlackBoxSigner::from_config(config).await.unwrap();
     assert_eq!(
         signer
+            .core
             .sign_request("/api/v1/vaults", 123, "")
             .await
             .unwrap(),
@@ -1205,7 +1214,7 @@ fn test_fordefi_config_rejects_both_request_signing_mechanisms() {
     let mut config = test_config("https://api.test.fordefi.com", public_key);
     config.request_signer = Some(Arc::new(CannedSigner("x")));
 
-    let result = FordefiSigner::build(config);
+    let result = FordefiCore::build(&config);
 
     assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
 }
@@ -1216,14 +1225,14 @@ fn test_fordefi_config_rejects_missing_request_signing_mechanism() {
     let mut config = test_config("https://api.test.fordefi.com", public_key);
     config.private_key_pem = None;
 
-    let result = FordefiSigner::build(config);
+    let result = FordefiCore::build(&config);
 
     assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
 }
 
 #[test]
 fn test_fordefi_custom_request_signer_still_validates_config() {
-    let result = FordefiSigner::build(FordefiSignerConfig {
+    let result = FordefiCore::build(&FordefiSignerConfig {
         access_token: String::new(),
         private_key_pem: None,
         request_signer: Some(Arc::new(CannedSigner("x"))),

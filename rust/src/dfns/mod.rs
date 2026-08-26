@@ -2,7 +2,7 @@ mod auth;
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
-use crate::traits::{SignTransactionResult, SignedTransaction};
+use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
 use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{
     error::SignerError,
@@ -277,6 +277,17 @@ impl SolanaSigner for DfnsSigner {
             .expect("DfnsSigner is not initialized; call init() first")
     }
 
+    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        self.sign_bytes(message).await
+    }
+
+    async fn is_available(&self) -> bool {
+        self.check_availability().await
+    }
+}
+
+#[async_trait::async_trait]
+impl TransactionSigner for DfnsSigner {
     async fn sign_transaction(
         &self,
         tx: &mut VersionedTransaction,
@@ -286,14 +297,6 @@ impl SolanaSigner for DfnsSigner {
             tx,
             signed_transaction,
         ))
-    }
-
-    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        self.sign_bytes(message).await
-    }
-
-    async fn is_available(&self) -> bool {
-        self.check_availability().await
     }
 }
 

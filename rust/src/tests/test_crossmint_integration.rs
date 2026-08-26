@@ -14,7 +14,7 @@ mod tests {
     use crate::crossmint::{CrossmintSigner, CrossmintSignerConfig};
     use crate::sdk_adapter::{Message, Transaction, VersionedTransaction};
     use crate::tests::rpc_util::get_rpc_blockhash;
-    use crate::traits::SolanaSigner;
+    use crate::traits::{SendingSigner, SolanaSigner};
 
     async fn get_signer() -> CrossmintSigner {
         dotenv().ok();
@@ -79,10 +79,10 @@ mod tests {
         // account balance/program execution checks by signing a minimal transaction.
         let mut message = Message::new(&[], Some(&signer.pubkey()));
         message.recent_blockhash = latest_blockhash;
-        let mut transaction: VersionedTransaction = Transaction::new_unsigned(message).into();
+        let transaction: VersionedTransaction = Transaction::new_unsigned(message).into();
 
         let signature = signer
-            .sign_and_send_transaction(&mut transaction)
+            .sign_and_send_transaction(&transaction)
             .await
             .expect("Failed to sign and send transaction with Crossmint");
 

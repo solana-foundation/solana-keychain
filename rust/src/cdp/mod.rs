@@ -4,7 +4,7 @@ mod jwt;
 mod types;
 
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
-use crate::traits::{SignTransactionResult, SignedTransaction};
+use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
 use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -339,6 +339,17 @@ impl SolanaSigner for CdpSigner {
         self.public_key
     }
 
+    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        self.sign_bytes(message).await
+    }
+
+    async fn is_available(&self) -> bool {
+        self.check_availability().await
+    }
+}
+
+#[async_trait::async_trait]
+impl TransactionSigner for CdpSigner {
     async fn sign_transaction(
         &self,
         tx: &mut VersionedTransaction,
@@ -348,14 +359,6 @@ impl SolanaSigner for CdpSigner {
             tx,
             signed_transaction,
         ))
-    }
-
-    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        self.sign_bytes(message).await
-    }
-
-    async fn is_available(&self) -> bool {
-        self.check_availability().await
     }
 }
 

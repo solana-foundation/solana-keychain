@@ -55,29 +55,6 @@ fn create_url_builder_test_signer(wallet_locator: &str) -> CrossmintSigner {
     signer
 }
 
-#[test]
-fn test_broadcasts_transactions() {
-    let signer = create_test_signer("https://example.com", 1, 1);
-    assert!(signer.broadcasts_transactions());
-}
-
-/// Crossmint has no sign-only API: an approved transaction is always executed
-/// server-side, so a caller asking for signature-only work must be refused
-/// rather than handed a transaction that has already landed.
-#[tokio::test]
-async fn test_sign_transaction_is_rejected() {
-    let keypair = Keypair::new();
-    let signer_pubkey = keypair_pubkey(&keypair);
-    let mut signer = create_test_signer("https://example.com", 1, 1);
-    signer.public_key = Some(signer_pubkey);
-    let mut tx = create_test_transaction(&signer_pubkey);
-
-    let error = signer.sign_transaction(&mut tx).await.unwrap_err();
-
-    assert!(matches!(error, SignerError::SigningFailed(_)));
-    assert_caller_transaction_untouched(&tx);
-}
-
 fn build_url_and_path(wallet_locator: &str, segments: &[&str]) -> (String, String) {
     let signer = create_url_builder_test_signer(wallet_locator);
     let built_url = signer.build_wallets_api_url(segments).unwrap();
@@ -314,7 +291,7 @@ async fn test_sign_and_send_transaction_success() {
     let mut signer = create_test_signer(&server.uri(), 1, 2);
     signer.init().await.unwrap();
 
-    let mut local_tx = create_test_transaction(&signer_pubkey);
+    let local_tx = create_test_transaction(&signer_pubkey);
     let mut signed_remote_tx = local_tx.clone();
     let expected_signature = keypair_sign_message(&keypair, &signed_remote_tx.message.serialize());
     TransactionUtil::add_signature_to_transaction(
@@ -347,10 +324,7 @@ async fn test_sign_and_send_transaction_success() {
         .mount(&server)
         .await;
 
-    let signature = signer
-        .sign_and_send_transaction(&mut local_tx)
-        .await
-        .unwrap();
+    let signature = signer.sign_and_send_transaction(&local_tx).await.unwrap();
 
     assert_eq!(signature, expected_signature);
     assert_caller_transaction_untouched(&local_tx);
@@ -375,7 +349,7 @@ async fn test_sign_and_send_transaction_locates_delegated_signer_signature() {
     let mut signer = create_test_signer(&server.uri(), 1, 2);
     signer.init().await.unwrap();
 
-    let mut local_tx = create_test_transaction(&wallet_pubkey);
+    let local_tx = create_test_transaction(&wallet_pubkey);
     let mut rewritten_tx = create_test_transaction(&delegated_pubkey);
     let expected_signature =
         keypair_sign_message(&delegated_keypair, &rewritten_tx.message.serialize());
@@ -399,10 +373,7 @@ async fn test_sign_and_send_transaction_locates_delegated_signer_signature() {
         .mount(&server)
         .await;
 
-    let signature = signer
-        .sign_and_send_transaction(&mut local_tx)
-        .await
-        .unwrap();
+    let signature = signer.sign_and_send_transaction(&local_tx).await.unwrap();
 
     assert_eq!(signature, expected_signature);
     assert_caller_transaction_untouched(&local_tx);
@@ -428,7 +399,7 @@ async fn test_sign_and_send_transaction_accepts_unrelated_signer_key() {
     let mut signer = create_test_signer(&server.uri(), 1, 2);
     signer.init().await.unwrap();
 
-    let mut local_tx = create_test_transaction(&wallet_pubkey);
+    let local_tx = create_test_transaction(&wallet_pubkey);
     let mut rewritten_tx = create_test_transaction(&stranger_pubkey);
     let signature = keypair_sign_message(&stranger, &rewritten_tx.message.serialize());
     TransactionUtil::add_signature_to_transaction(&mut rewritten_tx, &stranger_pubkey, signature)
@@ -447,10 +418,7 @@ async fn test_sign_and_send_transaction_accepts_unrelated_signer_key() {
         .mount(&server)
         .await;
 
-    let result = signer
-        .sign_and_send_transaction(&mut local_tx)
-        .await
-        .unwrap();
+    let result = signer.sign_and_send_transaction(&local_tx).await.unwrap();
     assert_eq!(result, signature);
     assert_caller_transaction_untouched(&local_tx);
 }
@@ -474,7 +442,7 @@ async fn test_sign_and_send_transaction_rewritten_is_reported_as_a_broadcast_res
     let mut signer = create_test_signer(&server.uri(), 1, 2);
     signer.init().await.unwrap();
 
-    let mut local_tx = create_test_transaction(&signer_pubkey);
+    let local_tx = create_test_transaction(&signer_pubkey);
     let mut rewritten_tx = create_test_transaction(&signer_pubkey);
     assert_ne!(
         rewritten_tx.message.serialize(),
@@ -503,10 +471,7 @@ async fn test_sign_and_send_transaction_rewritten_is_reported_as_a_broadcast_res
         .mount(&server)
         .await;
 
-    let signature = signer
-        .sign_and_send_transaction(&mut local_tx)
-        .await
-        .unwrap();
+    let signature = signer.sign_and_send_transaction(&local_tx).await.unwrap();
 
     assert_eq!(signature, expected_signature);
     assert_caller_transaction_untouched(&local_tx);
@@ -562,11 +527,8 @@ async fn test_sign_and_send_transaction_sponsored_returns_fee_payer_transaction_
     let mut signer = create_test_signer(&server.uri(), 1, 1);
     signer.init().await.unwrap();
 
-    let mut local_tx = create_test_transaction(&wallet_pubkey);
-    let signature = signer
-        .sign_and_send_transaction(&mut local_tx)
-        .await
-        .unwrap();
+    let local_tx = create_test_transaction(&wallet_pubkey);
+    let signature = signer.sign_and_send_transaction(&local_tx).await.unwrap();
 
     assert_eq!(signature, sponsor_signature);
     assert_ne!(signature, approval_signature);
@@ -626,11 +588,8 @@ async fn test_sign_and_send_transaction_skips_submitted_approvals_without_an_add
     let mut signer = create_test_signer(&server.uri(), 1, 1);
     signer.init().await.unwrap();
 
-    let mut local_tx = create_test_transaction(&wallet_pubkey);
-    let signature = signer
-        .sign_and_send_transaction(&mut local_tx)
-        .await
-        .unwrap();
+    let local_tx = create_test_transaction(&wallet_pubkey);
+    let signature = signer.sign_and_send_transaction(&local_tx).await.unwrap();
 
     assert_eq!(signature, sponsor_signature);
     assert_caller_transaction_untouched(&local_tx);
@@ -671,8 +630,8 @@ async fn test_sign_and_send_transaction_rejects_approval_signatures_for_local_tr
     let mut signer = create_test_signer(&server.uri(), 1, 1);
     signer.init().await.unwrap();
 
-    let mut tx = create_test_transaction(&signer.pubkey());
-    let result = signer.sign_and_send_transaction(&mut tx).await;
+    let tx = create_test_transaction(&signer.pubkey());
+    let result = signer.sign_and_send_transaction(&tx).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -712,9 +671,9 @@ async fn test_create_server_error_is_unconfirmed_without_a_transaction_id() {
 
     let mut signer = create_test_signer(&server.uri(), 1, 1);
     signer.init().await.unwrap();
-    let mut tx = create_test_transaction(&signer.pubkey());
+    let tx = create_test_transaction(&signer.pubkey());
 
-    match signer.sign_and_send_transaction(&mut tx).await.unwrap_err() {
+    match signer.sign_and_send_transaction(&tx).await.unwrap_err() {
         SignerError::BroadcastUnconfirmed {
             provider_tx_id,
             provider_status,
@@ -748,9 +707,9 @@ async fn test_create_accepted_without_an_id_is_unconfirmed() {
 
     let mut signer = create_test_signer(&server.uri(), 1, 1);
     signer.init().await.unwrap();
-    let mut tx = create_test_transaction(&signer.pubkey());
+    let tx = create_test_transaction(&signer.pubkey());
 
-    match signer.sign_and_send_transaction(&mut tx).await.unwrap_err() {
+    match signer.sign_and_send_transaction(&tx).await.unwrap_err() {
         SignerError::BroadcastUnconfirmed {
             provider_tx_id,
             provider_status,
@@ -784,9 +743,9 @@ async fn test_create_rejected_by_crossmint_stays_a_plain_failure() {
 
     let mut signer = create_test_signer(&server.uri(), 1, 1);
     signer.init().await.unwrap();
-    let mut tx = create_test_transaction(&signer.pubkey());
+    let tx = create_test_transaction(&signer.pubkey());
 
-    match signer.sign_and_send_transaction(&mut tx).await.unwrap_err() {
+    match signer.sign_and_send_transaction(&tx).await.unwrap_err() {
         SignerError::RemoteApiError(_) => {}
         other => panic!("Expected RemoteApiError, got: {:?}", other),
     }
@@ -830,11 +789,8 @@ async fn test_sign_and_send_transaction_accepts_signature_from_on_chain_transact
     let mut signer = create_test_signer(&server.uri(), 1, 1);
     signer.init().await.unwrap();
 
-    let mut local_tx = create_test_transaction(&signer_pubkey);
-    let signature = signer
-        .sign_and_send_transaction(&mut local_tx)
-        .await
-        .unwrap();
+    let local_tx = create_test_transaction(&signer_pubkey);
+    let signature = signer.sign_and_send_transaction(&local_tx).await.unwrap();
     assert_eq!(signature, remote_signature);
 }
 
@@ -882,11 +838,8 @@ async fn test_sign_and_send_transaction_prefers_on_chain_transaction_signature_o
     let mut signer = create_test_signer(&server.uri(), 1, 1);
     signer.init().await.unwrap();
 
-    let mut local_tx = create_test_transaction(&signer_pubkey);
-    let signature = signer
-        .sign_and_send_transaction(&mut local_tx)
-        .await
-        .unwrap();
+    let local_tx = create_test_transaction(&signer_pubkey);
+    let signature = signer.sign_and_send_transaction(&local_tx).await.unwrap();
     assert_eq!(signature, remote_sig);
 }
 
@@ -918,8 +871,8 @@ async fn test_sign_and_send_transaction_awaiting_approval() {
     let mut signer = create_test_signer(&server.uri(), 1, 2);
     signer.init().await.unwrap();
 
-    let mut tx = create_test_transaction(&signer.pubkey());
-    let result = signer.sign_and_send_transaction(&mut tx).await;
+    let tx = create_test_transaction(&signer.pubkey());
+    let result = signer.sign_and_send_transaction(&tx).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -991,7 +944,7 @@ async fn test_sign_and_send_transaction_submits_approval_once_and_polls_after_as
     attach_approval_signer(&mut signer, locator);
     signer.init().await.unwrap();
 
-    let mut tx = create_test_transaction(&signer_pubkey);
+    let tx = create_test_transaction(&signer_pubkey);
     let expected_signature = keypair_sign_message(&keypair, &tx.message.serialize());
     let tx_id = bs58::encode(expected_signature.as_ref()).into_string();
 
@@ -1005,7 +958,7 @@ async fn test_sign_and_send_transaction_submits_approval_once_and_polls_after_as
         .mount(&server)
         .await;
 
-    let signature = signer.sign_and_send_transaction(&mut tx).await.unwrap();
+    let signature = signer.sign_and_send_transaction(&tx).await.unwrap();
     assert_eq!(signature, expected_signature);
 }
 
@@ -1050,7 +1003,7 @@ async fn test_sign_and_send_transaction_selects_pending_approval_matching_signer
     let signing_key = attach_approval_signer(&mut signer, locator);
     signer.init().await.unwrap();
 
-    let mut tx = create_test_transaction(&signer_pubkey);
+    let tx = create_test_transaction(&signer_pubkey);
     let expected_tx_signature = keypair_sign_message(&keypair, &tx.message.serialize());
     let tx_id = bs58::encode(expected_tx_signature.as_ref()).into_string();
 
@@ -1074,7 +1027,7 @@ async fn test_sign_and_send_transaction_selects_pending_approval_matching_signer
         .mount(&server)
         .await;
 
-    let signature = signer.sign_and_send_transaction(&mut tx).await.unwrap();
+    let signature = signer.sign_and_send_transaction(&tx).await.unwrap();
     assert_eq!(signature, expected_tx_signature);
 }
 
@@ -1104,7 +1057,7 @@ async fn test_sign_and_send_transaction_success_on_last_polled_response() {
         .mount(&server)
         .await;
 
-    let mut tx = create_test_transaction(&signer_pubkey);
+    let tx = create_test_transaction(&signer_pubkey);
     let expected_signature = keypair_sign_message(&keypair, &tx.message.serialize());
     let tx_id = bs58::encode(expected_signature.as_ref()).into_string();
 
@@ -1126,6 +1079,6 @@ async fn test_sign_and_send_transaction_success_on_last_polled_response() {
     let mut signer = create_test_signer(&server.uri(), 1, 1);
     signer.init().await.unwrap();
 
-    let signature = signer.sign_and_send_transaction(&mut tx).await.unwrap();
+    let signature = signer.sign_and_send_transaction(&tx).await.unwrap();
     assert_eq!(signature, expected_signature);
 }

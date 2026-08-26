@@ -13,7 +13,7 @@ mod tests {
     use super::*;
     use crate::fireblocks::{FireblocksSigner, FireblocksSignerConfig};
     use crate::test_util::create_test_transaction;
-    use crate::traits::SolanaSigner;
+    use crate::traits::{SolanaSigner, TransactionSigner};
     use std::env;
 
     fn required_env(name: &str) -> String {

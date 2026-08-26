@@ -11,7 +11,7 @@ mod tests {
     use super::*;
     use crate::para::ParaSigner;
     use crate::test_util::create_test_transaction;
-    use crate::traits::SolanaSigner;
+    use crate::traits::{SolanaSigner, TransactionSigner};
     use crate::transaction_util::deserialize_wire_transaction;
     use std::env;
 

@@ -16,7 +16,9 @@ mod tests {
     use dotenvy::dotenv;
 
     use super::*;
-    use crate::fordefi::{FordefiSigner, FordefiSignerConfig, SolanaChainUniqueId};
+    use crate::fordefi::{
+        FordefiBlackBoxSigner, FordefiNativeAutoSigner, FordefiSignerConfig, SolanaChainUniqueId,
+    };
     #[cfg(feature = "integration-tests")]
     use crate::sdk_adapter::{AccountMeta, Instruction, Message, VersionedTransaction};
     use crate::sdk_adapter::{Pubkey, Transaction};
@@ -25,25 +27,25 @@ mod tests {
     use crate::tests::litesvm_util::{get_latest_blockhash, simulate_transaction, start_litesvm};
     #[cfg(feature = "integration-tests")]
     use crate::tests::rpc_util::{confirm_transaction, get_rpc_blockhash, send_raw_transaction};
-    use crate::traits::SolanaSigner;
+    use crate::traits::{SendingSigner, SolanaSigner, TransactionSigner};
     use crate::transaction_util::deserialize_wire_transaction;
     use std::env;
     use std::str::FromStr;
 
-    /// Build a `FordefiSigner` for the given vault, sharing the access token and
+    /// Build the config for the given vault, sharing the access token and
     /// request-signing key from the environment. `chain` selects black box mode
     /// (`None`) vs native Solana mode (`Some`).
-    async fn load_signer(
+    fn load_config(
         vault_id: String,
         public_key: String,
         chain: Option<SolanaChainUniqueId>,
-    ) -> FordefiSigner {
+    ) -> FordefiSignerConfig {
         let access_token = env::var(FORDEFI_ACCESS_TOKEN)
             .expect("FORDEFI_ACCESS_TOKEN must be set for integration tests");
         let private_key_pem = env::var(FORDEFI_PRIVATE_KEY_PEM)
             .expect("FORDEFI_PRIVATE_KEY_PEM must be set for integration tests");
 
-        FordefiSigner::from_config(FordefiSignerConfig {
+        FordefiSignerConfig {
             access_token,
             vault_id,
             private_key_pem: Some(private_key_pem),
@@ -55,25 +57,25 @@ mod tests {
             http_client_config: None,
             chain,
             fee: None,
-        })
-        .await
-        .expect("Failed to create Fordefi signer")
+        }
     }
 
     /// Black box signer — uses the dedicated black box vault (`FORDEFI_BB_*`),
     /// which is distinct from the Solana vault used by native mode.
-    async fn get_signer() -> FordefiSigner {
+    async fn get_signer() -> FordefiBlackBoxSigner {
         dotenv().ok();
         let vault_id = env::var(FORDEFI_BB_VAULT_ID)
             .expect("FORDEFI_BB_VAULT_ID must be set for integration tests");
         let public_key = env::var(FORDEFI_BB_PUBLIC_KEY)
             .expect("FORDEFI_BB_PUBLIC_KEY must be set for integration tests");
-        load_signer(vault_id, public_key, None).await
+        FordefiBlackBoxSigner::from_config(load_config(vault_id, public_key, None))
+            .await
+            .expect("Failed to create Fordefi black box signer")
     }
 
     /// Native Solana signer — uses the Solana vault (`FORDEFI_VAULT_ID`) and the
     /// chain from `FORDEFI_CHAIN`.
-    async fn get_native_signer() -> FordefiSigner {
+    async fn get_native_signer() -> FordefiNativeAutoSigner {
         dotenv().ok();
         let vault_id =
             env::var(FORDEFI_VAULT_ID).expect("FORDEFI_VAULT_ID must be set for integration tests");
@@ -84,7 +86,9 @@ mod tests {
             "solana_mainnet" => SolanaChainUniqueId::SolanaMainnet,
             other => panic!("Invalid FORDEFI_CHAIN value: {other}"),
         });
-        load_signer(vault_id, public_key, chain).await
+        FordefiNativeAutoSigner::from_config(load_config(vault_id, public_key, chain))
+            .await
+            .expect("Failed to create Fordefi native signer")
     }
 
     #[tokio::test]
@@ -279,10 +283,10 @@ mod tests {
 
         let mut message = Message::new(&[transfer_ix], Some(&from));
         message.recent_blockhash = blockhash;
-        let mut transaction: VersionedTransaction = Transaction::new_unsigned(message).into();
+        let transaction: VersionedTransaction = Transaction::new_unsigned(message).into();
 
         let signature = signer
-            .sign_and_send_transaction(&mut transaction)
+            .sign_and_send_transaction(&transaction)
             .await
             .expect("Failed to sign and send transaction with Fordefi native mode");
 

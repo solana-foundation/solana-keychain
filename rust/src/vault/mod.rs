@@ -10,7 +10,7 @@ pub use reqwest;
 use crate::remote_util::parse_json_response;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_base64, verify_or_reject};
-use crate::traits::{SignTransactionResult, SignedTransaction};
+use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
 use crate::{
     error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner,
     transaction_util::TransactionUtil,
@@ -207,17 +207,6 @@ impl SolanaSigner for VaultSigner {
         self.public_key
     }
 
-    async fn sign_transaction(
-        &self,
-        tx: &mut VersionedTransaction,
-    ) -> Result<SignTransactionResult, SignerError> {
-        let signed_transaction = self.sign_and_serialize(tx).await?;
-        Ok(TransactionUtil::classify_signed_transaction(
-            tx,
-            signed_transaction,
-        ))
-    }
-
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign_bytes(message).await
     }
@@ -254,6 +243,20 @@ impl SolanaSigner for VaultSigner {
         let key_type_is_ed25519 = body["data"]["type"].as_str() == Some("ed25519");
 
         supports_signing && key_type_is_ed25519
+    }
+}
+
+#[async_trait::async_trait]
+impl TransactionSigner for VaultSigner {
+    async fn sign_transaction(
+        &self,
+        tx: &mut VersionedTransaction,
+    ) -> Result<SignTransactionResult, SignerError> {
+        let signed_transaction = self.sign_and_serialize(tx).await?;
+        Ok(TransactionUtil::classify_signed_transaction(
+            tx,
+            signed_transaction,
+        ))
     }
 }
 

@@ -16,7 +16,7 @@ mod tests {
     use super::*;
     use crate::sdk_adapter::{Message, Transaction, VersionedTransaction};
     use crate::tests::rpc_util::get_rpc_blockhash;
-    use crate::traits::SolanaSigner;
+    use crate::traits::{SolanaSigner, TransactionSigner};
     use crate::utila::{UtilaSigner, UtilaSignerConfig};
 
     fn required_env(name: &str) -> String {

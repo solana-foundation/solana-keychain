@@ -8,7 +8,7 @@ use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{
     extract_and_verify_returned_signature, signature_from_base64, verify_or_reject,
 };
-use crate::traits::{SignTransactionResult, SignedTransaction};
+use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
 use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use authorization::prepare_privy_authorization_headers;
@@ -281,17 +281,6 @@ impl SolanaSigner for PrivySigner {
         self.public_key.expect("PrivySigner not initialized")
     }
 
-    async fn sign_transaction(
-        &self,
-        tx: &mut VersionedTransaction,
-    ) -> Result<SignTransactionResult, SignerError> {
-        let signed_transaction = self.sign_and_serialize(tx).await?;
-        Ok(TransactionUtil::classify_signed_transaction(
-            tx,
-            signed_transaction,
-        ))
-    }
-
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign_bytes(message).await
     }
@@ -306,6 +295,20 @@ impl SolanaSigner for PrivySigner {
             Ok(pubkey) => pubkey == public_key,
             Err(_) => false,
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl TransactionSigner for PrivySigner {
+    async fn sign_transaction(
+        &self,
+        tx: &mut VersionedTransaction,
+    ) -> Result<SignTransactionResult, SignerError> {
+        let signed_transaction = self.sign_and_serialize(tx).await?;
+        Ok(TransactionUtil::classify_signed_transaction(
+            tx,
+            signed_transaction,
+        ))
     }
 }
 

@@ -23,7 +23,7 @@ mod tests {
     use super::*;
     use crate::cdp::CdpSigner;
     use crate::test_util::create_test_transaction;
-    use crate::traits::SolanaSigner;
+    use crate::traits::{SolanaSigner, TransactionSigner};
     use crate::transaction_util::deserialize_wire_transaction;
 
     async fn get_signer() -> CdpSigner {

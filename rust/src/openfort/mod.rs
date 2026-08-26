@@ -33,7 +33,7 @@ mod types;
 use crate::remote_util::parse_json_response;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_hex, verify_or_reject};
-use crate::traits::{SignTransactionResult, SignedTransaction};
+use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
 use crate::transaction_util::TransactionUtil;
 use crate::wallet_jwt;
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
@@ -324,17 +324,6 @@ impl SolanaSigner for OpenfortSigner {
         self.public_key.expect("OpenfortSigner not initialized")
     }
 
-    async fn sign_transaction(
-        &self,
-        tx: &mut VersionedTransaction,
-    ) -> Result<SignTransactionResult, SignerError> {
-        let signed_transaction = self.sign_and_serialize(tx).await?;
-        Ok(TransactionUtil::classify_signed_transaction(
-            tx,
-            signed_transaction,
-        ))
-    }
-
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
         self.sign_bytes(message).await
     }
@@ -347,6 +336,20 @@ impl SolanaSigner for OpenfortSigner {
             Ok(pubkey) => pubkey == public_key,
             Err(_) => false,
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl TransactionSigner for OpenfortSigner {
+    async fn sign_transaction(
+        &self,
+        tx: &mut VersionedTransaction,
+    ) -> Result<SignTransactionResult, SignerError> {
+        let signed_transaction = self.sign_and_serialize(tx).await?;
+        Ok(TransactionUtil::classify_signed_transaction(
+            tx,
+            signed_transaction,
+        ))
     }
 }
 

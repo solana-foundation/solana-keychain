@@ -5,7 +5,7 @@ mod types;
 use crate::remote_util::{parse_json_response, validate_https_url};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_hex, verify_or_reject};
-use crate::traits::{SignTransactionResult, SignedTransaction};
+use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
 use crate::transaction_util::TransactionUtil;
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use std::str::FromStr;
@@ -247,6 +247,19 @@ impl SolanaSigner for ParaSigner {
             .expect("ParaSigner is not initialized; call init() first")
     }
 
+    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        self.sign_bytes(message).await
+    }
+
+    /// Check if the signer is available. Makes a network call to the Para API
+    /// with a 5-second timeout. Callers should cache the result if frequent checks are needed.
+    async fn is_available(&self) -> bool {
+        self.check_availability().await
+    }
+}
+
+#[async_trait::async_trait]
+impl TransactionSigner for ParaSigner {
     async fn sign_transaction(
         &self,
         tx: &mut VersionedTransaction,
@@ -256,16 +269,6 @@ impl SolanaSigner for ParaSigner {
             tx,
             signed_transaction,
         ))
-    }
-
-    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        self.sign_bytes(message).await
-    }
-
-    /// Check if the signer is available. Makes a network call to the Para API
-    /// with a 5-second timeout. Callers should cache the result if frequent checks are needed.
-    async fn is_available(&self) -> bool {
-        self.check_availability().await
     }
 }
 

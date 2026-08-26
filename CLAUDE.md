@@ -30,7 +30,8 @@ Consumer-facing summary in [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md); kee
 ## Cross-language gotchas
 
 - **`init()` before use** for Privy, Fireblocks, Dfns, Crossmint, Para, Openfort. The `Signer::from_*` (Rust) and `await createXSigner(...)` / `create_keychain_signer(...)` factories do it for you; direct construction skips it.
-- **Crossmint is sending-only.** `sign_and_send_transaction` / `signAndSendTransactions` only; the sign-only entry point fails, and `signMessages` is unsupported. In TS it implements `SolanaSendingSigner` and deliberately exposes no `signTransactions`, because Kit classifies signers by duck-typed method presence, so it is excluded from `@solana/keychain-kit-plugin` at the type level.
+- **Rust capability is in the type.** `SolanaSigner` is the base (pubkey, sign_message, is_available); a backend implements exactly one of `TransactionSigner`, `ModifyingSigner` or `SendingSigner`. Only the umbrella `Signer` enum carries erroring arms for capabilities a variant lacks. Fordefi is two types (`FordefiBlackBoxSigner`, `FordefiNativeAutoSigner`), picked by `config.chain`.
+- **Crossmint is sending-only.** `sign_and_send_transaction` / `signAndSendTransactions` only; the sign-only entry point fails, and `signMessages` is unsupported. In Rust it implements `SendingSigner` and no `TransactionSigner`. In TS it implements `SolanaSendingSigner` and deliberately exposes no `signTransactions`, because Kit classifies signers by duck-typed method presence, so it is excluded from `@solana/keychain-kit-plugin` at the type level.
 - **CDP** accepts UTF-8 message payloads only.
 - **Turnkey** response `r,s` must be left-padded to 32 bytes each before concatenation.
 - **GCP KMS** uses PureEdDSA with `EC_SIGN_ED25519`.

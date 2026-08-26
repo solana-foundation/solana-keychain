@@ -5,7 +5,7 @@ mod types;
 use crate::remote_util::parse_json_response;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::extract_and_verify_returned_signature;
-use crate::traits::{SignTransactionResult, SignedTransaction};
+use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
 use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -347,6 +347,19 @@ impl SolanaSigner for UtilaSigner {
         self.public_key.expect("UtilaSigner not initialized")
     }
 
+    async fn sign_message(&self, _message: &[u8]) -> Result<Signature, SignerError> {
+        Err(SignerError::SigningFailed(
+            "Utila sign_message is not supported for Solana wallets in this signer".to_string(),
+        ))
+    }
+
+    async fn is_available(&self) -> bool {
+        self.check_availability().await
+    }
+}
+
+#[async_trait::async_trait]
+impl TransactionSigner for UtilaSigner {
     async fn sign_transaction(
         &self,
         tx: &mut VersionedTransaction,
@@ -356,16 +369,6 @@ impl SolanaSigner for UtilaSigner {
             tx,
             signed_transaction,
         ))
-    }
-
-    async fn sign_message(&self, _message: &[u8]) -> Result<Signature, SignerError> {
-        Err(SignerError::SigningFailed(
-            "Utila sign_message is not supported for Solana wallets in this signer".to_string(),
-        ))
-    }
-
-    async fn is_available(&self) -> bool {
-        self.check_availability().await
     }
 }
 
