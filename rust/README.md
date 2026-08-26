@@ -366,10 +366,12 @@ transaction to sponsor gas, in which case the returned signature identifies the
 transaction it landed rather than covering the caller's bytes; the caller's
 transaction is never modified.
 
-The unified `Signer` enum wraps all backends in one type, so it implements
-every capability trait; calling an entry point the wrapped backend lacks
-returns `SigningFailed`. Direct use of the concrete signer types makes that
-mismatch a compile error instead.
+The unified `Signer` enum wraps all backends in one type and implements only
+the base `SolanaSigner` trait. Capability access goes through
+`as_transaction_signer()` / `as_sending_signer()`, which return `None` when
+the wrapped backend lacks that shape, and through the enum's own
+`sign_and_send`, which routes by variant. Direct use of the concrete signer
+types makes a capability mismatch a compile error instead.
 
 ### Sign and Send
 

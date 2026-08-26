@@ -261,7 +261,7 @@ all = ["memory", "vault", "privy", "turnkey", "your_service"]  # Update all
 
 ### Step 7: Update the Signer Enum
 
-Add your signer to `src/lib.rs`. The base `SolanaSigner` impl dispatches through the `dispatch_signer!` macro, so add one arm there; `sign_transaction` lives in the explicit `impl TransactionSigner for Signer` match, so add your delegating arm to it as well.
+Add your signer to `src/lib.rs`. The base `SolanaSigner` impl dispatches through the `dispatch_signer!` macro, so add one arm there; capability access lives in the explicit `as_transaction_signer()` / `as_sending_signer()` matches, so add your arm to each (a `Some(s)` arm in the accessor matching your capability trait, and for `as_transaction_signer` a `None` arm if your backend is sending-only).
 
 ```rust
 // Add feature-gated module
@@ -316,17 +316,13 @@ macro_rules! dispatch_signer {
     };
 }
 
-// Add a delegating arm to the explicit TransactionSigner match
-#[async_trait::async_trait]
-impl TransactionSigner for Signer {
-    async fn sign_transaction(
-        &self,
-        tx: &mut sdk_adapter::VersionedTransaction,
-    ) -> Result<SignTransactionResult, SignerError> {
+// Add your arm to the capability accessors
+impl Signer {
+    pub fn as_transaction_signer(&self) -> Option<&dyn TransactionSigner> {
         match self {
             // ... existing variants
             #[cfg(feature = "your_service")]
-            Signer::YourService(s) => s.sign_transaction(tx).await,
+            Signer::YourService(s) => Some(s),
         }
     }
 }
