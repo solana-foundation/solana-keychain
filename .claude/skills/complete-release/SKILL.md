@@ -68,7 +68,7 @@ for lang in rust typescript python go; do
 done
 ```
 
-If Rust changed (`rust/Cargo.toml`, `rust/CHANGELOG.md`, etc.):
+If Rust changed (`rust/Cargo.toml`, `rust/Cargo.lock`, etc.):
 
 ```bash
 gh workflow run "Publish Rust Crate" \

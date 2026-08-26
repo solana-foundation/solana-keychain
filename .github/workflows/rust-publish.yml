@@ -132,6 +132,7 @@ jobs:
               tag_name: tagName,
               name: releaseName,
               body: `Release of solana-keychain v${{ steps.version.outputs.version }} (Rust)\n\n**crates.io:** https://crates.io/crates/solana-keychain/${{ steps.version.outputs.version }}`,
+              generate_release_notes: true,
               draft: false,
               prerelease: isPrerelease,
             });

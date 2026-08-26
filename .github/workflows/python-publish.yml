@@ -157,6 +157,7 @@ jobs:
               tag_name: tagName,
               name: `solana-keychain (Python) v${version}`,
               body: `Release of solana-keychain v${version} (Python)\n\n**PyPI:** https://pypi.org/project/solana-keychain/${version}/`,
+              generate_release_notes: true,
               draft: false,
               prerelease: '${{ steps.prerelease.outputs.is_prerelease }}' === 'true',
             });

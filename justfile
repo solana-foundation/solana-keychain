@@ -398,33 +398,18 @@ release: _check-release-tools
     echo "Updating to $version..."
     cargo set-version "$version"
 
-    echo "Generating CHANGELOG.md..."
-    last_tag=$(git tag -l "v*" --sort=-version:refname | head -1)
-    if [ -z "${last_tag}" ]; then
-        git-cliff $(git rev-list --max-parents=0 HEAD)..HEAD --tag "v$version" --config ../.github/cliff.toml --output CHANGELOG.md --strip all
-    else
-        if [ -f CHANGELOG.md ]; then
-            git-cliff "${last_tag}..HEAD" --tag "v$version" --config ../.github/cliff.toml --strip all > CHANGELOG.new.md
-            cat CHANGELOG.md >> CHANGELOG.new.md
-            mv CHANGELOG.new.md CHANGELOG.md
-        else
-            git-cliff "${last_tag}..HEAD" --tag "v$version" --config ../.github/cliff.toml --output CHANGELOG.md --strip all
-        fi
-    fi
-
-    git add Cargo.toml CHANGELOG.md
+    git add Cargo.toml
 
     echo ""
     echo "Release prepared! Next steps:"
-    echo "  1. Review CHANGELOG.md"
-    echo "  2. git commit -m 'chore: release v$version'"
-    echo "  3. git push origin HEAD"
+    echo "  1. git commit -m 'chore: release v$version'"
+    echo "  2. git push origin HEAD"
     if [[ "$current_branch" == hotfix/* ]]; then
-        echo "  4. Trigger 'Publish Rust Crate' workflow from this hotfix branch"
-        echo "  5. Trigger 'Publish TypeScript Packages' workflow from this hotfix branch (if needed)"
-        echo "  6. Merge hotfix back to main"
+        echo "  3. Trigger 'Publish Rust Crate' workflow from this hotfix branch"
+        echo "  4. Trigger 'Publish TypeScript Packages' workflow from this hotfix branch (if needed)"
+        echo "  5. Merge hotfix back to main"
     else
-        echo "  4. Trigger 'Publish Rust Crate' workflow from main"
+        echo "  3. Trigger 'Publish Rust Crate' workflow from main"
     fi
 
 # Start a hotfix branch from a deployed stable tag
@@ -625,7 +610,6 @@ _check-release-tools:
         exit 1
     fi
     command -v cargo-set-version >/dev/null || { echo "Install: cargo install cargo-edit"; exit 1; }
-    command -v git-cliff >/dev/null || { echo "Install: cargo install git-cliff"; exit 1; }
 
 # Prepare the Go signer modules for publishing: after tagging and pushing
 # go/core/{{version}} and go/testutils/{{version}}, this drops the in-repo

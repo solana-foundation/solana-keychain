@@ -16,7 +16,12 @@ Prepare and publish a new release of solana-keychain via a PR-based flow.
 - Mainline release: prepare release changes, open PR to `main`, merge, then publish from `main`.
 - Hotfix release: create `hotfix/*` from deployed tag, prepare release on `hotfix/*`, publish from `hotfix/*`, then merge back to `main`.
 
-Needs `cargo-edit` (for `cargo set-version`) and `git-cliff`, both `cargo install`.
+| Tool | Install |
+|------|---------|
+| `cargo-edit` (`cargo set-version`) | `cargo install cargo-edit` |
+| `pnpm` | `npm install -g pnpm` |
+| `gh` CLI | `brew install gh` |
+| `jq` | `brew install jq` |
 
 ## Where versions live
 
@@ -59,22 +64,11 @@ cd rust && cargo set-version X.Y.Z && cd ..
 
 ---
 
-## Step 3: Generate CHANGELOG.md
+## Step 3: Release notes
 
-Run from the **project root** (not from `rust/`):
-
-```bash
-last_tag=$(git tag -l "v*" --sort=-version:refname | head -1)
-if [ -f rust/CHANGELOG.md ]; then
-  git-cliff "${last_tag}..HEAD" --tag "vX.Y.Z" --config .github/cliff.toml --strip all > /tmp/CHANGELOG.new.md
-  cat rust/CHANGELOG.md >> /tmp/CHANGELOG.new.md
-  mv /tmp/CHANGELOG.new.md rust/CHANGELOG.md
-else
-  git-cliff "${last_tag}..HEAD" --tag "vX.Y.Z" --config .github/cliff.toml --output rust/CHANGELOG.md --strip all
-fi
-```
-
-Review the output: `cat rust/CHANGELOG.md | head -30`
+Nothing to write. The publish workflows create the GitHub release with
+`generate_release_notes: true`, so GitHub lists the merged PRs since the
+previous tag. The repository keeps no changelog files.
 
 ---
 
@@ -84,7 +78,7 @@ Commit this before touching the other languages. `Cargo.lock` moves whenever the
 
 ```bash
 cd rust && cargo update --workspace && cd ..
-git add rust/Cargo.toml rust/CHANGELOG.md rust/Cargo.lock
+git add rust/Cargo.toml rust/Cargo.lock
 git commit -m "chore: bump rust version to vX.Y.Z"
 ```
 
@@ -119,7 +113,6 @@ Python, if `python/` changed:
 
 ```bash
 # python/pyproject.toml -> version = "A.B.C"
-# add the release section to python/CHANGELOG.md
 ```
 
 Go, if `go/` changed. Go modules carry no version file; the recipe rewrites each module's replace directives so the tagged modules resolve against each other:
@@ -154,9 +147,9 @@ gh pr create \
 
 List only the languages in this release:
 
-- Rust \`solana-keychain\` to vX.Y.Z ([CHANGELOG](rust/CHANGELOG.md))
+- Rust \`solana-keychain\` to vX.Y.Z
 - TypeScript \`@solana/keychain\` and packages to vA.B.C
-- Python \`solana-keychain\` to vA.B.C ([CHANGELOG](python/CHANGELOG.md))
+- Python \`solana-keychain\` to vA.B.C
 - Go modules to vA.B.C
 
 ## Merge
