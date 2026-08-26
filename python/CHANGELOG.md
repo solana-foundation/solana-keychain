@@ -1,4 +1,8 @@
-## Unreleased
+## 2.0.0b1 - 2026-08-26
+
+First beta, and the first published version of the Python package. The version
+number tracks the other language implementations rather than the package's own
+history. Installing it needs an explicit pin or `pip install --pre`.
 
 ### Features
 
@@ -10,6 +14,9 @@
 - `SignedTransaction.transaction`: the authoritative signed transaction, so callers never have to know whether a backend signed the object they passed in
 - `sign_and_send_transaction()`: one call to get a transaction on chain, using the provider's broadcast for a `SendingSigner` and a caller-injected send function for a `TransactionSigner` or `ModifyingSigner`
 - `FordefiNativeManualSigner`: Fordefi's `push_mode: manual` as a `ModifyingSigner`, where Fordefi rewrites the blockhash and Compute Budget fee instructions and signs without broadcasting; the vault must be the fee payer of an as-yet-unsigned transaction, the returned signature is verified against the rewritten message at the vault's signer position, and the rewritten transaction comes back as `SignedTransaction.transaction`
+- `BROADCAST_UNCONFIRMED` error code and `provider_may_have_accepted()`, so a failure after a provider accepted a transaction is distinguishable from one before (#269)
+- Crossmint is sending-only: `sign_transaction` fails and `sign_and_send_transaction` returns the signature of the landed transaction without mutating the caller's transaction (#284)
+- trusted-provider model with consolidated response handling and shared helpers across backends (#274, #281)
 
 ### Bug Fixes
 
