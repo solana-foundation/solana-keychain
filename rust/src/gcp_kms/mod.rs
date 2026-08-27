@@ -137,9 +137,7 @@ impl GcpKmsSigner {
             .await;
 
         match result {
-            Ok(public_key) => {
-                public_key.algorithm == CryptoKeyVersionAlgorithm::EcSignEd25519
-            }
+            Ok(public_key) => public_key.algorithm == CryptoKeyVersionAlgorithm::EcSignEd25519,
             Err(_e) => {
                 #[cfg(feature = "unsafe-debug")]
                 log::error!("GCP KMS availability check failed: {_e:?}");
