@@ -17,7 +17,6 @@ function makeMockSigner(address: Address = TEST_ADDRESS): SolanaSigner {
     } as unknown as SolanaSigner;
 }
 
-// Mock all backend factories
 vi.mock('@solana/keychain-aws-kms', () => ({ createAwsKmsSigner: vi.fn() }));
 vi.mock('@solana/keychain-cdp', () => ({ createCdpSigner: vi.fn() }));
 vi.mock('@solana/keychain-crossmint', () => ({ createCrossmintSigner: vi.fn() }));

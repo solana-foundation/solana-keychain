@@ -40,8 +40,6 @@ vi.mock('@solana/keychain-core', async importOriginal => {
 import { createCdpSigner } from '../cdp-signer.js';
 import type { CdpSignerConfig } from '../types.js';
 
-// --- Valid test credentials ---
-
 // Generate a real Ed25519 keypair so that createKeyPairFromBytes seed↔pubkey validation passes.
 // Ed25519 PKCS#8 DER: 16-byte header + 32-byte seed
 // Ed25519 SPKI DER:   12-byte header + 32-byte public key
@@ -79,7 +77,6 @@ const TEST_CDP_WALLET_SECRET = Buffer.from([
     0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
 ]).toString('base64');
 
-// Mock global fetch
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
@@ -99,7 +96,6 @@ const createMockTransaction = (): Transaction & TransactionWithinSizeLimit & Tra
     return {} as Transaction & TransactionWithinSizeLimit & TransactionWithLifetime;
 };
 
-// A valid base58 Solana address for tests
 const TEST_ADDRESS = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV';
 
 function makeConfig(overrides?: Partial<CdpSignerConfig>): CdpSignerConfig {
@@ -208,7 +204,6 @@ describe('CdpSigner', () => {
 
     describe('signMessages', () => {
         it('signs a message and returns a signature dictionary', async () => {
-            // Base58-encoded 64-byte signature
             const base58Sig = '5LfnqEfGPFBaHHeQBiNkgQ2EPy4FkVLKE7cjMYc7gv6EjE8Vs5gqaXcZHjpxr3yj5TMt7j3JdJPkXfnwXxXiNAh';
             mockFetch.mockResolvedValue(new Response(JSON.stringify({ signature: base58Sig }), { status: 200 }));
 

@@ -34,12 +34,10 @@ vi.mock('@solana/keychain-core', async importOriginal => {
 import { createFordefiSigner, type FordefiSignerConfig } from '../fordefi-signer.js';
 import type { SolanaChainUniqueId } from '../types.js';
 
-// Mock fetch globally
 global.fetch = vi.fn();
 
 const MOCK_ADDRESS = '11111111111111111111111111111111';
 
-// Generate a real P-256 key pair for tests
 const { privateKey: testPrivateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const TEST_PEM = testPrivateKey.export({ type: 'sec1', format: 'pem' }) as string;
 
@@ -183,7 +181,6 @@ describe('createFordefiSigner', () => {
     });
 
     describe('custom requestSigner', () => {
-        // Config using a custom request signer instead of a PEM key.
         const customConfig: FordefiSignerConfig & { chain?: undefined; pushMode?: undefined } = {
             accessToken: 'test-token',
             apiBaseUrl: 'https://api.test.fordefi.com',
@@ -252,7 +249,6 @@ describe('createFordefiSigner', () => {
             expect(results).toHaveLength(1);
             expect(results[0]).toHaveProperty(MOCK_ADDRESS);
 
-            // Verify POST was called with black_box_signature format (call #1)
             expect(fetch).toHaveBeenCalledTimes(2);
             const call = vi.mocked(fetch).mock.calls[0]!;
             expect(call[0]).toBe('https://api.test.fordefi.com/api/v1/transactions');
@@ -359,7 +355,6 @@ describe('createFordefiSigner', () => {
             const results = await signer.signMessages([{ content: new Uint8Array(32), signatures: {} }]);
             expect(results).toHaveLength(1);
 
-            // Verify request body uses the black_box_signature schema (call #1)
             expect(fetch).toHaveBeenCalledTimes(2);
             const call = vi.mocked(fetch).mock.calls[0]!;
             expect(call[0]).toBe('https://api.test.fordefi.com/api/v1/transactions');
@@ -457,7 +452,6 @@ describe('createFordefiSigner', () => {
                     }),
                 );
 
-                // Verify POST body uses solana_transaction type
                 const call = vi.mocked(fetch).mock.calls[0]!;
                 const postOpts = call[1] as RequestInit;
                 const body = JSON.parse(postOpts.body as string);
@@ -933,7 +927,6 @@ describe('createFordefiSigner', () => {
             const results = await signer.signMessages([{ content: new Uint8Array(32), signatures: {} }]);
             expect(results).toHaveLength(1);
 
-            // Verify POST body uses solana_message type
             const call = vi.mocked(fetch).mock.calls[0]!;
             const postOpts = call[1] as RequestInit;
             const body = JSON.parse(postOpts.body as string);

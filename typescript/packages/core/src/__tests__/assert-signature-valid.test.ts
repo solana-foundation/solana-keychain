@@ -28,7 +28,6 @@ describe('assertSignatureValid', () => {
         const data = new Uint8Array([1, 2, 3, 4]);
         const signature = await kp.sign(data);
 
-        // Corrupt the first byte
         const corrupted = new Uint8Array(signature);
         corrupted[0] ^= 0xff;
 

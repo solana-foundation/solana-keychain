@@ -219,9 +219,6 @@ class ParaSigner<TAddress extends string = string>
         );
     }
 
-    /**
-     * Sign raw bytes via Para's /sign-raw endpoint
-     */
     private async signBytes(data: ArrayLike<number>, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         const bytes = data instanceof Uint8Array ? data : new Uint8Array(Array.from(data));
         const hexData = getBase16Decoder().decode(bytes);
@@ -255,9 +252,6 @@ class ParaSigner<TAddress extends string = string>
         return this.decodeHexSignature(signResponse.signature);
     }
 
-    /**
-     * Decode a hex-encoded Ed25519 signature to SignatureBytes
-     */
     private decodeHexSignature(hexSignature: string): SignatureBytes {
         const cleaned = hexSignature.startsWith('0x') ? hexSignature.slice(2) : hexSignature;
 

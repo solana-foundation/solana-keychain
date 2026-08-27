@@ -69,9 +69,6 @@ export async function createJwt(apiKey: string, privateKey: CryptoKey, uri: stri
     }
 }
 
-/**
- * Compute SHA256 hash and return as hex string
- */
 async function sha256Hex(data: string): Promise<string> {
     const dataBuffer = new TextEncoder().encode(data);
     const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);

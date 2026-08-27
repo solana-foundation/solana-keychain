@@ -4,9 +4,6 @@ import { describe, expect, test } from 'vitest';
 
 import { ApiKeyStamper } from '../stamper.js';
 
-/**
- * Test fixture with P256 key pair
- */
 function getTestKeys() {
     const privateKey = 'c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721';
 
@@ -87,7 +84,6 @@ describe('ApiKeyStamper', () => {
         expect(decodedStamp.publicKey).toBe(publicKey);
         expect(decodedStamp.scheme).toBe('SIGNATURE_SCHEME_TK_API_P256');
 
-        // Verify signature is a valid DER hex string
         expect(decodedStamp.signature).toMatch(/^30[0-9a-f]+$/);
         expect(decodedStamp.signature.length).toBeGreaterThan(0);
     });

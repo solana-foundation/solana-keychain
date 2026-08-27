@@ -18,7 +18,6 @@ vi.mock('@solana/keychain-core', async importOriginal => {
     };
 });
 
-// Mock fetch globally
 global.fetch = vi.fn();
 
 describe('createVaultSigner', () => {
@@ -422,7 +421,6 @@ describe('createVaultSigner', () => {
 
             await signer.signMessages(messages);
 
-            // First message should not have delay, subsequent ones should
             expect(delaySpy).toHaveBeenCalledTimes(2);
             expect(delaySpy).toHaveBeenNthCalledWith(1, expect.any(Function), 100);
             expect(delaySpy).toHaveBeenNthCalledWith(2, expect.any(Function), 200);
@@ -448,7 +446,6 @@ describe('createVaultSigner', () => {
 
             const signer = createVaultSigner(mockConfig);
 
-            // Create a mock transaction - this is simplified
             const mockTransaction = {
                 '"__transactionSize:@solana/kit"': 100,
                 lifetimeConstraint: { blockhash: 'test', lastValidBlockHeight: 100n },

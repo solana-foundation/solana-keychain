@@ -158,9 +158,6 @@ class FireblocksSigner<TAddress extends string = string>
         return this._address;
     }
 
-    /**
-     * Initialize the signer by fetching the public key from Fireblocks
-     */
     private async init(): Promise<void> {
         if (this.initialized) {
             return;
@@ -183,9 +180,6 @@ class FireblocksSigner<TAddress extends string = string>
         return this.privateKeyPromise;
     }
 
-    /**
-     * Fetch the public key from Fireblocks API
-     */
     private async fetchPublicKey(): Promise<Address> {
         const uri = `/v1/vault/accounts/${encodeURIComponent(this.vaultAccountId)}/${encodeURIComponent(this.assetId)}/addresses_paginated`;
         const addressesResponse = await this.request<VaultAddressesResponse>('GET', uri);
@@ -228,9 +222,6 @@ class FireblocksSigner<TAddress extends string = string>
         });
     }
 
-    /**
-     * Make an authenticated request to Fireblocks API
-     */
     private async request<T>(method: string, uri: string, body?: unknown, abortSignal?: AbortSignal): Promise<T> {
         const bodyStr = body ? JSON.stringify(body) : '';
         const token = await createJwt(this.apiKey, await this.getPrivateKey(), uri, bodyStr);
@@ -251,9 +242,6 @@ class FireblocksSigner<TAddress extends string = string>
         });
     }
 
-    /**
-     * Sign raw bytes using Fireblocks RAW operation
-     */
     private async signRawBytes(messageBytes: Uint8Array, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         base16Decoder ||= getBase16Decoder();
         const hexContent = base16Decoder.decode(messageBytes);
@@ -481,9 +469,6 @@ class FireblocksSigner<TAddress extends string = string>
         }
     }
 
-    /**
-     * Ensure the signer has been initialized
-     */
     private ensureInitialized(): void {
         if (!this.initialized) {
             throwSignerError(SignerErrorCode.SIGNER_NOT_INITIALIZED, {

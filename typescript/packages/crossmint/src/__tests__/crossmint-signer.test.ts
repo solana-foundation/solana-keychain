@@ -272,14 +272,12 @@ describe('CrossmintSigner', () => {
         it('signs sequentially and stops creating transactions after a failure', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()
-                // tx 0: create -> success
                 .mockResolvedValueOnce(
                     new Response(
                         JSON.stringify({ id: 'tx-0', status: 'success', onChain: { txId: MOCK_SIGNATURE_B58 } }),
                         { status: 201 },
                     ),
                 )
-                // tx 1: create -> 500 (fails the batch)
                 .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'boom' }), { status: 500 }))
                 // tx 2: should NEVER be created (would only be reached under concurrent Promise.all)
                 .mockResolvedValueOnce(
@@ -1035,7 +1033,6 @@ describe('CrossmintSigner', () => {
                         { status: 201 },
                     ),
                 )
-                // approvals POST response -> success
                 .mockResolvedValueOnce(
                     new Response(
                         JSON.stringify({

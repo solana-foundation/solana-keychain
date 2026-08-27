@@ -43,7 +43,6 @@ global.fetch = vi.fn();
 const MOCK_B64_WIRE_TX =
     'Af1fCRSrZ9ASprap8D3ZLPsbzeCs6uihvj/jfjm3UrAY72by5zKMRd7YAIbJCl9gyRHQbw+xdklET2ZNmZi3iA2AAQABAurnRuGN5bfL2osZZMdGlvL1qz8k0GbdLhiP1fICgkmsBUpTWpkpIQZNJOhxYNo4fHw1td28kruB5B+oQEEFRI1NhzEgE0w/YfwaeZi2Ns/mLoZvq2Sx5NVQg7Am7wrjGwEBAAxIZWxsbywgUHJpdnkA' as Base64EncodedWireTransaction;
 
-// Mock the transaction encoding function
 vi.mock('@solana/transactions', async () => {
     const actual = await vi.importActual<typeof import('@solana/transactions')>('@solana/transactions');
     return {
@@ -52,7 +51,6 @@ vi.mock('@solana/transactions', async () => {
     };
 });
 
-// Helper to create a mock transaction without needing real transaction building
 const createMockTransaction = (): Transaction & TransactionWithinSizeLimit & TransactionWithLifetime => {
     return {} as Transaction & TransactionWithinSizeLimit & TransactionWithLifetime;
 };
@@ -237,7 +235,6 @@ describe('createTurnkeySigner', () => {
             const messageContent = new Uint8Array([1, 2, 3, 4]);
             const signature = await signBytes(keyPair.privateKey, messageContent);
 
-            // Split signature into r and s (32 bytes each)
             const r = Buffer.from(signature.slice(0, 32)).toString('hex');
             const s = Buffer.from(signature.slice(32, 64)).toString('hex');
 
@@ -260,7 +257,6 @@ describe('createTurnkeySigner', () => {
 
             const signer = createTurnkeySigner(config);
 
-            // Create undersized components (less than 32 bytes)
             const r = '1234abcd'; // 4 bytes
             const s = '5678ef90'; // 4 bytes
 
@@ -272,7 +268,6 @@ describe('createTurnkeySigner', () => {
             expect(sigDict).toBeTruthy();
             expect(sigDict?.[signer.address]).toBeTruthy();
 
-            // Signature should be 64 bytes (r and s padded to 32 each)
             const signatureBytes = sigDict?.[signer.address];
             expect(signatureBytes?.length).toBe(64);
         });
@@ -287,7 +282,6 @@ describe('createTurnkeySigner', () => {
 
             const signer = createTurnkeySigner(config);
 
-            // Create oversized r component (> 32 bytes)
             const r = Buffer.alloc(33, 0xff).toString('hex');
             const s = Buffer.alloc(32, 0x01).toString('hex');
 
@@ -311,7 +305,6 @@ describe('createTurnkeySigner', () => {
 
             const signer = createTurnkeySigner(config);
 
-            // Create oversized s component (> 32 bytes)
             const r = Buffer.alloc(32, 0x01).toString('hex');
             const s = Buffer.alloc(33, 0xff).toString('hex');
 

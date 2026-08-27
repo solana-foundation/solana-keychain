@@ -23,8 +23,6 @@ vi.mock('@solana/keychain-core', async importOriginal => {
 import { createOpenfortSigner } from '../openfort-signer.js';
 import type { OpenfortSignerConfig } from '../types.js';
 
-// --- Test fixtures ---
-
 // Valid P-256 PKCS#8 DER (scalar [0x01;32], in [1, n-1]) — base64-encoded.
 // This is the bare single-line form an operator pastes into an env var.
 const TEST_WALLET_SECRET_BASE64 = Buffer.from([
@@ -45,7 +43,6 @@ const TEST_SECRET_KEY = 'sk_test_secret';
 // 64-byte signature, hex-encoded with 0x prefix.
 const TEST_SIGNATURE_HEX = `0x${'ab'.repeat(64)}`;
 
-// Mock global fetch.
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 

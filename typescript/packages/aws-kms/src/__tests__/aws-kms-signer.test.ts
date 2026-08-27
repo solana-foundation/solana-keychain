@@ -10,11 +10,9 @@ vi.mock('@solana/keychain-core', async importOriginal => {
     return { ...mod, assertSignatureValid: vi.fn() };
 });
 
-// Mock AWS SDK
 const mockSend = vi.fn();
 
 vi.mock('@aws-sdk/client-kms', () => {
-    // Create proper constructor mock classes
     class MockKMSClient {
         send = mockSend;
     }

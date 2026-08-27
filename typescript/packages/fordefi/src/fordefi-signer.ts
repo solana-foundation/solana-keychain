@@ -806,9 +806,6 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         return createResponse.id;
     }
 
-    /**
-     * Submit a black_box_signature request for raw EdDSA signing.
-     */
     private async submitBlackBoxSignature(base64Data: string, abortSignal?: AbortSignal): Promise<string> {
         const requestBody: FordefiBlackBoxSignatureRequest = {
             details: {
@@ -869,9 +866,6 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         return namespaced;
     }
 
-    /**
-     * Submit a native Solana personal message for signing.
-     */
     private async submitSolanaMessage(base64Data: string, abortSignal?: AbortSignal): Promise<string> {
         const requestBody: FordefiSolanaMessageRequest = {
             details: {
@@ -965,9 +959,6 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         });
     }
 
-    /**
-     * Extract the base64-encoded signature from a poll result.
-     */
     private extractSignatureData(result: FordefiTransactionStatusResponse): string {
         const sigData = result.signatures?.[0]?.data;
         if (!sigData) {
@@ -987,9 +978,6 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         return await this.requestSigner.signRequest(payload);
     }
 
-    /**
-     * Make an authenticated request to the Fordefi API.
-     */
     private async request<T>(
         method: 'GET' | 'POST',
         apiPath: string,

@@ -213,7 +213,6 @@ async function importWithWebCrypto(
             privateKey = await subtle.importKey('pkcs8', privateKeyDer, attempt.importAlgorithm, false, ['sign']);
             await subtle.sign(attempt.signAlgorithm, privateKey, toArrayBuffer(getProbePayload()));
         } catch {
-            // Try the next key algorithm.
             continue;
         }
         return {

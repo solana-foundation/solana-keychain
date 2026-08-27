@@ -270,8 +270,6 @@ class OpenfortSigner<TAddress extends string = string>
     }
 }
 
-// --- JWT construction (ES256, signed with the wallet secret) ---
-
 function sortJson(value: unknown): unknown {
     if (value === null || typeof value !== 'object') return value;
     if (Array.isArray(value)) return (value as unknown[]).map(sortJson);
@@ -319,8 +317,6 @@ async function createWalletJwt(
     );
     return `${signingInput}.${base64UrlDecoder(new Uint8Array(sigBuffer))}`;
 }
-
-// --- Key + URL helpers ---
 
 /**
  * Decode a P-256 PKCS#8 private key into a Web Crypto `CryptoKey`. Accepts

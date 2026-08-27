@@ -138,9 +138,6 @@ class VaultSigner<TAddress extends string = string>
         return sigBytes as SignatureBytes;
     }
 
-    /**
-     * Sign data using Vault's transit engine
-     */
     private async signWithVault(base64Data: string, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         const url = `${this.vaultAddr}/v1/transit/sign/${encodeURIComponent(this.keyName)}`;
 
@@ -171,9 +168,6 @@ class VaultSigner<TAddress extends string = string>
         return this.extractSignatureFromVaultFormat(signResponse.data.signature);
     }
 
-    /**
-     * Sign message bytes using Vault
-     */
     private async signMessageBytes(
         messageBytes: ArrayLike<number>,
         abortSignal?: AbortSignal,

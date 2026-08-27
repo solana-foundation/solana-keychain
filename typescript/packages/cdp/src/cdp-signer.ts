@@ -44,8 +44,6 @@ export async function createCdpSigner<TAddress extends string = string>(
     return await CdpSigner.create(config);
 }
 
-// --- Module-level constants ---
-
 const CDP_DEFAULT_BASE_URL = 'https://api.cdp.coinbase.com';
 const CDP_BASE_PATH = '/platform/v2/solana/accounts';
 const JWT_TTL_SECS = 120;
@@ -146,8 +144,6 @@ async function createWalletJwt(
     return await signJwt(header, payload, walletKey, 'ES256');
 }
 
-// --- Key loading ---
-
 /**
  * Load the Ed25519 CDP API key from a base64-encoded 64-byte secret (seed || pubkey).
  *
@@ -160,9 +156,6 @@ async function loadApiKey(cdpApiKeySecret: string): Promise<CryptoKey> {
     try {
         base64Encoder ||= getBase64Encoder();
         const bytes = base64Encoder.encode(cdpApiKeySecret);
-        // createKeyPairFromBytes validates:
-        //   - input is exactly 64 bytes (seed || pubkey)
-        //   - the public key bytes match the seed (signs test data and verifies)
         keyPair = await createKeyPairFromBytes(bytes);
     } catch (error) {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {

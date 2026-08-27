@@ -33,7 +33,6 @@ vi.mock('@solana/keychain-core', async importOriginal => {
     };
 });
 
-// Mock fetch globally
 global.fetch = vi.fn();
 
 const mockFetch = global.fetch as ReturnType<typeof vi.fn>;
@@ -375,7 +374,6 @@ describe('createFireblocksSigner', () => {
         it('should throw HTTP_ERROR when fetch fails during signing request', async () => {
             const keyPair = await generateKeyPairSigner();
 
-            // Mock init fetch (success)
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ addresses: [{ address: keyPair.address }] }),
@@ -387,7 +385,6 @@ describe('createFireblocksSigner', () => {
                 vaultAccountId: TEST_VAULT_ACCOUNT_ID,
             });
 
-            // Mock signing request to fail with network error
             mockFetch.mockRejectedValueOnce(new Error('Network timeout'));
 
             const message = {
@@ -403,19 +400,16 @@ describe('createFireblocksSigner', () => {
         it('should sign a message successfully', async () => {
             const keyPair = await generateKeyPairSigner();
 
-            // Mock init fetch
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ addresses: [{ address: keyPair.address }] }),
             });
 
-            // Mock create transaction
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ id: 'tx-123', status: 'SUBMITTED' }),
             });
 
-            // Mock poll for completion
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({
@@ -450,19 +444,16 @@ describe('createFireblocksSigner', () => {
         it('should throw error on transaction failure', async () => {
             const keyPair = await generateKeyPairSigner();
 
-            // Mock init fetch
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ addresses: [{ address: keyPair.address }] }),
             });
 
-            // Mock create transaction
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ id: 'tx-123', status: 'SUBMITTED' }),
             });
 
-            // Mock poll returning FAILED status
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({
@@ -488,19 +479,16 @@ describe('createFireblocksSigner', () => {
         it('should throw error on invalid signature length', async () => {
             const keyPair = await generateKeyPairSigner();
 
-            // Mock init fetch
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ addresses: [{ address: keyPair.address }] }),
             });
 
-            // Mock create transaction
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ id: 'tx-123', status: 'SUBMITTED' }),
             });
 
-            // Mock poll with wrong signature length
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({
@@ -535,19 +523,16 @@ describe('createFireblocksSigner', () => {
         it('should sign a transaction successfully with RAW signing', async () => {
             const keyPair = await generateKeyPairSigner();
 
-            // Mock init fetch
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ addresses: [{ address: keyPair.address }] }),
             });
 
-            // Mock create transaction
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ id: 'tx-123', status: 'SUBMITTED' }),
             });
 
-            // Mock poll for completion
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({
@@ -583,19 +568,16 @@ describe('createFireblocksSigner', () => {
         it('should throw when COMPLETED response has no signedMessages', async () => {
             const keyPair = await generateKeyPairSigner();
 
-            // Mock init fetch
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ addresses: [{ address: keyPair.address }] }),
             });
 
-            // Mock create transaction
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ id: 'tx-123', status: 'SUBMITTED' }),
             });
 
-            // Mock poll for completion with no signedMessages
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({

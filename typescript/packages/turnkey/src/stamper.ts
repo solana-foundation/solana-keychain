@@ -105,7 +105,6 @@ export class ApiKeyStamper {
                 signature: signatureHex,
             };
 
-            // Encode as base64url (RFC 4648 §5)
             const stampJson = JSON.stringify(stamp);
             const stampBase64url = base64UrlDecoder(new TextEncoder().encode(stampJson));
 

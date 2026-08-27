@@ -172,7 +172,6 @@ describe('DfnsSigner', () => {
             mockWalletFetch();
             const signer = await createDfnsSigner(defaultConfig);
 
-            // The auth flow init request fails with network error
             mockFetch.mockRejectedValueOnce(new Error('Network timeout'));
 
             await expect(

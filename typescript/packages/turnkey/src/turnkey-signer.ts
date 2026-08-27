@@ -135,10 +135,7 @@ class TurnkeySigner<TAddress extends string = string>
         }
     }
 
-    /**
-     * Pad signature component to exactly 32 bytes
-     * Components from Turnkey may be shorter than 32 bytes and need left-padding with zeros
-     */
+    /** Components from Turnkey may be shorter than 32 bytes and need left-padding with zeros. */
     private padSignatureComponent(hex: string): Uint8Array {
         if (hex.length % 2 !== 0) {
             throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
@@ -154,7 +151,6 @@ class TurnkeySigner<TAddress extends string = string>
             });
         }
 
-        // Create 32-byte array and right-align the component (left-pad with zeros)
         const padded = new Uint8Array(32);
         padded.set(bytes, 32 - bytes.length);
         return padded;

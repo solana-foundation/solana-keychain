@@ -20,7 +20,6 @@ vi.mock('@solana/keychain-core', async importOriginal => {
 
 import { createParaSigner } from '../para-signer.js';
 
-// Mock fetch globally
 global.fetch = vi.fn();
 
 // Valid 64-byte Ed25519 signature as 128 hex chars
@@ -419,7 +418,6 @@ describe('ParaSigner', () => {
 
             await signer.signMessages(messages);
 
-            // First message has no delay, second has 100ms, third has 200ms
             expect(delaySpy).toHaveBeenCalledTimes(2);
             expect(delaySpy).toHaveBeenNthCalledWith(1, expect.any(Function), 100);
             expect(delaySpy).toHaveBeenNthCalledWith(2, expect.any(Function), 200);

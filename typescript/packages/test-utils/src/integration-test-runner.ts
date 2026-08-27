@@ -60,8 +60,8 @@ export async function runSignerIntegrationTest<T extends TestSigner>(
         console.log(`Address: ${truncateAddress(signer.address)}`);
     }
 
-    // Setup test environment. The recipient is funded by the test transfer itself,
-    // so only the signer needs an airdrop here.
+    // The recipient is funded by the test transfer itself, so only the signer
+    // needs an airdrop here.
     const recipientAddress = config.recipientAddress ?? (await generateKeyPairSigner()).address;
 
     airdropLamports(litesvm, signer.address, opts.airdropAmount);
@@ -80,9 +80,6 @@ export async function runSignerIntegrationTest<T extends TestSigner>(
     }
 }
 
-/**
- * Validates that required environment variables are present
- */
 function validateEnvironment(requiredVars: string[]): void {
     const missing = requiredVars.filter(v => !process.env[v]);
 
@@ -94,9 +91,6 @@ function validateEnvironment(requiredVars: string[]): void {
     }
 }
 
-/**
- * Runs a specific test scenario
- */
 async function runScenario<T extends TestSigner>(scenario: TestScenario, context: TestContext<T>): Promise<void> {
     switch (scenario) {
         case 'signTransaction':

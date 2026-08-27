@@ -300,9 +300,6 @@ class DfnsSigner<TAddress extends string = string>
         }
     }
 
-    /**
-     * Send a signature request to the Dfns Keys API
-     */
     private async sendSignatureRequest(
         request: GenerateSignatureRequest,
         abortSignal?: AbortSignal,
@@ -363,9 +360,6 @@ class DfnsSigner<TAddress extends string = string>
     }
 }
 
-/**
- * Fetch wallet details from Dfns
- */
 async function fetchWallet(apiBaseUrl: string, authToken: string, walletId: string): Promise<GetWalletResponse> {
     const rawWalletResponse = await fetchSignerJson<unknown>({
         init: {
