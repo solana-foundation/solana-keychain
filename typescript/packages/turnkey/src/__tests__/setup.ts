@@ -1,4 +1,4 @@
-import type { SolanaSigner } from '@solana/keychain-core';
+import type { SolanaMessageSigner, SolanaTransactionSigner } from '@solana/keychain-core';
 import { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
 import { createTurnkeySigner } from '../turnkey-signer';
 
@@ -11,7 +11,7 @@ const REQUIRED_ENV_VARS = [
     'TURNKEY_PUBLIC_KEY',
 ];
 
-const CONFIG: SignerTestConfig<SolanaSigner> = {
+const CONFIG: SignerTestConfig<SolanaMessageSigner & SolanaTransactionSigner> = {
     signerType: SIGNER_TYPE,
     requiredEnvVars: REQUIRED_ENV_VARS,
     createSigner: () =>
@@ -26,7 +26,9 @@ const CONFIG: SignerTestConfig<SolanaSigner> = {
         ),
 };
 
-export async function getConfig(scenarios: TestScenario[]): Promise<SignerTestConfig<SolanaSigner>> {
+export async function getConfig(
+    scenarios: TestScenario[],
+): Promise<SignerTestConfig<SolanaMessageSigner & SolanaTransactionSigner>> {
     return {
         ...CONFIG,
         testScenarios: scenarios,

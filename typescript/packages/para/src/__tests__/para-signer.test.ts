@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertIsSolanaTransactionSigner } from '@solana/keychain-core';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
@@ -73,12 +73,12 @@ describe('ParaSigner', () => {
             );
         });
 
-        it('should satisfy the SolanaSigner interface', async () => {
+        it('should satisfy the SolanaTransactionSigner and SolanaMessageSigner interfaces', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
 
             const signer = await createParaSigner(mockConfig);
 
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
         });
 
         it('should throw CONFIG_ERROR for missing apiKey', async () => {

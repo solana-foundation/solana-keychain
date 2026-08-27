@@ -8,7 +8,8 @@ import {
     normalizeBaseUrl,
     signBatchStaggered,
     SignerErrorCode,
-    SolanaSigner,
+    SolanaMessageSigner,
+    SolanaTransactionSigner,
     throwSignerError,
     validateRequestDelayMs,
 } from '@solana/keychain-core';
@@ -32,7 +33,7 @@ import type { ParaSignRawRequest, ParaSignRawResponse, ParaWalletResponse } from
  */
 export async function createParaSigner<TAddress extends string = string>(
     config: ParaSignerConfig,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>> {
     return await ParaSigner.create(config);
 }
 
@@ -60,7 +61,9 @@ export interface ParaSignerConfig {
  * Uses the /v1/wallets/:walletId/sign-raw endpoint for Ed25519 signing.
  * Raw bytes are signed directly with no hashing or transformation.
  */
-class ParaSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class ParaSigner<TAddress extends string = string>
+    implements SolanaMessageSigner<TAddress>, SolanaTransactionSigner<TAddress>
+{
     readonly address: Address<TAddress>;
     private readonly apiKey: string;
     private readonly apiBaseUrl: string;

@@ -1,4 +1,4 @@
-import type { SolanaSigner } from '@solana/keychain-core';
+import type { SolanaMessageSigner, SolanaTransactionSigner } from '@solana/keychain-core';
 import type { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
 
 import { createAwsKmsSigner } from '../aws-kms-signer.js';
@@ -9,7 +9,7 @@ export const TEST_REGION = 'us-east-1';
 const SIGNER_TYPE = 'aws-kms';
 const REQUIRED_ENV_VARS = ['AWS_KMS_KEY_ID', 'AWS_KMS_SIGNER_PUBKEY'];
 
-const CONFIG: SignerTestConfig<SolanaSigner> = {
+const CONFIG: SignerTestConfig<SolanaMessageSigner & SolanaTransactionSigner> = {
     createSigner: () =>
         Promise.resolve(
             createAwsKmsSigner({
@@ -22,7 +22,9 @@ const CONFIG: SignerTestConfig<SolanaSigner> = {
     signerType: SIGNER_TYPE,
 };
 
-export async function getConfig(scenarios: TestScenario[]): Promise<SignerTestConfig<SolanaSigner>> {
+export async function getConfig(
+    scenarios: TestScenario[],
+): Promise<SignerTestConfig<SolanaMessageSigner & SolanaTransactionSigner>> {
     return {
         ...CONFIG,
         testScenarios: scenarios,

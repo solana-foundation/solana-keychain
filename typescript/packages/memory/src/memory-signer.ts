@@ -1,4 +1,10 @@
-import { SignerError, SignerErrorCode, SolanaSigner, throwSignerError } from '@solana/keychain-core';
+import {
+    SignerError,
+    SignerErrorCode,
+    SolanaMessageSigner,
+    SolanaTransactionSigner,
+    throwSignerError,
+} from '@solana/keychain-core';
 import { signBytes, verifySignature } from '@solana/keys';
 import {
     createKeyPairSignerFromBytes,
@@ -11,7 +17,7 @@ import { loadKeypairFile, parsePrivateKeyString } from './keypair-util.js';
 import type { MemorySignerConfig } from './types.js';
 
 /**
- * Create a {@link SolanaSigner} backed by an in-memory Ed25519 keypair.
+ * Create a {@link SolanaTransactionSigner} & {@link SolanaMessageSigner} backed by an in-memory Ed25519 keypair.
  *
  * The private key never leaves the local process — all signing happens via the
  * Web Crypto API. Useful for development, server-side signing, and integration
@@ -25,7 +31,7 @@ import type { MemorySignerConfig } from './types.js';
  */
 export async function createMemorySigner<TAddress extends string = string>(
     config: MemorySignerConfig,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>> {
     const keyPairSigner = await resolveKeyPairSigner(config);
 
     return Object.freeze({
@@ -35,13 +41,13 @@ export async function createMemorySigner<TAddress extends string = string>(
         },
         signMessages: keyPairSigner.signMessages,
         signTransactions: keyPairSigner.signTransactions,
-    }) as SolanaSigner<TAddress>;
+    }) as SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>;
 }
 
 /** Create a memory signer from a pre-built `CryptoKeyPair`. */
 export async function createMemorySignerFromKeyPair<TAddress extends string = string>(
     keyPair: CryptoKeyPair,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>> {
     return await createMemorySigner<TAddress>({ keyPair });
 }
 
@@ -54,7 +60,7 @@ export async function createMemorySignerFromKeyPair<TAddress extends string = st
  */
 export async function createMemorySignerFromBytes<TAddress extends string = string>(
     privateKey: Uint8Array,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>> {
     return await createMemorySigner<TAddress>({ privateKey });
 }
 
@@ -67,7 +73,7 @@ export async function createMemorySignerFromBytes<TAddress extends string = stri
  */
 export async function createMemorySignerFromPrivateKeyString<TAddress extends string = string>(
     privateKeyString: string,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>> {
     return await createMemorySigner<TAddress>({ privateKeyString });
 }
 
@@ -78,7 +84,7 @@ export async function createMemorySignerFromPrivateKeyString<TAddress extends st
  */
 export async function createMemorySignerFromKeypairFile<TAddress extends string = string>(
     privateKeyPath: string,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>> {
     return await createMemorySigner<TAddress>({ privateKeyPath });
 }
 

@@ -4,23 +4,17 @@ import {
     abortableDelay,
     assertHttpsUrl,
     createSignatureDictionary,
-    createSignerError,
     extractAndVerifyReturnedSignature,
     fetchSignerJson,
     normalizeBaseUrl,
     normalizePrivateKeyPem,
     signBatchStaggered,
     SignerErrorCode,
-    type SolanaSigner,
+    type SolanaTransactionSigner,
     throwSignerError,
     validateRequestDelayMs,
 } from '@solana/keychain-core';
-import type {
-    MessagePartialSignerConfig,
-    SignableMessage,
-    SignatureDictionary,
-    TransactionPartialSignerConfig,
-} from '@solana/signers';
+import type { SignatureDictionary, TransactionPartialSignerConfig } from '@solana/signers';
 import {
     getBase64EncodedWireTransaction,
     type Transaction,
@@ -69,7 +63,7 @@ const TERMINAL_FAILURE_STATES = new Set([
  */
 export async function createUtilaSigner<TAddress extends string = string>(
     config: UtilaSignerConfig,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<SolanaTransactionSigner<TAddress>> {
     return await UtilaSigner.create(config);
 }
 
@@ -94,8 +88,12 @@ export async function createUtilaAccessToken(
 
 /**
  * Utila-backed signer for Solana transactions.
+ *
+ * Transaction-only: Utila does not support message signing for Solana
+ * wallets, so this signer has no `signMessages` method (Kit infers signer
+ * capabilities from method presence).
  */
-class UtilaSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class UtilaSigner<TAddress extends string = string> implements SolanaTransactionSigner<TAddress> {
     readonly address: Address<TAddress>;
     private readonly apiBaseUrl: string;
     private readonly designatedSigners: readonly string[];
@@ -214,17 +212,6 @@ class UtilaSigner<TAddress extends string = string> implements SolanaSigner<TAdd
         this.serviceAccountPrivateKey = config.privateKey;
         this.vaultId = config.vaultId;
         this.walletId = config.walletId;
-    }
-
-    async signMessages(
-        _messages: readonly SignableMessage[],
-        _config?: MessagePartialSignerConfig,
-    ): Promise<readonly SignatureDictionary[]> {
-        return await Promise.reject(
-            createSignerError(SignerErrorCode.SIGNING_FAILED, {
-                message: 'Utila signMessages is not supported for Solana wallets in this signer',
-            }),
-        );
     }
 
     async signTransactions(

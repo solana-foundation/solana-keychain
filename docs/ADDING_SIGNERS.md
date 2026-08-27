@@ -530,8 +530,8 @@ CI is a two-phase process. Coordinate with maintainers to prepare `main` before 
 ### Quick Checklist
 
 - [ ] Create package `typescript/packages/<name>/`
-- [ ] Implement `SolanaSigner` interface from `@solana/keychain-core`
-- [ ] Export `createXSigner()` factory function returning `SolanaSigner<TAddress>`
+- [ ] Implement the `SolanaTransactionSigner` and `SolanaMessageSigner` interfaces from `@solana/keychain-core`
+- [ ] Export `createXSigner()` factory function returning `SolanaTransactionSigner<TAddress> & SolanaMessageSigner<TAddress>`
 - [ ] Keep the signer class internal — do not export it from `index.ts`
 - [ ] Export config interface (`XSignerConfig`)
 - [ ] Enforce HTTPS on `apiBaseUrl` config fields
@@ -566,12 +566,16 @@ See [`typescript/packages/para/`](../typescript/packages/para/) for a complete r
 
 ### Signer Implementation
 
-Every signer must implement `SolanaSigner<TAddress>` from `@solana/keychain-core`. The interface requires:
+`@solana/keychain-core` defines one capability interface per Kit signer shape, mirroring the Rust capability traits: `SolanaTransactionSigner` (Rust `TransactionSigner`), `SolanaModifyingSigner` (Rust `ModifyingSigner`), `SolanaSendingSigner` (Rust `SendingSigner`), and the orthogonal `SolanaMessageSigner` (Rust's base-trait `sign_message`). `SolanaSigner` is the union of the three transaction shapes.
+
+A typical signer implements `SolanaTransactionSigner<TAddress>` and `SolanaMessageSigner<TAddress>` (a class lists both interfaces; it cannot implement the intersection type). Together they require:
 
 - `readonly address: Address<TAddress>`
 - `signMessages(messages, config?): Promise<readonly SignatureDictionary[]>`
 - `signTransactions(transactions, config?): Promise<readonly SignatureDictionary[]>`
 - `isAvailable(): Promise<boolean>` — health check for the signing backend
+
+If your backend has no message-sign endpoint, skip `SolanaMessageSigner` and expose no `signMessages` method at all (see Utila) — Kit classifies signers by duck-typed method presence, so a present-but-throwing method would misroute.
 
 The `config` parameter is Kit's optional partial-signer config. Every signing method must honor `config?.abortSignal` — see the abort-support rule under [Key rules](#factory-function--class).
 
@@ -598,20 +602,27 @@ export interface YourSignerConfig {
 
 #### Factory Function + Class
 
-The factory function is the only public API. It returns `SolanaSigner<TAddress>` (the interface), not the concrete class — the class itself is never exported from `index.ts`, so it stays reachable only through the factory (mirror `@solana/keychain-crossmint` for this pattern). Place the factory above the class definition, after imports.
+The factory function is the only public API. It returns `SolanaTransactionSigner<TAddress> & SolanaMessageSigner<TAddress>` (the capability interfaces), not the concrete class — the class itself is never exported from `index.ts`, so it stays reachable only through the factory (mirror `@solana/keychain-crossmint` for this pattern). Place the factory above the class definition, after imports.
 
 **Async signer** (fetches public key during init — most common):
 
 ```typescript
-import { SolanaSigner, SignerErrorCode, throwSignerError } from '@solana/keychain-core';
+import {
+    SolanaMessageSigner,
+    SolanaTransactionSigner,
+    SignerErrorCode,
+    throwSignerError,
+} from '@solana/keychain-core';
 
 export async function createYourSigner<TAddress extends string = string>(
     config: YourSignerConfig,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>> {
     return await YourSigner.create(config);
 }
 
-class YourSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class YourSigner<TAddress extends string = string>
+    implements SolanaMessageSigner<TAddress>, SolanaTransactionSigner<TAddress>
+{
     readonly address: Address<TAddress>;
 
     static async create<TAddress extends string = string>(
@@ -640,11 +651,13 @@ class YourSigner<TAddress extends string = string> implements SolanaSigner<TAddr
 ```typescript
 export function createYourSigner<TAddress extends string = string>(
     config: YourSignerConfig,
-): SolanaSigner<TAddress> {
+): SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress> {
     return new YourSigner<TAddress>(config);
 }
 
-class YourSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class YourSigner<TAddress extends string = string>
+    implements SolanaMessageSigner<TAddress>, SolanaTransactionSigner<TAddress>
+{
     readonly address: Address<TAddress>;
 
     constructor(config: YourSignerConfig) {
@@ -840,7 +853,7 @@ export { createYourSigner } from '@solana/keychain-your-signer';
 
 **g) `typescript/scripts/test-treeshake-umbrella.mjs`** — add your package to `SIGNER_MARKERS` (two distinctive strings that appear in your built `dist/` output — verify with grep before picking them) and your factory to the `FACTORIES` list. Without this, your backend leaking into other factories' bundles goes undetected.
 
-**h) Managed-broadcast (sending-signer) backends only** — if your backend rewrites the transaction message and/or broadcasts server-side, its signature cannot be applied to the caller's transaction, so it must be a `SolanaSendingSigner` (see `@solana/keychain-core`) instead of a `SolanaSigner`. That changes the checklist:
+**h) Managed-broadcast (sending-signer) backends only** — if your backend rewrites the transaction message and/or broadcasts server-side, its signature cannot be applied to the caller's transaction, so it must be a `SolanaSendingSigner` (see `@solana/keychain-core`) instead of a `SolanaTransactionSigner`. That changes the checklist:
 
 - The signer class implements `signAndSendTransactions()` and exposes **no** `signTransactions` (nor `signMessages`, unless the backend genuinely signs messages) — Kit classifies signers by duck-typed method presence, so throwing methods are not enough. See Crossmint, or Fordefi's own-property pattern for a package serving both shapes.
 - `signAndSendTransactions(transactions, config?)` takes Kit's sending-signer config and must honor `config?.abortSignal` like every other signing method. A correctly shaped sending signer is picked up automatically by core's `signAndSendTransaction()` helper and reported by `signerCapabilities()` — no extra registration needed.

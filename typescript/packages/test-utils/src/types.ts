@@ -53,7 +53,7 @@ export interface TestResult {
     success: boolean;
 }
 
-export type TestSigner = MessagePartialSigner & TransactionSigner;
+export type TestSigner = Partial<MessagePartialSigner> & TransactionSigner;
 
 /**
  * Context passed to test scenario functions

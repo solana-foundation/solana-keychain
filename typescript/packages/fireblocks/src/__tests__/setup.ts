@@ -1,11 +1,11 @@
-import type { SolanaSigner } from '@solana/keychain-core';
+import type { SolanaMessageSigner, SolanaTransactionSigner } from '@solana/keychain-core';
 import { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
 import { createFireblocksSigner } from '../fireblocks-signer';
 
 const SIGNER_TYPE = 'fireblocks';
 const REQUIRED_ENV_VARS = ['FIREBLOCKS_API_KEY', 'FIREBLOCKS_PRIVATE_KEY_PEM', 'FIREBLOCKS_VAULT_ACCOUNT_ID'];
 
-const CONFIG: SignerTestConfig<SolanaSigner> = {
+const CONFIG: SignerTestConfig<SolanaMessageSigner & SolanaTransactionSigner> = {
     signerType: SIGNER_TYPE,
     requiredEnvVars: REQUIRED_ENV_VARS,
     createSigner: () =>
@@ -18,7 +18,9 @@ const CONFIG: SignerTestConfig<SolanaSigner> = {
         }),
 };
 
-export async function getConfig(scenarios: TestScenario[]): Promise<SignerTestConfig<SolanaSigner>> {
+export async function getConfig(
+    scenarios: TestScenario[],
+): Promise<SignerTestConfig<SolanaMessageSigner & SolanaTransactionSigner>> {
     return {
         ...CONFIG,
         testScenarios: scenarios,

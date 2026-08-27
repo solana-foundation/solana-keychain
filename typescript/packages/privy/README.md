@@ -98,7 +98,7 @@ Creates and initializes a new Privy signer.
 
 **Example:**
 
-**Returns:** `Promise<SolanaSigner>`
+**Returns:** `Promise<SolanaTransactionSigner & SolanaMessageSigner>`
 
 ### Methods
 

@@ -1,6 +1,6 @@
 import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertIsSolanaTransactionSigner } from '@solana/keychain-core';
 
 import { createAwsKmsSigner } from '../aws-kms-signer.js';
 import type { AwsKmsSignerConfig } from '../types.js';
@@ -65,7 +65,7 @@ describe('createAwsKmsSigner', () => {
             });
 
             expect(signer.address).toBe(keyPair.address);
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
         });
 
         it('should throw error for missing keyId', async () => {
@@ -92,7 +92,7 @@ describe('createAwsKmsSigner', () => {
             const signer = createAwsKmsSigner(config);
 
             expect(signer.address).toBe(keyPair.address);
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
             expect(signer.signMessages).toBeDefined();
             expect(signer.signTransactions).toBeDefined();
             expect(signer.isAvailable).toBeDefined();

@@ -8,7 +8,8 @@ import {
     fetchSignerJson,
     signBatchStaggered,
     SignerErrorCode,
-    SolanaSigner,
+    SolanaMessageSigner,
+    SolanaTransactionSigner,
     throwSignerError,
     validateRequestDelayMs,
 } from '@solana/keychain-core';
@@ -48,7 +49,7 @@ import {
  */
 export async function createPrivySigner<TAddress extends string = string>(
     config: PrivySignerConfig,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>> {
     return await PrivySigner.create(config);
 }
 
@@ -96,7 +97,9 @@ type ResolvedPrivySignerConfig = PrivySignerConfig & {
  *
  * Note: Must initialize with create() to fetch the public key
  */
-class PrivySigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class PrivySigner<TAddress extends string = string>
+    implements SolanaMessageSigner<TAddress>, SolanaTransactionSigner<TAddress>
+{
     readonly address: Address<TAddress>;
     private readonly appId: string;
     private readonly appSecret: string;

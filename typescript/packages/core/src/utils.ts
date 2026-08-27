@@ -4,6 +4,7 @@ import { getBase64Encoder } from '@solana/codecs-strings';
 import { SignatureBytes, verifySignature } from '@solana/keys';
 import {
     isMessagePartialSigner,
+    isTransactionModifyingSigner,
     isTransactionPartialSigner,
     isTransactionSendingSigner,
     SignatureDictionary,
@@ -11,7 +12,13 @@ import {
 import { Base64EncodedWireTransaction, getTransactionDecoder } from '@solana/transactions';
 
 import { SignerError, SignerErrorCode, throwSignerError } from './errors.js';
-import { SolanaSendingSigner, SolanaSigner } from './types.js';
+import {
+    SolanaMessageSigner,
+    SolanaModifyingSigner,
+    SolanaSendingSigner,
+    SolanaSigner,
+    SolanaTransactionSigner,
+} from './types.js';
 
 /**
  * A UUID derived from SHA-256(message bytes), so a retry of the same bytes
@@ -230,7 +237,10 @@ export function createSignatureDictionary({
 }
 
 /**
- * Checks if the given value is a SolanaSigner.
+ * Checks if the given value is a SolanaSigner: any keychain signer, whatever
+ * its transaction capability. Narrow further with
+ * {@link isSolanaTransactionSigner}, {@link isSolanaModifyingSigner} or
+ * {@link isSolanaSendingSigner} before calling a signing method.
  * @param value - The value to check
  * @returns True if the value is a SolanaSigner, false otherwise
  */
@@ -240,15 +250,39 @@ export function isSolanaSigner<TAddress extends string>(value: {
     return (
         'address' in value &&
         'isAvailable' in value &&
-        isMessagePartialSigner(value) &&
-        isTransactionPartialSigner(value)
+        (isTransactionPartialSigner(value) || isTransactionModifyingSigner(value) || isTransactionSendingSigner(value))
     );
+}
+
+/**
+ * Checks if the given value is a SolanaTransactionSigner: a signer that
+ * returns signatures for a caller-owned transaction via `signTransactions`.
+ * @param value - The value to check
+ * @returns True if the value is a SolanaTransactionSigner, false otherwise
+ */
+export function isSolanaTransactionSigner<TAddress extends string>(value: {
+    address: Address<TAddress>;
+}): value is SolanaTransactionSigner<TAddress> {
+    return 'address' in value && 'isAvailable' in value && isTransactionPartialSigner(value);
+}
+
+/**
+ * Checks if the given value is a SolanaModifyingSigner: a signer that may
+ * rewrite the transaction before signing it, exposed as
+ * `modifyAndSignTransactions`.
+ * @param value - The value to check
+ * @returns True if the value is a SolanaModifyingSigner, false otherwise
+ */
+export function isSolanaModifyingSigner<TAddress extends string>(value: {
+    address: Address<TAddress>;
+}): value is SolanaModifyingSigner<TAddress> {
+    return 'address' in value && 'isAvailable' in value && isTransactionModifyingSigner(value);
 }
 
 /**
  * Checks if the given value is a SolanaSendingSigner (a managed-broadcast
  * signer). Such signers expose `signAndSendTransactions` and, by design, no
- * `signTransactions`, so they are never also a {@link SolanaSigner}.
+ * `signTransactions`.
  * @param value - The value to check
  * @returns True if the value is a SolanaSendingSigner, false otherwise
  */
@@ -259,11 +293,25 @@ export function isSolanaSendingSigner<TAddress extends string>(value: {
 }
 
 /**
+ * Checks if the given value is a SolanaMessageSigner: a signer that signs
+ * off-chain messages via `signMessages`.
+ * @param value - The value to check
+ * @returns True if the value is a SolanaMessageSigner, false otherwise
+ */
+export function isSolanaMessageSigner<TAddress extends string>(value: {
+    address: Address<TAddress>;
+}): value is SolanaMessageSigner<TAddress> {
+    return 'address' in value && 'isAvailable' in value && isMessagePartialSigner(value);
+}
+
+/**
  * The signing methods a signer actually exposes. Kit classifies signers by
  * method presence, so this reports what a signer can be used for rather than
  * which interface it nominally implements.
  */
 export type SignerCapabilities = Readonly<{
+    /** The signer may rewrite the transaction before signing it. */
+    canModifyTransactions: boolean;
     /** The signer signs and broadcasts through its provider. */
     canSignAndSend: boolean;
     /** The signer signs off-chain messages. */
@@ -278,6 +326,7 @@ export type SignerCapabilities = Readonly<{
  */
 export function signerCapabilities(signer: { address: Address }): SignerCapabilities {
     return Object.freeze({
+        canModifyTransactions: isTransactionModifyingSigner(signer),
         canSignAndSend: isTransactionSendingSigner(signer),
         canSignMessages: isMessagePartialSigner(signer),
         canSignTransactions: isTransactionPartialSigner(signer),
@@ -293,6 +342,24 @@ export function assertIsSolanaSigner<TAddress extends string>(value: {
     address: Address<TAddress>;
 }): asserts value is SolanaSigner<TAddress> {
     if (!isSolanaSigner(value)) {
+        throwSignerError(SignerErrorCode.EXPECTED_SOLANA_SIGNER, {
+            address: value.address,
+        });
+    }
+}
+
+/**
+ * Asserts that the given value is a SolanaTransactionSigner, throwing an
+ * error if it is not. Use this where a signer must return signatures for a
+ * caller-owned transaction, e.g. before installing it as a Kit client
+ * `payer`/`identity`; a managed-broadcast signer fails this assertion.
+ * @param value - The value to check
+ * @throws {SignerError} If the value is not a SolanaTransactionSigner
+ */
+export function assertIsSolanaTransactionSigner<TAddress extends string>(value: {
+    address: Address<TAddress>;
+}): asserts value is SolanaTransactionSigner<TAddress> {
+    if (!isSolanaTransactionSigner(value)) {
         throwSignerError(SignerErrorCode.EXPECTED_SOLANA_SIGNER, {
             address: value.address,
         });

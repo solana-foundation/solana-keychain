@@ -1,6 +1,5 @@
 import {
     type Blockhash,
-    createSignableMessage,
     createTransactionMessage,
     pipe,
     setTransactionMessageFeePayerSigner,
@@ -46,13 +45,6 @@ describe('UtilaSigner Integration', () => {
 
         expect(signedTx.signatures[signer.address]).toBeDefined();
         expect(signedTx.signatures[signer.address]?.byteLength).toBe(64);
-    });
-
-    it.skipIf(!process.env.UTILA_SERVICE_ACCOUNT_EMAIL)('returns not supported for signMessages', async () => {
-        const { createSigner } = await getConfig(['signMessage']);
-        const signer = await createSigner();
-        const message = createSignableMessage(new Uint8Array([1, 2, 3]));
-        await expect(signer.signMessages([message])).rejects.toThrow('not supported');
     });
 
     it.skipIf(!process.env.UTILA_SERVICE_ACCOUNT_EMAIL)('checks availability', async () => {

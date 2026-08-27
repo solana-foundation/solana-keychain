@@ -9,7 +9,8 @@ import {
     fetchSignerJson,
     signBatchStaggered,
     SignerErrorCode,
-    SolanaSigner,
+    SolanaMessageSigner,
+    SolanaTransactionSigner,
     throwSignerError,
     validateRequestDelayMs,
 } from '@solana/keychain-core';
@@ -47,7 +48,7 @@ import { FireblocksTransactionStatus, isTerminalStatus } from './types.js';
  */
 export async function createFireblocksSigner<TAddress extends string = string>(
     config: FireblocksSignerConfig,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>> {
     return await FireblocksSigner.create(config);
 }
 
@@ -82,7 +83,9 @@ const DEFAULT_MAX_POLL_ATTEMPTS = 60;
  * });
  * ```
  */
-class FireblocksSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class FireblocksSigner<TAddress extends string = string>
+    implements SolanaMessageSigner<TAddress>, SolanaTransactionSigner<TAddress>
+{
     private _address: Address<TAddress> | null = null;
     private privateKeyPromise: Promise<CryptoKey> | null = null;
     private readonly apiKey: string;

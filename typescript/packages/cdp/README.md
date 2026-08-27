@@ -76,7 +76,7 @@ Creates and initializes a new CDP signer.
 - `baseUrl` (string, optional): Custom API base URL (defaults to `https://api.cdp.coinbase.com`)
 - `requestDelayMs` (number, optional): Delay in ms between concurrent signing requests to avoid rate limits (default: 0)
 
-**Returns:** `Promise<SolanaSigner>`
+**Returns:** `Promise<SolanaTransactionSigner & SolanaMessageSigner>`
 
 ### Methods
 

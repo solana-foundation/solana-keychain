@@ -10,7 +10,8 @@ import {
     normalizeBaseUrl,
     signBatchStaggered,
     SignerErrorCode,
-    SolanaSigner,
+    SolanaMessageSigner,
+    SolanaTransactionSigner,
     throwSignerError,
     validateRequestDelayMs,
 } from '@solana/keychain-core';
@@ -37,7 +38,7 @@ import type { AccountResponse, OpenfortSignerConfig, SignResponse } from './type
  */
 export async function createOpenfortSigner<TAddress extends string = string>(
     config: OpenfortSignerConfig,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>> {
     return await OpenfortSigner.create<TAddress>(config);
 }
 
@@ -67,7 +68,9 @@ const JWT_LIFETIME_SECS = 120;
  * const signed = await signTransactionMessageWithSigners(transactionMessage, [signer]);
  * ```
  */
-class OpenfortSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class OpenfortSigner<TAddress extends string = string>
+    implements SolanaMessageSigner<TAddress>, SolanaTransactionSigner<TAddress>
+{
     readonly address: Address<TAddress>;
     private readonly accountId: string;
     private readonly secretKey: string;

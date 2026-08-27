@@ -12,7 +12,7 @@ import {
 } from '@solana/kit';
 import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { assertIsSolanaSigner, assertSignatureValid } from '@solana/keychain-core';
+import { assertIsSolanaTransactionSigner, assertSignatureValid } from '@solana/keychain-core';
 
 import { createFireblocksSigner } from '../fireblocks-signer.js';
 import { TEST_API_KEY, TEST_RSA_PRIVATE_KEY, TEST_VAULT_ACCOUNT_ID } from './setup.js';
@@ -159,7 +159,7 @@ describe('createFireblocksSigner', () => {
             });
 
             expect(signer.address).toBe(keyPair.address);
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
         });
 
         it('accepts a custom assetId', async () => {

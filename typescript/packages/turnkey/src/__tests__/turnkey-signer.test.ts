@@ -7,7 +7,7 @@ import {
     TransactionWithinSizeLimit,
     TransactionWithLifetime,
 } from '@solana/transactions';
-import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertIsSolanaTransactionSigner } from '@solana/keychain-core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createTurnkeySigner } from '../turnkey-signer.js';
@@ -116,7 +116,7 @@ describe('createTurnkeySigner', () => {
             });
 
             expect(signer.address).toBe(keyPair.address);
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
         });
 
         it('should throw error for missing config fields', () => {
@@ -142,7 +142,7 @@ describe('createTurnkeySigner', () => {
             const signer = createTurnkeySigner(config);
 
             expect(signer.address).toBe(keyPair.address);
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
             expect(signer.signMessages).toBeDefined();
             expect(signer.signTransactions).toBeDefined();
             expect(signer.isAvailable).toBeDefined();

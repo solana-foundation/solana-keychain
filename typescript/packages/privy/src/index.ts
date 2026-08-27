@@ -24,4 +24,10 @@ export type {
     SignatureBytesBase64,
     WalletResponse,
 } from './types.js';
-export { isSolanaSigner, assertIsSolanaSigner } from '@solana/keychain-core';
+export {
+    assertIsSolanaSigner,
+    assertIsSolanaTransactionSigner,
+    isSolanaMessageSigner,
+    isSolanaSigner,
+    isSolanaTransactionSigner,
+} from '@solana/keychain-core';

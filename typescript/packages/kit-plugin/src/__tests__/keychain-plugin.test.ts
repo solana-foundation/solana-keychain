@@ -1,3 +1,4 @@
+import { isSolanaMessageSigner } from '@solana/keychain';
 import { createClient } from '@solana/kit';
 import { describe, expect, it } from 'vitest';
 
@@ -26,7 +27,7 @@ describe('keychainSigner', () => {
         const client = await createClient().use(keychainSigner(MEMORY_CONFIG));
 
         expect(typeof client.payer.signTransactions).toBe('function');
-        expect(typeof client.payer.signMessages).toBe('function');
+        expect(isSolanaMessageSigner(client.payer)).toBe(true);
         await expect(client.payer.isAvailable()).resolves.toBe(true);
     });
 });

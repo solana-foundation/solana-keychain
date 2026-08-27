@@ -12,18 +12,16 @@ pnpm add @solana/keychain-core
 
 ### Interfaces
 
-**`SolanaSigner`** - Unified interface that all signer implementations extend:
+One capability interface per Kit signer shape, each adding `isAvailable(): Promise<boolean>` to the corresponding `@solana/signers` interface. Signing methods inherit Kit's optional config — including `{ abortSignal }` to cancel an in-flight signing request.
+
+**`SolanaTransactionSigner`** - A signer that returns signatures for a caller-owned transaction. Extends Kit's `TransactionPartialSigner`:
 
 ```typescript
-import { SolanaSigner } from '@solana/keychain-core';
+import { SolanaTransactionSigner } from '@solana/keychain-core';
 
-interface SolanaSigner {
+interface SolanaTransactionSigner {
     address: Address;
     isAvailable(): Promise<boolean>;
-    signMessages(
-        messages: readonly SignableMessage[],
-        config?: MessagePartialSignerConfig,
-    ): Promise<readonly SignatureDictionary[]>;
     signTransactions(
         transactions: readonly Transaction[],
         config?: TransactionPartialSignerConfig,
@@ -31,9 +29,9 @@ interface SolanaSigner {
 }
 ```
 
-`address`, `signMessages()` and `signTransactions()` are inherited from Kit's `MessagePartialSigner` and `TransactionPartialSigner`, so every signing method takes Kit's optional config — including `{ abortSignal }` to cancel an in-flight signing request.
+**`SolanaModifyingSigner`** - A signer that may rewrite parts of the transaction before signing it, then returns the modified transaction without broadcasting. Extends Kit's `TransactionModifyingSigner`. No keychain backend has this shape yet.
 
-**`SolanaSendingSigner`** - Interface for managed-broadcast backends. A backend belongs in this category when it rewrites the transaction message and/or broadcasts server-side, so its signature cannot be applied to the caller's transaction. Such signers expose `signAndSendTransactions()` (Kit's `TransactionSendingSigner`) and deliberately **no** `signTransactions` or `signMessages` — Kit classifies signers by duck-typed method presence, and a present-but-throwing method would make Kit misroute the transaction and fail at runtime. Backends that also support message signing intersect `MessagePartialSigner` per package:
+**`SolanaSendingSigner`** - Interface for managed-broadcast backends. A backend belongs in this category when it rewrites the transaction message and/or broadcasts server-side, so its signature cannot be applied to the caller's transaction. Such signers expose `signAndSendTransactions()` (Kit's `TransactionSendingSigner`) and deliberately **no** `signTransactions` — Kit classifies signers by duck-typed method presence, and a present-but-throwing method would make Kit misroute the transaction and fail at runtime:
 
 ```typescript
 import { SolanaSendingSigner } from '@solana/keychain-core';
@@ -45,7 +43,11 @@ interface SolanaSendingSigner {
 }
 ```
 
-Runtime guards: `isSolanaSigner()`, `assertIsSolanaSigner()`, and `isSolanaSendingSigner()`.
+**`SolanaMessageSigner`** - A signer that signs off-chain messages via `signMessages()`. Extends Kit's `MessagePartialSigner`. Message signing is orthogonal to the transaction shapes, exactly as Kit separates `MessageSigner` from `TransactionSigner`: a backend that signs messages intersects this interface with its transaction shape (`SolanaTransactionSigner & SolanaMessageSigner` for most backends), and a backend that does not (Crossmint, Utila) exposes no `signMessages` method at all.
+
+**`SolanaSigner`** - Any keychain signer: the union `SolanaModifyingSigner | SolanaSendingSigner | SolanaTransactionSigner`, mirroring Kit's `TransactionSigner` union. Which shape a signer has is not knowable from this type, so narrow with the guards below before calling a signing method.
+
+Runtime guards: `isSolanaSigner()`, `isSolanaTransactionSigner()`, `isSolanaModifyingSigner()`, `isSolanaSendingSigner()`, `isSolanaMessageSigner()`, `assertIsSolanaSigner()`, and `assertIsSolanaTransactionSigner()`. `signerCapabilities(signer)` reports the same information as a `{ canModifyTransactions, canSignAndSend, canSignMessages, canSignTransactions }` record.
 
 ### Error Handling
 
@@ -108,9 +110,9 @@ const sigDict = createSignatureDictionary({
 This package is typically used as a dependency when building custom signer implementations. See [@solana/keychain-privy](https://www.npmjs.com/package/@solana/keychain-privy) for an example implementation.
 
 ```typescript
-import { SolanaSigner, SignerErrorCode, throwSignerError } from '@solana/keychain-core';
+import { SolanaMessageSigner, SolanaTransactionSigner, SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 
-class MyCustomSigner implements SolanaSigner {
+class MyCustomSigner implements SolanaTransactionSigner, SolanaMessageSigner {
     readonly address: Address;
 
     async isAvailable(): Promise<boolean> {
@@ -129,13 +131,27 @@ class MyCustomSigner implements SolanaSigner {
 
 ## Type Guards
 
-**`isSolanaSigner`** - Check if a value is a SolanaSigner:
+**`isSolanaSigner`** - Check if a value is a `SolanaSigner` (any of the three transaction shapes):
 
 ```typescript
 import { isSolanaSigner } from '@solana/keychain-core';
 
 const isSigner = isSolanaSigner(value); // true or false
 ```
+
+**`isSolanaTransactionSigner`** / **`isSolanaModifyingSigner`** / **`isSolanaSendingSigner`** - Narrow a `SolanaSigner` to its transaction shape before calling a signing method:
+
+```typescript
+import { isSolanaSendingSigner, isSolanaTransactionSigner } from '@solana/keychain-core';
+
+if (isSolanaSendingSigner(signer)) {
+    await signer.signAndSendTransactions([transaction]);
+} else if (isSolanaTransactionSigner(signer)) {
+    await signer.signTransactions([transaction]);
+}
+```
+
+**`isSolanaMessageSigner`** - Check whether a signer signs off-chain messages via `signMessages`.
 
 **`assertIsSolanaSigner`** - Assert that a value is a SolanaSigner:
 
@@ -144,3 +160,5 @@ import { assertIsSolanaSigner } from '@solana/keychain-core';
 
 assertIsSolanaSigner(value); // void (throws if not a SolanaSigner)
 ```
+
+**`assertIsSolanaTransactionSigner`** - Assert that a value is a SolanaTransactionSigner. Use this where a signer must return signatures for a caller-owned transaction, e.g. before installing it as a Kit client `payer`/`identity`; a managed-broadcast signer fails this assertion.

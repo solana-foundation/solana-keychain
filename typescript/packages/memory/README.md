@@ -94,7 +94,7 @@ const available = await signer.isAvailable(); // always true
 
 ### `createMemorySigner(config)`
 
-Returns `Promise<SolanaSigner>`.
+Returns `Promise<SolanaTransactionSigner & SolanaMessageSigner>`.
 
 Config (`MemorySignerConfig`):
 - `keyPair?: CryptoKeyPair` — pre-built CryptoKeyPair (e.g. from `generateKeyPair`)

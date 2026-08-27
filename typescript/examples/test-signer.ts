@@ -23,7 +23,7 @@
  *   - AWS_KMS_REGION: "us-east-1" (optional, defaults to AWS config default region)
  */
 
-import { assertIsSolanaSigner, SolanaSigner } from '@solana/keychain-core';
+import { assertIsSolanaTransactionSigner, SolanaMessageSigner, SolanaTransactionSigner } from '@solana/keychain-core';
 import { createFireblocksSigner } from '@solana/keychain-fireblocks';
 import { createParaSigner } from '@solana/keychain-para';
 import { createPrivySigner } from '@solana/keychain-privy';
@@ -79,7 +79,7 @@ function logStatus(step: number, message: string) {
 
 interface SignerConfig {
     requiredEnvVars: string[];
-    create: () => Promise<SolanaSigner | KeyPairSigner>;
+    create: () => Promise<(SolanaMessageSigner & SolanaTransactionSigner) | KeyPairSigner>;
 }
 
 const SIGNER_CONFIGS: Record<SignerType, SignerConfig> = {
@@ -167,7 +167,7 @@ function validateEnv(signerType: SignerType) {
     }
 }
 
-async function createSigner(signerType: SignerType): Promise<SolanaSigner | KeyPairSigner> {
+async function createSigner(signerType: SignerType): Promise<(SolanaMessageSigner & SolanaTransactionSigner) | KeyPairSigner> {
     const config = SIGNER_CONFIGS[signerType];
     return await config.create();
 }
@@ -192,7 +192,7 @@ async function main() {
         if (signerType === 'keypair') {
             assertIsKeyPairSigner(signer as KeyPairSigner);
         } else {
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
             const available = await signer.isAvailable();
             console.log(`  ✓ Available: ${available}`);
 

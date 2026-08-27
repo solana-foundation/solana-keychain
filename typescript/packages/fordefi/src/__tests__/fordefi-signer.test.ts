@@ -3,10 +3,12 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-    assertIsSolanaSigner,
+    assertIsSolanaTransactionSigner,
     assertSignatureValid,
+    isSolanaMessageSigner,
     isSolanaSendingSigner,
     isSolanaSigner,
+    isSolanaTransactionSigner,
     type SignerError,
 } from '@solana/keychain-core';
 import { createCosignedWireTransaction, createSignedWireTransaction } from '@solana/keychain-test-utils';
@@ -96,9 +98,10 @@ describe('createFordefiSigner', () => {
             expect(signer.address).toBe(MOCK_ADDRESS);
         });
 
-        it('should satisfy the SolanaSigner interface', async () => {
+        it('should satisfy the SolanaTransactionSigner and SolanaMessageSigner interfaces', async () => {
             const signer = await createFordefiSigner(mockConfig);
-            expect(() => assertIsSolanaSigner(signer)).not.toThrow();
+            expect(() => assertIsSolanaTransactionSigner(signer)).not.toThrow();
+            expect(isSolanaMessageSigner(signer)).toBe(true);
         });
 
         it('should use the configured publicKey without a vault fetch', async () => {
@@ -471,7 +474,8 @@ describe('createFordefiSigner', () => {
             expect('signTransactions' in signer).toBe(false);
             expect(isTransactionPartialSigner(guardInput)).toBe(false);
             expect(isTransactionSendingSigner(guardInput)).toBe(true);
-            expect(isSolanaSigner(guardInput)).toBe(false);
+            expect(isSolanaSigner(guardInput)).toBe(true);
+            expect(isSolanaTransactionSigner(guardInput)).toBe(false);
             expect(isSolanaSendingSigner(guardInput)).toBe(true);
         });
 
@@ -499,6 +503,7 @@ describe('createFordefiSigner', () => {
             expect(isTransactionSendingSigner(guardInput)).toBe(false);
             expect(isTransactionPartialSigner(guardInput)).toBe(true);
             expect(isSolanaSigner(guardInput)).toBe(true);
+            expect(isSolanaTransactionSigner(guardInput)).toBe(true);
             expect(isSolanaSendingSigner(guardInput)).toBe(false);
         });
 

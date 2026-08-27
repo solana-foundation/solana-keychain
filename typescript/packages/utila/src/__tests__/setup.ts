@@ -1,4 +1,4 @@
-import type { SolanaSigner } from '@solana/keychain-core';
+import type { SolanaTransactionSigner } from '@solana/keychain-core';
 import { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
 import { createUtilaSigner } from '../utila-signer.js';
 
@@ -11,7 +11,7 @@ const REQUIRED_ENV_VARS = [
     'UTILA_NETWORK',
 ];
 
-const CONFIG: SignerTestConfig<SolanaSigner> = {
+const CONFIG: SignerTestConfig<SolanaTransactionSigner> = {
     signerType: SIGNER_TYPE,
     requiredEnvVars: REQUIRED_ENV_VARS,
     createSigner: () =>
@@ -29,7 +29,7 @@ const CONFIG: SignerTestConfig<SolanaSigner> = {
         }),
 };
 
-export async function getConfig(scenarios: TestScenario[]): Promise<SignerTestConfig<SolanaSigner>> {
+export async function getConfig(scenarios: TestScenario[]): Promise<SignerTestConfig<SolanaTransactionSigner>> {
     return {
         ...CONFIG,
         testScenarios: scenarios,
