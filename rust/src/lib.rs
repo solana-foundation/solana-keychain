@@ -120,8 +120,9 @@ pub use crossmint::{CrossmintSigner, CrossmintSignerConfig};
 pub use dfns::{DfnsSigner, DfnsSignerConfig};
 #[cfg(feature = "fordefi")]
 pub use fordefi::{
-    FordefiBlackBoxSigner, FordefiNativeAutoSigner, FordefiPriorityLevel, FordefiRequestSigner,
-    FordefiSignerConfig, FordefiSolanaFee, PemRequestSigner, SolanaChainUniqueId,
+    FordefiBlackBoxSigner, FordefiNativeAutoSigner, FordefiNativeManualSigner,
+    FordefiPriorityLevel, FordefiPushMode, FordefiRequestSigner, FordefiSignerConfig,
+    FordefiSolanaFee, PemRequestSigner, SolanaChainUniqueId,
 };
 #[cfg(feature = "openfort")]
 pub use openfort::{OpenfortSigner, OpenfortSignerConfig};
@@ -190,6 +191,8 @@ pub enum Signer {
     FordefiBlackBox(FordefiBlackBoxSigner),
     #[cfg(feature = "fordefi")]
     FordefiNativeAuto(FordefiNativeAutoSigner),
+    #[cfg(feature = "fordefi")]
+    FordefiNativeManual(FordefiNativeManualSigner),
 }
 
 impl Signer {
@@ -401,15 +404,22 @@ impl Signer {
     /// Create a Fordefi signer.
     ///
     /// `config.public_key` is trusted as the vault's Solana address; construction
-    /// performs no network calls. Set `config.chain` to use native Solana mode
-    /// (Fordefi modifies and auto-broadcasts the transaction). Leave it `None`
-    /// for black-box mode (raw EdDSA signing, transaction assembled locally).
+    /// performs no network calls. Set `config.chain` to use native Solana mode;
+    /// leave it `None` for black-box mode (raw EdDSA signing, transaction
+    /// assembled locally). Within native mode, `config.push_mode` selects whether
+    /// Fordefi broadcasts the transaction ([`FordefiPushMode::Auto`], the default)
+    /// or rewrites and signs it for the caller to send
+    /// ([`FordefiPushMode::Manual`]).
     #[cfg(feature = "fordefi")]
     pub async fn from_fordefi(config: FordefiSignerConfig) -> Result<Self, SignerError> {
-        Ok(if config.chain.is_some() {
-            Self::FordefiNativeAuto(FordefiNativeAutoSigner::from_config(config).await?)
-        } else {
-            Self::FordefiBlackBox(FordefiBlackBoxSigner::from_config(config).await?)
+        Ok(match (config.chain.is_some(), config.push_mode) {
+            (false, _) => Self::FordefiBlackBox(FordefiBlackBoxSigner::from_config(config).await?),
+            (true, Some(FordefiPushMode::Manual)) => {
+                Self::FordefiNativeManual(FordefiNativeManualSigner::from_config(config).await?)
+            }
+            (true, _) => {
+                Self::FordefiNativeAuto(FordefiNativeAutoSigner::from_config(config).await?)
+            }
         })
     }
 
@@ -418,8 +428,9 @@ impl Signer {
     /// A [`SendingSigner`] backend broadcasts through its provider, so its own
     /// signature identifies the transaction and `send` is never called; any
     /// other backend signs and `send` broadcasts the encoded wire transaction.
-    /// The crate has no RPC client, so the network hop is always
-    /// caller-supplied.
+    /// A [`ModifyingSigner`] backend replaces `tx` with the transaction its
+    /// signature covers, and `send` broadcasts that one. The crate has no RPC
+    /// client, so the network hop is always caller-supplied.
     ///
     /// # Errors
     ///
@@ -441,10 +452,13 @@ impl Signer {
             }
             None => match self.as_transaction_signer() {
                 Some(signer) => send::sign_and_send(signer, tx, send).await,
-                None => Err(SignerError::SigningFailed(
-                    "This signer supports neither sign_transaction nor sign_and_send_transaction"
-                        .to_string(),
-                )),
+                None => match self.as_modifying_signer() {
+                    Some(signer) => send::modify_and_send(signer, tx, send).await,
+                    None => Err(SignerError::SigningFailed(
+                        "This signer supports neither sign_transaction nor sign_and_send_transaction"
+                            .to_string(),
+                    )),
+                },
             },
         }
     }
@@ -483,6 +497,19 @@ impl Signer {
             Signer::Crossmint(_) => None,
             #[cfg(feature = "fordefi")]
             Signer::FordefiNativeAuto(_) => None,
+            #[cfg(feature = "fordefi")]
+            Signer::FordefiNativeManual(_) => None,
+        }
+    }
+
+    /// The wrapped backend as a [`ModifyingSigner`], or `None` when the provider
+    /// signs the bytes it was given.
+    pub fn as_modifying_signer(&self) -> Option<&dyn ModifyingSigner> {
+        match self {
+            #[cfg(feature = "fordefi")]
+            Signer::FordefiNativeManual(s) => Some(s),
+            #[allow(unreachable_patterns)]
+            _ => None,
         }
     }
 
@@ -533,6 +560,8 @@ macro_rules! dispatch_signer {
             Signer::FordefiBlackBox($signer) => $body,
             #[cfg(feature = "fordefi")]
             Signer::FordefiNativeAuto($signer) => $body,
+            #[cfg(feature = "fordefi")]
+            Signer::FordefiNativeManual($signer) => $body,
         }
     };
 }

@@ -44,6 +44,7 @@ fn base_test_config() -> FordefiSignerConfig {
         http_client_config: None,
         chain: None,
         fee: None,
+        push_mode: None,
     }
 }
 
@@ -100,7 +101,16 @@ fn create_native_test_signer(base_url: &str, pubkey: Pubkey) -> FordefiNativeAut
     }
 }
 
-/// The two signer types reject a config meant for the other, so a
+/// Helper to build a native-Solana signer that does not broadcast, for tests.
+fn create_manual_test_signer(base_url: &str, pubkey: Pubkey) -> FordefiNativeManualSigner {
+    FordefiNativeManualSigner {
+        core: create_test_core(base_url, pubkey, test_request_signer()),
+        chain: SolanaChainUniqueId::SolanaMainnet,
+        fee: None,
+    }
+}
+
+/// The three signer types reject a config meant for another, so a
 /// mode-mismatched construction fails instead of silently changing shape.
 #[tokio::test]
 async fn test_fordefi_constructors_reject_mode_mismatched_config() {
@@ -108,11 +118,43 @@ async fn test_fordefi_constructors_reject_mode_mismatched_config() {
         chain: Some(SolanaChainUniqueId::SolanaDevnet),
         ..base_test_config()
     };
-    let result = FordefiBlackBoxSigner::from_config(native_config).await;
+    let result = FordefiBlackBoxSigner::from_config(native_config.clone()).await;
+    assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+
+    let result = FordefiBlackBoxSigner::from_config(FordefiSignerConfig {
+        push_mode: Some(FordefiPushMode::Auto),
+        ..base_test_config()
+    })
+    .await;
     assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
 
     let result = FordefiNativeAutoSigner::from_config(base_test_config()).await;
     assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+
+    let result = FordefiNativeAutoSigner::from_config(FordefiSignerConfig {
+        push_mode: Some(FordefiPushMode::Manual),
+        ..native_config.clone()
+    })
+    .await;
+    assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+
+    let result = FordefiNativeManualSigner::from_config(native_config).await;
+    assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+
+    let result = FordefiNativeManualSigner::from_config(FordefiSignerConfig {
+        push_mode: Some(FordefiPushMode::Manual),
+        ..base_test_config()
+    })
+    .await;
+    assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+
+    let result = FordefiNativeManualSigner::from_config(FordefiSignerConfig {
+        chain: Some(SolanaChainUniqueId::SolanaDevnet),
+        push_mode: Some(FordefiPushMode::Manual),
+        ..base_test_config()
+    })
+    .await;
+    assert!(result.is_ok());
 }
 
 /// Build a mock wire transaction: [1 byte sig_count][64-byte signature][message bytes]
@@ -698,23 +740,26 @@ async fn test_fordefi_error_status_code_only() {
 
 // --- Native Solana signing tests ---
 
+/// The vault does not always occupy slot zero, so the signature is located by
+/// its required-signer position.
 #[test]
 fn test_fordefi_native_extracts_vault_signature_from_non_first_slot() {
     let fee_payer = create_test_keypair();
     let fordefi_keypair = create_test_keypair();
     let fordefi_pubkey = keypair_pubkey(&fordefi_keypair);
-    let signer = create_native_test_signer("https://test.com", fordefi_pubkey);
 
     let mut returned_tx = create_test_transaction(&keypair_pubkey(&fee_payer));
     add_required_signer(&mut returned_tx, fordefi_pubkey);
     let returned_message = returned_tx.message.serialize();
-    let fee_payer_signature = fee_payer.sign_message(&returned_message);
     let fordefi_signature = fordefi_keypair.sign_message(&returned_message);
-    returned_tx.signatures = vec![fee_payer_signature, fordefi_signature];
+    returned_tx.signatures = vec![fee_payer.sign_message(&returned_message), fordefi_signature];
+    let wire = crate::transaction_util::serialize_wire_transaction(&returned_tx).unwrap();
 
-    let extracted = signer.extract_vault_signature(&returned_tx).unwrap();
+    let (decoded, extracted) =
+        extract_and_verify_rewritten_transaction(&wire, &fordefi_pubkey).unwrap();
+
     assert_eq!(extracted, fordefi_signature);
-    assert!(extracted.verify(&fordefi_pubkey.to_bytes(), &returned_message));
+    assert_eq!(decoded.message.serialize(), returned_message);
 }
 
 #[test]
@@ -1240,4 +1285,209 @@ fn test_fordefi_custom_request_signer_still_validates_config() {
     });
 
     assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
+}
+
+// --- Native manual mode ---
+
+/// Fordefi rewrites the message, so the caller has to end up holding the bytes
+/// the returned signature covers rather than the ones they submitted.
+#[tokio::test]
+async fn test_fordefi_manual_replaces_the_callers_transaction() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let pubkey = keypair_pubkey(&keypair);
+    let signer = create_manual_test_signer(&mock_server.uri(), pubkey);
+
+    let mut tx = create_test_transaction(&pubkey);
+    let submitted_message = tx.message.serialize();
+    let rewritten = create_test_transaction(&pubkey);
+    let rewritten_message = rewritten.message.serialize();
+    assert_ne!(submitted_message, rewritten_message);
+    let wire_b64 = STANDARD.encode(build_mock_wire_transaction(&keypair, &rewritten_message));
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .and(wiremock::matchers::body_partial_json(serde_json::json!({
+            "type": "solana_transaction",
+            "details": {
+                "type": "solana_serialized_transaction_message",
+                "push_mode": "manual"
+            }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "manual-tx-1"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/transactions/manual-tx-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "state": "signed",
+            "raw_transaction": wire_b64
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let result = signer
+        .modify_and_sign_transaction(&mut tx)
+        .await
+        .expect("manual signing should succeed");
+
+    let (encoded, signature) = result.into_signed_transaction();
+    assert!(!encoded.is_empty(), "the caller broadcasts this themselves");
+    assert!(signature.verify(&pubkey.to_bytes(), &rewritten_message));
+    assert!(!signature.verify(&pubkey.to_bytes(), &submitted_message));
+    assert_eq!(
+        tx.message.serialize(),
+        rewritten_message,
+        "the caller's transaction must become the one the signature covers"
+    );
+}
+
+/// The idempotency key is namespaced so the same bytes cannot collide with an
+/// auto create that did broadcast them.
+#[tokio::test]
+async fn test_fordefi_manual_namespaces_the_idempotency_key() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let pubkey = keypair_pubkey(&keypair);
+    let signer = create_manual_test_signer(&mock_server.uri(), pubkey);
+
+    let mut tx = create_test_transaction(&pubkey);
+    let message_data = tx.message.serialize();
+    let auto_key = idempotency_key_from_message(&message_data);
+    let mut namespaced = format!(
+        "fordefi:solana:manual:{}:test-vault-id:",
+        SolanaChainUniqueId::SolanaMainnet.as_str()
+    )
+    .into_bytes();
+    namespaced.extend_from_slice(&message_data);
+    let manual_key = idempotency_key_from_message(&namespaced);
+    assert_ne!(auto_key, manual_key);
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .and(header("x-idempotence-id", manual_key.as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "manual-tx-idem"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/transactions/manual-tx-idem"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "state": "signed",
+            "raw_transaction": STANDARD.encode(build_mock_wire_transaction(&keypair, &message_data))
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    signer
+        .modify_and_sign_transaction(&mut tx)
+        .await
+        .expect("manual signing should succeed");
+}
+
+#[tokio::test]
+async fn test_fordefi_manual_rejects_a_transaction_it_does_not_pay_for() {
+    let pubkey = keypair_pubkey(&create_test_keypair());
+    let signer = create_manual_test_signer("https://api.test.fordefi.com", pubkey);
+    let mut tx = create_test_transaction(&Pubkey::new_unique());
+
+    let error = signer
+        .modify_and_sign_transaction(&mut tx)
+        .await
+        .expect_err("the vault must be the fee payer");
+
+    assert!(matches!(error, SignerError::SigningFailed(_)));
+}
+
+/// Fordefi may only rewrite a message nobody has signed yet.
+#[tokio::test]
+async fn test_fordefi_manual_rejects_an_already_signed_transaction() {
+    let keypair = create_test_keypair();
+    let pubkey = keypair_pubkey(&keypair);
+    let signer = create_manual_test_signer("https://api.test.fordefi.com", pubkey);
+    let mut tx = create_test_transaction(&pubkey);
+    add_required_signer(&mut tx, Pubkey::new_unique());
+    tx.signatures = vec![
+        keypair.sign_message(&tx.message.serialize()),
+        Signature::default(),
+    ];
+
+    let error = signer
+        .modify_and_sign_transaction(&mut tx)
+        .await
+        .expect_err("manual signing must run first");
+
+    assert!(matches!(error, SignerError::SigningFailed(_)));
+}
+
+/// The one thing manual mode does check: the signature has to cover the message
+/// it came back with, or the caller would hold bytes nothing signed.
+#[tokio::test]
+async fn test_fordefi_manual_rejects_a_signature_over_other_bytes() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let pubkey = keypair_pubkey(&keypair);
+    let signer = create_manual_test_signer(&mock_server.uri(), pubkey);
+
+    let mut tx = create_test_transaction(&pubkey);
+    let submitted_message = tx.message.serialize();
+
+    let mut wire = vec![1u8];
+    wire.extend_from_slice(keypair.sign_message(b"some other message").as_ref());
+    wire.extend_from_slice(&submitted_message);
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "manual-tx-mismatch"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/transactions/manual-tx-mismatch"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "state": "signed",
+            "raw_transaction": STANDARD.encode(&wire)
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let error = signer
+        .modify_and_sign_transaction(&mut tx)
+        .await
+        .expect_err("a signature that does not cover the returned message must be rejected");
+
+    assert!(matches!(error, SignerError::SigningFailed(_)));
+    assert_eq!(
+        tx.message.serialize(),
+        submitted_message,
+        "a rejected result must leave the caller's transaction alone"
+    );
+}
+
+/// Manual mode is neither a plain transaction signer nor a sending one, so the
+/// umbrella has to reach it through the modifying accessor.
+#[test]
+fn test_fordefi_manual_is_reached_through_the_modifying_accessor() {
+    let pubkey = keypair_pubkey(&create_test_keypair());
+    let signer = crate::Signer::FordefiNativeManual(create_manual_test_signer(
+        "https://api.test.fordefi.com",
+        pubkey,
+    ));
+
+    assert!(signer.as_modifying_signer().is_some());
+    assert!(signer.as_transaction_signer().is_none());
+    assert!(signer.as_sending_signer().is_none());
 }

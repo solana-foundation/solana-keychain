@@ -50,12 +50,40 @@ pub fn signature_from_hex(encoded: &str) -> Result<Signature, SignerError> {
     signature_from_bytes(&bytes)
 }
 
+/// Locate this signer's signature by its required-signer position, rejecting a
+/// missing or default signature in that slot.
+#[cfg(any(
+    feature = "privy",
+    feature = "turnkey",
+    feature = "cdp",
+    feature = "utila",
+    feature = "fordefi"
+))]
+fn signature_at_signer_position(
+    transaction: &crate::sdk_adapter::VersionedTransaction,
+    public_key: &Pubkey,
+) -> Result<Signature, SignerError> {
+    let position = crate::transaction_util::TransactionUtil::get_signing_keypair_position(
+        transaction,
+        public_key,
+    )?;
+    transaction
+        .signatures
+        .get(position)
+        .copied()
+        .filter(|signature| *signature != Signature::default())
+        .ok_or_else(|| {
+            SignerError::SigningFailed(
+                "Returned signed transaction is missing the signer's signature".to_string(),
+            )
+        })
+}
+
 /// Extract and verify this signer's signature from a fully-signed transaction
-/// returned by a provider.
+/// returned by a provider that signed the bytes we submitted.
 ///
-/// Rejects a missing or default signature in the signer's slot. Verifying
-/// against `original_message_bytes` guarantees the signature applies to the
-/// transaction we submitted, so no byte-equality check of the returned
+/// Verifying against `original_message_bytes` guarantees the signature applies
+/// to the transaction we submitted, so no byte-equality check of the returned
 /// message is needed.
 #[cfg(any(
     feature = "privy",
@@ -69,21 +97,25 @@ pub(crate) fn extract_and_verify_returned_signature(
     original_message_bytes: &[u8],
 ) -> Result<Signature, SignerError> {
     let returned = crate::transaction_util::deserialize_wire_transaction(returned_tx_bytes)?;
-    let position = crate::transaction_util::TransactionUtil::get_signing_keypair_position(
-        &returned, public_key,
-    )?;
-    let signature = returned
-        .signatures
-        .get(position)
-        .copied()
-        .filter(|sig| *sig != Signature::default())
-        .ok_or_else(|| {
-            SignerError::SigningFailed(
-                "Returned signed transaction is missing the signer's signature".to_string(),
-            )
-        })?;
+    let signature = signature_at_signer_position(&returned, public_key)?;
     verify_or_reject(&signature, public_key, original_message_bytes)?;
     Ok(signature)
+}
+
+/// Verify this signer's signature against the message the returned transaction
+/// carries, for a provider that rewrote the message before signing it.
+///
+/// Both are handed back: the caller has to continue from these bytes, not from
+/// the ones it submitted.
+#[cfg(feature = "fordefi")]
+pub(crate) fn extract_and_verify_rewritten_transaction(
+    returned_tx_bytes: &[u8],
+    public_key: &Pubkey,
+) -> Result<(crate::sdk_adapter::VersionedTransaction, Signature), SignerError> {
+    let returned = crate::transaction_util::deserialize_wire_transaction(returned_tx_bytes)?;
+    let signature = signature_at_signer_position(&returned, public_key)?;
+    verify_or_reject(&signature, public_key, &returned.message.serialize())?;
+    Ok((returned, signature))
 }
 
 /// Reject a backend-returned signature that does not verify against the
