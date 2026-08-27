@@ -17,7 +17,7 @@ from solana_keychain.core.http import (
     probe_availability,
 )
 from solana_keychain.core.signature_util import verify_returned_signature
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.signer import SignedTransaction, TransactionSigner
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
@@ -52,7 +52,7 @@ def _strip_vault_signature_prefix(signature: str) -> str:
     return encoded
 
 
-class VaultSigner(SolanaSigner):
+class VaultSigner(TransactionSigner):
     """Signer backed by the HashiCorp Vault transit engine."""
 
     def __init__(self, config: VaultSignerConfig) -> None:

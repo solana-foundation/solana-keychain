@@ -20,7 +20,7 @@ from solana_keychain.core.http import (
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import (
     SignedTransaction,
-    SolanaSigner,
+    TransactionSigner,
     require_initialized,
 )
 from solana_keychain.core.transaction_util import (
@@ -55,7 +55,7 @@ class OpenfortSignerConfig:
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
 
 
-class OpenfortSigner(SolanaSigner):
+class OpenfortSigner(TransactionSigner):
     """Signer backed by an Openfort backend wallet.
 
     ``init()`` must be awaited before signing — it resolves the wallet's Solana

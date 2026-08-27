@@ -39,40 +39,23 @@ class SignedTransaction:
 
 
 class SolanaSigner(ABC):
-    """Unified signing contract implemented by every backend."""
+    """Base contract every backend implements: identity, message signing and health.
+
+    Transaction handling lives in the capability classes, and a backend subclasses
+    exactly the one matching its provider's shape:
+
+    - ``TransactionSigner``: signs the caller's transaction as given and leaves
+      broadcasting to the caller.
+    - ``ModifyingSigner``: rewrites the transaction before signing it; the caller
+      must continue from the returned transaction.
+    - ``SendingSigner``: the provider signs and broadcasts server-side; the
+      caller's transaction is never mutated.
+    """
 
     @property
     @abstractmethod
     def pubkey(self) -> Pubkey:
         """The public key of this signer."""
-
-    @property
-    def broadcasts_transactions(self) -> bool:
-        """Whether the provider may execute transactions server-side, requiring
-        reconciliation by provider transaction ID before retrying."""
-        return False
-
-    @abstractmethod
-    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
-        """Sign ``transaction`` (modified in place) and return the encoded result.
-
-        Accepts legacy, v0 and v1."""
-
-    async def sign_and_send_transaction(self, transaction: VersionedTransaction) -> Signature:
-        """Sign ``transaction`` and broadcast it through the provider.
-
-        Implemented only by signers whose provider executes the transaction
-        server-side; ``broadcasts_transactions`` reports which shape a signer has
-        in its current configuration. The provider may rewrite the transaction, in
-        which case ``transaction`` is left untouched and the returned signature
-        identifies the transaction that actually landed.
-
-        Raises ``SIGNING_FAILED`` when this signer cannot broadcast.
-        """
-        raise SignerError(
-            SignerErrorCode.SIGNING_FAILED,
-            "this signer cannot broadcast transactions; sign it and broadcast the result",
-        )
 
     @abstractmethod
     async def sign_message(self, message: bytes) -> Signature:
@@ -81,3 +64,51 @@ class SolanaSigner(ABC):
     @abstractmethod
     async def is_available(self) -> bool:
         """Whether the signer is available and healthy."""
+
+
+class TransactionSigner(SolanaSigner):
+    """A signer that signs the caller's transaction exactly as given.
+
+    The transaction's message bytes are what the signature covers; the caller
+    broadcasts the result.
+    """
+
+    @abstractmethod
+    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
+        """Sign ``transaction`` (modified in place) and return the encoded result.
+
+        Accepts legacy, v0 and v1."""
+
+
+class ModifyingSigner(SolanaSigner):
+    """A signer whose provider rewrites the transaction before signing it.
+
+    The returned signature covers the rewritten message, not the bytes the caller
+    supplied, so any signatures collected beforehand are invalidated. Run a
+    modifying signer first and continue from the transaction it returns.
+    """
+
+    @abstractmethod
+    async def modify_and_sign_transaction(
+        self, transaction: VersionedTransaction
+    ) -> SignedTransaction:
+        """Let the provider rewrite ``transaction``, sign the rewritten
+        transaction and replace ``transaction`` with it.
+
+        On success ``transaction`` holds the provider's rewritten transaction;
+        continue from it, never from the bytes submitted."""
+
+
+class SendingSigner(SolanaSigner):
+    """A signer whose provider signs and broadcasts the transaction server-side.
+
+    The provider may rewrite the transaction before broadcasting; the caller's
+    transaction is never mutated, and the returned signature identifies the
+    transaction that actually landed. A failed call does not mean nothing landed:
+    ``BROADCAST_UNCONFIRMED`` carries the provider transaction id when the create
+    was accepted.
+    """
+
+    @abstractmethod
+    async def sign_and_send_transaction(self, transaction: VersionedTransaction) -> Signature:
+        """Sign ``transaction`` and broadcast it through the provider."""

@@ -18,7 +18,7 @@ from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 from solana_keychain.core.signature_util import verify_returned_signature
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.signer import SignedTransaction, TransactionSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
@@ -46,7 +46,7 @@ class GcpKmsSignerConfig:
     client: Any | None = field(default=None, repr=False)
 
 
-class GcpKmsSigner(SolanaSigner):
+class GcpKmsSigner(TransactionSigner):
     """Signer backed by a Google Cloud KMS Ed25519 key."""
 
     def __init__(self, config: GcpKmsSignerConfig) -> None:

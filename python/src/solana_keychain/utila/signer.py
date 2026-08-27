@@ -31,7 +31,7 @@ from solana_keychain.core.poll import poll_attempts
 from solana_keychain.core.signature_util import extract_and_verify_returned_signature
 from solana_keychain.core.signer import (
     SignedTransaction,
-    SolanaSigner,
+    TransactionSigner,
     require_initialized,
 )
 from solana_keychain.core.transaction_util import (
@@ -98,7 +98,7 @@ class UtilaSignerConfig:
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
 
 
-class UtilaSigner(SolanaSigner):
+class UtilaSigner(TransactionSigner):
     """Signer backed by a Utila MPC vault wallet.
 
     ``init()`` must be awaited before signing — it resolves the wallet's Solana

@@ -14,7 +14,7 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain import SignerError, SignerErrorCode
-from solana_keychain.core import signed_message_bytes
+from solana_keychain.core import SendingSigner, TransactionSigner, signed_message_bytes
 from solana_keychain.crossmint import (
     CrossmintSigner,
     CrossmintSignerConfig,
@@ -83,8 +83,13 @@ def test_parse_api_key() -> None:
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
-def test_broadcasts_transactions() -> None:
-    assert make_signer().broadcasts_transactions
+def test_exposes_only_the_sending_capability() -> None:
+    """Crossmint has no sign-only API: an approved transaction is always executed
+    server-side, so there is no sign_transaction for a caller to reach for."""
+    signer = make_signer()
+    assert isinstance(signer, SendingSigner)
+    assert not isinstance(signer, TransactionSigner)
+    assert not hasattr(signer, "sign_transaction")
 
 
 def test_derive_signing_key_is_deterministic_and_env_scoped() -> None:
@@ -186,21 +191,6 @@ async def test_uninitialized_sign_and_send_transaction_raises_not_initialized() 
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_and_send_transaction(create_test_transaction(Keypair().pubkey()))
     assert excinfo.value.code == SignerErrorCode.NOT_INITIALIZED
-
-
-@respx.mock
-async def test_sign_transaction_is_rejected() -> None:
-    """Crossmint has no sign-only API: an approved transaction is always executed
-    server-side, so a caller asking for signature-only work must be refused rather
-    than handed a transaction that has already landed."""
-    keypair = Keypair()
-    signer = await initialized_signer(keypair)
-    transaction = create_test_transaction(keypair.pubkey())
-
-    with pytest.raises(SignerError) as excinfo:
-        await signer.sign_transaction(transaction)
-    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
-    assert_caller_transaction_untouched(transaction)
 
 
 @respx.mock

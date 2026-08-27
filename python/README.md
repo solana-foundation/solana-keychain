@@ -112,18 +112,40 @@ rejected.
 
 ## Core API
 
-Every signer implements the `SolanaSigner` ABC from `solana_keychain.core`:
+Every backend subclasses the `SolanaSigner` ABC from `solana_keychain.core`,
+plus exactly the capability class matching its provider's shape:
 
 ```python
 class SolanaSigner(ABC):
     @property
     def pubkey(self) -> Pubkey: ...
 
-    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction: ...
-
     async def sign_message(self, message: bytes) -> Signature: ...
 
     async def is_available(self) -> bool: ...
+
+
+class TransactionSigner(SolanaSigner):
+    """Signs the caller's transaction as given; the caller broadcasts the result."""
+
+    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction: ...
+
+
+class ModifyingSigner(SolanaSigner):
+    """The provider rewrites the transaction before signing it; continue from the
+    returned transaction, never from the bytes submitted. No backend currently
+    subclasses this."""
+
+    async def modify_and_sign_transaction(
+        self, transaction: VersionedTransaction
+    ) -> SignedTransaction: ...
+
+
+class SendingSigner(SolanaSigner):
+    """The provider signs and broadcasts server-side; the caller's transaction is
+    never mutated, and the returned signature identifies what landed."""
+
+    async def sign_and_send_transaction(self, transaction: VersionedTransaction) -> Signature: ...
 ```
 
 `sign_transaction` signs the transaction in place and returns a
@@ -137,31 +159,34 @@ Errors are always `SignerError` with a stable `code`
 
 ### Signer capabilities
 
-Backends differ in whether the provider broadcasts the transaction and in whether
-they can sign arbitrary bytes. `broadcasts_transactions` reports the first at
-runtime; the second is fixed per backend:
+The capability class a backend subclasses says whether the provider broadcasts;
+whether it can sign arbitrary bytes is fixed per backend:
 
-| Backend | `broadcasts_transactions` | `sign_transaction` | `sign_and_send_transaction` | `sign_message` |
-|---------|---------------------------|--------------------|-----------------------------|----------------|
-| memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | False | yes | `SIGNING_FAILED` | yes |
-| cdp | False | yes | `SIGNING_FAILED` | UTF-8 payloads only, otherwise `SERIALIZATION_ERROR` |
-| crossmint | True | `SIGNING_FAILED` | yes | `SIGNING_FAILED` |
-| utila | False | yes | `SIGNING_FAILED` | `SIGNING_FAILED` |
-| fordefi (black-box mode) | False | yes | `SIGNING_FAILED` | yes |
-| fordefi (native mode) | True | `SIGNING_FAILED` | yes | yes |
+| Backend | Capability class | `sign_message` |
+|---------|------------------|----------------|
+| memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | `TransactionSigner` | yes |
+| cdp | `TransactionSigner` | UTF-8 payloads only, otherwise `SERIALIZATION_ERROR` |
+| utila | `TransactionSigner` | `SIGNING_FAILED` |
+| crossmint | `SendingSigner` | `SIGNING_FAILED` |
+| fordefi black box (`FordefiBlackBoxSigner`) | `TransactionSigner` | yes |
+| fordefi native (`FordefiNativeAutoSigner`) | `SendingSigner` | yes |
 
 Crossmint executes every approved transaction server-side and exposes no
-sign-only API, so it offers `sign_and_send_transaction` only. It may rewrite the
+sign-only API, so it is a `SendingSigner` only. It may rewrite the
 transaction to sponsor gas, in which case the returned signature identifies the
 transaction it landed rather than covering the caller's bytes; the caller's
 transaction is never modified.
 
+`create_fordefi_signer` picks the Fordefi type from `config.chain`: unset builds
+a `FordefiBlackBoxSigner`, a chain builds a `FordefiNativeAutoSigner`, and each
+type rejects a config meant for the other.
+
 ### Sign and Send
 
-`sign_and_send_transaction` gets a transaction on chain with one call. Signers
-whose `broadcasts_transactions` is True (Crossmint, Fordefi native mode) broadcast
-through their provider and the send function is never called; every other signer
-signs and the send function broadcasts the base64-encoded result:
+`sign_and_send_transaction` gets a transaction on chain with one call. A
+`SendingSigner` (Crossmint, Fordefi native) broadcasts through its provider and
+the send function is never called; a `TransactionSigner` signs and the send
+function broadcasts the base64-encoded result:
 
 ```python
 from solana_keychain import sign_and_send_transaction

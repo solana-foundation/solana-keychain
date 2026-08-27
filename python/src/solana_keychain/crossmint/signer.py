@@ -23,11 +23,7 @@ from solana_keychain.core.http import (
     probe_availability,
     provider_may_have_accepted,
 )
-from solana_keychain.core.signer import (
-    SignedTransaction,
-    SolanaSigner,
-    require_initialized,
-)
+from solana_keychain.core.signer import SendingSigner, require_initialized
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     idempotency_key_from_message,
@@ -80,7 +76,7 @@ class CrossmintSignerConfig:
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
 
 
-class CrossmintSigner(SolanaSigner):
+class CrossmintSigner(SendingSigner):
     """Signer backed by a Crossmint smart or MPC wallet.
 
     Crossmint is a broadcast-managed signer: it rewrites the transaction (gas
@@ -215,10 +211,6 @@ class CrossmintSigner(SolanaSigner):
     @property
     def pubkey(self) -> Pubkey:
         return self._initialized_pubkey()
-
-    @property
-    def broadcasts_transactions(self) -> bool:
-        return True
 
     async def _create_transaction(
         self, transaction_b58: str, idempotency_key: str
@@ -459,13 +451,6 @@ class CrossmintSigner(SolanaSigner):
         raise SignerError(
             SignerErrorCode.SIGNING_FAILED,
             "Unable to extract signature from Crossmint transaction response",
-        )
-
-    async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
-        raise SignerError(
-            SignerErrorCode.SIGNING_FAILED,
-            "Crossmint executes every transaction server-side; "
-            "call sign_and_send_transaction instead",
         )
 
     async def _execute_managed_transaction(self, transaction: VersionedTransaction) -> Signature:

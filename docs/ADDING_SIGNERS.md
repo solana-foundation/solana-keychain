@@ -954,7 +954,7 @@ Your PR must include:
 ### Quick Checklist
 
 - [ ] Create module `python/src/solana_keychain/<name>/`
-- [ ] Subclass `SolanaSigner` from `solana_keychain.core`
+- [ ] Subclass `SolanaSigner` from `solana_keychain.core` plus the capability class matching your provider's shape (usually `TransactionSigner`)
 - [ ] Export `async create_x_signer()` factory (awaits `init()` when the backend needs it)
 - [ ] Export a config dataclass (`XSignerConfig`) with secrets marked `field(repr=False)`
 - [ ] Enforce HTTPS on base-URL fields with `assert_https_url()`
@@ -984,12 +984,20 @@ for an extras-gated SDK reference.
 
 ### Signer Implementation
 
-Subclass `SolanaSigner` and implement the four contract members:
+Subclass `SolanaSigner` and implement the three base members:
 
 - `pubkey` property returning `solders.pubkey.Pubkey`
-- `async sign_transaction(transaction) -> SignedTransaction`
 - `async sign_message(message: bytes) -> Signature`
 - `async is_available() -> bool`
+
+Transaction handling goes in the capability class you also subclass, and a
+backend subclasses exactly one: `TransactionSigner`
+(`async sign_transaction(transaction) -> SignedTransaction`, the caller
+broadcasts), `ModifyingSigner`
+(`async modify_and_sign_transaction(transaction) -> SignedTransaction`, the
+provider rewrites the transaction) or `SendingSigner`
+(`async sign_and_send_transaction(transaction) -> Signature`, the provider
+broadcasts). A backend never defines an entry point it cannot serve.
 
 Backends that must resolve an address remotely add `async init()` and raise
 `SIGNER_NOT_INITIALIZED` from a private `_initialized_pubkey()` helper when used

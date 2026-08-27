@@ -30,7 +30,7 @@ from solana_keychain.core.signature_util import (
     extract_and_verify_returned_signature,
     verify_returned_signature,
 )
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.signer import SignedTransaction, TransactionSigner
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
@@ -93,7 +93,7 @@ class TurnkeySignerConfig:
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
 
 
-class TurnkeySigner(SolanaSigner):
+class TurnkeySigner(TransactionSigner):
     """Signer backed by a Turnkey-held Solana private key."""
 
     def __init__(self, config: TurnkeySignerConfig) -> None:

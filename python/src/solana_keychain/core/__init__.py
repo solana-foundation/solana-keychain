@@ -11,7 +11,14 @@ from solana_keychain.core.signature_util import (
     extract_and_verify_returned_signature,
     verify_returned_signature,
 )
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner, require_initialized
+from solana_keychain.core.signer import (
+    ModifyingSigner,
+    SendingSigner,
+    SignedTransaction,
+    SolanaSigner,
+    TransactionSigner,
+    require_initialized,
+)
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
@@ -25,11 +32,14 @@ from solana_keychain.core.transaction_util import (
 __all__ = [
     "DEFAULT_REQUEST_TIMEOUT_SECONDS",
     "ED25519_SIGNATURE_LENGTH",
+    "ModifyingSigner",
     "SendTransactionFn",
+    "SendingSigner",
     "SignedTransaction",
     "SignerError",
     "SignerErrorCode",
     "SolanaSigner",
+    "TransactionSigner",
     "add_signature_to_transaction",
     "assert_https_url",
     "classify_signed_transaction",

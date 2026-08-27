@@ -31,7 +31,12 @@ from solana_keychain.core.http import (
 )
 from solana_keychain.core.poll import poll_attempts
 from solana_keychain.core.signature_util import verify_returned_signature
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.signer import (
+    SendingSigner,
+    SignedTransaction,
+    SolanaSigner,
+    TransactionSigner,
+)
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
@@ -78,9 +83,11 @@ class FordefiSignerConfig:
     key in ``private_key_pem``, or a custom ``FordefiRequestSigner`` in
     ``request_signer`` for KMS/HSM-backed request signing.
 
-    ``chain`` (``solana_devnet`` / ``solana_mainnet``) switches from black-box
-    raw signing to Fordefi's native Solana API types: transactions are signed
-    and auto-broadcast by Fordefi, messages use ``solana_message``.
+    ``chain`` (``solana_devnet`` / ``solana_mainnet``) selects the signer type:
+    ``None`` builds a ``FordefiBlackBoxSigner``, a chain builds a
+    ``FordefiNativeAutoSigner`` using Fordefi's native Solana API types, where
+    transactions are signed and auto-broadcast by Fordefi and messages use
+    ``solana_message``.
 
     ``fee`` is the native-mode fee configuration passed through verbatim,
     e.g. ``{"type": "priority", "priority_level": "medium"}`` or
@@ -100,16 +107,11 @@ class FordefiSignerConfig:
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
 
 
-class FordefiSigner(SolanaSigner):
-    """Signer backed by a Fordefi vault.
+class _FordefiSignerBase(SolanaSigner):
+    """Shared Fordefi API plumbing: request signing, submit, polling, vault lookup.
 
     The configured ``public_key`` is trusted as the vault's Solana address;
     no remote lookup is performed at construction time.
-
-    Black-box mode (default) signs the caller's exact message bytes and the
-    caller broadcasts. Native mode (``chain`` set) lets Fordefi replace the
-    blockhash and fees, sign, and auto-broadcast; see
-    ``sign_and_send_transaction``.
     """
 
     def __init__(self, config: FordefiSignerConfig) -> None:
@@ -128,15 +130,6 @@ class FordefiSigner(SolanaSigner):
             raise SignerError(
                 SignerErrorCode.CONFIG_ERROR,
                 "one of private_key_pem or request_signer must be provided",
-            )
-        if config.chain is not None and config.chain not in SUPPORTED_CHAINS:
-            raise SignerError(
-                SignerErrorCode.CONFIG_ERROR,
-                f"chain must be one of {', '.join(SUPPORTED_CHAINS)}",
-            )
-        if config.fee is not None and config.chain is None:
-            raise SignerError(
-                SignerErrorCode.CONFIG_ERROR, "fee requires chain to be set (native Solana mode)"
             )
         if config.max_poll_attempts < 1:
             raise SignerError(
@@ -159,8 +152,6 @@ class FordefiSigner(SolanaSigner):
         )
         self._poll_interval_ms = config.poll_interval_ms
         self._max_poll_attempts = config.max_poll_attempts
-        self._chain = config.chain
-        self._fee = config.fee
         self._http_client = config.http_client
         try:
             self._public_key = Pubkey.from_string(config.public_key)
@@ -170,15 +161,11 @@ class FordefiSigner(SolanaSigner):
             ) from None
 
     def __repr__(self) -> str:
-        return f"FordefiSigner(pubkey={self._public_key}, vault_id={self._vault_id})"
+        return f"{type(self).__name__}(pubkey={self._public_key}, vault_id={self._vault_id})"
 
     @property
     def pubkey(self) -> Pubkey:
         return self._public_key
-
-    @property
-    def broadcasts_transactions(self) -> bool:
-        return self._chain is not None
 
     async def _sign_request(self, path: str, timestamp: int, body: str) -> str:
         return await self._request_signer.sign_request(f"{path}|{timestamp}|{body}".encode())
@@ -221,48 +208,6 @@ class FordefiSigner(SolanaSigner):
         if not isinstance(transaction_id, str):
             raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
         return transaction_id
-
-    def _black_box_request(self, data: bytes) -> dict[str, Any]:
-        return {
-            "vault_id": self._vault_id,
-            "signer_type": "api_signer",
-            "sign_mode": "auto",
-            "type": "black_box_signature",
-            "details": {
-                "format": "hash_binary",
-                "hash_binary": base64.b64encode(data).decode("ascii"),
-            },
-        }
-
-    def _solana_transaction_request(self, data: bytes) -> dict[str, Any]:
-        details: dict[str, Any] = {
-            "type": "solana_serialized_transaction_message",
-            "chain": self._chain,
-            "data": base64.b64encode(data).decode("ascii"),
-            "push_mode": "auto",
-        }
-        if self._fee is not None:
-            details["fee"] = self._fee
-        return {
-            "vault_id": self._vault_id,
-            "signer_type": "api_signer",
-            "sign_mode": "auto",
-            "type": "solana_transaction",
-            "details": details,
-        }
-
-    def _solana_message_request(self, data: bytes) -> dict[str, Any]:
-        return {
-            "vault_id": self._vault_id,
-            "signer_type": "api_signer",
-            "sign_mode": "auto",
-            "type": "solana_message",
-            "details": {
-                "type": "personal_message_type",
-                "chain": self._chain,
-                "raw_data": base64.b64encode(data).decode("ascii"),
-            },
-        }
 
     async def _poll_for_result(self, transaction_id: str, *, pushable: bool) -> dict[str, Any]:
         success_states = _PUSHABLE_SUCCESS_STATES if pushable else _NON_PUSHABLE_SUCCESS_STATES
@@ -309,6 +254,55 @@ class FordefiSigner(SolanaSigner):
             )
         return Signature.from_bytes(signature_bytes)
 
+    async def _fetch_vault(self, timeout_seconds: float) -> dict[str, Any]:
+        response = await self._get_json(
+            f"/api/v1/vaults/{quote(self._vault_id, safe='')}", timeout_seconds
+        )
+        if not isinstance(response, dict):
+            raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
+        return response
+
+    async def is_available(self) -> bool:
+        """Readiness probe: the vault is reachable with the bearer token and the
+        request signer can produce an ``x-signature`` value."""
+
+        async def probe() -> bool:
+            await self._fetch_vault(AVAILABILITY_TIMEOUT_SECONDS)
+            await self._sign_request("/api/v1/vaults", _timestamp_ms(), "")
+            return True
+
+        return await probe_availability(probe)
+
+
+class FordefiBlackBoxSigner(_FordefiSignerBase, TransactionSigner):
+    """Signer backed by a Fordefi black box vault.
+
+    Signs the caller's exact message bytes via ``black_box_signature``; Fordefi
+    does not broadcast, so the caller submits the returned encoded transaction
+    to an RPC. ``config.chain`` and ``config.fee`` must be unset; they select
+    ``FordefiNativeAutoSigner``.
+    """
+
+    def __init__(self, config: FordefiSignerConfig) -> None:
+        if config.chain is not None or config.fee is not None:
+            raise SignerError(
+                SignerErrorCode.CONFIG_ERROR,
+                "chain and fee select native Solana mode; use FordefiNativeAutoSigner",
+            )
+        super().__init__(config)
+
+    def _black_box_request(self, data: bytes) -> dict[str, Any]:
+        return {
+            "vault_id": self._vault_id,
+            "signer_type": "api_signer",
+            "sign_mode": "auto",
+            "type": "black_box_signature",
+            "details": {
+                "format": "hash_binary",
+                "hash_binary": base64.b64encode(data).decode("ascii"),
+            },
+        }
+
     async def _sign_black_box(self, data: bytes) -> Signature:
         transaction_id = await self._post_transaction(self._black_box_request(data))
         result = await self._poll_for_result(transaction_id, pushable=False)
@@ -317,19 +311,9 @@ class FordefiSigner(SolanaSigner):
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
         """Sign ``transaction`` via Fordefi MPC.
 
-        Black-box mode signs the exact message bytes, places the signature in
-        ``transaction`` in place, and returns the encoded transaction for the
-        caller to broadcast.
-
-        Native mode (``chain`` set) broadcasts through Fordefi, so it raises
-        ``SIGNING_FAILED`` here; call ``sign_and_send_transaction`` instead.
+        Signs the exact message bytes, places the signature in ``transaction`` in
+        place, and returns the encoded transaction for the caller to broadcast.
         """
-        if self._chain is not None:
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Fordefi native mode broadcasts through its own API; call "
-                "sign_and_send_transaction instead",
-            )
         message_data = signed_message_bytes(transaction.message)
         signature = await self._sign_black_box(message_data)
         verify_returned_signature(signature, self._public_key, message_data)
@@ -338,8 +322,68 @@ class FordefiSigner(SolanaSigner):
             transaction, serialize_transaction(transaction), signature
         )
 
+    async def sign_message(self, message: bytes) -> Signature:
+        signature = await self._sign_black_box(message)
+        verify_returned_signature(signature, self._public_key, message)
+        return signature
+
+
+class FordefiNativeAutoSigner(_FordefiSignerBase, SendingSigner):
+    """Signer backed by a regular Fordefi Solana vault.
+
+    Uses Fordefi's native ``solana_transaction`` / ``solana_message`` API types
+    with ``push_mode: auto``: Fordefi replaces the blockhash (and optionally
+    fees), signs, and broadcasts on chain itself. ``config.chain`` must be set;
+    leave it unset for ``FordefiBlackBoxSigner``.
+    """
+
+    def __init__(self, config: FordefiSignerConfig) -> None:
+        if config.chain is None:
+            raise SignerError(
+                SignerErrorCode.CONFIG_ERROR,
+                "chain must be set for native Solana mode; use FordefiBlackBoxSigner without it",
+            )
+        if config.chain not in SUPPORTED_CHAINS:
+            raise SignerError(
+                SignerErrorCode.CONFIG_ERROR,
+                f"chain must be one of {', '.join(SUPPORTED_CHAINS)}",
+            )
+        super().__init__(config)
+        self._chain = config.chain
+        self._fee = config.fee
+
+    def _solana_transaction_request(self, data: bytes) -> dict[str, Any]:
+        details: dict[str, Any] = {
+            "type": "solana_serialized_transaction_message",
+            "chain": self._chain,
+            "data": base64.b64encode(data).decode("ascii"),
+            "push_mode": "auto",
+        }
+        if self._fee is not None:
+            details["fee"] = self._fee
+        return {
+            "vault_id": self._vault_id,
+            "signer_type": "api_signer",
+            "sign_mode": "auto",
+            "type": "solana_transaction",
+            "details": details,
+        }
+
+    def _solana_message_request(self, data: bytes) -> dict[str, Any]:
+        return {
+            "vault_id": self._vault_id,
+            "signer_type": "api_signer",
+            "sign_mode": "auto",
+            "type": "solana_message",
+            "details": {
+                "type": "personal_message_type",
+                "chain": self._chain,
+                "raw_data": base64.b64encode(data).decode("ascii"),
+            },
+        }
+
     async def sign_and_send_transaction(self, transaction: VersionedTransaction) -> Signature:
-        """Sign ``transaction`` and let Fordefi broadcast it (native mode only).
+        """Sign ``transaction`` and let Fordefi broadcast it.
 
         Submits the message for signing with ``push_mode: auto``: Fordefi
         replaces the blockhash (and optionally fees), signs, and broadcasts the
@@ -359,11 +403,6 @@ class FordefiSigner(SolanaSigner):
         transaction; a rebuilt transaction derives a different id and is
         broadcast again.
         """
-        if self._chain is None:
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Fordefi black-box mode only signs; sign the transaction and broadcast the result",
-            )
         signed = await self._sign_transaction_native(transaction)
         return signed.signature
 
@@ -462,35 +501,17 @@ class FordefiSigner(SolanaSigner):
         return classify_signed_transaction(returned, "", signature)
 
     async def sign_message(self, message: bytes) -> Signature:
-        if self._chain is not None:
-            transaction_id = await self._post_transaction(self._solana_message_request(message))
-            result = await self._poll_for_result(transaction_id, pushable=False)
-            signature = self._extract_signature(result)
-        else:
-            signature = await self._sign_black_box(message)
+        transaction_id = await self._post_transaction(self._solana_message_request(message))
+        result = await self._poll_for_result(transaction_id, pushable=False)
+        signature = self._extract_signature(result)
         verify_returned_signature(signature, self._public_key, message)
         return signature
 
-    async def _fetch_vault(self, timeout_seconds: float) -> dict[str, Any]:
-        response = await self._get_json(
-            f"/api/v1/vaults/{quote(self._vault_id, safe='')}", timeout_seconds
-        )
-        if not isinstance(response, dict):
-            raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
-        return response
 
-    async def is_available(self) -> bool:
-        """Readiness probe: the vault is reachable with the bearer token and the
-        request signer can produce an ``x-signature`` value."""
-
-        async def probe() -> bool:
-            await self._fetch_vault(AVAILABILITY_TIMEOUT_SECONDS)
-            await self._sign_request("/api/v1/vaults", _timestamp_ms(), "")
-            return True
-
-        return await probe_availability(probe)
-
-
-async def create_fordefi_signer(config: FordefiSignerConfig) -> FordefiSigner:
-    """Create a ready-to-use Fordefi signer."""
-    return FordefiSigner(config)
+async def create_fordefi_signer(
+    config: FordefiSignerConfig,
+) -> FordefiBlackBoxSigner | FordefiNativeAutoSigner:
+    """Create a ready-to-use Fordefi signer, picked by ``config.chain``."""
+    if config.chain is None:
+        return FordefiBlackBoxSigner(config)
+    return FordefiNativeAutoSigner(config)

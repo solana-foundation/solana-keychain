@@ -20,7 +20,7 @@ from solana_keychain.core.http import (
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import (
     SignedTransaction,
-    SolanaSigner,
+    TransactionSigner,
     require_initialized,
 )
 from solana_keychain.core.transaction_util import (
@@ -64,7 +64,7 @@ class ParaSignerConfig:
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
 
 
-class ParaSigner(SolanaSigner):
+class ParaSigner(TransactionSigner):
     """Signer backed by a Para-held wallet.
 
     ``init()`` must be awaited before use — it resolves the wallet's public key.

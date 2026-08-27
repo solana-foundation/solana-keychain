@@ -6,7 +6,7 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.signer import SolanaSigner
+from solana_keychain.core.signer import SendingSigner, SolanaSigner, TransactionSigner
 
 SendTransactionFn = Callable[[str], Awaitable[Signature]]
 """Broadcasts a base64-encoded wire transaction and returns its signature. The
@@ -20,15 +20,16 @@ async def sign_and_send_transaction(
 ) -> Signature:
     """Sign ``transaction`` and get it on chain with one call.
 
-    A signer whose ``broadcasts_transactions`` is True broadcasts through its
-    provider and ``send_transaction`` is never called; any other signer signs and
-    ``send_transaction`` broadcasts the encoded result.
+    A ``SendingSigner`` broadcasts through its provider and ``send_transaction``
+    is never called; a ``TransactionSigner`` signs and ``send_transaction``
+    broadcasts the encoded result.
 
-    Raises ``CONFIG_ERROR`` when a signer that cannot broadcast is given no
-    ``send_transaction``, and ``SIGNING_FAILED`` when the broadcasting signer
-    returns no signature or the signed transaction is still missing signatures.
+    Raises ``CONFIG_ERROR`` when a ``TransactionSigner`` is given no
+    ``send_transaction``, and ``SIGNING_FAILED`` when the sending signer returns
+    no signature, the signed transaction is still missing signatures, or the
+    signer has neither capability.
     """
-    if signer.broadcasts_transactions:
+    if isinstance(signer, SendingSigner):
         signature = await signer.sign_and_send_transaction(transaction)
         if signature == Signature.default():
             raise SignerError(
@@ -36,6 +37,12 @@ async def sign_and_send_transaction(
                 "signer returned no signature for the transaction it broadcast",
             )
         return signature
+
+    if not isinstance(signer, TransactionSigner):
+        raise SignerError(
+            SignerErrorCode.SIGNING_FAILED,
+            "this signer supports neither signing nor broadcasting transactions",
+        )
 
     if send_transaction is None:
         raise SignerError(

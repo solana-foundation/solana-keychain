@@ -7,7 +7,7 @@ from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.signer import SignedTransaction, TransactionSigner
 from solana_keychain.core.transaction_util import (
     add_signature_to_transaction,
     classify_signed_transaction,
@@ -26,7 +26,7 @@ class MemorySignerConfig:
     keypair: Keypair
 
 
-class MemorySigner(SolanaSigner):
+class MemorySigner(TransactionSigner):
     """In-memory Ed25519 signer. The private key is held in process memory; this
     backend is intended for local development and testing."""
 
