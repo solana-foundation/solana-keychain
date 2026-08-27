@@ -8,17 +8,31 @@ substring-matches marker keywords, and every test here carries ``parametrize``.
 """
 
 import os
+from typing import TYPE_CHECKING
 
 import pytest
+from solders.pubkey import Pubkey
 
+from solana_keychain.core import signed_message_bytes
 from solana_keychain.core.signer import SolanaSigner
 from tests.integration.conftest import (
     assert_message_roundtrip,
     assert_send_transaction_roundtrip,
     assert_transaction_roundtrip,
+    broadcast_transaction,
+    confirm_transaction,
     optional_env,
     require_env,
+    unsigned_transfer,
 )
+
+if TYPE_CHECKING:
+    from solana_keychain.fordefi import (
+        FordefiNativeAutoSigner,
+        FordefiNativeManualSigner,
+        FordefiPushMode,
+        FordefiSignerConfig,
+    )
 
 pytestmark = pytest.mark.integration
 
@@ -148,6 +162,40 @@ async def make_fordefi_signer() -> SolanaSigner:
             api_base_url=optional_env("FORDEFI_API_BASE_URL") or DEFAULT_API_BASE_URL,
         )
     )
+
+
+def _native_fordefi_config(push_mode: "FordefiPushMode") -> "FordefiSignerConfig":
+    from solana_keychain.fordefi import FordefiSignerConfig
+    from solana_keychain.fordefi.signer import DEFAULT_API_BASE_URL
+
+    env = require_env(
+        "FORDEFI_ACCESS_TOKEN",
+        "FORDEFI_VAULT_ID",
+        "FORDEFI_PUBLIC_KEY",
+        "FORDEFI_PRIVATE_KEY_PEM",
+        "FORDEFI_CHAIN",
+    )
+    return FordefiSignerConfig(
+        access_token=env["FORDEFI_ACCESS_TOKEN"],
+        vault_id=env["FORDEFI_VAULT_ID"],
+        public_key=env["FORDEFI_PUBLIC_KEY"],
+        private_key_pem=env["FORDEFI_PRIVATE_KEY_PEM"],
+        chain=env["FORDEFI_CHAIN"],
+        push_mode=push_mode,
+        api_base_url=optional_env("FORDEFI_API_BASE_URL") or DEFAULT_API_BASE_URL,
+    )
+
+
+async def make_fordefi_native_auto_signer() -> "FordefiNativeAutoSigner":
+    from solana_keychain.fordefi import FordefiNativeAutoSigner
+
+    return FordefiNativeAutoSigner(_native_fordefi_config("auto"))
+
+
+async def make_fordefi_native_manual_signer() -> "FordefiNativeManualSigner":
+    from solana_keychain.fordefi import FordefiNativeManualSigner
+
+    return FordefiNativeManualSigner(_native_fordefi_config("manual"))
 
 
 async def make_cdp_signer() -> SolanaSigner:
@@ -307,3 +355,37 @@ async def test_live_is_available(backend: str) -> None:
     _skip_unless_selected(backend)
     signer = await _ALL_BACKENDS[backend]()
     assert await signer.is_available()
+
+
+def _devnet_recipient(payer: Pubkey) -> Pubkey:
+    recipient = optional_env("DEVNET_RECIPIENT")
+    return Pubkey.from_string(recipient) if recipient else payer
+
+
+@pytest.mark.parametrize("backend", ["fordefi"])
+async def test_live_fordefi_native_auto_sign_and_send(backend: str) -> None:
+    _skip_unless_selected(backend)
+    signer = await make_fordefi_native_auto_signer()
+    transaction = await unsigned_transfer(
+        signer.pubkey, _devnet_recipient(signer.pubkey), 100_000_000
+    )
+
+    signature = await signer.sign_and_send_transaction(transaction)
+
+    assert len(bytes(signature)) == 64
+    await confirm_transaction(str(signature))
+
+
+@pytest.mark.parametrize("backend", ["fordefi"])
+async def test_live_fordefi_native_manual_sign_and_broadcast(backend: str) -> None:
+    _skip_unless_selected(backend)
+    signer = await make_fordefi_native_manual_signer()
+    transaction = await unsigned_transfer(signer.pubkey, signer.pubkey, 1)
+
+    result = await signer.modify_and_sign_transaction(transaction)
+
+    assert result.is_complete
+    assert result.signature.verify(signer.pubkey, signed_message_bytes(result.transaction.message))
+
+    signature = await broadcast_transaction(result.encoded_transaction)
+    await confirm_transaction(signature, rebroadcast=result.encoded_transaction)
