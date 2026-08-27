@@ -30,17 +30,26 @@ export type FordefiSolanaFee =
     | { priority_level: 'high' | 'low' | 'medium'; type: 'priority' };
 
 /**
- * Request body for native Solana transaction signing via
- * `solana_serialized_transaction_message` with `push_mode: 'auto'`.
+ * Whether Fordefi broadcasts a native Solana transaction after signing it.
  *
- * Fordefi signs the serialized transaction message and pushes it on-chain.
+ * `auto` rewrites, signs and broadcasts; `manual` rewrites and signs, leaving
+ * the broadcast to the caller.
+ */
+export type FordefiPushMode = 'auto' | 'manual';
+
+/**
+ * Request body for native Solana transaction signing via
+ * `solana_serialized_transaction_message`.
+ *
+ * Fordefi signs the serialized transaction message and either pushes it
+ * on-chain or returns it for the caller to broadcast, per `details.push_mode`.
  */
 export interface FordefiSolanaTransactionRequest {
     details: {
         chain: SolanaChainUniqueId;
         data: string;
         fee?: FordefiSolanaFee;
-        push_mode: 'auto';
+        push_mode: FordefiPushMode;
         type: 'solana_serialized_transaction_message';
     };
     sign_mode: 'auto';

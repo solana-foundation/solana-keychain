@@ -9,6 +9,7 @@ from solana_keychain.core.http import (
 from solana_keychain.core.send import SendTransactionFn, sign_and_send_transaction
 from solana_keychain.core.signature_util import (
     extract_and_verify_returned_signature,
+    extract_and_verify_rewritten_transaction,
     verify_returned_signature,
 )
 from solana_keychain.core.signer import (
@@ -44,6 +45,7 @@ __all__ = [
     "assert_https_url",
     "classify_signed_transaction",
     "extract_and_verify_returned_signature",
+    "extract_and_verify_rewritten_transaction",
     "fetch_signer_json",
     "get_signing_keypair_position",
     "has_all_required_signatures",

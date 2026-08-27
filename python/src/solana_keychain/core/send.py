@@ -6,7 +6,13 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.signer import SendingSigner, SolanaSigner, TransactionSigner
+from solana_keychain.core.signer import (
+    ModifyingSigner,
+    SendingSigner,
+    SignedTransaction,
+    SolanaSigner,
+    TransactionSigner,
+)
 
 SendTransactionFn = Callable[[str], Awaitable[Signature]]
 """Broadcasts a base64-encoded wire transaction and returns its signature. The
@@ -21,13 +27,13 @@ async def sign_and_send_transaction(
     """Sign ``transaction`` and get it on chain with one call.
 
     A ``SendingSigner`` broadcasts through its provider and ``send_transaction``
-    is never called; a ``TransactionSigner`` signs and ``send_transaction``
-    broadcasts the encoded result.
+    is never called; a ``TransactionSigner`` or ``ModifyingSigner`` signs and
+    ``send_transaction`` broadcasts the encoded result.
 
-    Raises ``CONFIG_ERROR`` when a ``TransactionSigner`` is given no
+    Raises ``CONFIG_ERROR`` when a signing-only signer is given no
     ``send_transaction``, and ``SIGNING_FAILED`` when the sending signer returns
     no signature, the signed transaction is still missing signatures, or the
-    signer has neither capability.
+    signer has none of the three capabilities.
     """
     if isinstance(signer, SendingSigner):
         signature = await signer.sign_and_send_transaction(transaction)
@@ -38,7 +44,7 @@ async def sign_and_send_transaction(
             )
         return signature
 
-    if not isinstance(signer, TransactionSigner):
+    if not isinstance(signer, TransactionSigner | ModifyingSigner):
         raise SignerError(
             SignerErrorCode.SIGNING_FAILED,
             "this signer supports neither signing nor broadcasting transactions",
@@ -50,7 +56,11 @@ async def sign_and_send_transaction(
             "this signer cannot broadcast transactions; supply send_transaction to "
             "broadcast the signed one",
         )
-    signed = await signer.sign_transaction(transaction)
+    signed: SignedTransaction
+    if isinstance(signer, ModifyingSigner):
+        signed = await signer.modify_and_sign_transaction(transaction)
+    else:
+        signed = await signer.sign_transaction(transaction)
     if not signed.is_complete:
         raise SignerError(
             SignerErrorCode.SIGNING_FAILED,

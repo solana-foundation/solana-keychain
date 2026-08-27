@@ -5,6 +5,7 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core import (
+    ModifyingSigner,
     SendingSigner,
     SignedTransaction,
     SignerError,
@@ -16,6 +17,7 @@ from solana_keychain.core import (
 from tests.util import create_test_transaction
 
 ENCODED = "encoded-transaction"
+REWRITTEN_ENCODED = "rewritten-transaction"
 SIGNATURE = Signature.from_bytes(bytes([7] * 64))
 
 
@@ -45,6 +47,23 @@ class StubTransactionSigner(_StubBase, TransactionSigner):
             encoded_transaction=ENCODED,
             signature=self._signature,
             is_complete=self._is_complete,
+            transaction=transaction,
+        )
+
+
+class StubModifyingSigner(_StubBase, ModifyingSigner):
+    def __init__(self, *, is_complete: bool = True) -> None:
+        super().__init__()
+        self._is_complete = is_complete
+
+    async def modify_and_sign_transaction(
+        self, transaction: VersionedTransaction
+    ) -> SignedTransaction:
+        return SignedTransaction(
+            encoded_transaction=REWRITTEN_ENCODED,
+            signature=self._signature,
+            is_complete=self._is_complete,
+            transaction=create_test_transaction(self.pubkey),
         )
 
 
@@ -84,6 +103,44 @@ async def test_sign_only_signer_broadcasts_the_encoded_transaction() -> None:
     )
     assert sent == [ENCODED]
     assert signature == broadcast_signature
+
+
+async def test_modifying_signer_broadcasts_the_rewritten_transaction() -> None:
+    """The provider rewrote the message, so only its own bytes can be broadcast."""
+    signer = StubModifyingSigner()
+    sent: list[str] = []
+    broadcast_signature = Signature.from_bytes(bytes([2] * 64))
+
+    async def send(encoded: str) -> Signature:
+        sent.append(encoded)
+        return broadcast_signature
+
+    signature = await sign_and_send_transaction(
+        signer, create_test_transaction(signer.pubkey), send
+    )
+    assert sent == [REWRITTEN_ENCODED]
+    assert signature == broadcast_signature
+
+
+async def test_modifying_signer_without_a_sender_is_rejected() -> None:
+    """A modifying signer does not broadcast either, so the hop is still required."""
+    signer = StubModifyingSigner()
+
+    with pytest.raises(SignerError) as excinfo:
+        await sign_and_send_transaction(signer, create_test_transaction(signer.pubkey))
+    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
+
+
+async def test_partially_signed_rewrite_is_rejected_before_broadcast() -> None:
+    """A rewrite still awaiting downstream signers cannot land."""
+    signer = StubModifyingSigner(is_complete=False)
+
+    async def send(encoded: str) -> Signature:
+        raise AssertionError("send must not run for a partially signed rewrite")
+
+    with pytest.raises(SignerError) as excinfo:
+        await sign_and_send_transaction(signer, create_test_transaction(signer.pubkey), send)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
 
 
 async def test_missing_sender_is_rejected_before_signing() -> None:

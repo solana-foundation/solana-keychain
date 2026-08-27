@@ -1,6 +1,6 @@
 from solders.hash import Hash
 from solders.instruction import AccountMeta, Instruction
-from solders.message import Message, MessageV1, TransactionConfig
+from solders.message import Message, MessageV0, MessageV1, TransactionConfig
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.system_program import ID as SYSTEM_PROGRAM_ID
@@ -32,6 +32,15 @@ def create_test_transaction(
     instruction = _transfer_instruction(from_pubkey, to_pubkey)
     message = Message.new_with_blockhash([instruction], from_pubkey, Hash.default())
     return VersionedTransaction.from_legacy(Transaction.new_unsigned(message))
+
+
+def create_test_v0_transaction(
+    from_pubkey: Pubkey, to_pubkey: Pubkey | None = None
+) -> VersionedTransaction:
+    instruction = _transfer_instruction(from_pubkey, to_pubkey)
+    message = MessageV0.try_compile(from_pubkey, [instruction], [], Hash.default())
+    unsigned = [Signature.default()] * message.header.num_required_signatures
+    return VersionedTransaction.populate(message, unsigned)
 
 
 def create_test_v1_transaction(

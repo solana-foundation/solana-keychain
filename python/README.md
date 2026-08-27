@@ -82,6 +82,7 @@ async def main() -> None:
     #   result.encoded_transaction  # base64 wire transaction
     #   result.signature            # this signer's signature
     #   result.is_complete          # are all required signatures present?
+    #   result.transaction          # the authoritative signed transaction
 
 
 asyncio.run(main())
@@ -132,9 +133,8 @@ class TransactionSigner(SolanaSigner):
 
 
 class ModifyingSigner(SolanaSigner):
-    """The provider rewrites the transaction before signing it; continue from the
-    returned transaction, never from the bytes submitted. No backend currently
-    subclasses this."""
+    """The provider rewrites the transaction before signing it; continue from
+    `SignedTransaction.transaction`, never from the bytes submitted."""
 
     async def modify_and_sign_transaction(
         self, transaction: VersionedTransaction
@@ -148,9 +148,14 @@ class SendingSigner(SolanaSigner):
     async def sign_and_send_transaction(self, transaction: VersionedTransaction) -> Signature: ...
 ```
 
-`sign_transaction` signs the transaction in place and returns a
-`SignedTransaction(encoded_transaction, signature, is_complete)`; `is_complete`
-reports whether every required signature is present. Legacy, v0 and v1
+Both signing entry points return a
+`SignedTransaction(encoded_transaction, signature, is_complete, transaction)`;
+`is_complete` reports whether every required signature is present. A
+`TransactionSigner` signs the transaction in place and hands it back as
+`transaction`; a `ModifyingSigner` leaves the caller's object untouched, because
+solders messages are read-only, and hands back the provider's rewritten
+transaction instead. Only `transaction` is guaranteed to match
+`encoded_transaction` and the bytes `signature` covers. Legacy, v0 and v1
 transactions are all accepted.
 
 Errors are always `SignerError` with a stable `code`
@@ -169,7 +174,8 @@ whether it can sign arbitrary bytes is fixed per backend:
 | utila | `TransactionSigner` | `SIGNING_FAILED` |
 | crossmint | `SendingSigner` | `SIGNING_FAILED` |
 | fordefi black box (`FordefiBlackBoxSigner`) | `TransactionSigner` | yes |
-| fordefi native (`FordefiNativeAutoSigner`) | `SendingSigner` | yes |
+| fordefi native auto (`FordefiNativeAutoSigner`) | `SendingSigner` | yes |
+| fordefi native manual (`FordefiNativeManualSigner`) | `ModifyingSigner` | yes |
 
 Crossmint executes every approved transaction server-side and exposes no
 sign-only API, so it is a `SendingSigner` only. It may rewrite the
@@ -177,16 +183,74 @@ transaction to sponsor gas, in which case the returned signature identifies the
 transaction it landed rather than covering the caller's bytes; the caller's
 transaction is never modified.
 
-`create_fordefi_signer` picks the Fordefi type from `config.chain`: unset builds
-a `FordefiBlackBoxSigner`, a chain builds a `FordefiNativeAutoSigner`, and each
-type rejects a config meant for the other.
+### Fordefi signing modes
+
+`create_fordefi_signer` picks the Fordefi type from `config.chain` and
+`config.push_mode`, and each type rejects a config meant for another:
+
+| Config | Signer | Entry point |
+|--------|--------|-------------|
+| no `chain` | `FordefiBlackBoxSigner` | `sign_transaction` |
+| `chain`, `push_mode` unset or `"auto"` | `FordefiNativeAutoSigner` | `sign_and_send_transaction` |
+| `chain`, `push_mode="manual"` | `FordefiNativeManualSigner` | `modify_and_sign_transaction` |
+
+Black-box mode signs the caller's exact message bytes and leaves broadcasting to
+the caller. Native auto lets Fordefi update the blockhash and fees, then sign and
+broadcast; the caller's transaction is left untouched and the returned signature
+identifies what landed.
+
+Native manual lets Fordefi rewrite the recent blockhash and the Compute Budget
+fee instructions, then sign **without** broadcasting, so the caller broadcasts.
+The returned signature covers Fordefi's bytes, not the ones submitted, and the
+rewrite is not diffed against them: Fordefi is trusted for the rewrite. Inspect
+`result.transaction` before broadcasting it. Fordefi must be the fee payer and
+must sign before every downstream signer, so a transaction that is not vault-paid
+or already carries a signature is rejected before submitting.
+
+The signature is ed25519-verified against the returned transaction's own message
+at the vault's required-signer position; a signature that does not verify, or a
+returned transaction the vault does not sign, fails with `SIGNER_SIGNING_FAILED`
+and leaves the caller's transaction untouched.
+
+```python
+import os
+
+from solana_keychain.fordefi import FordefiSignerConfig, create_fordefi_signer
+
+signer = await create_fordefi_signer(
+    FordefiSignerConfig(
+        access_token=os.environ["FORDEFI_ACCESS_TOKEN"],
+        vault_id=os.environ["FORDEFI_VAULT_ID"],
+        public_key=os.environ["FORDEFI_PUBLIC_KEY"],
+        private_key_pem=os.environ["FORDEFI_PRIVATE_KEY_PEM"],
+        chain="solana_mainnet",
+        push_mode="manual",
+    )
+)
+
+result = await signer.modify_and_sign_transaction(transaction)
+if result.is_complete:
+    # Broadcast result.encoded_transaction through your RPC client.
+    pass
+else:
+    # Sign result.transaction with the downstream signers, reserialize, broadcast.
+    pass
+```
+
+Bound what Fordefi may spend through `config.fee`, for example
+`{"type": "custom", "priority_fee": "1000"}`; that request is what Fordefi
+honours, and the returned fee instructions are not checked against it locally.
+
+Fordefi normally refreshes the blockhash but does not return its exact
+`lastValidBlockHeight`, so broadcast manual results promptly rather than relying
+on a locally known block-height expiry.
 
 ### Sign and Send
 
 `sign_and_send_transaction` gets a transaction on chain with one call. A
-`SendingSigner` (Crossmint, Fordefi native) broadcasts through its provider and
-the send function is never called; a `TransactionSigner` signs and the send
-function broadcasts the base64-encoded result:
+`SendingSigner` (Crossmint, Fordefi native auto) broadcasts through its provider
+and the send function is never called; a `TransactionSigner` or `ModifyingSigner`
+signs and the send function broadcasts the base64-encoded result:
 
 ```python
 from solana_keychain import sign_and_send_transaction
