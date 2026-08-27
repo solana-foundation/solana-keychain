@@ -10,7 +10,6 @@ fn create_test_keypair() -> Keypair {
     Keypair::new()
 }
 
-// Generate a valid P256 private key for testing
 fn create_test_api_keys() -> (String, String) {
     let signing_key = p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
     let private_key_hex = hex::encode(signing_key.to_bytes());
@@ -81,16 +80,13 @@ async fn test_turnkey_sign_message() {
     let keypair = create_test_keypair();
     let (api_public_key, api_private_key) = create_test_api_keys();
 
-    // Create a signature from the keypair
     let message = b"test message";
     let signature = keypair.sign_message(message);
     let sig_bytes = signature.as_ref();
 
-    // Split signature into r and s components (32 bytes each)
     let r_hex = hex::encode(&sig_bytes[0..32]);
     let s_hex = hex::encode(&sig_bytes[32..64]);
 
-    // Mock the sign endpoint
     Mock::given(method("POST"))
         .and(path("/public/v1/submit/sign_raw_payload"))
         .and(header("Content-Type", "application/json"))
@@ -216,10 +212,7 @@ async fn test_turnkey_sign_transaction() {
     assert!(result.is_ok());
     let (serialized_tx, returned_sig) = result.unwrap().into_signed_transaction();
 
-    // Verify the signature matches
     assert_eq!(returned_sig, signature);
-
-    // Verify the transaction is properly serialized
     assert!(!serialized_tx.is_empty());
     assert_eq!(tx.signatures, vec![signature]);
 }
@@ -317,7 +310,6 @@ async fn test_turnkey_sign_unauthorized() {
     let keypair = create_test_keypair();
     let (api_public_key, api_private_key) = create_test_api_keys();
 
-    // Mock 401 Unauthorized response
     Mock::given(method("POST"))
         .and(path("/public/v1/submit/sign_raw_payload"))
         .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
@@ -352,7 +344,6 @@ async fn test_turnkey_sign_invalid_response() {
     let keypair = create_test_keypair();
     let (api_public_key, api_private_key) = create_test_api_keys();
 
-    // Mock response without result field
     Mock::given(method("POST"))
         .and(path("/public/v1/submit/sign_raw_payload"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -452,7 +443,6 @@ async fn test_turnkey_sign_invalid_hex() {
     let keypair = create_test_keypair();
     let (api_public_key, api_private_key) = create_test_api_keys();
 
-    // Mock response with invalid hex
     Mock::given(method("POST"))
         .and(path("/public/v1/submit/sign_raw_payload"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -495,7 +485,6 @@ async fn test_turnkey_is_available() {
     let keypair = create_test_keypair();
     let (api_public_key, api_private_key) = create_test_api_keys();
 
-    // Mock successful whoami response
     Mock::given(method("POST"))
         .and(path("/public/v1/query/whoami"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -528,7 +517,6 @@ async fn test_turnkey_is_not_available() {
     let keypair = create_test_keypair();
     let (api_public_key, api_private_key) = create_test_api_keys();
 
-    // Mock failed whoami response
     Mock::given(method("POST"))
         .and(path("/public/v1/query/whoami"))
         .respond_with(ResponseTemplate::new(500))
@@ -570,11 +558,9 @@ async fn test_turnkey_create_stamp() {
     assert!(stamp.is_ok());
     let stamp_str = stamp.unwrap();
 
-    // Verify it's valid base64
     let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&stamp_str);
     assert!(decoded.is_ok());
 
-    // Verify it's valid JSON
     let json: serde_json::Value = serde_json::from_slice(&decoded.unwrap()).unwrap();
     assert!(json.get("public_key").is_some());
     assert!(json.get("signature").is_some());
@@ -587,7 +573,6 @@ async fn test_turnkey_sign_oversized_component() {
     let keypair = create_test_keypair();
     let (api_public_key, api_private_key) = create_test_api_keys();
 
-    // Create oversized r component (> 32 bytes)
     let r_hex = hex::encode(vec![0xFF; 33]);
     let s_hex = hex::encode(vec![0x01; 32]);
 

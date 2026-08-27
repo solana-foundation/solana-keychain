@@ -213,7 +213,6 @@ impl FireblocksSigner {
         }
     }
 
-    /// Sign raw bytes using RAW operation
     async fn sign_raw_bytes(&self, message: &[u8]) -> Result<Signature, SignerError> {
         let public_key = self.initialized_pubkey()?;
 
@@ -300,7 +299,6 @@ impl FireblocksSigner {
         Ok(sig)
     }
 
-    /// Create a transaction (signing request) in Fireblocks
     async fn create_transaction(
         &self,
         request: CreateTransactionRequest,
@@ -323,7 +321,6 @@ impl FireblocksSigner {
         parse_json_response(response, "Fireblocks API create_transaction").await
     }
 
-    /// Poll for transaction completion
     async fn poll_for_completion(
         &self,
         tx_id: &str,
@@ -371,7 +368,6 @@ impl FireblocksSigner {
         .await
     }
 
-    /// Get transaction status
     async fn get_transaction(&self, tx_id: &str) -> Result<TransactionResponse, SignerError> {
         let uri = format!("/v1/transactions/{}", tx_id);
         let token = self.create_auth_token(&uri, "")?;
@@ -388,7 +384,6 @@ impl FireblocksSigner {
         parse_json_response(response, "Fireblocks API get_transaction").await
     }
 
-    /// Extract the signer-bound signature from a signing response.
     fn signature_from_signed_messages(
         &self,
         response: &TransactionResponse,
@@ -422,7 +417,6 @@ impl FireblocksSigner {
         ))
     }
 
-    /// Check if Fireblocks API is available
     async fn check_availability(&self) -> bool {
         if self.public_key.is_none() {
             return false;

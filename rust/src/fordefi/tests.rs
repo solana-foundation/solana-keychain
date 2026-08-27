@@ -168,8 +168,6 @@ fn build_mock_wire_transaction(keypair: &Keypair, message_bytes: &[u8]) -> Vec<u
     wire
 }
 
-// --- Config validation tests ---
-
 #[test]
 fn test_fordefi_config_empty_access_token() {
     let result = build_test_signer_from_config(FordefiSignerConfig {
@@ -302,8 +300,6 @@ fn test_fordefi_config_strips_trailing_slash() {
     assert_eq!(result.unwrap().api_base_url, "https://custom.api.com");
 }
 
-// --- Construction trust-model tests ---
-
 #[tokio::test]
 async fn test_fordefi_from_config_trusts_configured_public_key() {
     // No server exists at this base URL: construction must not touch the network.
@@ -316,8 +312,6 @@ async fn test_fordefi_from_config_trusts_configured_public_key() {
 
     assert_eq!(signer.pubkey(), public_key);
 }
-
-// --- sign_message tests ---
 
 #[tokio::test]
 async fn test_fordefi_sign_message_success() {
@@ -453,8 +447,6 @@ async fn test_fordefi_sign_message_failed_state() {
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
 }
-
-// --- Sign transaction tests ---
 
 #[tokio::test]
 async fn test_fordefi_sign_transaction_success() {
@@ -624,8 +616,6 @@ async fn test_fordefi_sign_transaction_missing_signatures() {
     assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
 }
 
-// --- is_available tests ---
-
 #[tokio::test]
 async fn test_fordefi_is_available_success() {
     let mock_server = MockServer::start().await;
@@ -701,8 +691,6 @@ async fn test_fordefi_is_available_timeout() {
     assert!(!signer.is_available().await);
 }
 
-// --- Debug ---
-
 #[test]
 fn test_fordefi_debug_hides_secrets() {
     let keypair = create_test_keypair();
@@ -737,8 +725,6 @@ async fn test_fordefi_error_status_code_only() {
     assert_eq!(err.to_string(), "Remote API error");
     assert!(!err.to_string().contains("Vault is locked"));
 }
-
-// --- Native Solana signing tests ---
 
 /// The vault does not always occupy slot zero, so the signature is located by
 /// its required-signer position.
@@ -1113,8 +1099,6 @@ async fn test_fordefi_native_sign_transaction_poll_timeout_is_broadcast_unconfir
     }
 }
 
-// --- Wire transaction parsing tests ---
-
 #[tokio::test]
 async fn test_fordefi_native_sign_transaction_malformed_raw_transaction() {
     let mock_server = MockServer::start().await;
@@ -1153,8 +1137,6 @@ async fn test_fordefi_native_sign_transaction_malformed_raw_transaction() {
         other => panic!("Expected BroadcastUnconfirmed, got: {other:?}"),
     }
 }
-
-// --- Custom request-signer (FordefiRequestSigner) tests ---
 
 /// A custom request signer that returns a fixed `x-signature` value.
 struct CannedSigner(&'static str);
@@ -1286,8 +1268,6 @@ fn test_fordefi_custom_request_signer_still_validates_config() {
 
     assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
 }
-
-// --- Native manual mode ---
 
 /// Fordefi rewrites the message, so the caller has to end up holding the bytes
 /// the returned signature covers rather than the ones they submitted.

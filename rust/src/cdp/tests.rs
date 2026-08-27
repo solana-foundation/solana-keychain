@@ -13,8 +13,7 @@ use wiremock::{
 
 const TEST_PUBKEY: &str = "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV";
 
-/// Generate a 64-byte random Ed25519 key in the CDP base64 format (seed || pubkey).
-/// This must be a real keypair to pass JWT validation.
+/// Real keypair required to pass JWT validation.
 fn test_ed25519_key() -> String {
     let seed = [0x42u8; 32];
     let keypair = keypair_from_seed(&seed).expect("failed to derive test keypair");

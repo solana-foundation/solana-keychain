@@ -15,12 +15,10 @@ impl KeypairUtil {
     /// - Base58 encoded string (current format)
     /// - U8Array format: "[0, 1, 2, ...]"
     pub fn from_private_key_string(private_key: &str) -> Result<Keypair, SignerError> {
-        // Try to parse as U8Array format
         if private_key.trim().starts_with('[') && private_key.trim().ends_with(']') {
             return Self::from_u8_array_string(private_key);
         }
 
-        // Default to base58 format (with proper error handling)
         Self::from_base58_safe(private_key)
     }
 
@@ -37,7 +35,6 @@ impl KeypairUtil {
 
     /// Creates a new keypair from a base58-encoded private key string with proper error handling
     pub fn from_base58_safe(private_key: &str) -> Result<Keypair, SignerError> {
-        // Try to decode as base58 first
         let decoded = Zeroizing::new(bs58::decode(private_key).into_vec().map_err(|_e| {
             #[cfg(feature = "unsafe-debug")]
             log::error!("Failed to decode base58 private key: {_e}");
@@ -109,7 +106,6 @@ impl KeypairUtil {
 
     /// Creates a new keypair from a JSON keypair file content
     pub fn from_json_keypair(json_content: &str) -> Result<Keypair, SignerError> {
-        // Try to parse as a simple JSON array first
         if let Ok(byte_array) = serde_json::from_str::<Vec<u8>>(json_content) {
             let byte_array = Zeroizing::new(byte_array);
             if byte_array.len() != PRIVATE_KEY_LENGTH {

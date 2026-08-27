@@ -151,7 +151,6 @@ impl TurnkeySigner {
 
         if let Some(result) = response.activity.result {
             if let Some(sign_result) = result.sign_raw_payload_result {
-                // Decode r and s components
                 let r_bytes = hex::decode(&sign_result.r).map_err(|e| {
                     SignerError::SerializationError(format!("Failed to decode r: {e}"))
                 })?;
@@ -159,14 +158,13 @@ impl TurnkeySigner {
                     SignerError::SerializationError(format!("Failed to decode s: {e}"))
                 })?;
 
-                // Ensure each component is exactly 32 bytes
                 if r_bytes.len() > 32 || s_bytes.len() > 32 {
                     return Err(SignerError::SigningFailed(
                         "Invalid signature component length".to_string(),
                     ));
                 }
 
-                // Combine r and s into a 64-byte signature, left-padded (right-aligned)
+                // r and s are left-padded to 32 bytes each before concatenation
                 let mut sig_bytes = [0u8; 64];
                 sig_bytes[32 - r_bytes.len()..32].copy_from_slice(&r_bytes);
                 sig_bytes[64 - s_bytes.len()..].copy_from_slice(&s_bytes);
@@ -244,7 +242,6 @@ impl TurnkeySigner {
             .map_err(|e| SignerError::InvalidPrivateKey(format!("Invalid signing key: {e}")))
     }
 
-    /// Create X-Stamp header for Turnkey API authentication
     fn create_stamp(&self, message: &str) -> Result<String, SignerError> {
         let signature: p256::ecdsa::Signature = self.api_signing_key.sign(message.as_bytes());
         let signature_der = signature.to_der().to_bytes();
@@ -261,7 +258,6 @@ impl TurnkeySigner {
         Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_stamp.as_bytes()))
     }
 
-    /// Check if Turnkey API is available and credentials are valid
     async fn check_availability(&self) -> bool {
         let request = WhoAmIRequest {
             organization_id: self.organization_id.clone(),
@@ -305,7 +301,6 @@ impl SolanaSigner for TurnkeySigner {
     }
 
     async fn is_available(&self) -> bool {
-        // Verify Turnkey API is reachable and credentials are valid
         self.check_availability().await
     }
 }

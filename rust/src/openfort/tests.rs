@@ -40,8 +40,7 @@ fn test_wallet_secret_pem() -> String {
     )
 }
 
-/// Default fixture used across most tests — bare base64 form, the same
-/// shape the Openfort dashboard and env vars deliver.
+/// Bare base64 form, the shape the Openfort dashboard and env vars deliver.
 fn test_wallet_secret() -> String {
     test_wallet_secret_b64()
 }
@@ -70,7 +69,6 @@ fn test_new_valid() {
         test_wallet_secret(),
     );
     assert!(signer.is_ok());
-    // Public key stays None until init() runs.
     assert!(signer.unwrap().public_key.is_none());
 }
 
@@ -172,8 +170,7 @@ async fn test_init_rejects_non_solana_address() {
 
 #[tokio::test]
 async fn test_is_available_uninitialized_returns_false() {
-    // No mock server needed — uninitialized signers must short-circuit
-    // without issuing a request.
+    // Uninitialized signers must short-circuit without issuing a request.
     let signer = create_uninitialized_test_signer("http://localhost");
     assert!(!signer.is_available().await);
 }

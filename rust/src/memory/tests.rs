@@ -53,7 +53,6 @@ async fn test_sign_message() {
 
     assert!(signature.is_ok());
     let sig = signature.unwrap();
-    // Solana signatures are 64 bytes
     assert_eq!(sig.as_ref().len(), 64);
 }
 

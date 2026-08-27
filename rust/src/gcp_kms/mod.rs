@@ -91,8 +91,7 @@ impl GcpKmsSigner {
 
     /// Sign message bytes using GCP KMS EdDSA signing
     async fn sign_bytes(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        // GCP KMS AsymmetricSign with EC_SIGN_ED25519 takes raw data directly
-        // because it operates in PureEdDSA mode
+        // GCP KMS AsymmetricSign takes raw data directly (PureEdDSA mode).
         let response = self
             .client
             .asymmetric_sign()
@@ -139,7 +138,6 @@ impl GcpKmsSigner {
 
         match result {
             Ok(public_key) => {
-                // Verify the algorithm is EC_SIGN_ED25519
                 public_key.algorithm == CryptoKeyVersionAlgorithm::EcSignEd25519
             }
             Err(_e) => {

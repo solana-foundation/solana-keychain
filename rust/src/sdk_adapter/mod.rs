@@ -10,7 +10,6 @@ mod v3;
 #[cfg(feature = "sdk-v4")]
 mod v4;
 
-// Re-export the appropriate version based on feature flags
 #[cfg(feature = "sdk-v2")]
 pub use v2::*;
 
@@ -20,7 +19,6 @@ pub use v3::*;
 #[cfg(feature = "sdk-v4")]
 pub use v4::*;
 
-// Compile-time checks to ensure exactly one SDK version is enabled
 #[cfg(any(
     all(feature = "sdk-v2", feature = "sdk-v3"),
     all(feature = "sdk-v2", feature = "sdk-v4"),

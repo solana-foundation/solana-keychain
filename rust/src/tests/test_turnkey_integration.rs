@@ -91,7 +91,6 @@ mod tests {
             .expect("Failed to sign transaction with Turnkey")
             .into_signed_transaction();
 
-        // Validate the signature
         assert_eq!(signature.as_ref().len(), 64, "Signature should be 64 bytes");
         assert!(
             signature.verify(
@@ -101,7 +100,6 @@ mod tests {
             "Signature should be valid"
         );
 
-        // Validate the transaction
         let decoded_bytes = STANDARD
             .decode(&base64_txn)
             .expect("Failed to decode base64 transaction");

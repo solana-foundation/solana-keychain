@@ -24,8 +24,6 @@ fn create_test_signer(api_key: &str, wallet_id: &str, base_url: Option<String>) 
     }
 }
 
-// --- Validation tests ---
-
 #[test]
 fn test_para_new_validates_api_key_prefix() {
     let result = ParaSigner::new(
@@ -101,8 +99,6 @@ fn test_uuid_validation() {
     )); // 'g' is not hex
 }
 
-// --- Sign before init ---
-
 #[tokio::test]
 async fn test_para_sign_before_init() {
     let signer = create_test_signer("test-api-key", "test-wallet-id", None);
@@ -111,8 +107,6 @@ async fn test_para_sign_before_init() {
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), SignerError::ConfigError(_)));
 }
-
-// --- Init tests ---
 
 #[tokio::test]
 async fn test_para_init_success() {
@@ -146,6 +140,7 @@ async fn test_para_init_case_insensitive_type() {
     let keypair = create_test_keypair();
     let pubkey_str = keypair_pubkey(&keypair).to_string();
 
+    // 10-second delay exceeds the 5s timeout
     Mock::given(method("GET"))
         .and(path("/v1/wallets/test-wallet-id"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -255,8 +250,6 @@ async fn test_para_init_unauthorized() {
     assert!(matches!(err, SignerError::RemoteApiError(_)));
     assert_eq!(err.to_string(), "Remote API error");
 }
-
-// --- Sign tests ---
 
 #[tokio::test]
 async fn test_para_sign_message() {
@@ -405,8 +398,6 @@ async fn test_para_sign_invalid_hex_length() {
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
 }
-
-// --- is_available tests ---
 
 #[tokio::test]
 async fn test_para_is_available_ready() {
@@ -632,7 +623,6 @@ async fn test_para_init_missing_type_field() {
 async fn test_para_is_available_timeout() {
     let mock_server = MockServer::start().await;
 
-    // Respond with a 10-second delay — exceeds the 5s timeout
     Mock::given(method("GET"))
         .and(path("/v1/wallets/test-wallet-id"))
         .respond_with(
@@ -706,7 +696,7 @@ async fn test_para_sign_verification_failure() {
     let mock_server = MockServer::start().await;
     let keypair = create_test_keypair();
 
-    // Return a valid-format but wrong signature (64 zero bytes)
+    // valid-format but wrong signature
     let bad_sig_hex = "00".repeat(64);
 
     Mock::given(method("POST"))

@@ -4,8 +4,8 @@ pub const FORDEFI_PRIVATE_KEY_PEM: &str = "FORDEFI_PRIVATE_KEY_PEM";
 pub const FORDEFI_PUBLIC_KEY: &str = "FORDEFI_PUBLIC_KEY";
 pub const FORDEFI_CHAIN: &str = "FORDEFI_CHAIN";
 pub const FORDEFI_API_BASE_URL: &str = "FORDEFI_API_BASE_URL";
-// Black box vault credentials — a black box vault signs raw bytes and is distinct
-// from the Solana (native-mode) vault above. Mirrors the TypeScript integration tests.
+// Black box vault credentials - a black box vault signs raw bytes and is distinct
+// from the Solana (native-mode) vault above.
 pub const FORDEFI_BB_VAULT_ID: &str = "FORDEFI_BB_VAULT_ID";
 pub const FORDEFI_BB_PUBLIC_KEY: &str = "FORDEFI_BB_PUBLIC_KEY";
 
@@ -64,8 +64,6 @@ mod tests {
         }
     }
 
-    /// Black box signer — uses the dedicated black box vault (`FORDEFI_BB_*`),
-    /// which is distinct from the Solana vault used by native mode.
     async fn get_signer() -> FordefiBlackBoxSigner {
         dotenv().ok();
         let vault_id = env::var(FORDEFI_BB_VAULT_ID)
@@ -77,8 +75,6 @@ mod tests {
             .expect("Failed to create Fordefi black box signer")
     }
 
-    /// Config for the Solana vault (`FORDEFI_VAULT_ID`) and the chain from
-    /// `FORDEFI_CHAIN`.
     fn load_native_config(push_mode: Option<FordefiPushMode>) -> FordefiSignerConfig {
         dotenv().ok();
         let vault_id =
@@ -93,14 +89,12 @@ mod tests {
         load_config(vault_id, public_key, chain, push_mode)
     }
 
-    /// Native Solana signer that lets Fordefi broadcast.
     async fn get_native_signer() -> FordefiNativeAutoSigner {
         FordefiNativeAutoSigner::from_config(load_native_config(None))
             .await
             .expect("Failed to create Fordefi native signer")
     }
 
-    /// Native Solana signer that signs without broadcasting.
     #[cfg(feature = "integration-tests")]
     async fn get_manual_signer() -> FordefiNativeManualSigner {
         FordefiNativeManualSigner::from_config(load_native_config(Some(FordefiPushMode::Manual)))
@@ -247,8 +241,6 @@ mod tests {
 
         println!("Devnet transaction confirmed: {tx_sig}");
     }
-
-    // --- Native Solana mode integration tests ---
 
     #[tokio::test]
     #[cfg(feature = "integration-tests")]

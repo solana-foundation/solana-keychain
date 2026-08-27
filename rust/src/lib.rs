@@ -82,7 +82,6 @@ pub mod para;
 #[cfg(feature = "utila")]
 pub mod utila;
 
-// Re-export core types
 pub use error::SignerError;
 pub use http_client_config::HttpClientConfig;
 pub use send::sign_and_send;
@@ -90,7 +89,6 @@ pub use traits::{
     ModifyingSigner, SendingSigner, SignTransactionResult, SolanaSigner, TransactionSigner,
 };
 
-// Re-export signer types
 #[cfg(feature = "memory")]
 pub use memory::{MemorySigner, MemorySignerConfig};
 

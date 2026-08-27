@@ -1,6 +1,5 @@
 //! Adapter for Solana SDK v4.x
 
-// Re-export core types from solana-sdk v4
 #[allow(unused_imports)]
 pub use solana_sdk_v4::hash::Hash;
 #[allow(unused_imports)]

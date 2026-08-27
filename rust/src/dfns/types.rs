@@ -2,8 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-// ── Wallet API ──────────────────────────────────────────────
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetWalletResponse {
@@ -21,8 +19,6 @@ pub struct SigningKey {
     pub curve: String,
     pub public_key: String,
 }
-
-// ── Signature API ───────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind")]

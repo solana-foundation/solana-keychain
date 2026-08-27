@@ -139,9 +139,6 @@ async fn test_gcp_kms_is_available_success() {
     )
     .expect("Failed to create signer");
 
-    // Mock GetPublicKey. Matched by path (not a catch-all) so the auth
-    // client's variable number of metadata probes (e.g. universe-domain)
-    // cannot inflate the match count of the strict expect(1) below.
     Mock::given(method("GET"))
         .and(path(format!("/v1/{TEST_KEY_NAME}/publicKey")))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
@@ -295,11 +292,9 @@ async fn test_gcp_kms_sign_transaction_success() {
     )
     .expect("Failed to create signer");
 
-    // Create a dummy transaction
     let mut tx = create_test_transaction(&keypair.pubkey());
     let signature = keypair.sign_message(&tx.message.serialize());
 
-    // Mock AsymmetricSign
     Mock::given(method("POST"))
         .and(path(format!("/v1/{TEST_KEY_NAME}:asymmetricSign")))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
@@ -357,7 +352,6 @@ async fn test_gcp_kms_sign_message_invalid_signature_length() {
     )
     .expect("Failed to create signer");
 
-    // Return invalid signature (not 64 bytes)
     Mock::given(method("POST"))
         .and(path(format!("/v1/{TEST_KEY_NAME}:asymmetricSign")))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(

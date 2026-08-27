@@ -132,11 +132,8 @@ impl AwsKmsSigner {
 
     /// Sign message bytes using AWS KMS EdDSA signing
     async fn sign_bytes(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        // AWS KMS Sign operation for EdDSA
-        // Use ED25519_SHA_512 algorithm with RAW message type as required by AWS KMS
-        // Note: The SDK may not have a typed enum variant yet since Ed25519 support
-        // was added in November 2025. Using from() creates an "Unknown" variant
-        // that still works with the API.
+        // The SDK may not have a typed enum variant yet since Ed25519 support was added
+        // in November 2025; from() creates an "Unknown" variant that still works.
         let signing_algorithm = SigningAlgorithmSpec::from(AWS_KMS_SIGNING_ALGORITHM);
 
         let response = self
@@ -155,7 +152,6 @@ impl AwsKmsSigner {
                 SignerError::RemoteApiError("AWS KMS Sign operation failed".to_string())
             })?;
 
-        // Extract signature from response
         let signature_blob = response.signature().ok_or_else(|| {
             SignerError::SigningFailed("No signature in AWS KMS response".to_string())
         })?;

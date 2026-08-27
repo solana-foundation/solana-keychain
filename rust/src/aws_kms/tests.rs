@@ -60,8 +60,6 @@ async fn test_kms_new_valid_pubkey() {
     )
     .await;
 
-    // This will succeed because we only validate the pubkey format
-    // AWS config loading happens but doesn't fail without credentials
     if let Ok(signer) = result {
         assert_eq!(signer.public_key, keypair.pubkey());
         assert_eq!(signer.key_id, TEST_KEY_ID);
@@ -131,11 +129,9 @@ async fn test_kms_debug_impl() {
     if let Ok(signer) = result {
         let debug_str = format!("{:?}", signer);
 
-        // Verify debug output contains expected fields
         assert!(debug_str.contains("AwsKmsSigner"));
         assert!(debug_str.contains("key_id"));
         assert!(debug_str.contains("public_key"));
-        // Verify it doesn't leak sensitive info (no client details)
         assert!(!debug_str.contains("client"));
     }
 }

@@ -24,8 +24,6 @@ use crate::signature_util::{
 const CDP_API_HOST: &str = "api.cdp.coinbase.com";
 const CDP_BASE_PATH: &str = "/platform/v2/solana/accounts";
 
-// ─── CdpSigner ────────────────────────────────────────────────────────────────
-
 /// CDP (Coinbase Developer Platform) Solana signer.
 ///
 /// Signs Solana transactions and messages using CDP's managed key infrastructure
@@ -331,8 +329,6 @@ impl CdpSigner {
     }
 }
 
-// ─── SolanaSigner Implementation ─────────────────────────────────────────────
-
 #[async_trait::async_trait]
 impl SolanaSigner for CdpSigner {
     fn pubkey(&self) -> Pubkey {
@@ -361,8 +357,6 @@ impl TransactionSigner for CdpSigner {
         ))
     }
 }
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests;
