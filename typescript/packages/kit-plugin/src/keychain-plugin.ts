@@ -9,12 +9,11 @@ import { extendClient } from '@solana/kit';
 
 /**
  * Backend configurations these plugins accept: every keychain backend except
- * the managed-broadcast ones — Crossmint, and Fordefi in native mode (`chain`
- * set). Those backends rewrite and broadcast transactions server-side, so
- * they expose `signAndSendTransactions` and no `signTransactions`, and cannot
- * serve as a client `payer` or `identity`: client send flows build, sign, and
- * broadcast themselves, and Kit routes a sending signer only through
- * `signAndSendTransactionMessageWithSigners()`. Create those signers with
+ * Crossmint and Fordefi in native mode (`chain` set). Those backends rewrite
+ * the transaction server-side, so they expose `signAndSendTransactions` or
+ * `modifyAndSignTransactions` and no `signTransactions`, and cannot serve as a
+ * client `payer` or `identity`: client send flows build, sign, and broadcast
+ * themselves against the message they compiled. Create those signers with
  * `createKeychainSigner()` and use that function directly instead.
  */
 export type KeychainKitPluginConfig =
@@ -22,17 +21,17 @@ export type KeychainKitPluginConfig =
     | (FordefiSignerConfig & { backend: 'fordefi'; chain?: undefined });
 
 /**
- * The managed-broadcast exclusion above only protects TypeScript callers, so
- * the config is also rejected at runtime — before `createKeychainSigner`
- * runs, since the excluded backends authenticate against their provider
- * during construction. The signer-shape assertion afterwards is the backstop
- * for any future backend whose factory returns a sending signer.
+ * The exclusion above only protects TypeScript callers, so the config is also
+ * rejected at runtime, before `createKeychainSigner` runs, since the excluded
+ * backends authenticate against their provider during construction. The
+ * signer-shape assertion afterwards is the backstop for any future backend
+ * whose factory returns a signer that is not a partial signer.
  */
 async function createPartialSigner(config: KeychainKitPluginConfig) {
     const { backend } = config as KeychainSignerConfig;
     if (backend === 'crossmint' || (backend === 'fordefi' && (config as { chain?: unknown }).chain !== undefined)) {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            message: `The '${backend}' backend broadcasts transactions server-side and cannot serve as a Kit client payer/identity. Create it with createKeychainSigner() and use signAndSendTransaction() instead.`,
+            message: `The '${backend}' backend rewrites transactions server-side and cannot serve as a Kit client payer/identity. Create it with createKeychainSigner() and use signAndSendTransaction() instead.`,
         });
     }
     const signer = await createKeychainSigner(config);

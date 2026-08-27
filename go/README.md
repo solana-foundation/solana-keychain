@@ -202,8 +202,7 @@ type SendingSigner interface {
 
 `SignTransaction` and `ModifyAndSignTransaction` return a `SignedTransaction
 { EncodedTransaction, Signature, Completeness }`; use `IsComplete()` to check
-whether every required signature is present. `ModifyingSigner` has no
-implementor yet.
+whether every required signature is present.
 
 A backend that cannot sign a transaction carries no `SignTransaction` method at
 all, so a type assertion is the way to ask what a signer can do:
@@ -215,12 +214,28 @@ all, so a type assertion is the way to ask what a signer can do:
 | crossmint | `SendingSigner` | `CodeSigningFailed` |
 | utila | `TransactionSigner` | `CodeSigningFailed` |
 | fordefi black box (`fordefi.BlackBoxSigner`) | `TransactionSigner` | yes |
-| fordefi native (`fordefi.NativeAutoSigner`) | `SendingSigner` | yes |
+| fordefi native auto (`fordefi.NativeAutoSigner`) | `SendingSigner` | yes |
+| fordefi native manual (`fordefi.NativeManualSigner`) | `ModifyingSigner` | yes |
 
-Fordefi is two types picked by `Config.Chain`: `fordefi.New` returns a
-`*NativeAutoSigner` when it is set and a `*BlackBoxSigner` otherwise, and
-`fordefi.NewNativeAuto` / `fordefi.NewBlackBox` build one directly, each
-rejecting the other mode's config.
+Fordefi is three types picked by `Config.Chain` and `Config.PushMode`:
+
+| Config | Type | Entry point |
+| --- | --- | --- |
+| `Chain` unset | `*BlackBoxSigner` | `SignTransaction` |
+| `Chain` set, `PushMode` unset or `PushModeAuto` | `*NativeAutoSigner` | `SignAndSendTransaction` |
+| `Chain` set, `PushMode` `PushModeManual` | `*NativeManualSigner` | `ModifyAndSignTransaction` |
+
+`fordefi.New` dispatches on the config; `fordefi.NewBlackBox`,
+`fordefi.NewNativeAuto` and `fordefi.NewNativeManual` build one directly, each
+rejecting the other modes' configs.
+
+In manual mode Fordefi rewrites the message, at minimum the recent blockhash,
+and it manages the Compute Budget fee instructions, then signs without
+broadcasting. The rewrite is not diffed: the returned signature is verified
+against the message Fordefi returned, and your transaction is replaced with
+those bytes so it can never hold a message the signature does not cover. Inspect
+the result before broadcasting it. Fordefi must be the fee payer and nothing may
+be signed yet, so run it before every other signer.
 
 Crossmint executes every approved transaction server-side and exposes no
 sign-only API, so it offers `SignAndSendTransaction` only. It may rewrite the
@@ -231,9 +246,10 @@ transaction is never modified.
 ### Sign and Send
 
 `core.SignAndSendTransaction` gets a transaction on chain with one call. A
-`SendingSigner` (Crossmint, Fordefi native mode) broadcasts through its provider
-and ignores the send function; a `TransactionSigner` signs and the send function
-broadcasts the base64-encoded result:
+`SendingSigner` (Crossmint, Fordefi native auto mode) broadcasts through its
+provider and ignores the send function; a `TransactionSigner` or a
+`ModifyingSigner` signs and the send function broadcasts the base64-encoded
+result, which for a `ModifyingSigner` is the transaction its provider rewrote:
 
 ```go
 sig, err := core.SignAndSendTransaction(ctx, signer, tx,

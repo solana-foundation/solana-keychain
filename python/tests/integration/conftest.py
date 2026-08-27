@@ -10,13 +10,19 @@ do) to fail when the flow the run asked for never executed: the backend named by
 run. Skipping is only acceptable for backends the run did not ask for.
 """
 
+import asyncio
 import base64
+import contextlib
 import os
+import time
+from typing import Any
 
 import httpx
 import pytest
 from solders.hash import Hash
 from solders.message import Message
+from solders.pubkey import Pubkey
+from solders.system_program import TransferParams, transfer
 from solders.transaction import Transaction, VersionedTransaction
 
 from solana_keychain.core import signed_message_bytes
@@ -83,22 +89,73 @@ async def assert_message_roundtrip(signer: SolanaSigner) -> None:
     assert signature.verify(signer.pubkey, message)
 
 
-async def fetch_latest_blockhash() -> Hash:
-    """A live blockhash is required: services reject or silently replace a stale one,
-    and a replaced blockhash changes the message bytes the signature must cover."""
+async def rpc_call(method: str, params: list[Any]) -> Any:
     rpc_url = os.environ.get("SOLANA_RPC_URL", DEFAULT_RPC_URL)
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
             rpc_url,
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "getLatestBlockhash",
-                "params": [{"commitment": "finalized"}],
-            },
+            json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
         )
     response.raise_for_status()
-    return Hash.from_string(response.json()["result"]["value"]["blockhash"])
+    body = response.json()
+    if body.get("error"):
+        raise AssertionError(f"{method} RPC error: {body['error']}")
+    return body["result"]
+
+
+async def fetch_latest_blockhash() -> Hash:
+    """A live blockhash is required: services reject or silently replace a stale one,
+    and a replaced blockhash changes the message bytes the signature must cover."""
+    result = await rpc_call("getLatestBlockhash", [{"commitment": "finalized"}])
+    return Hash.from_string(result["value"]["blockhash"])
+
+
+async def unsigned_transfer(
+    payer: Pubkey, recipient: Pubkey, lamports: int
+) -> VersionedTransaction:
+    instruction = transfer(
+        TransferParams(from_pubkey=payer, to_pubkey=recipient, lamports=lamports)
+    )
+    message = Message.new_with_blockhash([instruction], payer, await fetch_latest_blockhash())
+    return VersionedTransaction.from_legacy(Transaction.new_unsigned(message))
+
+
+async def broadcast_transaction(encoded_transaction: str) -> str:
+    """Returns the transaction signature the cluster accepted."""
+    # Preflight defaults to finalized, which cannot yet see a blockhash stamped
+    # seconds ago and rejects the send as BlockhashNotFound.
+    signature = await rpc_call(
+        "sendTransaction",
+        [encoded_transaction, {"encoding": "base64", "preflightCommitment": "processed"}],
+    )
+    return str(signature)
+
+
+async def confirm_transaction(
+    signature: str, rebroadcast: str | None = None, timeout_seconds: float = 60.0
+) -> None:
+    """Poll until ``signature`` is confirmed. ``rebroadcast`` carries the encoded
+    transaction when the caller owns the broadcast, and is None when the provider
+    pushed it and the wire bytes are not available."""
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        status = (
+            await rpc_call(
+                "getSignatureStatuses", [[signature], {"searchTransactionHistory": True}]
+            )
+        )["value"][0]
+        if status is not None:
+            if status["err"] is not None:
+                raise AssertionError(f"transaction failed on chain: {status['err']}")
+            if status["confirmationStatus"] in ("confirmed", "finalized"):
+                return
+        if rebroadcast is not None:
+            # A sent transaction can be dropped before it lands, and only a resend
+            # while its blockhash is still valid gets it back into a block.
+            with contextlib.suppress(Exception):
+                await broadcast_transaction(rebroadcast)
+        await asyncio.sleep(2)
+    raise AssertionError(f"timed out waiting for confirmation of {signature}")
 
 
 async def _unsigned_transaction(signer: SolanaSigner) -> VersionedTransaction:

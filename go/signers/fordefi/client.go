@@ -53,11 +53,11 @@ type blackBoxDetails struct {
 }
 
 type solanaTransactionDetails struct {
-	Type     string `json:"type"`
-	Chain    Chain  `json:"chain"`
-	Data     string `json:"data"`
-	PushMode string `json:"push_mode"`
-	Fee      *Fee   `json:"fee,omitempty"`
+	Type     string   `json:"type"`
+	Chain    Chain    `json:"chain"`
+	Data     string   `json:"data"`
+	PushMode PushMode `json:"push_mode"`
+	Fee      *Fee     `json:"fee,omitempty"`
 }
 
 type solanaMessageDetails struct {
@@ -186,7 +186,7 @@ func (s *signerCore) getTransaction(ctx context.Context, txID string) (transacti
 // pollForResult polls the transaction until it reaches a terminal state or the
 // attempt budget is exhausted. When pushable is true (native Solana
 // transactions, auto-broadcast) the only success state is "completed"; when
-// false (black box / messages) "signed" succeeds, with "completed" accepted
+// false (black box, messages, native manual) "signed" succeeds, with "completed" accepted
 // defensively. Cancellation of ctx aborts the wait, reported as
 // CodeBroadcastUnconfirmed when pushable because Fordefi may already have executed it.
 func (s *signerCore) pollForResult(ctx context.Context, txID string, pushable bool) (transactionStatusResponse, error) {

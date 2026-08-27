@@ -2,6 +2,8 @@ from solana_keychain.fordefi.request_signer import FordefiRequestSigner, PemRequ
 from solana_keychain.fordefi.signer import (
     FordefiBlackBoxSigner,
     FordefiNativeAutoSigner,
+    FordefiNativeManualSigner,
+    FordefiPushMode,
     FordefiSignerConfig,
     create_fordefi_signer,
 )
@@ -9,6 +11,8 @@ from solana_keychain.fordefi.signer import (
 __all__ = [
     "FordefiBlackBoxSigner",
     "FordefiNativeAutoSigner",
+    "FordefiNativeManualSigner",
+    "FordefiPushMode",
     "FordefiRequestSigner",
     "FordefiSignerConfig",
     "PemRequestSigner",
