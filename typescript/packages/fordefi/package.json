@@ -48,17 +48,21 @@
         "@solana/codecs-strings": ">=8.0.0",
         "@solana/keys": ">=8.0.0",
         "@solana/signers": ">=8.0.0",
+        "@solana/transaction-messages": ">=8.0.0",
         "@solana/transactions": ">=8.0.0"
     },
     "publishConfig": {
         "access": "public"
     },
     "devDependencies": {
+        "@solana-program/system": "^0.13.0",
         "@solana/addresses": "8.0.0",
         "@solana/codecs-strings": "8.0.0",
         "@solana/keychain-test-utils": "workspace:*",
         "@solana/keys": "8.0.0",
+        "@solana/kit": "8.0.0",
         "@solana/signers": "8.0.0",
+        "@solana/transaction-messages": "8.0.0",
         "@solana/transactions": "8.0.0",
         "dotenv": "^17.4.2"
     }
