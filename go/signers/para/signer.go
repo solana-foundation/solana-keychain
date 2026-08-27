@@ -25,7 +25,7 @@ type Signer struct {
 }
 
 // Ensure Signer satisfies the core contract at compile time.
-var _ core.Signer = (*Signer)(nil)
+var _ core.TransactionSigner = (*Signer)(nil)
 
 // New builds a Para signer and initializes it by fetching the wallet from
 // Para's API and extracting its Solana address.

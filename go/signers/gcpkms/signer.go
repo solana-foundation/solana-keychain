@@ -23,7 +23,7 @@ type Signer struct {
 }
 
 // Ensure Signer satisfies the core contract at compile time.
-var _ core.Signer = (*Signer)(nil)
+var _ core.TransactionSigner = (*Signer)(nil)
 
 // String renders the signer without config detail, so fmt's reflective struct
 // printing cannot surface the key resource name or client internals.

@@ -35,7 +35,7 @@ type Signer struct {
 }
 
 // Ensure Signer satisfies the core contract at compile time.
-var _ core.Signer = (*Signer)(nil)
+var _ core.TransactionSigner = (*Signer)(nil)
 
 // New builds an Openfort signer and fetches the wallet's Solana address from
 // GET /v2/accounts/{accountId}.

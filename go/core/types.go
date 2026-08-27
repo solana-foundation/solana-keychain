@@ -41,18 +41,19 @@ type SignedTransaction struct {
 // IsComplete reports whether every required signature is present.
 func (s SignedTransaction) IsComplete() bool { return s.Completeness == Complete }
 
-// Signer is the unified signing interface implemented by every backend.
+// SolanaSigner is the base contract every signer backend implements: identity,
+// message signing and health.
 //
 // Methods take a context.Context and block. Batch signing is provided as the free
 // helpers SignMessages / SignTransactions rather than on the interface.
-type Signer interface {
+//
+// Transaction handling lives in the capability interfaces, and a backend
+// implements exactly the one matching its provider's shape: TransactionSigner
+// signs the caller's transaction as given, ModifyingSigner rewrites it before
+// signing, SendingSigner has the provider sign and broadcast it.
+type SolanaSigner interface {
 	// Pubkey returns this signer's Solana public key.
 	Pubkey() solana.PublicKey
-
-	// SignTransaction signs tx in place: it places this signer's signature at the
-	// correct position in tx.Signatures and returns the encoded transaction, the
-	// signature, and whether the transaction is now fully signed.
-	SignTransaction(ctx context.Context, tx *solana.Transaction) (SignedTransaction, error)
 
 	// SignMessage signs arbitrary bytes and returns the 64-byte signature.
 	SignMessage(ctx context.Context, message []byte) (solana.Signature, error)
@@ -62,14 +63,34 @@ type Signer interface {
 	IsAvailable(ctx context.Context) bool
 }
 
-// TransactionBroadcaster marks signers whose provider executes the transaction
-// server-side, where a failure does not mean nothing happened; callers must
-// reconcile by provider transaction id before retrying, and SignTransactions
-// rejects them.
-type TransactionBroadcaster interface {
-	// BroadcastsTransactions reports whether this signer broadcasts in its
-	// current configuration.
-	BroadcastsTransactions() bool
+// TransactionSigner signs the caller's transaction exactly as given; the caller
+// broadcasts the result.
+type TransactionSigner interface {
+	SolanaSigner
+
+	// SignTransaction signs tx in place: it places this signer's signature at the
+	// correct position in tx.Signatures and returns the encoded transaction, the
+	// signature, and whether the transaction is now fully signed.
+	SignTransaction(ctx context.Context, tx *solana.Transaction) (SignedTransaction, error)
+}
+
+// ModifyingSigner has its provider rewrite the transaction before signing it.
+// The returned signature covers the rewritten message, not the bytes the caller
+// supplied, so any signatures collected beforehand are invalidated; continue
+// from the transaction it returns.
+type ModifyingSigner interface {
+	SolanaSigner
+
+	// ModifyAndSignTransaction lets the provider rewrite tx, signs the rewritten
+	// transaction and replaces tx with it.
+	ModifyAndSignTransaction(ctx context.Context, tx *solana.Transaction) (SignedTransaction, error)
+}
+
+// SendingSigner has its provider sign and broadcast the transaction server-side,
+// where a failure does not mean nothing happened: callers must reconcile by
+// provider transaction id before retrying.
+type SendingSigner interface {
+	SolanaSigner
 
 	// SignAndSendTransaction signs tx and broadcasts it through the provider.
 	// The provider may rewrite tx, in which case tx is left untouched and the
@@ -78,7 +99,7 @@ type TransactionBroadcaster interface {
 }
 
 // SignatureDictionary maps a signer address to its signature, a convenience for
-// @solana/kit-style callers; it is NOT part of the Signer interface.
+// @solana/kit-style callers; it is NOT part of the SolanaSigner interface.
 type SignatureDictionary map[solana.PublicKey]solana.Signature
 
 // NewSignatureDictionary builds a single-entry SignatureDictionary.

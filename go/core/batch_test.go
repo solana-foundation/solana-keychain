@@ -10,8 +10,8 @@ import (
 	"github.com/solana-foundation/solana-go/v2"
 )
 
-// countingSigner is a minimal in-package Signer stub for batch tests: it
-// records how many sign calls it received and returns a signature derived from
+// countingSigner is a minimal in-package TransactionSigner stub for batch tests:
+// it records how many sign calls it received and returns a signature derived from
 // the message's first byte so ordering can be asserted.
 type countingSigner struct {
 	calls atomic.Int32
@@ -29,45 +29,17 @@ func (c *countingSigner) SignMessage(_ context.Context, message []byte) (solana.
 }
 
 func (c *countingSigner) SignTransaction(context.Context, *solana.Transaction) (SignedTransaction, error) {
-	return SignedTransaction{}, NewSignerError(CodeSigningFailed, "not used in this test")
+	c.calls.Add(1)
+	return SignedTransaction{}, nil
 }
 
 func (c *countingSigner) IsAvailable(context.Context) bool { return true }
 
-// broadcastingSigner reports broadcasting with a configurable answer,
-// mirroring mode-dependent backends.
-type broadcastingSigner struct {
-	countingSigner
-	broadcasts bool
-}
-
-func (b *broadcastingSigner) BroadcastsTransactions() bool { return b.broadcasts }
-
-func (b *broadcastingSigner) SignAndSendTransaction(context.Context, *solana.Transaction) (solana.Signature, error) {
-	b.calls.Add(1)
-	return solana.Signature{}, nil
-}
-
-func (b *broadcastingSigner) SignTransaction(context.Context, *solana.Transaction) (SignedTransaction, error) {
-	b.calls.Add(1)
-	return SignedTransaction{}, nil
-}
-
-// Broadcasting signers must be rejected before any remote work: the single
-// nil, err batch result hides which transactions already executed.
-func TestSignTransactionsRejectsBroadcastingSigners(t *testing.T) {
-	s := &broadcastingSigner{broadcasts: true}
-	_, err := SignTransactions(context.Background(), s, []*solana.Transaction{{}}, BatchOptions{})
-	if code, ok := CodeOf(err); !ok || code != CodeConfigError {
-		t.Errorf("got code %q (ok=%v), want CodeConfigError", code, ok)
-	}
-	if got := s.calls.Load(); got != 0 {
-		t.Errorf("signer called %d times, want 0 (rejected before any remote work)", got)
-	}
-}
-
-func TestSignTransactionsAcceptsNonBroadcastingConfiguration(t *testing.T) {
-	s := &broadcastingSigner{broadcasts: false}
+// Only a TransactionSigner can be batched; the parameter type is what keeps a
+// SendingSigner out, where the single nil, err result would hide which
+// transactions the provider already executed.
+func TestSignTransactionsSignsEveryTransaction(t *testing.T) {
+	s := &countingSigner{}
 	out, err := SignTransactions(context.Background(), s, []*solana.Transaction{{}, {}}, BatchOptions{})
 	if err != nil {
 		t.Fatal(err)

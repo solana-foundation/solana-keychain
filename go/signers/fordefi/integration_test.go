@@ -18,9 +18,9 @@ import (
 // integrationSigner builds a black-box signer against the live Fordefi API
 // configured by the environment, run by `just go-test-integration` (loads
 // .env) or CI with Doppler secrets.
-func integrationSigner(t *testing.T) *Signer {
+func integrationSigner(t *testing.T) *BlackBoxSigner {
 	t.Helper()
-	s, err := New(context.Background(), Config{
+	s, err := NewBlackBox(context.Background(), Config{
 		AccessToken:   testutils.RequireEnv(t, "FORDEFI_ACCESS_TOKEN"),
 		VaultID:       testutils.RequireEnv(t, "FORDEFI_BB_VAULT_ID"),
 		PublicKey:     testutils.RequireEnv(t, "FORDEFI_BB_PUBLIC_KEY"),

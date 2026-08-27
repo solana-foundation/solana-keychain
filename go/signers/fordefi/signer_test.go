@@ -75,16 +75,31 @@ func newTestServer(t *testing.T, address string, configure func(mux *http.ServeM
 	return srv
 }
 
-func newTestSigner(t *testing.T, cfg Config, address string, configure func(mux *http.ServeMux)) *Signer {
+// testConfig points cfg at a stub server and shortens the polling bounds.
+func testConfig(t *testing.T, cfg Config, address string, configure func(mux *http.ServeMux)) Config {
 	t.Helper()
 	srv := newTestServer(t, address, configure)
 	cfg.APIBaseURL = srv.URL
 	cfg.HTTPClient = srv.Client()
 	cfg.PollInterval = time.Millisecond
 	cfg.MaxPollAttempts = 3
-	s, err := New(context.Background(), cfg)
+	return cfg
+}
+
+func newTestSigner(t *testing.T, cfg Config, address string, configure func(mux *http.ServeMux)) *BlackBoxSigner {
+	t.Helper()
+	s, err := NewBlackBox(context.Background(), testConfig(t, cfg, address, configure))
 	if err != nil {
-		t.Fatalf("New failed: %v", err)
+		t.Fatalf("NewBlackBox failed: %v", err)
+	}
+	return s
+}
+
+func newNativeTestSigner(t *testing.T, cfg Config, address string, configure func(mux *http.ServeMux)) *NativeAutoSigner {
+	t.Helper()
+	s, err := NewNativeAuto(context.Background(), testConfig(t, cfg, address, configure))
+	if err != nil {
+		t.Fatalf("NewNativeAuto failed: %v", err)
 	}
 	return s
 }
@@ -494,16 +509,43 @@ func nativeConfig(t *testing.T) Config {
 	return cfg
 }
 
-// Native mode broadcasts, so batch helpers must reject it; black box may batch.
-func TestBroadcastsTransactionsFollowsMode(t *testing.T) {
+// The mode is a type, not a runtime flag: Chain decides which capability the
+// signer carries, and the other one must be absent so callers cannot reach a
+// path the mode does not support.
+func TestNewSelectsTheSignerTypeFromChain(t *testing.T) {
 	pub := testutils.TestPublicKey()
-	native := newTestSigner(t, nativeConfig(t), pub.String(), func(*http.ServeMux) {})
-	if !native.BroadcastsTransactions() {
-		t.Error("native mode must report broadcasting")
+
+	native, err := New(context.Background(), testConfig(t, nativeConfig(t), pub.String(), nil))
+	if err != nil {
+		t.Fatal(err)
 	}
-	blackBox := newTestSigner(t, baseConfig(t), pub.String(), func(*http.ServeMux) {})
-	if blackBox.BroadcastsTransactions() {
-		t.Error("black-box mode must not report broadcasting")
+	if _, ok := native.(core.SendingSigner); !ok {
+		t.Error("native mode must be a SendingSigner")
+	}
+	if _, ok := native.(core.TransactionSigner); ok {
+		t.Error("native mode broadcasts, so it must expose no SignTransaction")
+	}
+
+	blackBox, err := New(context.Background(), testConfig(t, baseConfig(t), pub.String(), nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := blackBox.(core.TransactionSigner); !ok {
+		t.Error("black-box mode must be a TransactionSigner")
+	}
+	if _, ok := blackBox.(core.SendingSigner); ok {
+		t.Error("black-box mode only signs, so it must expose no SignAndSendTransaction")
+	}
+}
+
+// Each constructor owns one mode, so a config meant for the other must be
+// refused rather than silently ignored.
+func TestConstructorsRejectTheOtherModesConfig(t *testing.T) {
+	if _, err := NewBlackBox(context.Background(), nativeConfig(t)); err == nil {
+		t.Error("NewBlackBox must reject a config selecting native Solana mode")
+	}
+	if _, err := NewNativeAuto(context.Background(), baseConfig(t)); err == nil {
+		t.Error("NewNativeAuto must reject a config without a chain")
 	}
 }
 
@@ -528,7 +570,7 @@ func TestSignTransactionNativeSuccess(t *testing.T) {
 
 	cfg := nativeConfig(t)
 	cfg.Fee = &Fee{Type: FeeTypePriority, PriorityLevel: PriorityMedium}
-	s := newTestSigner(t, cfg, pub.String(), func(mux *http.ServeMux) {
+	s := newNativeTestSigner(t, cfg, pub.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			var req map[string]any
@@ -592,7 +634,7 @@ func TestSignTransactionNativeSuccess(t *testing.T) {
 // reach "completed" before polling stops.
 func TestSignTransactionNativeWaitsForCompleted(t *testing.T) {
 	pub := testutils.TestPublicKey()
-	s := newTestSigner(t, nativeConfig(t), pub.String(),
+	s := newNativeTestSigner(t, nativeConfig(t), pub.String(),
 		respondSigned(t, "signed", nil))
 
 	tx, err := testutils.CreateTestTransaction(pub)
@@ -624,7 +666,7 @@ func assertBroadcastUnconfirmed(t *testing.T, err error, wantTxID string) {
 
 func TestSignTransactionNativeSubmitServerErrorIsUnconfirmedWithoutID(t *testing.T) {
 	pub := testutils.TestPublicKey()
-	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusBadGateway)
 		})
@@ -643,7 +685,7 @@ func TestSignTransactionNativeSubmitServerErrorIsUnconfirmedWithoutID(t *testing
 
 func TestSignTransactionNativeSubmitWithoutIDIsUnconfirmed(t *testing.T) {
 	pub := testutils.TestPublicKey()
-	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
 			testutils.WriteJSON(w, http.StatusOK, map[string]any{"state": "pending"})
 		})
@@ -662,7 +704,7 @@ func TestSignTransactionNativeSubmitWithoutIDIsUnconfirmed(t *testing.T) {
 
 func TestSignTransactionNativeSubmitRejectionStaysPlainFailure(t *testing.T) {
 	pub := testutils.TestPublicKey()
-	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
 		})
@@ -716,7 +758,7 @@ func assertBroadcastUnconfirmedWithoutID(t *testing.T, err error, wantStatus int
 func TestSignTransactionNativeRejectsMultiSigner(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	var requests atomic.Int64
-	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
 			requests.Add(1)
 			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123"})
@@ -742,7 +784,7 @@ func TestSignTransactionNativeRejectsMultiSigner(t *testing.T) {
 
 func TestSignTransactionNativeMissingRawTransaction(t *testing.T) {
 	pub := testutils.TestPublicKey()
-	s := newTestSigner(t, nativeConfig(t), pub.String(),
+	s := newNativeTestSigner(t, nativeConfig(t), pub.String(),
 		respondSigned(t, "completed", nil))
 
 	tx, err := testutils.CreateTestTransaction(pub)
@@ -758,7 +800,7 @@ func TestSignTransactionNativeMissingRawTransaction(t *testing.T) {
 
 func TestSignTransactionNativeUndecodableRawTransaction(t *testing.T) {
 	pub := testutils.TestPublicKey()
-	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
 			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123"})
 		})
@@ -787,7 +829,7 @@ func TestSignMessageNativeUsesSolanaMessage(t *testing.T) {
 	message := []byte("native message")
 	signature := ed25519.Sign(priv, message)
 
-	s := newTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
 		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			var req map[string]any
@@ -859,7 +901,7 @@ func TestIsAvailableFailure(t *testing.T) {
 func TestIsAvailableUnreachable(t *testing.T) {
 	s := newTestSigner(t, baseConfig(t), testutils.TestPublicKey().String(), nil)
 	s2 := *s
-	s2.apiBaseURL = "https://127.0.0.1:1"
+	s2.core.apiBaseURL = "https://127.0.0.1:1"
 	if s2.IsAvailable(context.Background()) {
 		t.Error("IsAvailable should be false when the API is unreachable")
 	}
@@ -871,7 +913,7 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 	cfg := baseConfig(t)
 	pemBody := strings.Split(cfg.PrivateKeyPEM, "\n")[1]
 	s := newTestSigner(t, cfg, testutils.TestPublicKey().String(), nil)
-	pemSigner, ok := s.requestSigner.(*PemRequestSigner)
+	pemSigner, ok := s.core.requestSigner.(*PemRequestSigner)
 	if !ok {
 		t.Fatal("expected the built-in PEM request signer")
 	}
@@ -891,7 +933,7 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 		if strings.Contains(rendered, pemBody) || strings.Contains(rendered, pemSigner.key.D.String()) {
 			t.Errorf("rendered signer leaks P-256 key material: %s", rendered)
 		}
-		if !strings.Contains(rendered, "fordefi.Signer") {
+		if !strings.Contains(rendered, "fordefi.BlackBoxSigner") {
 			t.Errorf("rendered signer should identify the type: %s", rendered)
 		}
 	}

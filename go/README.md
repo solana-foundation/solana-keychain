@@ -9,7 +9,7 @@ library offers a consistent API across all signing methods.
 
 ## Features
 
-- **Unified interface**: a single `Signer` interface for every backend
+- **Unified interface**: one `SolanaSigner` base contract for every backend, plus a capability interface that makes each backend's transaction shape a compile-time fact
 - **Context-aware**: methods take `context.Context` and block — idiomatic Go, no callbacks
 - **Per-backend modules**: each backend is its own Go module, so both your build and your module graph contain only the backends you import
 - **Verified wire format**: golden-vector tests pin the exact serialized transaction bytes, so serialization can never silently drift
@@ -162,17 +162,13 @@ sigs, err := core.SignMessages(ctx, signer, [][]byte{msg1, msg2}, core.BatchOpti
 
 ## Core API
 
-Every signer implements the `Signer` interface from the
+Every signer implements the `SolanaSigner` base interface from the
 [`core`](core/) package:
 
 ```go
-type Signer interface {
+type SolanaSigner interface {
 	// Pubkey returns this signer's Solana public key.
 	Pubkey() solana.PublicKey
-
-	// SignTransaction signs tx in place and returns the encoded transaction,
-	// the signature, and whether all required signatures are now present.
-	SignTransaction(ctx context.Context, tx *solana.Transaction) (SignedTransaction, error)
 
 	// SignMessage signs arbitrary bytes and returns the 64-byte signature.
 	SignMessage(ctx context.Context, message []byte) (solana.Signature, error)
@@ -182,25 +178,49 @@ type Signer interface {
 }
 ```
 
-`SignTransaction` returns a `SignedTransaction { EncodedTransaction, Signature,
-Completeness }`; use `IsComplete()` to check whether every required signature is
-present.
-
 ### Signer capabilities
 
-Backends differ in whether the provider broadcasts the transaction and in whether
-they can sign arbitrary bytes. Managed-broadcast signers implement
-`core.TransactionBroadcaster`, whose `BroadcastsTransactions()` reports the first
-at runtime; the second is fixed per backend:
+Transaction handling lives in three capability interfaces, and a backend
+implements exactly the one matching its provider's shape:
 
-| Backend | `BroadcastsTransactions()` | `SignTransaction` | `SignAndSendTransaction` | `SignMessage` |
-|---------|----------------------------|-------------------|--------------------------|---------------|
-| memory, vault, privy, turnkey, awskms, fireblocks, gcpkms, dfns, para, openfort | not implemented | yes | not implemented | yes |
-| cdp | not implemented | yes | not implemented | UTF-8 payloads only, otherwise `CodeSerializationError` |
-| crossmint | `true` | `CodeSigningFailed` | yes | `CodeSigningFailed` |
-| utila | not implemented | yes | not implemented | `CodeSigningFailed` |
-| fordefi (black-box mode) | `false` | yes | `CodeSigningFailed` | yes |
-| fordefi (native mode) | `true` | `CodeSigningFailed` | yes | yes |
+```go
+type TransactionSigner interface {
+	SolanaSigner
+	SignTransaction(ctx context.Context, tx *solana.Transaction) (SignedTransaction, error)
+}
+
+type ModifyingSigner interface {
+	SolanaSigner
+	ModifyAndSignTransaction(ctx context.Context, tx *solana.Transaction) (SignedTransaction, error)
+}
+
+type SendingSigner interface {
+	SolanaSigner
+	SignAndSendTransaction(ctx context.Context, tx *solana.Transaction) (solana.Signature, error)
+}
+```
+
+`SignTransaction` and `ModifyAndSignTransaction` return a `SignedTransaction
+{ EncodedTransaction, Signature, Completeness }`; use `IsComplete()` to check
+whether every required signature is present. `ModifyingSigner` has no
+implementor yet.
+
+A backend that cannot sign a transaction carries no `SignTransaction` method at
+all, so a type assertion is the way to ask what a signer can do:
+
+| Backend | Capability | `SignMessage` |
+|---------|------------|---------------|
+| memory, vault, privy, turnkey, awskms, fireblocks, gcpkms, dfns, para, openfort | `TransactionSigner` | yes |
+| cdp | `TransactionSigner` | UTF-8 payloads only, otherwise `CodeSerializationError` |
+| crossmint | `SendingSigner` | `CodeSigningFailed` |
+| utila | `TransactionSigner` | `CodeSigningFailed` |
+| fordefi black box (`fordefi.BlackBoxSigner`) | `TransactionSigner` | yes |
+| fordefi native (`fordefi.NativeAutoSigner`) | `SendingSigner` | yes |
+
+Fordefi is two types picked by `Config.Chain`: `fordefi.New` returns a
+`*NativeAutoSigner` when it is set and a `*BlackBoxSigner` otherwise, and
+`fordefi.NewNativeAuto` / `fordefi.NewBlackBox` build one directly, each
+rejecting the other mode's config.
 
 Crossmint executes every approved transaction server-side and exposes no
 sign-only API, so it offers `SignAndSendTransaction` only. It may rewrite the
@@ -210,10 +230,10 @@ transaction is never modified.
 
 ### Sign and Send
 
-`core.SignAndSendTransaction` gets a transaction on chain with one call.
-Managed-broadcast signers (Crossmint, Fordefi native mode) broadcast through their
-provider and ignore the send function; every other signer signs and the send
-function broadcasts the base64-encoded result:
+`core.SignAndSendTransaction` gets a transaction on chain with one call. A
+`SendingSigner` (Crossmint, Fordefi native mode) broadcasts through its provider
+and ignores the send function; a `TransactionSigner` signs and the send function
+broadcasts the base64-encoded result:
 
 ```go
 sig, err := core.SignAndSendTransaction(ctx, signer, tx,
@@ -226,7 +246,7 @@ sig, err := core.SignAndSendTransaction(ctx, signer, tx,
 
 | Package | Description |
 | --- | --- |
-| [`core`](core/) | `Signer` interface, `SignedTransaction`, error types, transaction & HTTP utilities, batch helpers |
+| [`core`](core/) | `SolanaSigner` and the capability interfaces, `SignedTransaction`, error types, transaction & HTTP utilities, batch helpers |
 | [`signers/memory`](signers/memory/) | In-memory Ed25519 signer — local keypairs for development and testing |
 | [`signers/vault`](signers/vault/) | HashiCorp Vault transit engine |
 | [`signers/turnkey`](signers/turnkey/) | Turnkey (P-256 API-key request stamping) |
