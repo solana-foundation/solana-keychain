@@ -17,7 +17,8 @@ mod tests {
 
     use super::*;
     use crate::fordefi::{
-        FordefiBlackBoxSigner, FordefiNativeAutoSigner, FordefiSignerConfig, SolanaChainUniqueId,
+        FordefiBlackBoxSigner, FordefiNativeAutoSigner, FordefiNativeManualSigner, FordefiPushMode,
+        FordefiSignerConfig, SolanaChainUniqueId,
     };
     #[cfg(feature = "integration-tests")]
     use crate::sdk_adapter::{AccountMeta, Instruction, Message, VersionedTransaction};
@@ -27,18 +28,20 @@ mod tests {
     use crate::tests::litesvm_util::{get_latest_blockhash, simulate_transaction, start_litesvm};
     #[cfg(feature = "integration-tests")]
     use crate::tests::rpc_util::{confirm_transaction, get_rpc_blockhash, send_raw_transaction};
-    use crate::traits::{SendingSigner, SolanaSigner, TransactionSigner};
+    use crate::traits::{ModifyingSigner, SendingSigner, SolanaSigner, TransactionSigner};
     use crate::transaction_util::deserialize_wire_transaction;
     use std::env;
     use std::str::FromStr;
 
     /// Build the config for the given vault, sharing the access token and
     /// request-signing key from the environment. `chain` selects black box mode
-    /// (`None`) vs native Solana mode (`Some`).
+    /// (`None`) vs native Solana mode (`Some`), and `push_mode` selects whether
+    /// native mode broadcasts.
     fn load_config(
         vault_id: String,
         public_key: String,
         chain: Option<SolanaChainUniqueId>,
+        push_mode: Option<FordefiPushMode>,
     ) -> FordefiSignerConfig {
         let access_token = env::var(FORDEFI_ACCESS_TOKEN)
             .expect("FORDEFI_ACCESS_TOKEN must be set for integration tests");
@@ -57,6 +60,7 @@ mod tests {
             http_client_config: None,
             chain,
             fee: None,
+            push_mode,
         }
     }
 
@@ -68,14 +72,14 @@ mod tests {
             .expect("FORDEFI_BB_VAULT_ID must be set for integration tests");
         let public_key = env::var(FORDEFI_BB_PUBLIC_KEY)
             .expect("FORDEFI_BB_PUBLIC_KEY must be set for integration tests");
-        FordefiBlackBoxSigner::from_config(load_config(vault_id, public_key, None))
+        FordefiBlackBoxSigner::from_config(load_config(vault_id, public_key, None, None))
             .await
             .expect("Failed to create Fordefi black box signer")
     }
 
-    /// Native Solana signer — uses the Solana vault (`FORDEFI_VAULT_ID`) and the
-    /// chain from `FORDEFI_CHAIN`.
-    async fn get_native_signer() -> FordefiNativeAutoSigner {
+    /// Config for the Solana vault (`FORDEFI_VAULT_ID`) and the chain from
+    /// `FORDEFI_CHAIN`.
+    fn load_native_config(push_mode: Option<FordefiPushMode>) -> FordefiSignerConfig {
         dotenv().ok();
         let vault_id =
             env::var(FORDEFI_VAULT_ID).expect("FORDEFI_VAULT_ID must be set for integration tests");
@@ -86,9 +90,22 @@ mod tests {
             "solana_mainnet" => SolanaChainUniqueId::SolanaMainnet,
             other => panic!("Invalid FORDEFI_CHAIN value: {other}"),
         });
-        FordefiNativeAutoSigner::from_config(load_config(vault_id, public_key, chain))
+        load_config(vault_id, public_key, chain, push_mode)
+    }
+
+    /// Native Solana signer that lets Fordefi broadcast.
+    async fn get_native_signer() -> FordefiNativeAutoSigner {
+        FordefiNativeAutoSigner::from_config(load_native_config(None))
             .await
             .expect("Failed to create Fordefi native signer")
+    }
+
+    /// Native Solana signer that signs without broadcasting.
+    #[cfg(feature = "integration-tests")]
+    async fn get_manual_signer() -> FordefiNativeManualSigner {
+        FordefiNativeManualSigner::from_config(load_native_config(Some(FordefiPushMode::Manual)))
+            .await
+            .expect("Failed to create Fordefi native manual signer")
     }
 
     #[tokio::test]
@@ -224,7 +241,7 @@ mod tests {
         println!("Devnet transaction sent: {tx_sig}");
 
         // Wait for confirmation (up to 60s)
-        confirm_transaction(&rpc_url, &tx_sig, 60)
+        confirm_transaction(&rpc_url, &tx_sig, Some(&base64_tx), 60)
             .await
             .expect("Transaction was not confirmed on devnet");
 
@@ -297,7 +314,7 @@ mod tests {
         let tx_sig = signature.to_string();
         println!("Devnet native transaction pushed by Fordefi: {tx_sig}");
 
-        confirm_transaction(&rpc_url, &tx_sig, 60)
+        confirm_transaction(&rpc_url, &tx_sig, None, 60)
             .await
             .expect("Native transaction was not confirmed on devnet");
 
@@ -309,5 +326,57 @@ mod tests {
     async fn test_fordefi_native_is_available() {
         let signer = get_native_signer().await;
         assert!(signer.is_available().await);
+    }
+
+    /// Manual mode signs without broadcasting, so the caller sends the
+    /// transaction Fordefi returned and confirms it themselves.
+    #[tokio::test]
+    #[cfg(feature = "integration-tests")]
+    async fn test_fordefi_manual_sign_and_broadcast() {
+        let signer = get_manual_signer().await;
+        let rpc_url = env::var("SOLANA_RPC_URL")
+            .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
+        let from = signer.pubkey();
+
+        let transfer_ix = Instruction {
+            program_id: Pubkey::from_str("11111111111111111111111111111111").unwrap(),
+            accounts: vec![AccountMeta::new(from, true), AccountMeta::new(from, false)],
+            data: {
+                let mut data = vec![2, 0, 0, 0];
+                data.extend_from_slice(&1u64.to_le_bytes());
+                data
+            },
+        };
+
+        let blockhash = get_rpc_blockhash(&rpc_url)
+            .await
+            .expect("Failed to get devnet blockhash");
+        let mut message = Message::new(&[transfer_ix], Some(&from));
+        message.recent_blockhash = blockhash;
+        let mut transaction: VersionedTransaction = Transaction::new_unsigned(message).into();
+
+        let result = signer
+            .modify_and_sign_transaction(&mut transaction)
+            .await
+            .expect("Failed to sign transaction with Fordefi manual mode");
+        assert!(
+            matches!(result, crate::traits::SignTransactionResult::Complete(_)),
+            "a single-signer manual result should be complete"
+        );
+        let (encoded, signature) = result.into_signed_transaction();
+
+        assert!(
+            signature.verify(&from.to_bytes(), &transaction.message.serialize()),
+            "the signature must cover the transaction Fordefi returned"
+        );
+
+        let tx_sig = send_raw_transaction(&rpc_url, &encoded)
+            .await
+            .expect("Failed to broadcast the manually signed transaction");
+        confirm_transaction(&rpc_url, &tx_sig, Some(&encoded), 60)
+            .await
+            .expect("Manual transaction was not confirmed on devnet");
+
+        println!("Devnet manual transaction confirmed: {tx_sig}");
     }
 }

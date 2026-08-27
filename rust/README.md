@@ -325,8 +325,7 @@ pub trait TransactionSigner: SolanaSigner {
 }
 
 /// The provider rewrites the transaction before signing it; continue from the
-/// returned transaction, never from the bytes submitted. No backend currently
-/// implements this trait.
+/// returned transaction, never from the bytes submitted.
 #[async_trait]
 pub trait ModifyingSigner: SolanaSigner {
     async fn modify_and_sign_transaction(
@@ -358,7 +357,8 @@ whether it can sign arbitrary bytes is fixed per backend:
 | utila | `TransactionSigner` | `SigningFailed` |
 | crossmint | `SendingSigner` | `SigningFailed` |
 | fordefi black box (`FordefiBlackBoxSigner`) | `TransactionSigner` | yes |
-| fordefi native (`FordefiNativeAutoSigner`) | `SendingSigner` | yes |
+| fordefi native auto (`FordefiNativeAutoSigner`) | `SendingSigner` | yes |
+| fordefi native manual (`FordefiNativeManualSigner`) | `ModifyingSigner` | yes |
 
 Crossmint executes every approved transaction server-side and exposes no
 sign-only API, so it is a `SendingSigner` only. It may rewrite the
@@ -366,9 +366,16 @@ transaction to sponsor gas, in which case the returned signature identifies the
 transaction it landed rather than covering the caller's bytes; the caller's
 transaction is never modified.
 
+Fordefi native manual mode is the one backend that rewrites the caller's
+transaction without broadcasting it: `modify_and_sign_transaction` replaces `tx`
+with the transaction Fordefi signed, so continue from `tx` and never from the
+value you built. What Fordefi changed is not diffed, so inspect the result before
+you broadcast it.
+
 The unified `Signer` enum wraps all backends in one type and implements only
 the base `SolanaSigner` trait. Capability access goes through
-`as_transaction_signer()` / `as_sending_signer()`, which return `None` when
+`as_transaction_signer()` / `as_modifying_signer()` / `as_sending_signer()`,
+which return `None` when
 the wrapped backend lacks that shape, and through the enum's own
 `sign_and_send`, which routes by variant. Direct use of the concrete signer
 types makes a capability mismatch a compile error instead.
@@ -389,16 +396,25 @@ let signature = sign_and_send(&signer, &mut tx, |encoded| async move {
 ```
 
 A `SendingSigner` broadcasts through its provider: call
-`sign_and_send_transaction` directly. The unified `Signer` enum has its own
-`sign_and_send` method covering both shapes; for a broadcasting backend the
-closure is never called.
+`sign_and_send_transaction` directly. A `ModifyingSigner` rewrites `tx` first, so
+the closure has to broadcast the transaction it returned. The unified `Signer`
+enum has its own `sign_and_send` method covering all three shapes; for a
+broadcasting backend the closure is never called.
 
 ### Fordefi Signer
 
-Fordefi comes as two signer types, which differ in whether Fordefi broadcasts the transaction and in which entry point exists. `config.chain` picks the type: `Signer::from_fordefi` builds a `FordefiBlackBoxSigner` when it is `None` and a `FordefiNativeAutoSigner` when it is set, and each type's `from_config` rejects a config meant for the other.
+Fordefi comes as three signer types, which differ in whether Fordefi rewrites or broadcasts the transaction and in which entry point exists. `config.chain` and `config.push_mode` pick the type: `Signer::from_fordefi` builds a `FordefiBlackBoxSigner` when `chain` is `None`, a `FordefiNativeManualSigner` when `chain` is set and `push_mode` is `Manual`, and a `FordefiNativeAutoSigner` otherwise. Each type's `from_config` rejects a config meant for another.
 
-- **`FordefiBlackBoxSigner`** (`TransactionSigner`): Signs raw bytes via EdDSA; the wire transaction is assembled locally. Fordefi does **not** broadcast: `sign_transaction` returns the signed serialized transaction, and **you** submit it to an RPC. Use with a Fordefi black box vault.
+- **`FordefiBlackBoxSigner`** (`TransactionSigner`): Signs raw bytes via EdDSA; the wire transaction is assembled locally. Fordefi never parses the transaction, so it cannot apply Solana-aware policy to it, and it does **not** broadcast: `sign_transaction` returns the signed serialized transaction, and **you** submit it to an RPC. Use with a Fordefi black box vault.
 - **`FordefiNativeAutoSigner`** (`SendingSigner`, recommended): Uses Solana-specific API types. Fordefi modifies the transaction (at minimum updating the blockhash, and optionally adding priority fees) and **auto-broadcasts** it on-chain (`push_mode: "auto"`). Call `sign_and_send_transaction`, which returns the signature, the on-chain identifier; do not re-send the transaction. The current auto-broadcast request supports only transactions whose sole required signer is the configured Fordefi vault; additional required signers are rejected before submission. Use with a regular Fordefi Solana vault.
+- **`FordefiNativeManualSigner`** (`ModifyingSigner`): The same native path, so Fordefi still parses the transaction, but it signs without broadcasting (`push_mode: "manual"`). `modify_and_sign_transaction` replaces your `&mut VersionedTransaction` with the transaction Fordefi signed and returns a serialized transaction for you to broadcast. Fordefi must be the fee payer and must sign before every downstream signer, which is what makes this the only native mode that supports additional required signers.
+
+Fordefi may rewrite the message before signing it: at minimum the recent
+blockhash, and it manages the Compute Budget fee instructions, so a compute-unit
+limit or price you set yourself may not survive. The signature is verified against
+the message Fordefi returned, not the one you submitted, and the rewrite itself is
+not diffed. Inspect the replaced transaction before broadcasting if its contents
+matter to you.
 
 The configured `public_key` is the source of truth for the vault's Solana
 address: construction performs no network calls, and every signature Fordefi
@@ -423,6 +439,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_client_config: None,
         chain: None,
         fee: None,
+        push_mode: None,
     })
     .await?;
 
@@ -431,7 +448,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-For native Solana mode, set `chain` and optionally `fee`:
+For native auto mode, set `chain` and optionally `fee`:
 
 ```rust
 use solana_keychain::{
@@ -457,6 +474,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fee: Some(FordefiSolanaFee::Priority {
             priority_level: FordefiPriorityLevel::Medium,
         }),
+        push_mode: None,
     })
     .await?;
 
@@ -467,6 +485,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+For native manual mode, set `push_mode` and broadcast the result yourself:
+
+```rust
+use solana_keychain::{
+    FordefiNativeManualSigner, FordefiPushMode, FordefiSignerConfig, ModifyingSigner,
+    SolanaChainUniqueId,
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pem = std::fs::read_to_string("path/to/ecdsa-p256-key.pem")?;
+
+    let signer = FordefiNativeManualSigner::from_config(FordefiSignerConfig {
+        access_token: std::env::var("FORDEFI_ACCESS_TOKEN")?,
+        vault_id: std::env::var("FORDEFI_VAULT_ID")?,
+        private_key_pem: Some(pem),
+        request_signer: None,
+        public_key: std::env::var("FORDEFI_PUBLIC_KEY")?,
+        api_base_url: None,
+        poll_interval_ms: None,
+        max_poll_attempts: None,
+        http_client_config: None,
+        chain: Some(SolanaChainUniqueId::SolanaMainnet),
+        fee: None,
+        push_mode: Some(FordefiPushMode::Manual),
+    })
+    .await?;
+
+    let result = signer.modify_and_sign_transaction(&mut tx).await?;
+    let (encoded, signature) = result.into_signed_transaction();
+    println!("Fordefi signature: {signature}");
+    rpc_send(encoded).await?;
+
+    Ok(())
+}
+```
+
+`tx` now holds Fordefi's transaction, so any downstream signer signs that message
+and not the one built locally. Fordefi refreshes the blockhash but does not return
+its `lastValidBlockHeight`, so broadcast a manual result promptly rather than
+relying on local block-height expiry detection. A single-signer result is complete
+and ready to send; a multisigner result is partial, so add every downstream
+signature to the replaced `tx` and serialize that rather than sending the earlier
+partial encoding.
 
 #### Custom API-request signer (KMS/HSM)
 
@@ -505,6 +568,7 @@ let signer = FordefiBlackBoxSigner::from_config(FordefiSignerConfig {
     http_client_config: None,
     chain: None,
     fee: None,
+    push_mode: None,
 })
 .await?;
 ```

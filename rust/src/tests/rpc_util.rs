@@ -41,7 +41,7 @@ pub async fn send_raw_transaction(
         "jsonrpc": "2.0",
         "id": 1,
         "method": "sendTransaction",
-        "params": [base64_tx, { "encoding": "base64" }]
+        "params": [base64_tx, { "encoding": "base64", "preflightCommitment": "processed" }]
     });
 
     let response = client
@@ -64,10 +64,13 @@ pub async fn send_raw_transaction(
 }
 
 /// Poll `getSignatureStatuses` until the transaction is confirmed or finalized,
-/// or `timeout_secs` elapses.
+/// or `timeout_secs` elapses. When `base64_tx` is `Some`, the transaction is
+/// rebroadcast between polls so a dropped one still lands while its blockhash
+/// is valid; pass `None` when the provider owns the broadcast.
 pub async fn confirm_transaction(
     rpc_url: &str,
     signature: &str,
+    base64_tx: Option<&str>,
     timeout_secs: u64,
 ) -> Result<(), Box<dyn Error>> {
     let client = reqwest::Client::new();
@@ -102,6 +105,9 @@ pub async fn confirm_transaction(
             }
         }
 
+        if let Some(tx) = base64_tx {
+            let _ = send_raw_transaction(rpc_url, tx).await;
+        }
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
 

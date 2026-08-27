@@ -1115,9 +1115,13 @@ guarantees. If your provider makes one impossible, say so in the PR and in
   return the signature that identifies the landed transaction. If the provider
   has no sign-only endpoint at all, make the backend sending-only: fail the
   sign-only entry point rather than submitting behind the caller's back.
-- **Never mutate the caller's transaction with a signature that does not cover
-  it.** A provider that rewrites the transaction produces a signature over its
-  own bytes; leave the caller's transaction untouched.
+- **Never leave the caller holding a transaction the signature does not cover.**
+  A provider that rewrites the transaction produces a signature over its own
+  bytes. Either leave the caller's transaction untouched because there is nothing
+  for them to broadcast (the broadcast-managed case), or take the modifying shape
+  (`ModifyingSigner` in Rust) and replace it wholesale with the provider's bytes,
+  so that what the caller holds is what was signed. Never merge the signature
+  into the caller's original.
 - **Report broadcast uncertainty as such.** A failure after submission may still
   have landed. Surface `BROADCAST_UNCONFIRMED` rather than a generic error a
   caller might blindly retry into a duplicate spend, and carry the provider

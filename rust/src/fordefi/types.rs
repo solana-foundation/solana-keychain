@@ -15,6 +15,25 @@ pub enum SolanaChainUniqueId {
     SolanaMainnet,
 }
 
+impl SolanaChainUniqueId {
+    pub(crate) const fn as_str(&self) -> &'static str {
+        match self {
+            Self::SolanaDevnet => "solana_devnet",
+            Self::SolanaMainnet => "solana_mainnet",
+        }
+    }
+}
+
+/// Whether Fordefi broadcasts a native Solana transaction after signing it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FordefiPushMode {
+    /// Fordefi rewrites, signs and broadcasts the transaction.
+    Auto,
+    /// Fordefi rewrites and signs the transaction, leaving the broadcast to the caller.
+    Manual,
+}
+
 /// Priority fee level for native Solana transactions.
 #[derive(Clone, Debug, Serialize)]
 pub enum FordefiPriorityLevel {
@@ -73,9 +92,10 @@ pub struct BlackBoxDetails {
 // ---------------------------------------------------------------------------
 
 /// Request body for native Solana transaction signing via
-/// `solana_serialized_transaction_message` with `push_mode: 'auto'`.
+/// `solana_serialized_transaction_message`.
 ///
-/// Fordefi signs the serialized transaction message and pushes it on-chain.
+/// Fordefi signs the serialized transaction message and either pushes it on-chain
+/// or returns it for the caller to broadcast, per `details.push_mode`.
 #[derive(Serialize)]
 pub struct SolanaTransactionRequest {
     pub vault_id: String,
@@ -93,7 +113,7 @@ pub struct SolanaTransactionDetails {
     pub detail_type: &'static str,
     pub chain: SolanaChainUniqueId,
     pub data: String,
-    pub push_mode: &'static str,
+    pub push_mode: FordefiPushMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fee: Option<FordefiSolanaFee>,
 }

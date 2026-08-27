@@ -18,13 +18,13 @@ use crate::remote_util::{
     extract_api_error, parse_json_response, poll_until, read_body_capped, PollOutcome,
 };
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
-use crate::signature_util::signature_from_base64;
+use crate::signature_util::{extract_and_verify_rewritten_transaction, signature_from_base64};
 use crate::traits::{
-    SendingSigner, SignTransactionResult, SignedTransaction, SolanaSigner, TransactionSigner,
+    ModifyingSigner, SendingSigner, SignTransactionResult, SignedTransaction, SolanaSigner,
+    TransactionSigner,
 };
 use crate::transaction_util::{
-    deserialize_wire_transaction, idempotency_key_from_message, unconfirmed_unless_rejected,
-    TransactionUtil,
+    idempotency_key_from_message, unconfirmed_unless_rejected, TransactionUtil,
 };
 pub use request_signer::{FordefiRequestSigner, PemRequestSigner};
 use types::{
@@ -32,7 +32,7 @@ use types::{
     SolanaMessageRequest, SolanaTransactionDetails, SolanaTransactionRequest,
     TransactionStatusResponse, VaultResponse,
 };
-pub use types::{FordefiPriorityLevel, FordefiSolanaFee, SolanaChainUniqueId};
+pub use types::{FordefiPriorityLevel, FordefiPushMode, FordefiSolanaFee, SolanaChainUniqueId};
 
 const DEFAULT_BASE_URL: &str = "https://api.fordefi.com";
 const DEFAULT_POLL_INTERVAL_MS: u64 = 2000;
@@ -41,8 +41,10 @@ const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 
 /// Configuration for creating a Fordefi signer.
 ///
-/// `chain` selects the signer type: `None` builds a [`FordefiBlackBoxSigner`],
-/// `Some(...)` builds a [`FordefiNativeAutoSigner`].
+/// `chain` selects the signer type: `None` builds a [`FordefiBlackBoxSigner`].
+/// With `chain` set, `push_mode` picks between [`FordefiNativeAutoSigner`]
+/// ([`FordefiPushMode::Auto`] or `None`) and [`FordefiNativeManualSigner`]
+/// ([`FordefiPushMode::Manual`]).
 #[derive(Clone)]
 pub struct FordefiSignerConfig {
     /// Fordefi API bearer token
@@ -70,6 +72,10 @@ pub struct FordefiSignerConfig {
     pub chain: Option<SolanaChainUniqueId>,
     /// Fee configuration for native Solana transactions (only used when `chain` is set).
     pub fee: Option<FordefiSolanaFee>,
+    /// Whether Fordefi broadcasts a native Solana transaction. `None` is
+    /// equivalent to [`FordefiPushMode::Auto`]; [`FordefiPushMode::Manual`]
+    /// requires `chain`.
+    pub push_mode: Option<FordefiPushMode>,
 }
 
 /// Shared Fordefi API plumbing: request signing, submit, polling, vault lookup.
@@ -375,6 +381,89 @@ impl FordefiCore {
         Self::extract_signature_from_result(&result)
     }
 
+    /// Submit a native Solana transaction request.
+    ///
+    /// The create carries an `x-idempotence-id` derived from the message bytes,
+    /// so replaying these exact bytes cannot create a second transaction; a
+    /// rebuilt transaction derives a different id. The manual-mode key is
+    /// namespaced so the same bytes submitted for signing cannot collide with an
+    /// earlier auto create that did broadcast them.
+    async fn submit_solana_transaction(
+        &self,
+        chain: &SolanaChainUniqueId,
+        fee: Option<&FordefiSolanaFee>,
+        push_mode: FordefiPushMode,
+        data_bytes: &[u8],
+    ) -> Result<String, SignerError> {
+        let request = SolanaTransactionRequest {
+            vault_id: self.vault_id.clone(),
+            signer_type: "api_signer",
+            sign_mode: "auto",
+            tx_type: "solana_transaction",
+            details: SolanaTransactionDetails {
+                detail_type: "solana_serialized_transaction_message",
+                chain: chain.clone(),
+                data: STANDARD.encode(data_bytes),
+                push_mode,
+                fee: fee.cloned(),
+            },
+        };
+
+        let idempotency_key = match push_mode {
+            FordefiPushMode::Auto => idempotency_key_from_message(data_bytes),
+            FordefiPushMode::Manual => {
+                let mut namespaced = format!(
+                    "fordefi:solana:manual:{}:{}:",
+                    chain.as_str(),
+                    self.vault_id
+                )
+                .into_bytes();
+                namespaced.extend_from_slice(data_bytes);
+                idempotency_key_from_message(&namespaced)
+            }
+        };
+
+        self.submit_request(
+            &request,
+            Some(&idempotency_key),
+            push_mode == FordefiPushMode::Auto,
+        )
+        .await
+    }
+
+    /// Submit a native Solana message request.
+    async fn submit_solana_message(
+        &self,
+        chain: &SolanaChainUniqueId,
+        message_bytes: &[u8],
+    ) -> Result<String, SignerError> {
+        let request = SolanaMessageRequest {
+            vault_id: self.vault_id.clone(),
+            signer_type: "api_signer",
+            sign_mode: "auto",
+            tx_type: "solana_message",
+            details: SolanaMessageDetails {
+                detail_type: "personal_message_type",
+                chain: chain.clone(),
+                raw_data: STANDARD.encode(message_bytes),
+            },
+        };
+
+        self.submit_request(&request, None, false).await
+    }
+
+    /// Decode the base64 wire transaction a native poll response carries.
+    fn decode_raw_transaction(result: &TransactionStatusResponse) -> Result<Vec<u8>, SignerError> {
+        let raw_tx_b64 = result.raw_transaction.as_ref().ok_or_else(|| {
+            SignerError::SigningFailed(
+                "Fordefi solana_transaction response missing raw_transaction".to_string(),
+            )
+        })?;
+        STANDARD.decode(raw_tx_b64).map_err(|e| {
+            SignerError::SerializationError(format!("Failed to decode raw_transaction base64: {e}"))
+        })
+    }
+
     /// Verify `signature` against `message` with the vault's public key.
     fn verify_signature(&self, signature: &Signature, message: &[u8]) -> Result<(), SignerError> {
         if !signature.verify(&self.public_key.to_bytes(), message) {
@@ -433,8 +522,8 @@ impl std::fmt::Debug for FordefiBlackBoxSigner {
 impl FordefiBlackBoxSigner {
     /// Create a black-box signer from a configuration object.
     ///
-    /// `config.chain` and `config.fee` must be `None`; they belong to
-    /// [`FordefiNativeAutoSigner`].
+    /// `config.chain`, `config.fee` and `config.push_mode` must be `None`; they
+    /// belong to the native Solana signers.
     ///
     /// Provide exactly one request-signing mechanism: a PEM-encoded ECDSA P-256
     /// key in `config.private_key_pem`, or a custom [`FordefiRequestSigner`] in
@@ -443,6 +532,11 @@ impl FordefiBlackBoxSigner {
         if config.chain.is_some() || config.fee.is_some() {
             return Err(SignerError::ConfigError(
                 "chain and fee select native Solana mode; use FordefiNativeAutoSigner".to_string(),
+            ));
+        }
+        if config.push_mode.is_some() {
+            return Err(SignerError::ConfigError(
+                "push_mode applies to native Solana mode only; it requires chain".to_string(),
             ));
         }
         Ok(Self {
@@ -528,7 +622,9 @@ impl FordefiNativeAutoSigner {
     /// Create a native auto-broadcast signer from a configuration object.
     ///
     /// `config.chain` must be set; leave it `None` for
-    /// [`FordefiBlackBoxSigner`].
+    /// [`FordefiBlackBoxSigner`]. `config.push_mode` must be
+    /// [`FordefiPushMode::Auto`] or `None`; [`FordefiPushMode::Manual`] belongs
+    /// to [`FordefiNativeManualSigner`].
     ///
     /// Provide exactly one request-signing mechanism: a PEM-encoded ECDSA P-256
     /// key in `config.private_key_pem`, or a custom [`FordefiRequestSigner`] in
@@ -540,57 +636,16 @@ impl FordefiNativeAutoSigner {
                     .to_string(),
             ));
         };
+        if config.push_mode == Some(FordefiPushMode::Manual) {
+            return Err(SignerError::ConfigError(
+                "manual push_mode does not broadcast; use FordefiNativeManualSigner".to_string(),
+            ));
+        }
         Ok(Self {
             core: FordefiCore::build(&config)?,
             chain,
             fee: config.fee,
         })
-    }
-
-    /// Submit a native Solana transaction request.
-    async fn submit_solana_transaction(&self, data_bytes: &[u8]) -> Result<String, SignerError> {
-        let base64_data = STANDARD.encode(data_bytes);
-
-        let request = SolanaTransactionRequest {
-            vault_id: self.core.vault_id.clone(),
-            signer_type: "api_signer",
-            sign_mode: "auto",
-            tx_type: "solana_transaction",
-            details: SolanaTransactionDetails {
-                detail_type: "solana_serialized_transaction_message",
-                chain: self.chain.clone(),
-                data: base64_data,
-                push_mode: "auto",
-                fee: self.fee.clone(),
-            },
-        };
-
-        self.core
-            .submit_request(
-                &request,
-                Some(&idempotency_key_from_message(data_bytes)),
-                true,
-            )
-            .await
-    }
-
-    /// Submit a native Solana message request.
-    async fn submit_solana_message(&self, message_bytes: &[u8]) -> Result<String, SignerError> {
-        let base64_data = STANDARD.encode(message_bytes);
-
-        let request = SolanaMessageRequest {
-            vault_id: self.core.vault_id.clone(),
-            signer_type: "api_signer",
-            sign_mode: "auto",
-            tx_type: "solana_message",
-            details: SolanaMessageDetails {
-                detail_type: "personal_message_type",
-                chain: self.chain.clone(),
-                raw_data: base64_data,
-            },
-        };
-
-        self.core.submit_request(&request, None, false).await
     }
 
     /// Sign and broadcast via the native Solana path: submit → poll → parse wire tx.
@@ -612,7 +667,15 @@ impl FordefiNativeAutoSigner {
     ) -> Result<Signature, SignerError> {
         self.validate_transaction(transaction)?;
         let message_data = transaction.message.serialize();
-        let tx_id = self.submit_solana_transaction(&message_data).await?;
+        let tx_id = self
+            .core
+            .submit_solana_transaction(
+                &self.chain,
+                self.fee.as_ref(),
+                FordefiPushMode::Auto,
+                &message_data,
+            )
+            .await?;
         // Once the submit is accepted Fordefi is already broadcasting
         // (push_mode: "auto"), so any later failure leaves an on-chain outcome
         // this client cannot rule out. Report those as BroadcastUnconfirmed
@@ -629,34 +692,9 @@ impl FordefiNativeAutoSigner {
 
     async fn finish_broadcast(&self, tx_id: &str) -> Result<Signature, SignerError> {
         let result = self.core.poll_for_result(tx_id, true).await?;
-
-        let raw_tx_b64 = result.raw_transaction.as_ref().ok_or_else(|| {
-            SignerError::SigningFailed(
-                "Fordefi solana_transaction response missing raw_transaction".to_string(),
-            )
-        })?;
-
-        let wire_bytes = STANDARD.decode(raw_tx_b64).map_err(|e| {
-            SignerError::SerializationError(format!("Failed to decode raw_transaction base64: {e}"))
-        })?;
-
-        let returned_tx: VersionedTransaction =
-            deserialize_wire_transaction(&wire_bytes).map_err(|e| {
-                SignerError::SerializationError(format!(
-                    "Failed to deserialize Fordefi wire transaction: {e}"
-                ))
-            })?;
-
-        let signature = self.extract_vault_signature(&returned_tx)?;
-
-        // Verify against the *returned* message (Fordefi modifies the tx, e.g. blockhash)
-        let returned_message = returned_tx.message.serialize();
-        if !signature.verify(&self.core.public_key.to_bytes(), &returned_message) {
-            return Err(SignerError::SigningFailed(
-                "Signature verification failed against Fordefi-returned message".to_string(),
-            ));
-        }
-
+        let wire_bytes = FordefiCore::decode_raw_transaction(&result)?;
+        let (_, signature) =
+            extract_and_verify_rewritten_transaction(&wire_bytes, &self.core.public_key)?;
         Ok(signature)
     }
 
@@ -675,25 +713,6 @@ impl FordefiNativeAutoSigner {
         }
         Ok(())
     }
-
-    /// Locate the configured vault's signature by its required-signer account
-    /// position rather than assuming it occupies slot zero.
-    fn extract_vault_signature(
-        &self,
-        returned_tx: &VersionedTransaction,
-    ) -> Result<Signature, SignerError> {
-        let signer_index =
-            TransactionUtil::get_signing_keypair_position(returned_tx, &self.core.public_key)?;
-        returned_tx
-            .signatures
-            .get(signer_index)
-            .copied()
-            .ok_or_else(|| {
-                SignerError::SigningFailed(
-                    "Fordefi signature slot missing from returned transaction".to_string(),
-                )
-            })
-    }
 }
 
 #[async_trait::async_trait]
@@ -703,7 +722,10 @@ impl SolanaSigner for FordefiNativeAutoSigner {
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        let tx_id = self.submit_solana_message(message).await?;
+        let tx_id = self
+            .core
+            .submit_solana_message(&self.chain, message)
+            .await?;
         let signature = self.core.poll_for_signature(&tx_id).await?;
         self.core.verify_signature(&signature, message)?;
         Ok(signature)
@@ -721,6 +743,147 @@ impl SendingSigner for FordefiNativeAutoSigner {
         tx: &VersionedTransaction,
     ) -> Result<Signature, SignerError> {
         self.sign_and_broadcast(tx).await
+    }
+}
+
+/// Fordefi native Solana signer: `solana_transaction` API types with
+/// `push_mode: "manual"`.
+///
+/// Fordefi rewrites the message (at minimum the recent blockhash, and it manages
+/// the Compute Budget fee instructions), signs it and hands it back without
+/// broadcasting. `modify_and_sign_transaction` replaces the caller's transaction
+/// with the one the returned signature covers; the rewrite itself is not diffed,
+/// so inspect the result before broadcasting.
+///
+/// Fordefi must be the fee payer and must sign before every downstream signer.
+pub struct FordefiNativeManualSigner {
+    core: FordefiCore,
+    chain: SolanaChainUniqueId,
+    fee: Option<FordefiSolanaFee>,
+}
+
+impl std::fmt::Debug for FordefiNativeManualSigner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FordefiNativeManualSigner")
+            .field("public_key", &self.core.public_key)
+            .finish_non_exhaustive()
+    }
+}
+
+impl FordefiNativeManualSigner {
+    /// Create a native signer that does not broadcast, from a configuration
+    /// object.
+    ///
+    /// `config.chain` must be set and `config.push_mode` must be
+    /// [`FordefiPushMode::Manual`]; anything else belongs to
+    /// [`FordefiBlackBoxSigner`] or [`FordefiNativeAutoSigner`].
+    ///
+    /// Provide exactly one request-signing mechanism: a PEM-encoded ECDSA P-256
+    /// key in `config.private_key_pem`, or a custom [`FordefiRequestSigner`] in
+    /// `config.request_signer` for KMS/HSM-backed signing.
+    pub async fn from_config(config: FordefiSignerConfig) -> Result<Self, SignerError> {
+        let Some(chain) = config.chain.clone() else {
+            return Err(SignerError::ConfigError(
+                "manual push_mode requires chain to be set (native Solana mode)".to_string(),
+            ));
+        };
+        if config.push_mode != Some(FordefiPushMode::Manual) {
+            return Err(SignerError::ConfigError(
+                "manual push_mode must be set explicitly; use FordefiNativeAutoSigner to broadcast"
+                    .to_string(),
+            ));
+        }
+        Ok(Self {
+            core: FordefiCore::build(&config)?,
+            chain,
+            fee: config.fee,
+        })
+    }
+
+    /// Rewrite and sign via the native Solana path: submit → poll → parse wire tx.
+    ///
+    /// `transaction` is replaced with the bytes the returned signature covers.
+    async fn modify_and_serialize(
+        &self,
+        transaction: &mut VersionedTransaction,
+    ) -> Result<SignedTransaction, SignerError> {
+        self.validate_transaction(transaction)?;
+        let message_data = transaction.message.serialize();
+        let tx_id = self
+            .core
+            .submit_solana_transaction(
+                &self.chain,
+                self.fee.as_ref(),
+                FordefiPushMode::Manual,
+                &message_data,
+            )
+            .await?;
+
+        let result = self.core.poll_for_result(&tx_id, false).await?;
+        let wire_bytes = FordefiCore::decode_raw_transaction(&result)?;
+        let (returned_tx, signature) =
+            extract_and_verify_rewritten_transaction(&wire_bytes, &self.core.public_key)?;
+
+        let encoded = TransactionUtil::serialize_transaction(&returned_tx)?;
+        *transaction = returned_tx;
+        Ok((encoded, signature))
+    }
+
+    /// Fordefi may only rewrite a message no one has signed yet, and it only
+    /// rewrites one it pays for.
+    fn validate_transaction(&self, transaction: &VersionedTransaction) -> Result<(), SignerError> {
+        if transaction.message.static_account_keys().first() != Some(&self.core.public_key) {
+            return Err(SignerError::SigningFailed(
+                "Fordefi native manual signing requires the configured vault to be the transaction fee payer"
+                    .to_string(),
+            ));
+        }
+        if transaction
+            .signatures
+            .iter()
+            .any(|signature| *signature != Signature::default())
+        {
+            return Err(SignerError::SigningFailed(
+                "Fordefi native manual signing must run before any transaction signatures are applied"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl SolanaSigner for FordefiNativeManualSigner {
+    fn pubkey(&self) -> Pubkey {
+        self.core.public_key
+    }
+
+    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        let tx_id = self
+            .core
+            .submit_solana_message(&self.chain, message)
+            .await?;
+        let signature = self.core.poll_for_signature(&tx_id).await?;
+        self.core.verify_signature(&signature, message)?;
+        Ok(signature)
+    }
+
+    async fn is_available(&self) -> bool {
+        self.core.is_available().await
+    }
+}
+
+#[async_trait::async_trait]
+impl ModifyingSigner for FordefiNativeManualSigner {
+    async fn modify_and_sign_transaction(
+        &self,
+        tx: &mut VersionedTransaction,
+    ) -> Result<SignTransactionResult, SignerError> {
+        let signed_transaction = self.modify_and_serialize(tx).await?;
+        Ok(TransactionUtil::classify_signed_transaction(
+            tx,
+            signed_transaction,
+        ))
     }
 }
 
