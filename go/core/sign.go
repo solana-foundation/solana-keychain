@@ -75,7 +75,9 @@ type SendTransactionFn func(ctx context.Context, encodedTransaction string) (sol
 
 // SignAndSendTransaction gets tx on chain with one call. A SendingSigner
 // broadcasts through its provider, so its own signature identifies the transaction
-// and send is ignored; a TransactionSigner signs and send broadcasts the result.
+// and send is ignored; a TransactionSigner or a ModifyingSigner signs and send
+// broadcasts the result, which for a ModifyingSigner is the transaction its
+// provider rewrote.
 //
 // send is checked before signing so a missing one cannot waste a signature.
 func SignAndSendTransaction(ctx context.Context, s SolanaSigner, tx *solana.Transaction, send SendTransactionFn) (solana.Signature, error) {
@@ -91,10 +93,10 @@ func SignAndSendTransaction(ctx context.Context, s SolanaSigner, tx *solana.Tran
 		return sig, nil
 	}
 
-	signer, ok := s.(TransactionSigner)
-	if !ok {
+	signTransaction := signOnlyEntryPoint(s)
+	if signTransaction == nil {
 		return solana.Signature{}, NewSignerError(CodeSigningFailed,
-			"this signer supports neither SignTransaction nor SignAndSendTransaction")
+			"this signer supports none of SignTransaction, ModifyAndSignTransaction and SignAndSendTransaction")
 	}
 
 	if send == nil {
@@ -102,7 +104,7 @@ func SignAndSendTransaction(ctx context.Context, s SolanaSigner, tx *solana.Tran
 			"this signer cannot broadcast transactions; supply a SendTransactionFn to broadcast the signed one")
 	}
 
-	signed, err := signer.SignTransaction(ctx, tx)
+	signed, err := signTransaction(ctx, tx)
 	if err != nil {
 		return solana.Signature{}, err
 	}
@@ -111,6 +113,18 @@ func SignAndSendTransaction(ctx context.Context, s SolanaSigner, tx *solana.Tran
 			"transaction is still missing signatures after signing and cannot be broadcast")
 	}
 	return send(ctx, signed.EncodedTransaction)
+}
+
+// signOnlyEntryPoint returns the entry point s uses to sign a transaction the
+// caller then broadcasts, or nil when s carries neither.
+func signOnlyEntryPoint(s SolanaSigner) func(context.Context, *solana.Transaction) (SignedTransaction, error) {
+	if signer, ok := s.(TransactionSigner); ok {
+		return signer.SignTransaction
+	}
+	if signer, ok := s.(ModifyingSigner); ok {
+		return signer.ModifyAndSignTransaction
+	}
+	return nil
 }
 
 // SignTransactionWith signs tx's message with signFn and attaches the resulting

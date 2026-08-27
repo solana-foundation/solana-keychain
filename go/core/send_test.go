@@ -42,6 +42,35 @@ func (s *sendingSigner) SignAndSendTransaction(context.Context, *solana.Transact
 	return s.signature, nil
 }
 
+// modifyingSigner stands in for a provider that rewrites the transaction before
+// signing it: it records the call and returns a configurable result.
+type modifyingSigner struct {
+	baseSigner
+	signed      SignedTransaction
+	modifyCalls int
+}
+
+func (s *modifyingSigner) ModifyAndSignTransaction(context.Context, *solana.Transaction) (SignedTransaction, error) {
+	s.modifyCalls++
+	return s.signed, nil
+}
+
+// bothSigner carries two sign-only entry points at once, to pin down which one
+// the router picks.
+type bothSigner struct {
+	baseSigner
+	transaction transactionSigner
+	modifying   modifyingSigner
+}
+
+func (s *bothSigner) SignTransaction(ctx context.Context, tx *solana.Transaction) (SignedTransaction, error) {
+	return s.transaction.SignTransaction(ctx, tx)
+}
+
+func (s *bothSigner) ModifyAndSignTransaction(ctx context.Context, tx *solana.Transaction) (SignedTransaction, error) {
+	return s.modifying.ModifyAndSignTransaction(ctx, tx)
+}
+
 func completeSignature(first byte) SignedTransaction {
 	var sig solana.Signature
 	sig[0] = first
@@ -112,6 +141,66 @@ func TestSignAndSendTransactionRejectsABroadcastWithoutASignature(t *testing.T) 
 	_, err := SignAndSendTransaction(context.Background(), s, &solana.Transaction{}, nil)
 	if code, ok := CodeOf(err); !ok || code != CodeSigningFailed {
 		t.Errorf("got code %q (ok=%v), want CodeSigningFailed", code, ok)
+	}
+}
+
+// A ModifyingSigner does not broadcast either, so the caller's send function
+// must put the transaction its provider rewrote on chain.
+func TestSignAndSendTransactionBroadcastsWhatAModifyingSignerRewrote(t *testing.T) {
+	s := &modifyingSigner{signed: completeSignature(3)}
+	s.signed.EncodedTransaction = "rewritten"
+	var sent string
+	send := func(_ context.Context, encoded string) (solana.Signature, error) {
+		sent = encoded
+		return s.signed.Signature, nil
+	}
+
+	sig, err := SignAndSendTransaction(context.Background(), s, &solana.Transaction{}, send)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.modifyCalls != 1 {
+		t.Errorf("ModifyAndSignTransaction called %d times, want 1", s.modifyCalls)
+	}
+	if sent != "rewritten" {
+		t.Errorf("sender received %q, want the rewritten transaction", sent)
+	}
+	if sig != s.signed.Signature {
+		t.Errorf("got signature %v, want %v", sig, s.signed.Signature)
+	}
+}
+
+// A modifying signer's remote call is as wasteful to throw away as any other, so
+// the missing sender must be caught before it runs.
+func TestSignAndSendTransactionRequiresASenderBeforeModifying(t *testing.T) {
+	s := &modifyingSigner{signed: completeSignature(4)}
+
+	_, err := SignAndSendTransaction(context.Background(), s, &solana.Transaction{}, nil)
+	if code, ok := CodeOf(err); !ok || code != CodeConfigError {
+		t.Errorf("got code %q (ok=%v), want CodeConfigError", code, ok)
+	}
+	if s.modifyCalls != 0 {
+		t.Errorf("signer called %d times, want 0", s.modifyCalls)
+	}
+}
+
+// No backend carries both sign-only entry points, but the routing order has to
+// be pinned anyway: signing the caller's own bytes is the narrower contract, so
+// it wins over letting the provider rewrite them.
+func TestSignAndSendTransactionPrefersSignTransactionOverModifying(t *testing.T) {
+	s := &bothSigner{
+		transaction: transactionSigner{signed: completeSignature(5)},
+		modifying:   modifyingSigner{signed: completeSignature(6)},
+	}
+	send := func(context.Context, string) (solana.Signature, error) {
+		return s.transaction.signed.Signature, nil
+	}
+
+	if _, err := SignAndSendTransaction(context.Background(), s, &solana.Transaction{}, send); err != nil {
+		t.Fatal(err)
+	}
+	if s.transaction.signCalls != 1 || s.modifying.modifyCalls != 0 {
+		t.Errorf("routed to modify (%d) instead of sign (%d)", s.modifying.modifyCalls, s.transaction.signCalls)
 	}
 }
 
