@@ -37,13 +37,13 @@ Use the toolchain versions checked into the repository. Do not bump the Rust too
 
 ## Making a change
 
-Keep changes focused. A pull request should solve one problem and include the tests, documentation, and changelog entries needed to keep the repository usable.
+Keep changes focused. A pull request should solve one problem and include the tests and documentation needed to keep the repository usable.
 
 Before opening a pull request:
 
 - Format, lint, build, and test the affected code with `just fmt`, `just build`, and `just test`.
 - Add or update tests when behavior changes. Unit tests must not make live API calls: mock HTTP with `wiremock` (Rust), `respx` (Python), `httptest` (Go), or the package's fetch mock (TypeScript).
-- Update documentation, examples, and the relevant `CHANGELOG.md` when they are part of the user-facing contract.
+- Update documentation and examples when they are part of the user-facing contract. There are no changelog files: each release's notes are generated from the merged PR titles, so the PR title is the note.
 - Explain any new dependency and why the existing dependency set is insufficient. A signing library pays for every transitive dependency it adds.
 
 ### Cross-language parity
