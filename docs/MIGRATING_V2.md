@@ -128,7 +128,7 @@ const signer = await createPrivySigner(config);
 
 ### New error code: `BROADCAST_UNCONFIRMED`
 
-Same semantics as the Rust variant: the provider may have executed the transaction. `providerMayHaveAccepted()` and `providerStatus()` on the error help classify before retrying.
+Same semantics as the Rust variant: the provider may have executed the transaction. The `providerMayHaveAccepted(error)` and `providerStatus(error)` helpers from `@solana/keychain-core` classify it before retrying.
 
 ## New in 2.0
 
