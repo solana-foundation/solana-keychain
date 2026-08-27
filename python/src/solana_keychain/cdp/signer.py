@@ -28,7 +28,7 @@ from solana_keychain.core.signature_util import (
     extract_and_verify_returned_signature,
     verify_returned_signature,
 )
-from solana_keychain.core.signer import SignedTransaction, SolanaSigner
+from solana_keychain.core.signer import SignedTransaction, TransactionSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
@@ -60,7 +60,7 @@ class CdpSignerConfig:
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
 
 
-class CdpSigner(SolanaSigner):
+class CdpSigner(TransactionSigner):
     """Signer backed by a CDP-managed Solana account.
 
     ``sign_message`` requires UTF-8 payloads — the sign-message endpoint takes a

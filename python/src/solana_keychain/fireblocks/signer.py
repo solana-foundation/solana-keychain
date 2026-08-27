@@ -22,7 +22,7 @@ from solana_keychain.core.poll import poll_attempts
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import (
     SignedTransaction,
-    SolanaSigner,
+    TransactionSigner,
     require_initialized,
 )
 from solana_keychain.core.transaction_util import (
@@ -74,7 +74,7 @@ class FireblocksSignerConfig:
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
 
 
-class FireblocksSigner(SolanaSigner):
+class FireblocksSigner(TransactionSigner):
     """Signer backed by a Fireblocks vault account using RAW or PROGRAM_CALL signing.
 
     ``init()`` must be awaited before use — it resolves the vault's public key.

@@ -20,7 +20,7 @@ from solders.message import Message
 from solders.transaction import Transaction, VersionedTransaction
 
 from solana_keychain.core import signed_message_bytes
-from solana_keychain.core.signer import SolanaSigner
+from solana_keychain.core.signer import SendingSigner, SolanaSigner, TransactionSigner
 
 REQUIRE_RUN_ENV = "KEYCHAIN_INTEGRATION_REQUIRE_RUN"
 BACKEND_ENV = "KEYCHAIN_INTEGRATION_BACKEND"
@@ -110,6 +110,7 @@ async def assert_transaction_roundtrip(signer: SolanaSigner) -> None:
     """An instruction-free transaction keeps this focused on remote signing rather
     than balances or program execution.
     """
+    assert isinstance(signer, TransactionSigner)
     transaction = await _unsigned_transaction(signer)
     result = await signer.sign_transaction(transaction)
 
@@ -125,6 +126,7 @@ async def assert_send_transaction_roundtrip(signer: SolanaSigner) -> None:
     than the caller's and only its shape can be checked. Each signer verifies the
     signature against the bytes it actually covers internally.
     """
+    assert isinstance(signer, SendingSigner)
     transaction = await _unsigned_transaction(signer)
     signature = await signer.sign_and_send_transaction(transaction)
 

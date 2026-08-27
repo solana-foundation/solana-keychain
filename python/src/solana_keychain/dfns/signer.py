@@ -19,7 +19,7 @@ from solana_keychain.core.http import (
 from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import (
     SignedTransaction,
-    SolanaSigner,
+    TransactionSigner,
     require_initialized,
 )
 from solana_keychain.core.transaction_util import (
@@ -51,7 +51,7 @@ class DfnsSignerConfig:
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
 
 
-class DfnsSigner(SolanaSigner):
+class DfnsSigner(TransactionSigner):
     """Signer backed by a Dfns-held wallet.
 
     ``init()`` must be awaited before signing — it resolves the wallet's signing-key

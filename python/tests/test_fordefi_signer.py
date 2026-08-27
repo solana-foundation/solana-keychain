@@ -20,10 +20,11 @@ from solders.keypair import Keypair
 from solders.signature import Signature
 
 from solana_keychain import SignerError, SignerErrorCode
-from solana_keychain.core import signed_message_bytes
+from solana_keychain.core import SendingSigner, TransactionSigner, signed_message_bytes
 from solana_keychain.fordefi import (
+    FordefiBlackBoxSigner,
+    FordefiNativeAutoSigner,
     FordefiRequestSigner,
-    FordefiSigner,
     FordefiSignerConfig,
     PemRequestSigner,
     create_fordefi_signer,
@@ -41,8 +42,8 @@ EC_PRIVATE_PEM = _EC_KEY.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncr
 EC_PUBLIC_KEY = _EC_KEY.public_key()
 
 
-def make_signer(keypair: Keypair, **overrides: Any) -> FordefiSigner:
-    config = FordefiSignerConfig(
+def make_config(keypair: Keypair, **overrides: Any) -> FordefiSignerConfig:
+    return FordefiSignerConfig(
         access_token=overrides.pop("access_token", ACCESS_TOKEN),
         vault_id=overrides.pop("vault_id", VAULT_ID),
         public_key=overrides.pop("public_key", str(keypair.pubkey())),
@@ -52,7 +53,15 @@ def make_signer(keypair: Keypair, **overrides: Any) -> FordefiSigner:
         max_poll_attempts=overrides.pop("max_poll_attempts", 3),
         **overrides,
     )
-    return FordefiSigner(config)
+
+
+def make_black_box_signer(keypair: Keypair, **overrides: Any) -> FordefiBlackBoxSigner:
+    return FordefiBlackBoxSigner(make_config(keypair, **overrides))
+
+
+def make_native_signer(keypair: Keypair, **overrides: Any) -> FordefiNativeAutoSigner:
+    overrides.setdefault("chain", "solana_devnet")
+    return FordefiNativeAutoSigner(make_config(keypair, **overrides))
 
 
 def mock_vault(body: dict[str, Any], status_code: int = 200) -> None:
@@ -84,34 +93,61 @@ class StaticRequestSigner(FordefiRequestSigner):
         return "static-signature"
 
 
-def test_broadcasts_transactions_by_mode() -> None:
+def test_each_mode_exposes_exactly_one_transaction_capability() -> None:
+    """The mode is the type, so a caller cannot reach an entry point the vault
+    shape does not support."""
     keypair = Keypair()
-    assert not make_signer(keypair).broadcasts_transactions
-    assert make_signer(keypair, chain="solana_mainnet").broadcasts_transactions
+    black_box = make_black_box_signer(keypair)
+    native = make_native_signer(keypair, chain="solana_mainnet")
+
+    assert isinstance(black_box, TransactionSigner)
+    assert not isinstance(black_box, SendingSigner)
+    assert isinstance(native, SendingSigner)
+    assert not isinstance(native, TransactionSigner)
+
+
+def test_black_box_signer_rejects_a_native_config() -> None:
+    with pytest.raises(SignerError) as excinfo:
+        FordefiBlackBoxSigner(make_config(Keypair(), chain="solana_mainnet"))
+    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
+
+
+def test_native_signer_rejects_a_black_box_config() -> None:
+    with pytest.raises(SignerError) as excinfo:
+        FordefiNativeAutoSigner(make_config(Keypair()))
+    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
+
+
+async def test_factory_picks_the_signer_type_from_chain() -> None:
+    keypair = Keypair()
+    black_box = await create_fordefi_signer(make_config(keypair))
+    native = await create_fordefi_signer(make_config(keypair, chain="solana_devnet"))
+    assert isinstance(black_box, FordefiBlackBoxSigner)
+    assert isinstance(native, FordefiNativeAutoSigner)
 
 
 @pytest.mark.parametrize("field", ["access_token", "vault_id", "public_key"])
 def test_config_rejects_empty_required_field(field: str) -> None:
     with pytest.raises(SignerError) as excinfo:
-        make_signer(Keypair(), **{field: ""})
+        make_black_box_signer(Keypair(), **{field: ""})
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
 def test_config_rejects_both_key_mechanisms() -> None:
     with pytest.raises(SignerError) as excinfo:
-        make_signer(Keypair(), request_signer=StaticRequestSigner())
+        make_black_box_signer(Keypair(), request_signer=StaticRequestSigner())
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
 def test_config_rejects_missing_key_mechanism() -> None:
     with pytest.raises(SignerError) as excinfo:
-        make_signer(Keypair(), private_key_pem=None)
+        make_black_box_signer(Keypair(), private_key_pem=None)
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
 def test_config_rejects_invalid_pem() -> None:
     with pytest.raises(SignerError) as excinfo:
-        make_signer(Keypair(), private_key_pem="not-a-pem")
+        make_black_box_signer(Keypair(), private_key_pem="not-a-pem")
     assert excinfo.value.code == SignerErrorCode.INVALID_PRIVATE_KEY
 
 
@@ -119,43 +155,43 @@ def test_config_rejects_non_p256_pem() -> None:
     other_key = ec.generate_private_key(ec.SECP384R1())
     pem = other_key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()).decode()
     with pytest.raises(SignerError) as excinfo:
-        make_signer(Keypair(), private_key_pem=pem)
+        make_black_box_signer(Keypair(), private_key_pem=pem)
     assert excinfo.value.code == SignerErrorCode.INVALID_PRIVATE_KEY
 
 
 def test_config_rejects_invalid_public_key() -> None:
     with pytest.raises(SignerError) as excinfo:
-        make_signer(Keypair(), public_key="not-a-pubkey")
+        make_black_box_signer(Keypair(), public_key="not-a-pubkey")
     assert excinfo.value.code == SignerErrorCode.INVALID_PUBLIC_KEY
 
 
 def test_config_rejects_http_url() -> None:
     with pytest.raises(SignerError) as excinfo:
-        make_signer(Keypair(), api_base_url="http://insecure.example.com")
+        make_black_box_signer(Keypair(), api_base_url="http://insecure.example.com")
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
 def test_config_rejects_unknown_chain() -> None:
     with pytest.raises(SignerError) as excinfo:
-        make_signer(Keypair(), chain="solana_testnet")
+        make_native_signer(Keypair(), chain="solana_testnet")
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
-def test_config_rejects_fee_without_chain() -> None:
+def test_black_box_config_rejects_a_fee() -> None:
     with pytest.raises(SignerError) as excinfo:
-        make_signer(Keypair(), fee={"type": "priority", "priority_level": "high"})
+        make_black_box_signer(Keypair(), fee={"type": "priority", "priority_level": "high"})
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
 def test_config_rejects_zero_max_poll_attempts() -> None:
     with pytest.raises(SignerError) as excinfo:
-        make_signer(Keypair(), max_poll_attempts=0)
+        make_black_box_signer(Keypair(), max_poll_attempts=0)
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
 def test_config_rejects_negative_poll_interval() -> None:
     with pytest.raises(SignerError) as excinfo:
-        make_signer(Keypair(), poll_interval_ms=-1)
+        make_black_box_signer(Keypair(), poll_interval_ms=-1)
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
@@ -180,7 +216,7 @@ async def test_sign_message_black_box_success_with_stamped_request() -> None:
     keypair = Keypair()
     message = b"fordefi-message"
     signature = keypair.sign_message(message)
-    signer = make_signer(keypair)
+    signer = make_black_box_signer(keypair)
     mock_sign_flow(
         status_response("waiting_for_signing_trigger"),
         status_response("signed", signatures=[{"data": signature_b64(signature)}]),
@@ -211,7 +247,9 @@ async def test_sign_message_uses_custom_request_signer() -> None:
     keypair = Keypair()
     message = b"custom-signer-message"
     signature = keypair.sign_message(message)
-    signer = make_signer(keypair, private_key_pem=None, request_signer=StaticRequestSigner())
+    signer = make_black_box_signer(
+        keypair, private_key_pem=None, request_signer=StaticRequestSigner()
+    )
     mock_sign_flow(status_response("signed", signatures=[{"data": signature_b64(signature)}]))
 
     await signer.sign_message(message)
@@ -224,7 +262,7 @@ async def test_sign_message_verification_failure() -> None:
     keypair = Keypair()
     message = b"fordefi-message"
     bogus = Keypair().sign_message(message)
-    signer = make_signer(keypair)
+    signer = make_black_box_signer(keypair)
     mock_sign_flow(status_response("signed", signatures=[{"data": signature_b64(bogus)}]))
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_message(message)
@@ -233,7 +271,7 @@ async def test_sign_message_verification_failure() -> None:
 
 @respx.mock
 async def test_sign_message_missing_signatures() -> None:
-    signer = make_signer(Keypair())
+    signer = make_black_box_signer(Keypair())
     mock_sign_flow(status_response("signed"))
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_message(b"hello")
@@ -242,7 +280,7 @@ async def test_sign_message_missing_signatures() -> None:
 
 @respx.mock
 async def test_sign_message_undecodable_signature() -> None:
-    signer = make_signer(Keypair())
+    signer = make_black_box_signer(Keypair())
     mock_sign_flow(status_response("signed", signatures=[{"data": "not-base64!"}]))
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_message(b"hello")
@@ -251,7 +289,7 @@ async def test_sign_message_undecodable_signature() -> None:
 
 @respx.mock
 async def test_sign_message_wrong_length_signature() -> None:
-    signer = make_signer(Keypair())
+    signer = make_black_box_signer(Keypair())
     short = base64.b64encode(b"\x01" * 32).decode("ascii")
     mock_sign_flow(status_response("signed", signatures=[{"data": short}]))
     with pytest.raises(SignerError) as excinfo:
@@ -274,7 +312,7 @@ async def test_sign_message_wrong_length_signature() -> None:
     ],
 )
 async def test_sign_message_terminal_failure_state(state: str) -> None:
-    signer = make_signer(Keypair())
+    signer = make_black_box_signer(Keypair())
     mock_sign_flow(status_response(state))
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_message(b"hello")
@@ -283,7 +321,7 @@ async def test_sign_message_terminal_failure_state(state: str) -> None:
 
 @respx.mock
 async def test_sign_message_polling_timeout() -> None:
-    signer = make_signer(Keypair(), max_poll_attempts=3)
+    signer = make_black_box_signer(Keypair(), max_poll_attempts=3)
     respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"id": "tx-1"}))
     respx.get(f"{TRANSACTIONS_URL}/tx-1").mock(
         return_value=status_response("waiting_for_signing_trigger")
@@ -297,7 +335,7 @@ async def test_sign_message_polling_timeout() -> None:
 @respx.mock
 async def test_sign_transaction_native_polling_timeout_is_broadcast_unconfirmed() -> None:
     keypair = Keypair()
-    signer = make_signer(keypair, chain="solana_devnet", max_poll_attempts=3)
+    signer = make_native_signer(keypair, chain="solana_devnet", max_poll_attempts=3)
     respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"id": "tx-1"}))
     respx.get(f"{TRANSACTIONS_URL}/tx-1").mock(
         return_value=status_response("waiting_for_signing_trigger")
@@ -311,7 +349,7 @@ async def test_sign_transaction_native_polling_timeout_is_broadcast_unconfirmed(
 @respx.mock
 async def test_native_submit_server_error_is_unconfirmed_without_a_transaction_id() -> None:
     keypair = Keypair()
-    signer = make_signer(keypair, chain="solana_devnet")
+    signer = make_native_signer(keypair, chain="solana_devnet")
     respx.post(TRANSACTIONS_URL).mock(
         return_value=httpx.Response(502, json={"error": "bad gateway"})
     )
@@ -325,7 +363,7 @@ async def test_native_submit_server_error_is_unconfirmed_without_a_transaction_i
 @respx.mock
 async def test_native_submit_accepted_without_an_id_is_unconfirmed() -> None:
     keypair = Keypair()
-    signer = make_signer(keypair, chain="solana_devnet")
+    signer = make_native_signer(keypair, chain="solana_devnet")
     respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"state": "pending"}))
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
@@ -337,7 +375,7 @@ async def test_native_submit_accepted_without_an_id_is_unconfirmed() -> None:
 @respx.mock
 async def test_native_submit_rejected_by_fordefi_stays_a_plain_failure() -> None:
     keypair = Keypair()
-    signer = make_signer(keypair, chain="solana_devnet")
+    signer = make_native_signer(keypair, chain="solana_devnet")
     respx.post(TRANSACTIONS_URL).mock(
         return_value=httpx.Response(401, json={"error": "unauthorized"})
     )
@@ -351,7 +389,7 @@ async def test_black_box_submit_server_error_is_not_reported_as_unconfirmed() ->
     """Black-box mode only signs, so a failed submit has no on-chain outcome to be
     unconfirmed about."""
     keypair = Keypair()
-    signer = make_signer(keypair)
+    signer = make_black_box_signer(keypair)
     respx.post(TRANSACTIONS_URL).mock(
         return_value=httpx.Response(502, json={"error": "bad gateway"})
     )
@@ -366,7 +404,7 @@ async def test_cancellation_during_native_submit_warns_without_a_transaction_id(
 ) -> None:
     """No id exists yet, so the warning is all the caller gets."""
     keypair = Keypair()
-    signer = make_signer(keypair, chain="solana_devnet")
+    signer = make_native_signer(keypair, chain="solana_devnet")
     submitting = asyncio.Event()
     observed: list[str] = []
 
@@ -402,7 +440,7 @@ async def test_sign_transaction_native_cancellation_carries_the_transaction_id(
     the id must also be logged: awaiting the cancelled task yields a fresh
     CancelledError from the task machinery, without the message."""
     keypair = Keypair()
-    signer = make_signer(keypair, chain="solana_devnet")
+    signer = make_native_signer(keypair, chain="solana_devnet")
     polling = asyncio.Event()
     observed: list[str] = []
 
@@ -434,7 +472,7 @@ async def test_sign_transaction_native_cancellation_carries_the_transaction_id(
 @respx.mock
 async def test_sign_transaction_black_box_success() -> None:
     keypair = Keypair()
-    signer = make_signer(keypair)
+    signer = make_black_box_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
     signature = keypair.sign_message(signed_message_bytes(transaction.message))
     mock_sign_flow(status_response("signed", signatures=[{"data": signature_b64(signature)}]))
@@ -452,7 +490,7 @@ async def test_sign_message_native_mode_uses_solana_message() -> None:
     keypair = Keypair()
     message = b"native-message"
     signature = keypair.sign_message(message)
-    signer = make_signer(keypair, chain="solana_devnet")
+    signer = make_native_signer(keypair, chain="solana_devnet")
     mock_sign_flow(status_response("signed", signatures=[{"data": signature_b64(signature)}]))
 
     result = await signer.sign_message(message)
@@ -477,7 +515,7 @@ def make_signed_wire_transaction(keypair: Keypair) -> tuple[str, Any]:
 @respx.mock
 async def test_sign_transaction_native_success() -> None:
     keypair = Keypair()
-    signer = make_signer(
+    signer = make_native_signer(
         keypair, chain="solana_mainnet", fee={"type": "priority", "priority_level": "high"}
     )
     raw_transaction, signature = make_signed_wire_transaction(keypair)
@@ -511,7 +549,7 @@ async def test_sign_transaction_native_success() -> None:
 @respx.mock
 async def test_sign_transaction_native_missing_raw_transaction() -> None:
     keypair = Keypair()
-    signer = make_signer(keypair, chain="solana_devnet")
+    signer = make_native_signer(keypair, chain="solana_devnet")
     mock_sign_flow(status_response("completed"))
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
@@ -522,7 +560,7 @@ async def test_sign_transaction_native_missing_raw_transaction() -> None:
 @respx.mock
 async def test_sign_transaction_native_verifies_against_returned_message() -> None:
     keypair = Keypair()
-    signer = make_signer(keypair, chain="solana_devnet")
+    signer = make_native_signer(keypair, chain="solana_devnet")
     transaction = create_test_transaction(keypair.pubkey())
     returned = create_test_transaction(keypair.pubkey())
     returned.signatures = [keypair.sign_message(signed_message_bytes(transaction.message))]
@@ -537,7 +575,7 @@ async def test_sign_transaction_native_verifies_against_returned_message() -> No
 @respx.mock
 async def test_sign_transaction_native_rejects_multi_signer_before_submitting() -> None:
     keypair = Keypair()
-    signer = make_signer(keypair, chain="solana_devnet")
+    signer = make_native_signer(keypair, chain="solana_devnet")
     transaction = create_two_signer_transaction(keypair.pubkey(), Keypair().pubkey())
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_and_send_transaction(transaction)
@@ -548,13 +586,13 @@ async def test_sign_transaction_native_rejects_multi_signer_before_submitting() 
 @respx.mock
 async def test_is_available_success() -> None:
     mock_vault({"id": VAULT_ID})
-    assert await make_signer(Keypair()).is_available()
+    assert await make_black_box_signer(Keypair()).is_available()
 
 
 @respx.mock
 async def test_is_available_false_on_api_error() -> None:
     mock_vault({"detail": "forbidden"}, status_code=403)
-    assert not await make_signer(Keypair()).is_available()
+    assert not await make_black_box_signer(Keypair()).is_available()
 
 
 @respx.mock
@@ -564,7 +602,9 @@ async def test_is_available_false_on_failing_request_signer() -> None:
             raise RuntimeError("kms unavailable")
 
     mock_vault({"id": VAULT_ID})
-    signer = make_signer(Keypair(), private_key_pem=None, request_signer=FailingRequestSigner())
+    signer = make_black_box_signer(
+        Keypair(), private_key_pem=None, request_signer=FailingRequestSigner()
+    )
     assert not await signer.is_available()
 
 
@@ -583,7 +623,7 @@ def test_reprs_never_contain_secrets() -> None:
         private_key_pem=EC_PRIVATE_PEM,
         api_base_url=API_BASE_URL,
     )
-    signer = make_signer(keypair)
+    signer = make_black_box_signer(keypair)
     for text in (repr(config), repr(signer)):
         assert ACCESS_TOKEN not in text
         assert "PRIVATE KEY" not in text

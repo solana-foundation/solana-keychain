@@ -23,7 +23,7 @@ from solana_keychain.core.signature_util import (
 )
 from solana_keychain.core.signer import (
     SignedTransaction,
-    SolanaSigner,
+    TransactionSigner,
     require_initialized,
 )
 from solana_keychain.core.transaction_util import (
@@ -58,7 +58,7 @@ class PrivySignerConfig:
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
 
 
-class PrivySigner(SolanaSigner):
+class PrivySigner(TransactionSigner):
     """Signer backed by a Privy-held wallet.
 
     ``init()`` must be awaited before use — it resolves the wallet's public key.
