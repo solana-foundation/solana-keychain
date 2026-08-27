@@ -1,5 +1,6 @@
 import type { TestScenario } from '@solana/keychain-test-utils';
-import { createCrossmintSigner, type CrossmintSendingSigner } from '../crossmint-signer.js';
+import type { SolanaSendingSigner } from '@solana/keychain-core';
+import { createCrossmintSigner } from '../crossmint-signer.js';
 
 const SIGNER_TYPE = 'crossmint';
 const REQUIRED_ENV_VARS = ['CROSSMINT_API_KEY', 'CROSSMINT_WALLET_LOCATOR'];
@@ -8,7 +9,7 @@ const REQUIRED_ENV_VARS = ['CROSSMINT_API_KEY', 'CROSSMINT_WALLET_LOCATOR'];
 // does not satisfy `SignerTestConfig` and the shared LiteSVM runner does not
 // apply; the integration test drives the signer directly.
 interface CrossmintTestConfig {
-    createSigner: () => Promise<CrossmintSendingSigner>;
+    createSigner: () => Promise<SolanaSendingSigner>;
     requiredEnvVars: string[];
     signerType: string;
     testScenarios?: TestScenario[];

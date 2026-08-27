@@ -1,6 +1,11 @@
-import type { SolanaMessageSigner, SolanaSigner, SolanaTransactionSigner } from '@solana/keychain-core';
+import type {
+    SolanaMessageSigner,
+    SolanaSendingSigner,
+    SolanaSigner,
+    SolanaTransactionSigner,
+} from '@solana/keychain-core';
 import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
-import type { CrossmintSendingSigner, CrossmintSignerConfig } from '@solana/keychain-crossmint';
+import type { CrossmintSignerConfig } from '@solana/keychain-crossmint';
 import type { FordefiNativeSigner, FordefiSignerConfig, SolanaChainUniqueId } from '@solana/keychain-fordefi';
 import type { UtilaSignerConfig } from '@solana/keychain-utila';
 
@@ -30,7 +35,7 @@ function stripBackend<T extends { backend: string }>({ backend: _, ...rest }: T)
  */
 export function createKeychainSigner(
     config: CrossmintSignerConfig & { backend: 'crossmint' },
-): Promise<CrossmintSendingSigner>;
+): Promise<SolanaSendingSigner>;
 export function createKeychainSigner(
     config: FordefiSignerConfig & { backend: 'fordefi'; chain: SolanaChainUniqueId },
 ): Promise<FordefiNativeSigner>;

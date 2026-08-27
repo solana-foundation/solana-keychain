@@ -70,7 +70,7 @@ Most backends sign a transaction you own and hand back signatures (`SolanaTransa
 | memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | `SolanaTransactionSigner & SolanaMessageSigner` | yes | no | yes |
 | cdp | `SolanaTransactionSigner & SolanaMessageSigner` | yes | no | yes (UTF-8 payloads only) |
 | utila | `SolanaTransactionSigner` | yes | no | no |
-| crossmint | `CrossmintSendingSigner` (a `SolanaSendingSigner`) | no | yes | no |
+| crossmint | `SolanaSendingSigner` | no | yes | no |
 | fordefi (black-box mode) | `FordefiBlackBoxSigner` (`SolanaTransactionSigner & SolanaMessageSigner`) | yes | no | yes |
 | fordefi (native mode) | `FordefiNativeSigner` (`SolanaSendingSigner & SolanaMessageSigner`) | no | yes | yes |
 
