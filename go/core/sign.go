@@ -73,15 +73,14 @@ func AttachSignature(tx *solana.Transaction, pubkey solana.PublicKey, sig solana
 // signature. Core has no RPC dependency, so the network hop is always caller-supplied.
 type SendTransactionFn func(ctx context.Context, encodedTransaction string) (solana.Signature, error)
 
-// SignAndSendTransaction gets tx on chain with one call. A TransactionBroadcaster
+// SignAndSendTransaction gets tx on chain with one call. A SendingSigner
 // broadcasts through its provider, so its own signature identifies the transaction
-// and send is ignored; any other signer signs and send broadcasts the result.
+// and send is ignored; a TransactionSigner signs and send broadcasts the result.
 //
 // send is checked before signing so a missing one cannot waste a signature.
-func SignAndSendTransaction(ctx context.Context, s Signer, tx *solana.Transaction, send SendTransactionFn) (solana.Signature, error) {
-	broadcaster, ok := s.(TransactionBroadcaster)
-	if ok && broadcaster.BroadcastsTransactions() {
-		sig, err := broadcaster.SignAndSendTransaction(ctx, tx)
+func SignAndSendTransaction(ctx context.Context, s SolanaSigner, tx *solana.Transaction, send SendTransactionFn) (solana.Signature, error) {
+	if sender, ok := s.(SendingSigner); ok {
+		sig, err := sender.SignAndSendTransaction(ctx, tx)
 		if err != nil {
 			return solana.Signature{}, err
 		}
@@ -92,12 +91,18 @@ func SignAndSendTransaction(ctx context.Context, s Signer, tx *solana.Transactio
 		return sig, nil
 	}
 
+	signer, ok := s.(TransactionSigner)
+	if !ok {
+		return solana.Signature{}, NewSignerError(CodeSigningFailed,
+			"this signer supports neither SignTransaction nor SignAndSendTransaction")
+	}
+
 	if send == nil {
 		return solana.Signature{}, NewSignerError(CodeConfigError,
 			"this signer cannot broadcast transactions; supply a SendTransactionFn to broadcast the signed one")
 	}
 
-	signed, err := s.SignTransaction(ctx, tx)
+	signed, err := signer.SignTransaction(ctx, tx)
 	if err != nil {
 		return solana.Signature{}, err
 	}

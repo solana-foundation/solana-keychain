@@ -43,10 +43,7 @@ type Signer struct {
 }
 
 // Ensure Signer satisfies the core contract at compile time.
-var (
-	_ core.Signer                 = (*Signer)(nil)
-	_ core.TransactionBroadcaster = (*Signer)(nil)
-)
+var _ core.SendingSigner = (*Signer)(nil)
 
 // New builds a Crossmint signer and resolves the wallet's public key, so the
 // returned signer is ready to use.
@@ -116,10 +113,6 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 // Pubkey returns the Crossmint wallet's Solana public key.
 func (s *Signer) Pubkey() solana.PublicKey { return s.publicKey }
 
-// BroadcastsTransactions is always true: Crossmint executes every
-// transaction server-side.
-func (s *Signer) BroadcastsTransactions() bool { return true }
-
 // String renders the signer without any secret material.
 func (s Signer) String() string {
 	return "crossmint.Signer{pubkey: " + s.publicKey.String() + ", apiBaseURL: " + s.apiBaseURL + "}"
@@ -134,13 +127,6 @@ func (s Signer) GoString() string { return s.String() }
 func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, error) {
 	return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
 		"Crossmint sign_message is not supported for Solana wallets in this signer")
-}
-
-// SignTransaction is intentionally unsupported: Crossmint executes every
-// approved transaction server-side and exposes no sign-only API.
-func (s *Signer) SignTransaction(_ context.Context, _ *solana.Transaction) (core.SignedTransaction, error) {
-	return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
-		"Crossmint executes every transaction server-side; call SignAndSendTransaction instead")
 }
 
 // SignAndSendTransaction submits tx to Crossmint, polls it to completion, and

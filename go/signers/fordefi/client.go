@@ -83,7 +83,7 @@ type transactionStatusResponse struct {
 	RawTransaction string           `json:"raw_transaction"`
 }
 
-func (s *Signer) newRequest(ctx context.Context, method, path, body string) (*http.Request, error) {
+func (s *signerCore) newRequest(ctx context.Context, method, path, body string) (*http.Request, error) {
 	var reader io.Reader
 	if body != "" {
 		reader = strings.NewReader(body)
@@ -96,12 +96,12 @@ func (s *Signer) newRequest(ctx context.Context, method, path, body string) (*ht
 	return req, nil
 }
 
-func (s *Signer) send(req *http.Request) (int, []byte, error) {
+func (s *signerCore) send(req *http.Request) (int, []byte, error) {
 	return core.SendRequest(s.client, req, "fordefi")
 }
 
 // doGet sends an authenticated GET and returns the status code and body.
-func (s *Signer) doGet(ctx context.Context, path string) (int, []byte, error) {
+func (s *signerCore) doGet(ctx context.Context, path string) (int, []byte, error) {
 	req, err := s.newRequest(ctx, http.MethodGet, path, "")
 	if err != nil {
 		return 0, nil, err
@@ -111,7 +111,7 @@ func (s *Signer) doGet(ctx context.Context, path string) (int, []byte, error) {
 
 // signRequest produces the x-signature value over the {path}|{timestamp}|{body}
 // payload via the configured RequestSigner.
-func (s *Signer) signRequest(ctx context.Context, path string, timestamp int64, body string) (string, error) {
+func (s *signerCore) signRequest(ctx context.Context, path string, timestamp int64, body string) (string, error) {
 	payload := path + "|" + strconv.FormatInt(timestamp, 10) + "|" + body
 	return s.requestSigner.SignRequest(ctx, []byte(payload))
 }
@@ -121,7 +121,7 @@ func (s *Signer) signRequest(ctx context.Context, path string, timestamp int64, 
 //
 // broadcastManaged marks a submit whose acceptance means Fordefi is already
 // broadcasting, so an unresolved failure is reported as unconfirmed.
-func (s *Signer) submitTransaction(ctx context.Context, request transactionRequest, idempotenceID string, broadcastManaged bool) (string, error) {
+func (s *signerCore) submitTransaction(ctx context.Context, request transactionRequest, idempotenceID string, broadcastManaged bool) (string, error) {
 	classify := func(status int, err error) error {
 		if !broadcastManaged {
 			return err
@@ -167,7 +167,7 @@ func (s *Signer) submitTransaction(ctx context.Context, request transactionReque
 }
 
 // getTransaction fetches the current state of a Fordefi transaction.
-func (s *Signer) getTransaction(ctx context.Context, txID string) (transactionStatusResponse, error) {
+func (s *signerCore) getTransaction(ctx context.Context, txID string) (transactionStatusResponse, error) {
 	status, body, err := s.doGet(ctx, transactionsPath+"/"+url.PathEscape(txID))
 	if err != nil {
 		return transactionStatusResponse{}, err
@@ -189,7 +189,7 @@ func (s *Signer) getTransaction(ctx context.Context, txID string) (transactionSt
 // false (black box / messages) "signed" succeeds, with "completed" accepted
 // defensively. Cancellation of ctx aborts the wait, reported as
 // CodeBroadcastUnconfirmed when pushable because Fordefi may already have executed it.
-func (s *Signer) pollForResult(ctx context.Context, txID string, pushable bool) (transactionStatusResponse, error) {
+func (s *signerCore) pollForResult(ctx context.Context, txID string, pushable bool) (transactionStatusResponse, error) {
 	for attempt := 0; attempt < s.maxPollAttempts; attempt++ {
 		response, err := s.getTransaction(ctx, txID)
 		if err != nil {
@@ -234,7 +234,7 @@ func extractSignature(response transactionStatusResponse) (solana.Signature, err
 // probeVault fetches the configured vault as a reachability and authentication
 // check. The body is not interpreted: the configured public key is the source
 // of truth for the signer's identity.
-func (s *Signer) probeVault(ctx context.Context) error {
+func (s *signerCore) probeVault(ctx context.Context) error {
 	status, body, err := s.doGet(ctx, "/api/v1/vaults/"+url.PathEscape(s.vaultID))
 	if err != nil {
 		return err

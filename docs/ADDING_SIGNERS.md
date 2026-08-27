@@ -1111,7 +1111,7 @@ guarantees. If your provider makes one impossible, say so in the PR and in
   does not verify must fail, never be attached.
 - **Declare whether the provider broadcasts.** If it executes server-side,
   implement the sending shape (`SendingSigner` in Rust,
-  `SolanaSendingSigner` in TypeScript, `core.TransactionBroadcaster` in Go) and
+  `SolanaSendingSigner` in TypeScript, `core.SendingSigner` in Go) and
   return the signature that identifies the landed transaction. If the provider
   has no sign-only endpoint at all, make the backend sending-only: fail the
   sign-only entry point rather than submitting behind the caller's back.

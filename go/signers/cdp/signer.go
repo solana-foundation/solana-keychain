@@ -35,7 +35,7 @@ type Signer struct {
 }
 
 // Ensure Signer satisfies the core contract at compile time.
-var _ core.Signer = (*Signer)(nil)
+var _ core.TransactionSigner = (*Signer)(nil)
 
 // New builds a CDP signer from cfg. Construction performs no I/O: key material
 // is only validated when the first JWT is built.

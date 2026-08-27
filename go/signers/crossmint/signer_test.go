@@ -103,25 +103,6 @@ func assertCallerTransactionUntouched(t *testing.T, tx *solana.Transaction) {
 	}
 }
 
-// Crossmint has no sign-only API: an approved transaction is always executed
-// server-side, so a caller asking for signature-only work must be refused
-// rather than handed a transaction that has already landed.
-func TestSignTransactionIsRejected(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.TestPublicKey().String()))
-	srv := testutils.StartTLSServer(t, mux)
-	s := newTestSigner(t, baseConfig(srv))
-
-	tx, err := testutils.CreateTestTransaction(testutils.TestPublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = s.SignTransaction(context.Background(), tx)
-	testutils.AssertCode(t, err, core.CodeSigningFailed)
-	assertCallerTransactionUntouched(t, tx)
-}
-
 // TestBuildWalletsAPIURL: raw slashes, dot segments, pre-encoded traversal
 // sequences, and query/fragment metacharacters in a wallet locator must all
 // stay inside a single encoded path segment.

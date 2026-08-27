@@ -35,7 +35,7 @@ type Signer struct {
 }
 
 // Ensure Signer satisfies the core contract at compile time.
-var _ core.Signer = (*Signer)(nil)
+var _ core.TransactionSigner = (*Signer)(nil)
 
 // New builds a Turnkey signer from cfg. Construction is pure: no network I/O.
 // The configured P-256 API-key material is validated here so a malformed key

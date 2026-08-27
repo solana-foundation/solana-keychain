@@ -16,7 +16,7 @@ type Signer struct {
 }
 
 // Ensure Signer satisfies the core contract at compile time.
-var _ core.Signer = (*Signer)(nil)
+var _ core.TransactionSigner = (*Signer)(nil)
 
 // New builds a memory signer from cfg. Exactly one key source must be provided.
 func New(cfg Config) (*Signer, error) {
