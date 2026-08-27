@@ -1,18 +1,15 @@
 # CLAUDE.md
 
-One `SolanaSigner` contract over 14 backends in Rust, TypeScript, Python and Go, kept at cross-language parity: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Crossmint, CDP, Para, Openfort, Utila, Fordefi.
-
-Layout: `rust/` (feature-gated crate), `typescript/` (pnpm monorepo, one package per backend plus `core` and the `keychain` umbrella), `python/` (single `solana-keychain` package, src layout), `go/` (one module per backend plus `core`, no umbrella). Adding a backend: [docs/ADDING_SIGNERS.md](docs/ADDING_SIGNERS.md).
+One `SolanaSigner` contract over 14 backends in Rust, TypeScript, Python and Go, kept at cross-language parity. Adding a backend: [docs/ADDING_SIGNERS.md](docs/ADDING_SIGNERS.md).
 
 ## Commands
 
-Always use `just`, never raw `cargo`/`pnpm`/`pytest`/`go test`: the recipes encode flags those get wrong. `just` with no args lists every recipe.
+Always use `just`, never raw `cargo`/`pnpm`/`pytest`/`go test`: the recipes encode flags those get wrong.
 
-- `just build` / `test` / `fmt` / `test-integration` cover all four languages. `just <rust|ts|py|go>-*` scopes to one.
 - `just rust-test` runs the `sdk-v2`, `sdk-v3` and `sdk-v4` matrices. `cargo test --all-features` fails: the SDK features are mutually exclusive.
 - `just ts-treeshake` after touching TS exports; every package and the umbrella must stay tree-shakable.
 - Integration recipes spawn their own local `vault server -dev` and load `.env`. Never start Vault or pass secrets yourself.
-- Releases go through the [`release`](.claude/skills/release/SKILL.md) and [`complete-release`](.claude/skills/complete-release/SKILL.md) skills; CI wiring for a forked backend PR through [`add-signer-ci`](.claude/skills/add-signer-ci/SKILL.md). Check version consistency across **all** crates and packages.
+- Releasing: check version consistency across **all** crates and packages.
 
 ## Security standing
 
@@ -25,14 +22,14 @@ Consumer-facing summary in [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md); kee
 - **Redirects always rejected**, timeouts always set, HTTPS enforced on configured base URLs. Two carve-outs: Vault allows plain-HTTP loopback for `vault server -dev`, and the KMS backends use their vendor SDK's transport. Signing before `init()` fails rather than using the zero address.
 - **Pinned wire format.** Golden vectors freeze the serialized bytes; never regenerate them to make a suite pass.
 - Rust zeroizes intermediate key buffers. Go and Python cannot: treat the whole process memory as sensitive with local-key backends.
-- Audit covers Rust and TypeScript through one commit; Python and Go are entirely unaudited. See [audits/AUDIT_STATUS.md](audits/AUDIT_STATUS.md).
+- Audit coverage is uneven across the four languages and moves every release. [audits/AUDIT_STATUS.md](audits/AUDIT_STATUS.md) is the source of truth.
 
 ## Cross-language gotchas
 
 - **`init()` before use** for Privy, Fireblocks, Dfns, Crossmint, Para, Openfort. The `Signer::from_*` (Rust) and `await createXSigner(...)` / `create_keychain_signer(...)` factories do it for you; direct construction skips it.
-- **Rust capability is in the type.** `SolanaSigner` is the base (pubkey, sign_message, is_available); a backend implements exactly one of `TransactionSigner`, `ModifyingSigner` or `SendingSigner`. The umbrella `Signer` enum implements only the base trait; capabilities are reached through `as_transaction_signer()` / `as_sending_signer()` (`None` when absent) or its own variant-routing `sign_and_send`. Fordefi is two types (`FordefiBlackBoxSigner`, `FordefiNativeAutoSigner`), picked by `config.chain`. TS mirrors this: `SolanaSigner` is the union `SolanaTransactionSigner | SolanaModifyingSigner | SolanaSendingSigner` (narrow with the `isSolana*Signer` guards), `SolanaMessageSigner` is orthogonal, and Utila is transaction-only with no `signMessages` method.
-- **Go capability is in the interface.** `core.SolanaSigner` is the base; `core.TransactionSigner`, `core.ModifyingSigner` and `core.SendingSigner` embed it and add the one method. Capability is reached by type assertion, so a backend that cannot sign a transaction must carry no `SignTransaction` method at all. Fordefi is `fordefi.BlackBoxSigner` / `fordefi.NativeAutoSigner`, picked by `Config.Chain`.
-- **Crossmint is sending-only.** `sign_and_send_transaction` / `signAndSendTransactions` only; the sign-only entry point fails, and `signMessages` is unsupported. In Rust it implements `SendingSigner` and no `TransactionSigner`, and in Go `core.SendingSigner` with no `SignTransaction` method. In TS it is a `SolanaSendingSigner` and deliberately exposes no `signTransactions` or `signMessages`, because Kit classifies signers by duck-typed method presence, so it is excluded from `@solana/keychain-kit-plugin` at the type level.
+- **Capability is in the type, and the umbrella hides it.** A backend implements exactly one of the transaction, modifying or sending capability traits. The Rust umbrella `Signer` enum implements only the base trait: capabilities are reached through `as_transaction_signer()` / `as_sending_signer()`, which return `None` when absent, or through its own variant-routing `sign_and_send`. In TS, narrow with the `isSolana*Signer` guards; `SolanaMessageSigner` is orthogonal. Fordefi is two types (`FordefiBlackBoxSigner`, `FordefiNativeAutoSigner`), picked by `config.chain`.
+- **Go capability is by type assertion**, so a backend that cannot sign a transaction must carry no `SignTransaction` method at all. Fordefi is `fordefi.BlackBoxSigner` / `fordefi.NativeAutoSigner`, picked by `Config.Chain`.
+- **Crossmint is sending-only** and Utila is transaction-only, and in TS each must expose *no* method for what it does not support rather than a throwing one: Kit classifies signers by duck-typed method presence, so a stub would misclassify them. This is why Crossmint is excluded from `@solana/keychain-kit-plugin` at the type level.
 - **CDP** accepts UTF-8 message payloads only.
 - **Turnkey** response `r,s` must be left-padded to 32 bytes each before concatenation.
 - **GCP KMS** uses PureEdDSA with `EC_SIGN_ED25519`.
@@ -43,7 +40,3 @@ Consumer-facing summary in [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md); kee
 - **Python extras:** the root `__init__.py` must never eagerly import a backend whose deps sit behind an optional extra, and such a backend must raise "install `solana-keychain[<extra>]`". New backends go in `keychain.py`'s `_BACKENDS` table.
 - **Adding a backend to TS** touches the umbrella in 7 places (including the treeshake script) plus `typescript-ci.yml` and `typescript-publish.yml`.
 - **No Go umbrella on purpose:** Go does not dead-code-eliminate across a runtime dispatch switch, so an umbrella would force every backend SDK into all consumers' builds.
-
-## Branches
-
-`main` is the integration branch (audited plus unaudited). Topic branches are `feat/*`, `fix/*`, `chore/*` off `main`; urgent fixes are `hotfix/*` off a deployed stable tag via `just hotfix`. `just branch-info` prints the full guidance.

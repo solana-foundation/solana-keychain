@@ -1,9 +1,10 @@
 ---
 name: release
 description: >
-  Guide for releasing a new version of solana-keychain (Rust and/or TypeScript).
+  Guide for releasing a new version of solana-keychain (Rust, TypeScript, Python and/or Go).
   Use when asked to "prepare a release", "bump the version", "release Rust", "release TypeScript",
-  "publish a new version", or "cut a release". Covers the PR-based release flow end-to-end.
+  "release Python", "release Go", "publish a new version", or "cut a release". Covers the PR-based
+  release flow end-to-end.
 ---
 
 # Release Skill
@@ -15,22 +16,16 @@ Prepare and publish a new release of solana-keychain via a PR-based flow.
 - Mainline release: prepare release changes, open PR to `main`, merge, then publish from `main`.
 - Hotfix release: create `hotfix/*` from deployed tag, prepare release on `hotfix/*`, publish from `hotfix/*`, then merge back to `main`.
 
-## Prerequisites
+Needs `cargo-edit` (for `cargo set-version`) and `git-cliff`, both `cargo install`.
 
-| Tool | Install |
-|------|---------|
-| `cargo-edit` (`cargo set-version`) | `cargo install cargo-edit` |
-| `git-cliff` | `cargo install git-cliff` |
-| `pnpm` | `npm install -g pnpm` |
-| `gh` CLI | `brew install gh` |
-| `jq` | `brew install jq` |
+## Where versions live
 
-## Current Versions Reference
-
-| Artifact | Version file | Field |
-|----------|-------------|-------|
-| Rust crate | `rust/Cargo.toml` | `version` |
-| TypeScript packages | `typescript/packages/keychain/package.json` | `version` |
+| Artifact | Version file |
+|----------|-------------|
+| Rust crate | `rust/Cargo.toml` |
+| TypeScript packages | every `typescript/packages/*/package.json` plus `typescript/package.json` |
+| Python package | `python/pyproject.toml` |
+| Go modules | tags only; `just go-release-prep <version>` rewrites the module replace directives |
 
 ---
 
@@ -48,7 +43,7 @@ git pull
 git status  # must be clean before proceeding
 ```
 
-Also check whether the release branch already exists — if so, skip to Step 6:
+Also check whether the release branch already exists. If so, skip to Step 7:
 
 ```bash
 git branch -a | grep release
@@ -85,7 +80,7 @@ Review the output: `cat rust/CHANGELOG.md | head -30`
 
 ## Step 4: Update Cargo.lock and commit Rust changes
 
-This MUST happen before the TS release — `just release-ts` checks for a clean working tree and will fail if `Cargo.lock` is dirty.
+Commit this before touching the other languages. `Cargo.lock` moves whenever the crate version does, and a dirty lockfile fails the clean-working-tree check in `just release-ts` if anyone falls back to it.
 
 ```bash
 cd rust && cargo update --workspace && cd ..
@@ -97,31 +92,58 @@ git commit -m "chore: bump rust version to vX.Y.Z"
 
 ## Step 5: Bump TypeScript versions
 
+Derive the package list from the directory rather than hardcoding it: the set grows with every new backend, and a stale list silently skips bumping one.
+
 ```bash
 cd typescript
-for pkg in core aws-kms cdp dfns fireblocks gcp-kms memory openfort para privy turnkey utila vault keychain kit-plugin test-utils crossmint; do
-  cd packages/${pkg} && npm version "A.B.C" --no-git-tag-version && cd ../..
+for dir in packages/*/; do
+  (cd "$dir" && npm version "A.B.C" --no-git-tag-version)
 done
 npm version "A.B.C" --no-git-tag-version
 cd ..
 ```
 
+Confirm every package moved before continuing:
+
+```bash
+grep -h '"version"' typescript/package.json typescript/packages/*/package.json | sort -u
+```
+
 ---
 
-## Step 6: Create release branch, commit all changes, push
+## Step 6: Bump Python and Go, if they are in this release
+
+Release only the languages whose code changed; each publishes through its own workflow.
+
+Python, if `python/` changed:
+
+```bash
+# python/pyproject.toml -> version = "A.B.C"
+# add the release section to python/CHANGELOG.md
+```
+
+Go, if `go/` changed. Go modules carry no version file; the recipe rewrites each module's replace directives so the tagged modules resolve against each other:
+
+```bash
+just go-release-prep A.B.C
+```
+
+## Step 7: Create release branch, commit all changes, push
 
 ```bash
 git checkout -b chore/release-rust-vX.Y.Z-ts-vA.B.C
-git add typescript/
+git add -A
 git commit -m "chore: release rust vX.Y.Z and ts-keychain vA.B.C"
 git push -u origin chore/release-rust-vX.Y.Z-ts-vA.B.C
 ```
+
+Name the branch and the commit after the languages actually in the release.
 
 If the branch already existed from a previous session, switch to it and verify it already has the right state before opening the PR.
 
 ---
 
-## Step 7: Open PR to main
+## Step 8: Open PR to main
 
 ```bash
 gh pr create \
@@ -130,8 +152,12 @@ gh pr create \
   --body "$(cat <<'EOF'
 ## Release
 
-- Rust \`solana-keychain\` → vX.Y.Z ([CHANGELOG](rust/CHANGELOG.md))
-- TypeScript \`@solana/keychain\` and packages → vA.B.C
+List only the languages in this release:
+
+- Rust \`solana-keychain\` to vX.Y.Z ([CHANGELOG](rust/CHANGELOG.md))
+- TypeScript \`@solana/keychain\` and packages to vA.B.C
+- Python \`solana-keychain\` to vA.B.C ([CHANGELOG](python/CHANGELOG.md))
+- Go modules to vA.B.C
 
 ## Merge
 
@@ -148,12 +174,8 @@ For urgent fixes to a deployed stable version:
 
 ```bash
 just hotfix <fix-name>   # creates hotfix/<fix-name> from latest stable tag
-# apply fixes on hotfix/* and run release prep on hotfix/*
-just release             # required for Rust publish
-just release-ts          # if TypeScript packages changed
-# commit and push hotfix/*
-# publish from hotfix/* before merge-back
-# then open PR to main and merge hotfix back
 ```
 
-Hotfix patch releases are published from `hotfix/*` before merge-back to `main`.
+Apply the fix on `hotfix/*`, then run the same version-bump steps above on that branch. `just release` / `just release-ts` are still off limits here for the same TTY reason: use Steps 2 through 5 manually.
+
+Publish from `hotfix/*` before merging back, then open a PR to `main` and merge the hotfix back.

@@ -2,8 +2,9 @@
 name: complete-release
 description: >
   Finalize a mainline solana-keychain release after the PR is approved: approve, squash-merge, and
-  trigger both publish workflows from main via gh CLI. Use when asked to "finalize release",
-  "merge release PR", "complete release", "publish packages", or "approve and merge release".
+  trigger the publish workflows for the languages in the release from main via gh CLI. Use when
+  asked to "finalize release", "merge release PR", "complete release", "publish packages", or
+  "approve and merge release".
 ---
 
 # Complete Release Skill
@@ -56,15 +57,15 @@ Wait for merge to complete before proceeding.
 
 Check which paths the merged PR touched, then trigger only the relevant workflow(s):
 
+Each language publishes through its own workflow. Trigger only the ones whose tree the release touched.
+
 ```bash
 # Get the files changed by the merged PR
 FILES=$(gh pr view <PR_NUMBER> --json files --jq '.files[].path')
 
-CHANGED_RUST=$(echo "$FILES" | grep -q "^rust/" && echo "yes" || echo "no")
-CHANGED_TS=$(echo "$FILES" | grep -q "^typescript/" && echo "yes" || echo "no")
-
-echo "Rust changed: $CHANGED_RUST"
-echo "TypeScript changed: $CHANGED_TS"
+for lang in rust typescript python go; do
+  echo "$lang changed: $(echo "$FILES" | grep -q "^${lang}/" && echo yes || echo no)"
+done
 ```
 
 If Rust changed (`rust/Cargo.toml`, `rust/CHANGELOG.md`, etc.):
@@ -88,20 +89,41 @@ gh workflow run "Publish TypeScript Packages (Manual)" \
   -f create-github-release=true
 ```
 
+If Python changed (`python/pyproject.toml`, `python/CHANGELOG.md`, etc.):
+
+```bash
+gh workflow run "Publish Python Package (Manual)" \
+  --repo solana-foundation/solana-keychain \
+  --ref main \
+  -f publish-to-pypi=true \
+  -f create-github-release=true
+```
+
+If Go changed. Unlike the others, this workflow takes the version explicitly, without a leading `v`, because Go modules carry no version file to read it from:
+
+```bash
+gh workflow run "Publish Go Modules (Manual)" \
+  --repo solana-foundation/solana-keychain \
+  --ref main \
+  -f version=A.B.C \
+  -f create-github-release=true
+```
+
 ## Step 5: Verify workflows started
 
 Only check workflows that were triggered:
 
 ```bash
-gh run list --workflow="Publish Rust Crate" --limit 1
-gh run list --workflow="Publish TypeScript Packages (Manual)" --limit 1
+gh run list --workflow="<workflow name>" --limit 1
 ```
 
 Each triggered workflow should show `queued` or `in_progress`.
 
 ## Verification
 
-Once workflows complete:
+Once workflows complete, for each language published:
 
-- If Rust was published: confirm `vX.Y.Z` tag exists on GitHub and crates.io shows the new version
-- If TypeScript was published: confirm `ts-keychain-vA.B.C` tag exists on GitHub and `@solana/keychain` on npm shows the new version
+- Rust: `vX.Y.Z` tag exists on GitHub and crates.io shows the new version
+- TypeScript: `ts-keychain-vA.B.C` tag exists on GitHub and `@solana/keychain` on npm shows the new version
+- Python: `solana-keychain` on PyPI shows the new version
+- Go: the per-module tags exist and `go get` resolves the new version
