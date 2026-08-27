@@ -1,7 +1,7 @@
 import { createPrivateKey, createSign, type KeyObject } from 'node:crypto';
 
 import { Address, assertIsAddress } from '@solana/addresses';
-import { getBase58Encoder, getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
+import { getBase58Encoder, getBase64Decoder, getBase64Encoder, getUtf8Encoder } from '@solana/codecs-strings';
 import {
     abortableDelay,
     assertHttpsUrl,
@@ -16,6 +16,7 @@ import {
     signBatchStaggered,
     SignerErrorCode,
     SolanaMessageSigner,
+    SolanaModifyingSigner,
     SolanaSendingSigner,
     SolanaTransactionSigner,
     throwSignerError,
@@ -26,15 +27,20 @@ import {
     MessagePartialSignerConfig,
     SignableMessage,
     SignatureDictionary,
+    TransactionModifyingSigner,
+    TransactionModifyingSignerConfig,
     TransactionPartialSigner,
     TransactionPartialSignerConfig,
     TransactionSendingSigner,
     TransactionSendingSignerConfig,
 } from '@solana/signers';
+import { getCompiledTransactionMessageDecoder } from '@solana/transaction-messages';
 import {
+    assertIsTransactionWithinSizeLimit,
     Base64EncodedWireTransaction,
     getSignatureFromTransaction,
     getTransactionDecoder,
+    getTransactionLifetimeConstraintFromCompiledTransactionMessage,
     Transaction,
     TransactionWithinSizeLimit,
     TransactionWithLifetime,
@@ -43,6 +49,7 @@ import {
 import type {
     FordefiBlackBoxSignatureRequest,
     FordefiCreateTransactionResponse,
+    FordefiPushMode,
     FordefiSolanaFee,
     FordefiSolanaMessageRequest,
     FordefiSolanaTransactionRequest,
@@ -57,12 +64,15 @@ const DEFAULT_POLL_INTERVAL_MS = 2000;
 let base58Encoder: ReturnType<typeof getBase58Encoder> | undefined;
 let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
 let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
+let utf8Encoder: ReturnType<typeof getUtf8Encoder> | undefined;
 const DEFAULT_MAX_POLL_ATTEMPTS = 50;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
+// An unrecognized value would otherwise fall through to auto and broadcast.
+const PUSH_MODES = new Set<string>(['auto', 'manual']);
 /** Terminal success states for pushable transactions (solana_transaction with push_mode auto). */
 const PUSHABLE_SUCCESS_STATES = new Set(['completed']);
-/** Terminal success states for non-pushable transactions (black_box_signature, solana_message). */
+/** Terminal success states for non-pushable transactions (black_box_signature, solana_message, native manual). */
 const NON_PUSHABLE_SUCCESS_STATES = new Set(['signed', 'completed']);
 /** Terminal failure states (all transaction types). Mirrors the Rust backend. */
 const FAILURE_STATES = new Set([
@@ -116,8 +126,8 @@ export interface FordefiSignerConfig {
     apiBaseUrl?: string;
     /**
      * Solana chain identifier. When set, uses native Solana API types
-     * (`solana_serialized_transaction_message` with `push_mode: 'auto'` for
-     * transactions, `solana_message` for messages) instead of `black_box_signature`.
+     * (`solana_serialized_transaction_message` for transactions,
+     * `solana_message` for messages) instead of `black_box_signature`.
      */
     chain?: SolanaChainUniqueId;
     /** Solana fee configuration for native mode transactions. Only used when `chain` is set. */
@@ -133,6 +143,11 @@ export interface FordefiSignerConfig {
     privateKeyPem?: string;
     /** Solana public key of the vault (base58) */
     publicKey: string;
+    /**
+     * Whether Fordefi broadcasts a native Solana transaction. Omitted is
+     * equivalent to `'auto'`; `'manual'` requires `chain`.
+     */
+    pushMode?: FordefiPushMode;
     /** Optional delay in ms between concurrent signing requests (default: 0) */
     requestDelayMs?: number;
     /**
@@ -151,15 +166,16 @@ export interface FordefiSignerConfig {
 }
 
 /**
- * Fordefi signer shape returned when `chain` enables native Solana mode.
+ * Fordefi signer shape returned when `chain` enables native Solana mode with
+ * `pushMode` omitted or `'auto'`.
  *
- * Native mode may replace the recent blockhash and fees before signing and
- * broadcasts with `push_mode: 'auto'`, so it must be used through Kit's
+ * Native auto mode may replace the recent blockhash and fees before signing and
+ * broadcasts the result itself, so it must be used through Kit's
  * {@link TransactionSendingSigner} flow rather than as a partial signer.
- * Native instances expose no `signTransactions` — Kit classifies signers by
- * duck-typed method presence — but do sign messages.
+ * Instances expose no `signTransactions`, because Kit classifies signers by
+ * duck-typed method presence, but do sign messages.
  *
- * Native mode is not retry-safe: any failure after Fordefi accepts the
+ * Native auto mode is not retry-safe: any failure after Fordefi accepts the
  * submission rejects with `BROADCAST_UNCONFIRMED` carrying
  * `context.providerTransactionId`; check that transaction with Fordefi before
  * retrying. A submission that fails without a usable response rejects with
@@ -171,6 +187,24 @@ export interface FordefiSignerConfig {
  */
 export interface FordefiNativeSigner<TAddress extends string = string>
     extends SolanaSendingSigner<TAddress>, SolanaMessageSigner<TAddress> {}
+
+/**
+ * Fordefi signer shape returned when `chain` is set and `pushMode` is
+ * `'manual'`.
+ *
+ * Fordefi rewrites the message (the recent blockhash, and the Compute Budget
+ * fee instructions it manages) and signs it without broadcasting, so
+ * `modifyAndSignTransactions()` returns the transaction Fordefi signed rather
+ * than signatures for the caller's own bytes. Continue from that transaction
+ * and never from the one you submitted: every downstream signer has to sign the
+ * message the Fordefi signature covers. What Fordefi changed is not diffed, so
+ * inspect the result before broadcasting it.
+ *
+ * Instances expose neither `signTransactions` nor `signAndSendTransactions`,
+ * and Fordefi must be the fee payer and sign before every downstream signer.
+ */
+export interface FordefiNativeManualSigner<TAddress extends string = string>
+    extends SolanaModifyingSigner<TAddress>, SolanaMessageSigner<TAddress> {}
 
 /**
  * Fordefi signer shape returned when `chain` is unset (black box mode).
@@ -191,17 +225,20 @@ export interface FordefiBlackBoxSigner<TAddress extends string = string>
  * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
  */
 export function createFordefiSigner<TAddress extends string = string>(
-    config: FordefiSignerConfig & { chain: SolanaChainUniqueId },
+    config: FordefiSignerConfig & { chain: SolanaChainUniqueId; pushMode: 'manual' },
+): Promise<FordefiNativeManualSigner<TAddress>>;
+export function createFordefiSigner<TAddress extends string = string>(
+    config: FordefiSignerConfig & { chain: SolanaChainUniqueId; pushMode?: 'auto' },
 ): Promise<FordefiNativeSigner<TAddress>>;
 export function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig & { chain?: undefined },
 ): Promise<FordefiBlackBoxSigner<TAddress>>;
 export function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig,
-): Promise<FordefiBlackBoxSigner<TAddress> | FordefiNativeSigner<TAddress>>;
+): Promise<FordefiBlackBoxSigner<TAddress> | FordefiNativeManualSigner<TAddress> | FordefiNativeSigner<TAddress>>;
 export async function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig,
-): Promise<FordefiBlackBoxSigner<TAddress> | FordefiNativeSigner<TAddress>> {
+): Promise<FordefiBlackBoxSigner<TAddress> | FordefiNativeManualSigner<TAddress> | FordefiNativeSigner<TAddress>> {
     // The instance's own properties expose the mode-appropriate signing
     // method, which the class type cannot express statically.
     return await Promise.resolve(FordefiSigner.create(config) as unknown as FordefiBlackBoxSigner<TAddress>);
@@ -215,6 +252,7 @@ export async function createFordefiSigner<TAddress extends string = string>(
  */
 class FordefiSigner<TAddress extends string = string> implements SolanaMessageSigner<TAddress> {
     readonly address: Address<TAddress>;
+    declare modifyAndSignTransactions?: TransactionModifyingSigner<TAddress>['modifyAndSignTransactions'];
     declare signAndSendTransactions?: TransactionSendingSigner<TAddress>['signAndSendTransactions'];
     declare signTransactions?: TransactionPartialSigner<TAddress>['signTransactions'];
     private readonly accessToken: string;
@@ -223,6 +261,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
     private readonly fee?: FordefiSolanaFee;
     private readonly maxPollAttempts: number;
     private readonly pollIntervalMs: number;
+    private readonly pushMode: FordefiPushMode;
     private readonly requestSigner: FordefiRequestSigner;
     private readonly requestDelayMs: number;
     private readonly requestTimeoutMs: number;
@@ -235,6 +274,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         this.fee = config.fee;
         this.maxPollAttempts = config.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS;
         this.pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+        this.pushMode = config.pushMode ?? 'auto';
         this.requestSigner = config.requestSigner ?? new PemRequestSigner(config.privateKeyPem ?? '');
         this.requestDelayMs = config.requestDelayMs ?? 0;
         this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
@@ -243,11 +283,12 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
 
         // Kit classifies signers by duck-typed method presence, so each mode
         // exposes exactly the method it can honor as an own property: native
-        // mode rewrites and auto-broadcasts, so it is a sending signer and
-        // must not present a partial-signer method; black-box mode signs the
-        // caller's exact bytes, so it is a partial signer and must not
-        // present a sending method.
-        if (this.chain) {
+        // manual mode returns a rewritten transaction, native auto mode
+        // rewrites and broadcasts it, and black-box mode signs the caller's
+        // exact bytes.
+        if (this.chain && this.pushMode === 'manual') {
+            this.modifyAndSignTransactions = this.modifyAndSignNativeTransactions.bind(this);
+        } else if (this.chain) {
             this.signAndSendTransactions = this.signAndSendNativeTransactions.bind(this);
         } else {
             this.signTransactions = this.signBlackBoxTransactions.bind(this);
@@ -256,14 +297,18 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
 
     /** Create a FordefiSigner with the provided configuration. */
     static create<TAddress extends string = string>(
-        config: FordefiSignerConfig & { chain: SolanaChainUniqueId },
+        config: FordefiSignerConfig & { chain: SolanaChainUniqueId; pushMode: 'manual' },
+    ): FordefiNativeManualSigner<TAddress> & FordefiSigner<TAddress>;
+    static create<TAddress extends string = string>(
+        config: FordefiSignerConfig & { chain: SolanaChainUniqueId; pushMode?: 'auto' },
     ): FordefiNativeSigner<TAddress> & FordefiSigner<TAddress>;
     static create<TAddress extends string = string>(
         config: FordefiSignerConfig & { chain?: undefined },
     ): FordefiBlackBoxSigner<TAddress> & FordefiSigner<TAddress>;
     static create<TAddress extends string = string>(
         config: FordefiSignerConfig,
-    ): FordefiSigner<TAddress> & (FordefiBlackBoxSigner<TAddress> | FordefiNativeSigner<TAddress>);
+    ): FordefiSigner<TAddress> &
+        (FordefiBlackBoxSigner<TAddress> | FordefiNativeManualSigner<TAddress> | FordefiNativeSigner<TAddress>);
     static create<TAddress extends string = string>(config: FordefiSignerConfig): FordefiSigner<TAddress> {
         if (!config.accessToken) {
             return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
@@ -292,6 +337,18 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         if (!config.requestSigner && !config.privateKeyPem) {
             return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
                 message: 'one of privateKeyPem or requestSigner must be provided',
+            });
+        }
+
+        if (config.pushMode !== undefined && !PUSH_MODES.has(config.pushMode)) {
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: "pushMode must be 'auto' or 'manual'",
+            });
+        }
+
+        if (config.pushMode === 'manual' && !config.chain) {
+            return throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: "pushMode 'manual' requires chain to enable Fordefi native Solana mode",
             });
         }
 
@@ -454,6 +511,135 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
     }
 
     /**
+     * Native manual path for Kit's TransactionModifyingSigner contract; attached
+     * as an own property only when `chain` is set and `pushMode` is `'manual'`.
+     *
+     * Fordefi rewrites the message before signing it and does not broadcast, so
+     * the returned transaction replaces the caller's. The rewrite itself is not
+     * diffed: the signature is verified against the bytes Fordefi returned, and
+     * those bytes are what the caller continues from.
+     */
+    private async modifyAndSignNativeTransactions(
+        transactions: readonly (Transaction | (Transaction & TransactionWithLifetime))[],
+        config?: TransactionModifyingSignerConfig,
+    ): Promise<readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[]> {
+        config?.abortSignal?.throwIfAborted();
+        return await signBatchStaggered(
+            transactions,
+            async transaction => {
+                config?.abortSignal?.throwIfAborted();
+                this.assertNativeManualTransactionSupported(transaction);
+
+                base64Decoder ||= getBase64Decoder();
+                const base64Data = base64Decoder.decode(transaction.messageBytes);
+                const txId = await this.submitSolanaTransaction(base64Data, 'manual', config?.abortSignal);
+                return await this.finishNativeManualSigning(txId, transaction, config?.abortSignal);
+            },
+            this.requestDelayMs,
+            config?.abortSignal,
+        );
+    }
+
+    /**
+     * Poll a submitted manual transaction to completion, verify the vault's
+     * signature against the message Fordefi returned, and hand back those bytes
+     * as a Kit transaction the caller can broadcast.
+     */
+    private async finishNativeManualSigning(
+        txId: string,
+        originalTransaction: Transaction | (Transaction & TransactionWithLifetime),
+        abortSignal?: AbortSignal,
+    ): Promise<Transaction & TransactionWithinSizeLimit & TransactionWithLifetime> {
+        const result = await this.pollForResult(txId, { pushable: false }, abortSignal);
+        if (!result.raw_transaction) {
+            return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                message: 'Fordefi solana_transaction response missing raw_transaction',
+            });
+        }
+
+        let decodedTransaction: Transaction;
+        try {
+            base64Encoder ||= getBase64Encoder();
+            decodedTransaction = getTransactionDecoder().decode(base64Encoder.encode(result.raw_transaction));
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                cause: error,
+                message: 'Failed to decode the Fordefi wire transaction',
+            });
+        }
+
+        const signerSignature = decodedTransaction.signatures[this.address];
+        if (!signerSignature) {
+            return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                address: this.address,
+                message: 'Fordefi wire transaction did not contain the configured vault signature',
+            });
+        }
+
+        await assertSignatureValid({
+            data: decodedTransaction.messageBytes,
+            signature: signerSignature,
+            signerAddress: this.address,
+        });
+
+        const signedTransaction = Object.freeze({
+            ...decodedTransaction,
+            lifetimeConstraint: await this.readReturnedLifetime(originalTransaction, decodedTransaction),
+            signatures: Object.freeze(decodedTransaction.signatures),
+        });
+
+        try {
+            assertIsTransactionWithinSizeLimit(signedTransaction);
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                cause: error,
+                message: 'Fordefi wire transaction exceeds the Solana transaction size limit',
+            });
+        }
+
+        abortSignal?.throwIfAborted();
+        return signedTransaction;
+    }
+
+    /**
+     * Recover the lifetime of the returned transaction from its compiled
+     * message. Fordefi does not report the `lastValidBlockHeight` of a blockhash
+     * it refreshed, so Kit substitutes `U64_MAX`; the caller's own constraint is
+     * kept instead whenever the lifetime survived the rewrite.
+     */
+    private async readReturnedLifetime(
+        originalTransaction: Transaction | (Transaction & TransactionWithLifetime),
+        returnedTransaction: Transaction,
+    ): Promise<TransactionWithLifetime['lifetimeConstraint']> {
+        let returnedLifetime: TransactionWithLifetime['lifetimeConstraint'];
+        try {
+            const compiledMessage = getCompiledTransactionMessageDecoder().decode(returnedTransaction.messageBytes);
+            returnedLifetime = await getTransactionLifetimeConstraintFromCompiledTransactionMessage(compiledMessage);
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                cause: error,
+                message: 'Failed to recover the lifetime of the Fordefi wire transaction',
+            });
+        }
+
+        if ('lifetimeConstraint' in originalTransaction) {
+            const originalLifetime = originalTransaction.lifetimeConstraint;
+            const lifetimeSurvived =
+                ('blockhash' in originalLifetime &&
+                    'blockhash' in returnedLifetime &&
+                    originalLifetime.blockhash === returnedLifetime.blockhash) ||
+                ('nonce' in originalLifetime &&
+                    'nonce' in returnedLifetime &&
+                    originalLifetime.nonce === returnedLifetime.nonce);
+            if (lifetimeSurvived) {
+                return originalLifetime;
+            }
+        }
+
+        return returnedLifetime;
+    }
+
+    /**
      * Native Solana transaction path for Kit's TransactionSendingSigner contract.
      *
      * Fordefi may replace the message lifetime and fees, then broadcasts the
@@ -483,7 +669,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
                 const base64Data = base64Decoder.decode(transaction.messageBytes);
                 let txId: string;
                 try {
-                    txId = await this.submitSolanaTransaction(base64Data, config?.abortSignal);
+                    txId = await this.submitSolanaTransaction(base64Data, 'auto', config?.abortSignal);
                 } catch (error) {
                     if (!providerMayHaveAccepted(error)) {
                         throw error;
@@ -583,6 +769,22 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         }
     }
 
+    /** Fordefi may only rewrite a message the vault pays for and no one has signed yet. */
+    private assertNativeManualTransactionSupported(transaction: Transaction): void {
+        if (Object.keys(transaction.signatures)[0] !== this.address) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                address: this.address,
+                message: 'Fordefi native manual signing requires the configured vault to be the transaction fee payer',
+            });
+        }
+        if (Object.values(transaction.signatures).some(signature => signature !== null)) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                address: this.address,
+                message: 'Fordefi native manual signing must run before any transaction signatures are applied',
+            });
+        }
+    }
+
     /**
      * POST a transaction request to Fordefi and return the transaction ID.
      * Shared by all signing modes (black_box, solana_transaction, solana_message).
@@ -622,15 +824,20 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
     }
 
     /**
-     * Submit a native Solana serialized transaction message for signing + auto-push.
+     * Submit a native Solana serialized transaction message for signing, and for
+     * broadcasting when `pushMode` is `'auto'`.
      */
-    private async submitSolanaTransaction(base64Data: string, abortSignal?: AbortSignal): Promise<string> {
+    private async submitSolanaTransaction(
+        base64Data: string,
+        pushMode: FordefiPushMode,
+        abortSignal?: AbortSignal,
+    ): Promise<string> {
         const requestBody: FordefiSolanaTransactionRequest = {
             details: {
                 chain: this.chain!,
                 data: base64Data,
                 ...(this.fee ? { fee: this.fee } : {}),
-                push_mode: 'auto',
+                push_mode: pushMode,
                 type: 'solana_serialized_transaction_message',
             },
             sign_mode: 'auto',
@@ -639,11 +846,27 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
             vault_id: this.vaultId,
         };
         base64Encoder ||= getBase64Encoder();
+        const messageBytes = new Uint8Array(base64Encoder.encode(base64Data));
         return await this.submitTransaction(
             requestBody,
-            await idempotencyKeyFromMessage(base64Encoder.encode(base64Data)),
+            await idempotencyKeyFromMessage(
+                pushMode === 'manual' ? this.namespaceManualIdempotencyInput(messageBytes) : messageBytes,
+            ),
             abortSignal,
         );
+    }
+
+    /**
+     * Namespaced so the same bytes submitted for signing cannot collide with an
+     * earlier auto create that did broadcast them.
+     */
+    private namespaceManualIdempotencyInput(messageBytes: Uint8Array): Uint8Array {
+        utf8Encoder ||= getUtf8Encoder();
+        const namespace = utf8Encoder.encode(`fordefi:solana:manual:${this.chain!}:${this.vaultId}:`);
+        const namespaced = new Uint8Array(namespace.length + messageBytes.length);
+        namespaced.set(namespace);
+        namespaced.set(messageBytes, namespace.length);
+        return namespaced;
     }
 
     /**

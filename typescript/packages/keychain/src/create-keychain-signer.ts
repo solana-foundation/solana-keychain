@@ -6,7 +6,12 @@ import type {
 } from '@solana/keychain-core';
 import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 import type { CrossmintSignerConfig } from '@solana/keychain-crossmint';
-import type { FordefiNativeSigner, FordefiSignerConfig, SolanaChainUniqueId } from '@solana/keychain-fordefi';
+import type {
+    FordefiNativeManualSigner,
+    FordefiNativeSigner,
+    FordefiSignerConfig,
+    SolanaChainUniqueId,
+} from '@solana/keychain-fordefi';
 import type { UtilaSignerConfig } from '@solana/keychain-utila';
 
 import type { KeychainSignerConfig } from './types.js';
@@ -37,7 +42,10 @@ export function createKeychainSigner(
     config: CrossmintSignerConfig & { backend: 'crossmint' },
 ): Promise<SolanaSendingSigner>;
 export function createKeychainSigner(
-    config: FordefiSignerConfig & { backend: 'fordefi'; chain: SolanaChainUniqueId },
+    config: FordefiSignerConfig & { backend: 'fordefi'; chain: SolanaChainUniqueId; pushMode: 'manual' },
+): Promise<FordefiNativeManualSigner>;
+export function createKeychainSigner(
+    config: FordefiSignerConfig & { backend: 'fordefi'; chain: SolanaChainUniqueId; pushMode?: 'auto' },
 ): Promise<FordefiNativeSigner>;
 export function createKeychainSigner(
     config: UtilaSignerConfig & { backend: 'utila' },

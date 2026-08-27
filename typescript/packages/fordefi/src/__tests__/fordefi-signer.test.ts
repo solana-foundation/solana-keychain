@@ -6,13 +6,14 @@ import {
     assertIsSolanaTransactionSigner,
     assertSignatureValid,
     isSolanaMessageSigner,
+    isSolanaModifyingSigner,
     isSolanaSendingSigner,
     isSolanaSigner,
     isSolanaTransactionSigner,
     type SignerError,
 } from '@solana/keychain-core';
 import { createCosignedWireTransaction, createSignedWireTransaction } from '@solana/keychain-test-utils';
-import { isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
+import { isTransactionModifyingSigner, isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
@@ -31,6 +32,7 @@ vi.mock('@solana/keychain-core', async importOriginal => {
 });
 
 import { createFordefiSigner, type FordefiSignerConfig } from '../fordefi-signer.js';
+import type { SolanaChainUniqueId } from '../types.js';
 
 // Mock fetch globally
 global.fetch = vi.fn();
@@ -44,7 +46,7 @@ const TEST_PEM = testPrivateKey.export({ type: 'sec1', format: 'pem' }) as strin
 const MOCK_SIGNATURE_BYTES = new Uint8Array(64).fill(0xab);
 const MOCK_SIGNATURE_BASE64 = Buffer.from(MOCK_SIGNATURE_BYTES).toString('base64');
 
-const mockConfig: FordefiSignerConfig & { chain?: undefined } = {
+const mockConfig: FordefiSignerConfig & { chain?: undefined; pushMode?: undefined } = {
     accessToken: 'test-token',
     apiBaseUrl: 'https://api.test.fordefi.com',
     privateKeyPem: TEST_PEM,
@@ -81,6 +83,31 @@ async function setupNativeBroadcast(version: 0 | 1) {
         publicKey: fixture.feePayer,
     } satisfies FordefiSignerConfig;
     return { config, fixture };
+}
+
+// Manual mode replaces the caller's transaction with real wire bytes, so the
+// response has to be a decodable transaction the vault signed.
+async function setupNativeManual(version: 0 | 1) {
+    const fixture = await createSignedWireTransaction(version);
+    const config = {
+        ...mockConfig,
+        chain: 'solana_mainnet',
+        publicKey: fixture.feePayer,
+        pushMode: 'manual',
+    } satisfies FordefiSignerConfig & { chain: SolanaChainUniqueId; pushMode: 'manual' };
+    return { config, fixture };
+}
+
+function unsignedManualTransaction(feePayer: string, messageBytes = new Uint8Array(32)) {
+    return { messageBytes, signatures: { [feePayer]: null } } as never;
+}
+
+function idempotencyKeyOf(input: Uint8Array) {
+    const digest = createHash('sha256').update(input).digest().subarray(0, 16);
+    digest[6] = (digest[6]! & 0x0f) | 0x40;
+    digest[8] = (digest[8]! & 0x3f) | 0x80;
+    const hex = digest.toString('hex');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
 function mockVaultResponse(address: string = MOCK_ADDRESS) {
@@ -157,7 +184,7 @@ describe('createFordefiSigner', () => {
 
     describe('custom requestSigner', () => {
         // Config using a custom request signer instead of a PEM key.
-        const customConfig: FordefiSignerConfig & { chain?: undefined } = {
+        const customConfig: FordefiSignerConfig & { chain?: undefined; pushMode?: undefined } = {
             accessToken: 'test-token',
             apiBaseUrl: 'https://api.test.fordefi.com',
             publicKey: MOCK_ADDRESS,
@@ -646,6 +673,227 @@ describe('createFordefiSigner', () => {
                 code: 'SIGNER_BROADCAST_UNCONFIRMED',
                 context: expect.objectContaining({ providerTransactionId: 'tx-fail' }) as object,
             });
+        });
+    });
+
+    describe('modifyAndSignTransactions (native manual mode)', () => {
+        it.each([0, 1] as const)(
+            'should replace the caller transaction with the one Fordefi signed from a v%i envelope',
+            async version => {
+                const { config, fixture } = await setupNativeManual(version);
+                vi.mocked(fetch)
+                    .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
+                    .mockResolvedValueOnce(mockPollResponse('signed', undefined, fixture.wireTransaction));
+
+                const signer = await createFordefiSigner(config);
+                const results = await signer.modifyAndSignTransactions([unsignedManualTransaction(fixture.feePayer)]);
+
+                expect(results).toHaveLength(1);
+                // Continuing from the caller's own bytes would leave downstream
+                // signers signing a message the Fordefi signature does not cover.
+                expect(results[0]!.messageBytes).toStrictEqual(fixture.messageBytes);
+                expect(results[0]!.signatures[fixture.feePayer]).toStrictEqual(fixture.signature);
+                expect(results[0]!.lifetimeConstraint).toBeDefined();
+
+                // The signature covers what Fordefi returned, not what was submitted.
+                expect(assertSignatureValid).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        data: fixture.messageBytes,
+                        signerAddress: fixture.feePayer,
+                    }),
+                );
+            },
+        );
+
+        it('should submit solana_transaction with push_mode manual', async () => {
+            const { config, fixture } = await setupNativeManual(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
+                .mockResolvedValueOnce(mockPollResponse('signed', undefined, fixture.wireTransaction));
+
+            const signer = await createFordefiSigner(config);
+            await signer.modifyAndSignTransactions([unsignedManualTransaction(fixture.feePayer)]);
+
+            const postOpts = vi.mocked(fetch).mock.calls[0]![1] as RequestInit;
+            const body = JSON.parse(postOpts.body as string);
+            expect(body.type).toBe('solana_transaction');
+            expect(body.details.type).toBe('solana_serialized_transaction_message');
+            expect(body.details.push_mode).toBe('manual');
+        });
+
+        it('namespaces the x-idempotence-id so the same bytes cannot reuse an auto create', async () => {
+            const messageBytes = new Uint8Array(32).fill(0xab);
+            const { config, fixture } = await setupNativeManual(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
+                .mockResolvedValueOnce(mockPollResponse('signed', undefined, fixture.wireTransaction));
+
+            const signer = await createFordefiSigner(config);
+            await signer.modifyAndSignTransactions([unsignedManualTransaction(fixture.feePayer, messageBytes)]);
+
+            const namespace = Buffer.from(`fordefi:solana:manual:solana_mainnet:${config.vaultId}:`, 'utf8');
+            const postOpts = vi.mocked(fetch).mock.calls[0]![1] as RequestInit;
+            expect(postOpts.headers).toHaveProperty(
+                'x-idempotence-id',
+                idempotencyKeyOf(Buffer.concat([namespace, Buffer.from(messageBytes)])),
+            );
+            expect(postOpts.headers).not.toHaveProperty('x-idempotence-id', idempotencyKeyOf(messageBytes));
+        });
+
+        it('exposes only the modifying method, so Kit cannot route it as a partial or sending signer', async () => {
+            const { config } = await setupNativeManual(0);
+            const signer = await createFordefiSigner(config);
+            const guardInput = signer as unknown as { [key: string]: unknown; address: typeof signer.address };
+
+            expect('signTransactions' in signer).toBe(false);
+            expect('signAndSendTransactions' in signer).toBe(false);
+            expect(isTransactionModifyingSigner(guardInput)).toBe(true);
+            expect(isTransactionPartialSigner(guardInput)).toBe(false);
+            expect(isTransactionSendingSigner(guardInput)).toBe(false);
+            expect(isSolanaSigner(guardInput)).toBe(true);
+            expect(isSolanaModifyingSigner(guardInput)).toBe(true);
+            expect(isSolanaTransactionSigner(guardInput)).toBe(false);
+            expect(isSolanaSendingSigner(guardInput)).toBe(false);
+            expect(isSolanaMessageSigner(guardInput)).toBe(true);
+        });
+
+        it('rejects a transaction the vault does not pay for before submitting remote work', async () => {
+            const { config, fixture } = await setupNativeManual(0);
+            const signer = await createFordefiSigner(config);
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { '22222222222222222222222222222222': null, [fixture.feePayer]: null },
+            } as never;
+
+            await expect(signer.modifyAndSignTransactions([mockTx])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+            expect(fetch).not.toHaveBeenCalled();
+        });
+
+        it('rejects an already-signed transaction, whose signatures the rewrite would invalidate', async () => {
+            const { config, fixture } = await setupNativeManual(0);
+            const signer = await createFordefiSigner(config);
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [fixture.feePayer]: MOCK_SIGNATURE_BYTES },
+            } as never;
+
+            await expect(signer.modifyAndSignTransactions([mockTx])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+            expect(fetch).not.toHaveBeenCalled();
+        });
+
+        it('rejects a response without raw_transaction, having nothing to continue from', async () => {
+            const { config, fixture } = await setupNativeManual(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
+                .mockResolvedValueOnce(mockPollResponse('signed', MOCK_SIGNATURE_BASE64));
+
+            const signer = await createFordefiSigner(config);
+            await expect(
+                signer.modifyAndSignTransactions([unsignedManualTransaction(fixture.feePayer)]),
+            ).rejects.toMatchObject({ code: 'SIGNER_SIGNING_FAILED' });
+        });
+
+        it('rejects a returned transaction that the configured vault did not sign', async () => {
+            const fixture = await createCosignedWireTransaction(0);
+            const config = {
+                ...mockConfig,
+                chain: 'solana_mainnet',
+                publicKey: fixture.feePayer,
+                pushMode: 'manual',
+            } satisfies FordefiSignerConfig & { chain: SolanaChainUniqueId; pushMode: 'manual' };
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
+                .mockResolvedValueOnce(mockPollResponse('signed', undefined, fixture.wireTransaction));
+
+            const signer = await createFordefiSigner(config);
+            await expect(
+                signer.modifyAndSignTransactions([unsignedManualTransaction(fixture.feePayer)]),
+            ).rejects.toMatchObject({ code: 'SIGNER_SIGNING_FAILED' });
+        });
+
+        it('leaves the caller transaction untouched when the returned signature does not verify', async () => {
+            const { config, fixture } = await setupNativeManual(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
+                .mockResolvedValueOnce(mockPollResponse('signed', undefined, fixture.wireTransaction));
+            vi.mocked(assertSignatureValid).mockRejectedValueOnce(new Error('signature does not match'));
+
+            const signer = await createFordefiSigner(config);
+            const callerTransaction = unsignedManualTransaction(fixture.feePayer);
+            const before = structuredClone(callerTransaction);
+
+            await expect(signer.modifyAndSignTransactions([callerTransaction])).rejects.toThrow(
+                'signature does not match',
+            );
+            expect(callerTransaction).toStrictEqual(before);
+        });
+
+        it('does not leak the access token or the request key into a failure', async () => {
+            const { config, fixture } = await setupNativeManual(0);
+            vi.mocked(fetch).mockResolvedValueOnce(
+                new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 }),
+            );
+
+            const signer = await createFordefiSigner(config);
+            const error = await signer.modifyAndSignTransactions([unsignedManualTransaction(fixture.feePayer)]).then(
+                () => {
+                    throw new Error('expected the submit failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+
+            const reported = `${error.message} ${JSON.stringify(error.context)} ${JSON.stringify(error)}`;
+            expect(reported).not.toContain(config.accessToken);
+            expect(reported).not.toContain(TEST_PEM);
+        });
+
+        it('keeps the caller lifetime when Fordefi did not refresh the blockhash', async () => {
+            const { config, fixture } = await setupNativeManual(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
+                .mockResolvedValueOnce(mockPollResponse('signed', undefined, fixture.wireTransaction));
+
+            // Fordefi does not report a lastValidBlockHeight, so a surviving
+            // blockhash must not lose the caller's expiry height.
+            const lifetimeConstraint = { blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 100n };
+            const signer = await createFordefiSigner(config);
+            const results = await signer.modifyAndSignTransactions([
+                {
+                    lifetimeConstraint,
+                    messageBytes: new Uint8Array(32),
+                    signatures: { [fixture.feePayer]: null },
+                } as never,
+            ]);
+
+            expect(results[0]!.lifetimeConstraint).toStrictEqual(lifetimeConstraint);
+        });
+
+        it('should reject pushMode manual without chain', async () => {
+            await expect(
+                createFordefiSigner({ ...mockConfig, pushMode: 'manual' } as FordefiSignerConfig),
+            ).rejects.toMatchObject({ code: 'SIGNER_CONFIG_ERROR' });
+        });
+
+        it('should reject an unrecognized pushMode rather than defaulting it to auto', async () => {
+            await expect(
+                createFordefiSigner({
+                    ...mockConfig,
+                    chain: 'solana_mainnet',
+                    pushMode: 'push',
+                } as unknown as FordefiSignerConfig),
+            ).rejects.toMatchObject({ code: 'SIGNER_CONFIG_ERROR' });
+        });
+
+        it('should still expose the sending method when pushMode is explicitly auto', async () => {
+            const signer = await createFordefiSigner({ ...nativeConfig, pushMode: 'auto' });
+            const guardInput = signer as unknown as { [key: string]: unknown; address: typeof signer.address };
+
+            expect(isTransactionSendingSigner(guardInput)).toBe(true);
+            expect(isTransactionModifyingSigner(guardInput)).toBe(false);
         });
     });
 
