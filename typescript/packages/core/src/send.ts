@@ -8,8 +8,8 @@ import type {
 import { isFullySignedTransaction } from '@solana/transactions';
 
 import { SignerErrorCode, throwSignerError } from './errors.js';
-import type { SolanaSendingSigner, SolanaSigner } from './types.js';
-import { isSolanaSendingSigner } from './utils.js';
+import type { SolanaSigner } from './types.js';
+import { isSolanaModifyingSigner, isSolanaSendingSigner } from './utils.js';
 
 type SignableTransaction = Transaction & TransactionWithinSizeLimit & TransactionWithLifetime;
 
@@ -49,8 +49,10 @@ export type SignAndSendTransactionConfig = Readonly<{
  * Gets a transaction on chain with one flow, whichever shape the signer has.
  *
  * A {@link SolanaSendingSigner} signs and broadcasts through its provider. A
- * {@link SolanaSigner} signs, its signature is merged into the transaction, and
- * `config.sendTransaction` broadcasts the result.
+ * {@link SolanaModifyingSigner} returns a signed (and possibly rewritten)
+ * transaction, and a {@link SolanaTransactionSigner}'s signature is merged
+ * into the caller's transaction; in both cases `config.sendTransaction`
+ * broadcasts the result.
  *
  * @param signer - Any keychain signer.
  * @param transaction - The transaction to sign and broadcast.
@@ -68,7 +70,7 @@ export type SignAndSendTransactionConfig = Readonly<{
  * ```
  */
 export async function signAndSendTransaction<TAddress extends string>(
-    signer: SolanaSendingSigner<TAddress> | SolanaSigner<TAddress>,
+    signer: SolanaSigner<TAddress>,
     transaction: SignableTransaction,
     config?: SignAndSendTransactionConfig,
 ): Promise<SignatureBytes> {
@@ -93,18 +95,30 @@ export async function signAndSendTransaction<TAddress extends string>(
         });
     }
 
-    const [signatureDictionary] = await signer.signTransactions([transaction], { abortSignal });
-    if (!signatureDictionary) {
-        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-            address: signer.address,
-            message: 'Signer returned no signatures for the transaction',
+    let signedTransaction: SignableTransaction;
+    if (isSolanaModifyingSigner(signer)) {
+        const [modifiedTransaction] = await signer.modifyAndSignTransactions([transaction], { abortSignal });
+        if (!modifiedTransaction) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                address: signer.address,
+                message: 'Signer returned no transaction for the transaction it signed',
+            });
+        }
+        signedTransaction = modifiedTransaction;
+    } else {
+        const [signatureDictionary] = await signer.signTransactions([transaction], { abortSignal });
+        if (!signatureDictionary) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                address: signer.address,
+                message: 'Signer returned no signatures for the transaction',
+            });
+        }
+
+        signedTransaction = Object.freeze({
+            ...transaction,
+            signatures: Object.freeze({ ...transaction.signatures, ...signatureDictionary }),
         });
     }
-
-    const signedTransaction = Object.freeze({
-        ...transaction,
-        signatures: Object.freeze({ ...transaction.signatures, ...signatureDictionary }),
-    });
 
     if (!isFullySignedTransaction(signedTransaction)) {
         const missing = Object.entries(signedTransaction.signatures)

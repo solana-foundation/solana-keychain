@@ -1,4 +1,4 @@
-import type { SolanaSigner } from '@solana/keychain-core';
+import type { SolanaMessageSigner, SolanaTransactionSigner } from '@solana/keychain-core';
 import { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
 import { createDfnsSigner } from '../dfns-signer.js';
 
@@ -55,7 +55,7 @@ export function createSignatureResponse(r: string, s: string) {
 const SIGNER_TYPE = 'dfns';
 const REQUIRED_ENV_VARS = ['DFNS_AUTH_TOKEN', 'DFNS_CRED_ID', 'DFNS_PRIVATE_KEY_PEM', 'DFNS_WALLET_ID'];
 
-const CONFIG: SignerTestConfig<SolanaSigner> = {
+const CONFIG: SignerTestConfig<SolanaMessageSigner & SolanaTransactionSigner> = {
     signerType: SIGNER_TYPE,
     requiredEnvVars: REQUIRED_ENV_VARS,
     createSigner: () =>
@@ -68,7 +68,9 @@ const CONFIG: SignerTestConfig<SolanaSigner> = {
         }),
 };
 
-export async function getConfig(scenarios: TestScenario[]): Promise<SignerTestConfig<SolanaSigner>> {
+export async function getConfig(
+    scenarios: TestScenario[],
+): Promise<SignerTestConfig<SolanaMessageSigner & SolanaTransactionSigner>> {
     return {
         ...CONFIG,
         testScenarios: scenarios,

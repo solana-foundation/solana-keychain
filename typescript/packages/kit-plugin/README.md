@@ -25,7 +25,7 @@ const client = await createClient().use(
     }),
 );
 
-client.payer; // SolanaSigner — also a Kit TransactionSigner
+client.payer; // SolanaTransactionSigner — also a Kit TransactionPartialSigner
 client.identity; // same signer instance
 ```
 
@@ -66,7 +66,7 @@ const client = await createClient()
 
 ## Already have a signer?
 
-If you've already constructed a `SolanaSigner` (or want to share one across clients), you don't need this package — every keychain signer is a valid Kit `TransactionSigner`, so [`@solana/kit-plugin-signer`](https://github.com/anza-xyz/kit-plugins/tree/main/packages/kit-plugin-signer) works directly:
+If you've already constructed a `SolanaTransactionSigner` (or want to share one across clients), you don't need this package — every such signer is a valid Kit `TransactionPartialSigner`, so [`@solana/kit-plugin-signer`](https://github.com/anza-xyz/kit-plugins/tree/main/packages/kit-plugin-signer) works directly:
 
 ```ts
 import { signer } from '@solana/kit-plugin-signer';

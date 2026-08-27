@@ -8,7 +8,8 @@ import {
     fetchSignerJson,
     signBatchStaggered,
     SignerErrorCode,
-    SolanaSigner,
+    SolanaMessageSigner,
+    SolanaTransactionSigner,
     throwSignerError,
     validateRequestDelayMs,
 } from '@solana/keychain-core';
@@ -45,7 +46,7 @@ import type {
  */
 export async function createDfnsSigner<TAddress extends string = string>(
     config: DfnsSignerConfig,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>> {
     return await DfnsSigner.create(config);
 }
 
@@ -95,7 +96,9 @@ function bytesToBase58(bytes: Uint8Array): string {
  * const signed = await signTransactionMessageWithSigners(transactionMessage, [signer]);
  * ```
  */
-class DfnsSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class DfnsSigner<TAddress extends string = string>
+    implements SolanaMessageSigner<TAddress>, SolanaTransactionSigner<TAddress>
+{
     readonly address: Address<TAddress>;
     private readonly authToken: string;
     private readonly credId: string;

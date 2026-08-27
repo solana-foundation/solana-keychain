@@ -1,5 +1,10 @@
 import type { FordefiSignerConfig, KeychainSignerConfig } from '@solana/keychain';
-import { assertIsSolanaSigner, createKeychainSigner, SignerErrorCode, throwSignerError } from '@solana/keychain';
+import {
+    assertIsSolanaTransactionSigner,
+    createKeychainSigner,
+    SignerErrorCode,
+    throwSignerError,
+} from '@solana/keychain';
 import { extendClient } from '@solana/kit';
 
 /**
@@ -31,7 +36,7 @@ async function createPartialSigner(config: KeychainKitPluginConfig) {
         });
     }
     const signer = await createKeychainSigner(config);
-    assertIsSolanaSigner(signer);
+    assertIsSolanaTransactionSigner(signer);
     return signer;
 }
 

@@ -48,6 +48,25 @@ function createSendingSigner() {
     };
 }
 
+function createModifyingSigner(overrides?: { transactions?: SignableTransaction[] }) {
+    return {
+        address: SIGNER_ADDRESS,
+        isAvailable: async () => true,
+        modifyAndSignTransactions: vi.fn(async (transactions: readonly SignableTransaction[]) => {
+            if (overrides?.transactions) {
+                return overrides.transactions;
+            }
+            const [transaction] = transactions;
+            return [
+                Object.freeze({
+                    ...transaction!,
+                    signatures: Object.freeze({ ...transaction!.signatures, [SIGNER_ADDRESS]: SIGNER_SIGNATURE }),
+                }) as SignableTransaction,
+            ];
+        }),
+    };
+}
+
 describe('signAndSendTransaction', () => {
     it('broadcasts through a sending signer', async () => {
         const signer = createSendingSigner();
@@ -95,6 +114,47 @@ describe('signAndSendTransaction', () => {
         });
 
         expect(signature).toBe(FEE_PAYER_SIGNATURE);
+    });
+
+    it('broadcasts the transaction a modifying signer returns', async () => {
+        const signer = createModifyingSigner();
+        const transaction = createTransaction();
+        const sendTransaction = vi.fn<SendTransactionFn>(async () => SENT_SIGNATURE);
+
+        const signature = await signAndSendTransaction(signer, transaction, { sendTransaction });
+
+        expect(signature).toBe(SENT_SIGNATURE);
+        expect(signer.modifyAndSignTransactions).toHaveBeenCalledWith([transaction], { abortSignal: undefined });
+        const [sentTransaction] = sendTransaction.mock.calls[0]!;
+        expect(sentTransaction.signatures).toStrictEqual({
+            [FEE_PAYER]: FEE_PAYER_SIGNATURE,
+            [SIGNER_ADDRESS]: SIGNER_SIGNATURE,
+        });
+    });
+
+    it('throws when a modifying signer returns no transaction', async () => {
+        const signer = createModifyingSigner({ transactions: [] });
+
+        await expect(
+            signAndSendTransaction(signer, createTransaction(), { sendTransaction: async () => undefined }),
+        ).rejects.toMatchObject({ code: SignerErrorCode.SIGNING_FAILED });
+    });
+
+    it('throws when a modifying signer returns a transaction with missing signatures', async () => {
+        const signer = createModifyingSigner({ transactions: [createTransaction()] });
+
+        await expect(
+            signAndSendTransaction(signer, createTransaction(), { sendTransaction: async () => undefined }),
+        ).rejects.toMatchObject({ code: SignerErrorCode.SIGNING_FAILED });
+    });
+
+    it('throws a config error when a modifying signer has no send function', async () => {
+        const signer = createModifyingSigner();
+
+        await expect(signAndSendTransaction(signer, createTransaction())).rejects.toMatchObject({
+            code: SignerErrorCode.CONFIG_ERROR,
+        });
+        expect(signer.modifyAndSignTransactions).not.toHaveBeenCalled();
     });
 
     it('throws a config error when the signer cannot broadcast and no send function is given', async () => {

@@ -1,5 +1,5 @@
 import { Address } from '@solana/addresses';
-import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertIsSolanaTransactionSigner } from '@solana/keychain-core';
 import { type Transaction, type TransactionWithinSizeLimit, type TransactionWithLifetime } from '@solana/transactions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -99,7 +99,7 @@ describe('OpenfortSigner', () => {
             const signer = await createOpenfortSigner(makeConfig());
 
             expect(signer.address).toBe(TEST_ADDRESS);
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
             expect(mockFetch).toHaveBeenCalledTimes(1);
             const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
             expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TEST_SECRET_KEY}`);

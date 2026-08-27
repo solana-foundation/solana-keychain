@@ -173,6 +173,10 @@ async function testSignMessage<T extends TestSigner>(context: TestContext<T>): P
         console.log('Testing message signing...');
     }
 
+    if (!signer.signMessages) {
+        throw new Error('Signer exposes no signMessages; drop the signMessage scenario for this backend');
+    }
+
     const messageContent = new Uint8Array([1, 2, 3, 4, 5]);
     const message = createSignableMessage(messageContent);
 

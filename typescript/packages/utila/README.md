@@ -16,7 +16,7 @@ const signer = await createUtilaSigner({
 
 The signer fetches the Solana address from the configured Utila wallet during initialization. Transaction signing uses Utila's serialized Solana transaction flow with `publish=false`, so callers remain responsible for broadcasting.
 
-`signMessages` is intentionally unsupported because the Utila API surface used here does not expose a Solana message-sign initiation endpoint.
+This is a `SolanaTransactionSigner` only: the Utila API surface used here does not expose a Solana message-sign initiation endpoint, so the signer exposes no `signMessages` method (Kit infers signer capabilities from method presence).
 
 ## Environment
 

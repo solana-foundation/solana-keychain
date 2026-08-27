@@ -44,9 +44,9 @@ const signer = await createKeychainSigner({
 await signer.signTransactions([transaction]);
 ```
 
-The `backend` field determines which signer is created. TypeScript narrows the config type automatically — you get full autocomplete for each backend's required fields.
+The `backend` field determines which signer is created. TypeScript narrows the config type automatically — you get full autocomplete for each backend's required fields, and the overloads return each backend's exact shape (see [Signer Shapes](#signer-shapes)).
 
-**Managed-broadcast backends** (Crossmint always; Fordefi when `chain` enables native mode) rewrite the transaction and/or broadcast it server-side, so they return a `SolanaSendingSigner` with `signAndSendTransactions()` instead of `signTransactions()`:
+**Managed-broadcast backends** (Crossmint always; Fordefi when `chain` enables native mode) rewrite the transaction and/or broadcast it server-side, so they return a `SolanaSendingSigner` (`CrossmintSendingSigner` / `FordefiNativeSigner`) with `signAndSendTransactions()` instead of `signTransactions()`:
 
 ```typescript
 const crossmint = await createKeychainSigner({
@@ -182,20 +182,25 @@ try {
 | `utila` | [@solana/keychain-utila](../utila/README.md) | API |
 | `vault` | [@solana/keychain-vault](../vault/README.md) | Config (`publicKey`) |
 
-## Common Interface
+## Signer Shapes
 
-Most signers implement `SolanaSigner`, which is compatible with `@solana/kit` and `@solana/signers`:
+`@solana/keychain-core` defines one capability interface per Kit signer shape, each adding `isAvailable(): Promise<boolean>`: `SolanaTransactionSigner` (Kit's `TransactionPartialSigner`), `SolanaModifyingSigner` (Kit's `TransactionModifyingSigner`), `SolanaSendingSigner` (Kit's `TransactionSendingSigner`), and the orthogonal `SolanaMessageSigner` (Kit's `MessagePartialSigner`). `SolanaSigner` is the union of the three transaction shapes — any keychain signer.
+
+When the `backend` literal is known, `createKeychainSigner`'s overloads return the exact shape: `crossmint` → `CrossmintSendingSigner`, `fordefi` with `chain` set → `FordefiNativeSigner`, `utila` → `SolanaTransactionSigner` (no `signMessages`), and every other backend (including Fordefi black-box mode) → `SolanaTransactionSigner & SolanaMessageSigner`. With a widened `KeychainSignerConfig` — e.g. config loaded at runtime — the return type is the `SolanaSigner` union; narrow with `isSolanaTransactionSigner()` / `isSolanaSendingSigner()` from `@solana/keychain-core` before calling a signing method:
 
 ```typescript
-interface SolanaSigner<TAddress extends string = string> {
-    readonly address: Address<TAddress>;
-    signMessages(messages: SignableMessage[]): Promise<SignatureDictionary[]>;
-    signTransactions(transactions: Transaction[]): Promise<SignatureDictionary[]>;
-    isAvailable(): Promise<boolean>;
+import { isSolanaSendingSigner, isSolanaTransactionSigner } from '@solana/keychain-core';
+
+const signer = await createKeychainSigner(loadConfig()); // SolanaSigner
+
+if (isSolanaSendingSigner(signer)) {
+    await signer.signAndSendTransactions([transaction]);
+} else if (isSolanaTransactionSigner(signer)) {
+    await signer.signTransactions([transaction]);
 }
 ```
 
-Managed-broadcast signers (Crossmint, Fordefi native mode) implement `SolanaSendingSigner` instead — Kit's `TransactionSendingSigner` plus `address` and `isAvailable()` — and deliberately expose no `signTransactions`, because Kit classifies signers by method presence. Use `isSolanaSigner()` / `isSolanaSendingSigner()` from `@solana/keychain-core` to distinguish them at runtime.
+Managed-broadcast signers (Crossmint, Fordefi native mode) deliberately expose no `signTransactions`, because Kit classifies signers by method presence.
 
 ## License
 

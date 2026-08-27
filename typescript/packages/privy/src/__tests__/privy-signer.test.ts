@@ -6,7 +6,7 @@ import {
     TransactionWithinSizeLimit,
     TransactionWithLifetime,
 } from '@solana/transactions';
-import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertIsSolanaTransactionSigner } from '@solana/keychain-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createPrivySigner } from '../privy-signer.js';
@@ -112,7 +112,7 @@ describe('createPrivySigner', () => {
             expect(signer.signTransactions).toBeDefined();
             expect(signer.isAvailable).toBeDefined();
             expect(typeof signer.address).toBe('string');
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
         });
 
         it('sets address field correctly from API response', async () => {

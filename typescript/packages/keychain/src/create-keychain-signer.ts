@@ -1,7 +1,8 @@
-import type { SolanaSendingSigner, SolanaSigner } from '@solana/keychain-core';
+import type { SolanaMessageSigner, SolanaSigner, SolanaTransactionSigner } from '@solana/keychain-core';
 import { SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 import type { CrossmintSendingSigner, CrossmintSignerConfig } from '@solana/keychain-crossmint';
 import type { FordefiNativeSigner, FordefiSignerConfig, SolanaChainUniqueId } from '@solana/keychain-fordefi';
+import type { UtilaSignerConfig } from '@solana/keychain-utila';
 
 import type { KeychainSignerConfig } from './types.js';
 
@@ -34,12 +35,15 @@ export function createKeychainSigner(
     config: FordefiSignerConfig & { backend: 'fordefi'; chain: SolanaChainUniqueId },
 ): Promise<FordefiNativeSigner>;
 export function createKeychainSigner(
+    config: UtilaSignerConfig & { backend: 'utila' },
+): Promise<SolanaTransactionSigner>;
+export function createKeychainSigner(
     config:
-        | Exclude<KeychainSignerConfig, { backend: 'crossmint' | 'fordefi' }>
+        | Exclude<KeychainSignerConfig, { backend: 'crossmint' | 'fordefi' | 'utila' }>
         | (FordefiSignerConfig & { backend: 'fordefi'; chain?: undefined }),
-): Promise<SolanaSigner>;
-export function createKeychainSigner(config: KeychainSignerConfig): Promise<SolanaSendingSigner | SolanaSigner>;
-export async function createKeychainSigner(config: KeychainSignerConfig): Promise<SolanaSendingSigner | SolanaSigner> {
+): Promise<SolanaMessageSigner & SolanaTransactionSigner>;
+export function createKeychainSigner(config: KeychainSignerConfig): Promise<SolanaSigner>;
+export async function createKeychainSigner(config: KeychainSignerConfig): Promise<SolanaSigner> {
     switch (config.backend) {
         case 'aws-kms': {
             const { createAwsKmsSigner } = await import('@solana/keychain-aws-kms');

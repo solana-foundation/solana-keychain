@@ -11,7 +11,8 @@ import {
     normalizeBaseUrl,
     signBatchStaggered,
     SignerErrorCode,
-    SolanaSigner,
+    SolanaMessageSigner,
+    SolanaTransactionSigner,
     throwSignerError,
     validateRequestDelayMs,
 } from '@solana/keychain-core';
@@ -39,7 +40,7 @@ import type { CdpSignerConfig, SignMessageResponse, SignTransactionResponse } fr
  */
 export async function createCdpSigner<TAddress extends string = string>(
     config: CdpSignerConfig,
-): Promise<SolanaSigner<TAddress>> {
+): Promise<SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>> {
     return await CdpSigner.create(config);
 }
 
@@ -213,7 +214,9 @@ async function loadWalletKey(walletSecret: string): Promise<CryptoKey> {
  * const signed = await signTransactionMessageWithSigners(transactionMessage, [signer]);
  * ```
  */
-class CdpSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class CdpSigner<TAddress extends string = string>
+    implements SolanaMessageSigner<TAddress>, SolanaTransactionSigner<TAddress>
+{
     readonly address: Address<TAddress>;
     private readonly apiKeyId: string;
     private readonly apiKey: CryptoKey;

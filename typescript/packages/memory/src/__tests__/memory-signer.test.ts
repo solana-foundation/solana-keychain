@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { assertIsSolanaSigner, assertSignatureValid } from '@solana/keychain-core';
+import { assertIsSolanaTransactionSigner, assertSignatureValid } from '@solana/keychain-core';
 import {
     blockhash,
     compileTransaction,
@@ -66,14 +66,14 @@ describe('createMemorySigner', () => {
         it('builds a signer from 64-byte raw bytes (seed||pubkey)', async () => {
             const signer = await createMemorySignerFromBytes(TEST_KEYPAIR_BYTES);
             expect(signer.address).toBe(TEST_PUBKEY);
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
         });
 
         it('builds a signer from 32-byte raw bytes (seed only) and derives the same pubkey', async () => {
             const seed = TEST_KEYPAIR_BYTES.slice(0, 32);
             const signer = await createMemorySignerFromBytes(seed);
             expect(signer.address).toBe(TEST_PUBKEY);
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
         });
 
         it('builds a signer from a base58 string', async () => {
@@ -100,7 +100,7 @@ describe('createMemorySigner', () => {
             const keyPair = await generateKeyPair();
             const signer = await createMemorySignerFromKeyPair(keyPair);
             expect(typeof signer.address).toBe('string');
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
         });
 
         it.each([null, {}])('rejects %o as a keyPair with a config error', async invalid => {

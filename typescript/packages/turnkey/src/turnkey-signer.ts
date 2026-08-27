@@ -9,7 +9,8 @@ import {
     fetchSignerJson,
     signBatchStaggered,
     SignerErrorCode,
-    SolanaSigner,
+    SolanaMessageSigner,
+    SolanaTransactionSigner,
     throwSignerError,
     validateRequestDelayMs,
 } from '@solana/keychain-core';
@@ -37,7 +38,7 @@ import type { ActivityResponse, SignRequest, SignTransactionRequest, WhoAmIReque
  */
 export function createTurnkeySigner<TAddress extends string = string>(
     config: TurnkeySignerConfig,
-): SolanaSigner<TAddress> {
+): SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress> {
     return TurnkeySigner.create(config);
 }
 
@@ -66,7 +67,9 @@ export interface TurnkeySignerConfig {
  *
  * Uses P256 ECDSA for API authentication (X-Stamp header) and Ed25519 for Solana signing
  */
-class TurnkeySigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class TurnkeySigner<TAddress extends string = string>
+    implements SolanaMessageSigner<TAddress>, SolanaTransactionSigner<TAddress>
+{
     readonly address: Address<TAddress>;
     private readonly apiBaseUrl: string;
     private readonly organizationId: string;

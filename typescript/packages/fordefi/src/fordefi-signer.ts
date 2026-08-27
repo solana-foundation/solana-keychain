@@ -15,14 +15,14 @@ import {
     providerStatus,
     signBatchStaggered,
     SignerErrorCode,
+    SolanaMessageSigner,
     SolanaSendingSigner,
-    SolanaSigner,
+    SolanaTransactionSigner,
     throwSignerError,
     validateRequestDelayMs,
 } from '@solana/keychain-core';
 import { SignatureBytes } from '@solana/keys';
 import {
-    MessagePartialSigner,
     MessagePartialSignerConfig,
     SignableMessage,
     SignatureDictionary,
@@ -170,7 +170,16 @@ export interface FordefiSignerConfig {
  * rebuilt transaction derives a different id and is broadcast again.
  */
 export interface FordefiNativeSigner<TAddress extends string = string>
-    extends SolanaSendingSigner<TAddress>, MessagePartialSigner<TAddress> {}
+    extends SolanaSendingSigner<TAddress>, SolanaMessageSigner<TAddress> {}
+
+/**
+ * Fordefi signer shape returned when `chain` is unset (black box mode).
+ *
+ * Black box mode signs the caller's exact bytes and never broadcasts, so it
+ * is a partial signer for both transactions and messages.
+ */
+export interface FordefiBlackBoxSigner<TAddress extends string = string>
+    extends SolanaTransactionSigner<TAddress>, SolanaMessageSigner<TAddress> {}
 
 /**
  * Create and initialize a Fordefi-backed signer.
@@ -186,16 +195,16 @@ export function createFordefiSigner<TAddress extends string = string>(
 ): Promise<FordefiNativeSigner<TAddress>>;
 export function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig & { chain?: undefined },
-): Promise<SolanaSigner<TAddress>>;
+): Promise<FordefiBlackBoxSigner<TAddress>>;
 export function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig,
-): Promise<FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>>;
+): Promise<FordefiBlackBoxSigner<TAddress> | FordefiNativeSigner<TAddress>>;
 export async function createFordefiSigner<TAddress extends string = string>(
     config: FordefiSignerConfig,
-): Promise<FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>> {
+): Promise<FordefiBlackBoxSigner<TAddress> | FordefiNativeSigner<TAddress>> {
     // The instance's own properties expose the mode-appropriate signing
     // method, which the class type cannot express statically.
-    return await Promise.resolve(FordefiSigner.create(config) as unknown as SolanaSigner<TAddress>);
+    return await Promise.resolve(FordefiSigner.create(config) as unknown as FordefiBlackBoxSigner<TAddress>);
 }
 
 /**
@@ -204,7 +213,7 @@ export async function createFordefiSigner<TAddress extends string = string>(
  * Transaction signing is async: submit via POST, poll GET until MPC signing completes.
  * API requests require ECDSA P-256 request-level signing.
  */
-class FordefiSigner<TAddress extends string = string> implements MessagePartialSigner<TAddress> {
+class FordefiSigner<TAddress extends string = string> implements SolanaMessageSigner<TAddress> {
     readonly address: Address<TAddress>;
     declare signAndSendTransactions?: TransactionSendingSigner<TAddress>['signAndSendTransactions'];
     declare signTransactions?: TransactionPartialSigner<TAddress>['signTransactions'];
@@ -251,10 +260,10 @@ class FordefiSigner<TAddress extends string = string> implements MessagePartialS
     ): FordefiNativeSigner<TAddress> & FordefiSigner<TAddress>;
     static create<TAddress extends string = string>(
         config: FordefiSignerConfig & { chain?: undefined },
-    ): FordefiSigner<TAddress> & SolanaSigner<TAddress>;
+    ): FordefiBlackBoxSigner<TAddress> & FordefiSigner<TAddress>;
     static create<TAddress extends string = string>(
         config: FordefiSignerConfig,
-    ): FordefiSigner<TAddress> & (FordefiNativeSigner<TAddress> | SolanaSigner<TAddress>);
+    ): FordefiSigner<TAddress> & (FordefiBlackBoxSigner<TAddress> | FordefiNativeSigner<TAddress>);
     static create<TAddress extends string = string>(config: FordefiSignerConfig): FordefiSigner<TAddress> {
         if (!config.accessToken) {
             return throwSignerError(SignerErrorCode.CONFIG_ERROR, {

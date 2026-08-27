@@ -9,7 +9,8 @@ import {
     normalizeBaseUrl,
     signBatchStaggered,
     SignerErrorCode,
-    SolanaSigner,
+    SolanaMessageSigner,
+    SolanaTransactionSigner,
     throwSignerError,
     validateRequestDelayMs,
 } from '@solana/keychain-core';
@@ -32,7 +33,9 @@ let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
  *
  * @throws {SignerError} `SIGNER_CONFIG_ERROR` when required config is missing or invalid.
  */
-export function createVaultSigner<TAddress extends string = string>(config: VaultSignerConfig): SolanaSigner<TAddress> {
+export function createVaultSigner<TAddress extends string = string>(
+    config: VaultSignerConfig,
+): SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress> {
     return VaultSigner.create(config);
 }
 
@@ -58,7 +61,9 @@ export interface VaultSignerConfig {
  * The Vault key must be an ED25519 key created in the transit engine.
  * Example creation: `vault write transit/keys/my-key type=ed25519`
  */
-class VaultSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class VaultSigner<TAddress extends string = string>
+    implements SolanaMessageSigner<TAddress>, SolanaTransactionSigner<TAddress>
+{
     readonly address: Address<TAddress>;
     private readonly vaultAddr: string;
     private readonly vaultToken: string;

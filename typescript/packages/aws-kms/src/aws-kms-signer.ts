@@ -6,7 +6,8 @@ import {
     ED25519_SIGNATURE_LENGTH,
     signBatchStaggered,
     SignerErrorCode,
-    SolanaSigner,
+    SolanaMessageSigner,
+    SolanaTransactionSigner,
     throwSignerError,
     validateRequestDelayMs,
 } from '@solana/keychain-core';
@@ -28,7 +29,7 @@ import type { AwsCredentials, AwsKmsSignerConfig } from './types.js';
  */
 export function createAwsKmsSigner<TAddress extends string = string>(
     config: AwsKmsSignerConfig,
-): SolanaSigner<TAddress> {
+): SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress> {
     return AwsKmsSigner.create(config);
 }
 
@@ -47,7 +48,9 @@ export function createAwsKmsSigner<TAddress extends string = string>(
  *   --description "Solana signing key"
  * ```
  */
-class AwsKmsSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class AwsKmsSigner<TAddress extends string = string>
+    implements SolanaMessageSigner<TAddress>, SolanaTransactionSigner<TAddress>
+{
     readonly address: Address<TAddress>;
     private readonly keyId: string;
     private readonly client: KMSClient;

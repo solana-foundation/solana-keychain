@@ -19,7 +19,12 @@ vi.mock('@solana/transactions', async importOriginal => {
     };
 });
 
-import { isSolanaSendingSigner, isSolanaSigner, type SignerError } from '@solana/keychain-core';
+import {
+    isSolanaSendingSigner,
+    isSolanaSigner,
+    isSolanaTransactionSigner,
+    type SignerError,
+} from '@solana/keychain-core';
 import { isMessagePartialSigner, isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
 import { getTransactionDecoder } from '@solana/transactions';
 import { createCrossmintSigner } from '../crossmint-signer.js';
@@ -220,7 +225,8 @@ describe('CrossmintSigner', () => {
             expect(isTransactionPartialSigner(guardInput)).toBe(false);
             expect(isMessagePartialSigner(guardInput)).toBe(false);
             expect(isTransactionSendingSigner(guardInput)).toBe(true);
-            expect(isSolanaSigner(signer)).toBe(false);
+            expect(isSolanaSigner(signer)).toBe(true);
+            expect(isSolanaTransactionSigner(signer)).toBe(false);
             expect(isSolanaSendingSigner(signer)).toBe(true);
         });
     });

@@ -35,16 +35,14 @@ const signer = await createPrivySigner({
 const signedTx = await signTransactionWithSigners([signer], compiledTransaction);
 ```
 
-All keychain signers implement the `SolanaSigner` interface from `@solana/keychain-core`, which is compatible with `@solana/signers` and `@solana/kit`:
+`@solana/keychain-core` defines one capability interface per Kit signer shape, each adding `isAvailable(): Promise<boolean>` to the corresponding `@solana/signers` interface:
 
-```typescript
-interface SolanaSigner<TAddress extends string = string> {
-    readonly address: Address<TAddress>;
-    signMessages(messages: SignableMessage[]): Promise<SignatureDictionary[]>;
-    signTransactions(transactions: Transaction[]): Promise<SignatureDictionary[]>;
-    isAvailable(): Promise<boolean>;
-}
-```
+- `SolanaTransactionSigner` — Kit's `TransactionPartialSigner`: returns signatures for a caller-owned transaction.
+- `SolanaModifyingSigner` — Kit's `TransactionModifyingSigner`: may rewrite the transaction before signing it. No backend has this shape yet.
+- `SolanaSendingSigner` — Kit's `TransactionSendingSigner`: signs and broadcasts through its provider (managed broadcast).
+- `SolanaMessageSigner` — Kit's `MessagePartialSigner`: signs off-chain messages. Orthogonal to the transaction shapes, exactly as Kit separates `MessageSigner` from `TransactionSigner`.
+
+`SolanaSigner` is the union of the three transaction shapes — any keychain signer. Which shape a given signer has is not knowable from the union, so narrow with `isSolanaTransactionSigner()` / `isSolanaModifyingSigner()` / `isSolanaSendingSigner()` before calling a signing method. Most backends are `SolanaTransactionSigner & SolanaMessageSigner`, and every factory's return type states its backend's exact capabilities.
 
 See the [`@solana/keychain` README](./packages/keychain/README.md) for more usage patterns.
 
@@ -60,23 +58,23 @@ const client = await createClient().use(
     keychainSigner({ backend: 'privy', appId, appSecret, walletId }),
 );
 
-client.payer; // SolanaSigner — also a Kit TransactionSigner
+client.payer; // SolanaTransactionSigner — also a Kit TransactionPartialSigner
 ```
 
 ## Signer capabilities
 
-Backends come in two shapes. Most sign a transaction you own and hand back signatures (`SolanaSigner`). Managed-broadcast backends rewrite and broadcast the transaction themselves, so they expose only `signAndSendTransactions` (`SolanaSendingSigner`) — Kit classifies signers by method presence, so they deliberately do not expose `signTransactions`.
+Most backends sign a transaction you own and hand back signatures (`SolanaTransactionSigner`). Managed-broadcast backends rewrite and broadcast the transaction themselves, so they expose only `signAndSendTransactions` (`SolanaSendingSigner`) — Kit classifies signers by method presence, so they deliberately do not expose `signTransactions`. Message signing (`SolanaMessageSigner`) is an orthogonal capability: a backend that does not sign messages exposes no `signMessages` method at all.
 
-| Backend | Interface | `signTransactions` | `signAndSendTransactions` | `signMessages` |
-|---------|-----------|--------------------|---------------------------|----------------|
-| memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | `SolanaSigner` | yes | no | yes |
-| cdp | `SolanaSigner` | yes | no | yes (UTF-8 payloads only) |
-| utila | `SolanaSigner` | yes | no | throws at runtime |
-| crossmint | `SolanaSendingSigner` | no | yes | not exposed |
-| fordefi (black-box mode) | `SolanaSigner` | yes | no | yes |
-| fordefi (native mode) | `SolanaSendingSigner` | no | yes | yes |
+| Backend | Shape | `signTransactions` | `signAndSendTransactions` | `signMessages` |
+|---------|-------|--------------------|---------------------------|----------------|
+| memory, vault, privy, turnkey, aws-kms, fireblocks, gcp-kms, dfns, para, openfort | `SolanaTransactionSigner & SolanaMessageSigner` | yes | no | yes |
+| cdp | `SolanaTransactionSigner & SolanaMessageSigner` | yes | no | yes (UTF-8 payloads only) |
+| utila | `SolanaTransactionSigner` | yes | no | no |
+| crossmint | `CrossmintSendingSigner` (a `SolanaSendingSigner`) | no | yes | no |
+| fordefi (black-box mode) | `FordefiBlackBoxSigner` (`SolanaTransactionSigner & SolanaMessageSigner`) | yes | no | yes |
+| fordefi (native mode) | `FordefiNativeSigner` (`SolanaSendingSigner & SolanaMessageSigner`) | no | yes | yes |
 
-`signAndSendTransaction()` from `@solana/keychain-core` gets a transaction on chain through either shape. Signers that cannot broadcast use the send function you inject — core has no RPC dependency:
+`signAndSendTransaction()` from `@solana/keychain-core` gets a transaction on chain through any shape, routing by capability. Signers that cannot broadcast use the send function you inject — core has no RPC dependency:
 
 ```typescript
 import { signAndSendTransaction } from '@solana/keychain-core';
@@ -88,7 +86,7 @@ const signature = await signAndSendTransaction(signer, transaction, {
 
 Every signing method — `signMessages`, `signTransactions`, `signAndSendTransactions` — takes Kit's optional config as its second argument, so `{ abortSignal }` cancels an in-flight signing request on any backend.
 
-Use `signerCapabilities(signer)` to inspect a signer at runtime — it returns `{ canSignTransactions, canSignMessages, canSignAndSend }`.
+Use `signerCapabilities(signer)` to inspect a signer at runtime — it returns `{ canModifyTransactions, canSignAndSend, canSignMessages, canSignTransactions }`.
 
 ## Packages
 

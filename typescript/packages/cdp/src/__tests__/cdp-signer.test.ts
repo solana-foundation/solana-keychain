@@ -1,7 +1,7 @@
 import * as nodeCrypto from 'node:crypto';
 
 import { Address } from '@solana/addresses';
-import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertIsSolanaTransactionSigner } from '@solana/keychain-core';
 import { generateKeyPairSigner } from '@solana/signers';
 import {
     type Base64EncodedWireTransaction,
@@ -122,7 +122,7 @@ describe('CdpSigner', () => {
             const signer = await createCdpSigner(makeConfig());
 
             expect(signer.address).toBe(TEST_ADDRESS);
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
             expect(signer.signMessages).toBeDefined();
             expect(signer.signTransactions).toBeDefined();
             expect(signer.isAvailable).toBeDefined();

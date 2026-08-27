@@ -27,7 +27,7 @@ vi.mock('@solana/transactions', async importOriginal => {
     };
 });
 
-import { assertIsSolanaSigner, extractAndVerifyReturnedSignature } from '@solana/keychain-core';
+import { assertIsSolanaTransactionSigner, extractAndVerifyReturnedSignature } from '@solana/keychain-core';
 import { getTransactionDecoder } from '@solana/transactions';
 import { createUtilaAccessToken, createUtilaSigner } from '../utila-signer.js';
 import { TEST_EMAIL, TEST_RSA_PRIVATE_KEY } from './setup.js';
@@ -117,7 +117,7 @@ describe('UtilaSigner', () => {
             const signer = await createUtilaSigner(mockConfig);
 
             expect(signer.address).toBe(MOCK_ADDRESS);
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
             expect(fetch).toHaveBeenCalledWith(
                 'https://api.test.utila.io/v2/vaults/vault-test/wallets/wallet-test',
                 expect.objectContaining({
@@ -186,20 +186,6 @@ describe('UtilaSigner', () => {
             });
 
             expect(signer.address).toBe(MOCK_ADDRESS);
-        });
-    });
-
-    describe('signMessages', () => {
-        it('returns not supported error', async () => {
-            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
-            const signer = await createUtilaSigner(mockConfig);
-
-            await expect(
-                signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }]),
-            ).rejects.toMatchObject({
-                code: 'SIGNER_SIGNING_FAILED',
-                message: expect.stringContaining('not supported'),
-            });
         });
     });
 

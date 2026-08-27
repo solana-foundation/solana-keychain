@@ -7,7 +7,8 @@ import {
     fetchSignerJson,
     signBatchStaggered,
     SignerErrorCode,
-    SolanaSigner,
+    SolanaMessageSigner,
+    SolanaTransactionSigner,
     throwSignerError,
     validateRequestDelayMs,
 } from '@solana/keychain-core';
@@ -45,7 +46,7 @@ type PublicKeyResponse = {
 };
 export function createGcpKmsSigner<TAddress extends string = string>(
     config: GcpKmsSignerConfig,
-): SolanaSigner<TAddress> {
+): SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress> {
     return GcpKmsSigner.create(config);
 }
 
@@ -65,7 +66,9 @@ export function createGcpKmsSigner<TAddress extends string = string>(
  *   --default-algorithm=ec-sign-ed25519
  * ```
  */
-class GcpKmsSigner<TAddress extends string = string> implements SolanaSigner<TAddress> {
+class GcpKmsSigner<TAddress extends string = string>
+    implements SolanaMessageSigner<TAddress>, SolanaTransactionSigner<TAddress>
+{
     readonly address: Address<TAddress>;
     private readonly keyName: string;
     private readonly keyNamePathSegments: readonly string[];

@@ -1,6 +1,6 @@
 import { address } from '@solana/addresses';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { assertIsSolanaSigner } from '@solana/keychain-core';
+import { assertIsSolanaTransactionSigner } from '@solana/keychain-core';
 
 import { createGcpKmsSigner } from '../gcp-kms-signer.js';
 import type { GcpKmsSignerConfig } from '../types.js';
@@ -86,7 +86,7 @@ describe('createGcpKmsSigner', () => {
             });
 
             expect(signer.address).toBe(TEST_PUBLIC_KEY);
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
         });
 
         it('should throw error for missing keyName', () => {
@@ -109,7 +109,7 @@ describe('createGcpKmsSigner', () => {
             const signer = createGcpKmsSigner(config);
 
             expect(signer.address).toBe(TEST_PUBLIC_KEY);
-            assertIsSolanaSigner(signer);
+            assertIsSolanaTransactionSigner(signer);
             expect(signer.signMessages).toBeDefined();
             expect(signer.signTransactions).toBeDefined();
             expect(signer.isAvailable).toBeDefined();

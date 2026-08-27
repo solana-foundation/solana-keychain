@@ -1,11 +1,11 @@
 import { runSignerIntegrationTest, type SignerTestConfig } from '@solana/keychain-test-utils';
-import type { SolanaSigner } from '@solana/keychain-core';
+import type { SolanaMessageSigner, SolanaTransactionSigner } from '@solana/keychain-core';
 import { generateKeyPair } from '@solana/keys';
 import { describe, it } from 'vitest';
 
 import { createMemorySignerFromKeyPair } from '../memory-signer.js';
 
-const CONFIG: SignerTestConfig<SolanaSigner> = {
+const CONFIG: SignerTestConfig<SolanaMessageSigner & SolanaTransactionSigner> = {
     signerType: 'memory',
     requiredEnvVars: [],
     createSigner: async () => createMemorySignerFromKeyPair(await generateKeyPair()),

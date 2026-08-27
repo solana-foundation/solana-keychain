@@ -1,4 +1,4 @@
-import type { SolanaSigner } from '@solana/keychain-core';
+import type { SolanaMessageSigner, SolanaTransactionSigner } from '@solana/keychain-core';
 import { SignerTestConfig, TestScenario } from '@solana/keychain-test-utils';
 
 import { createOpenfortSigner } from '../openfort-signer.js';
@@ -6,7 +6,7 @@ import { createOpenfortSigner } from '../openfort-signer.js';
 const SIGNER_TYPE = 'openfort';
 const REQUIRED_ENV_VARS = ['OPENFORT_SECRET_KEY', 'OPENFORT_ACCOUNT_ID', 'OPENFORT_WALLET_SECRET'];
 
-const CONFIG: SignerTestConfig<SolanaSigner> = {
+const CONFIG: SignerTestConfig<SolanaMessageSigner & SolanaTransactionSigner> = {
     signerType: SIGNER_TYPE,
     requiredEnvVars: REQUIRED_ENV_VARS,
     createSigner: () =>
@@ -18,7 +18,9 @@ const CONFIG: SignerTestConfig<SolanaSigner> = {
         }),
 };
 
-export async function getConfig(scenarios: TestScenario[]): Promise<SignerTestConfig<SolanaSigner>> {
+export async function getConfig(
+    scenarios: TestScenario[],
+): Promise<SignerTestConfig<SolanaMessageSigner & SolanaTransactionSigner>> {
     return {
         ...CONFIG,
         testScenarios: scenarios,
