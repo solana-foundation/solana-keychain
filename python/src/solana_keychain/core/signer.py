@@ -1,7 +1,7 @@
 """Core contract definitions for Solana signers."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TypeVar
 
 from solders.pubkey import Pubkey
@@ -31,11 +31,18 @@ class SignedTransaction:
     ``encoded_transaction`` is ``base64(bincode(tx))``. ``is_complete`` is True when
     every required signature slot is populated, False when other signers still need
     to sign.
+
+    ``transaction`` is the authoritative signed transaction. A ``TransactionSigner``
+    signs the caller's object and hands it back; a ``ModifyingSigner`` hands back the
+    provider's rewritten one, which ``solders`` cannot apply to the caller's object.
+    Only ``transaction`` is guaranteed to match ``encoded_transaction`` and the bytes
+    ``signature`` covers.
     """
 
     encoded_transaction: str
     signature: Signature
     is_complete: bool
+    transaction: VersionedTransaction = field(repr=False, compare=False)
 
 
 class SolanaSigner(ABC):
@@ -85,18 +92,18 @@ class ModifyingSigner(SolanaSigner):
 
     The returned signature covers the rewritten message, not the bytes the caller
     supplied, so any signatures collected beforehand are invalidated. Run a
-    modifying signer first and continue from the transaction it returns.
+    modifying signer first and continue from ``SignedTransaction.transaction``.
     """
 
     @abstractmethod
     async def modify_and_sign_transaction(
         self, transaction: VersionedTransaction
     ) -> SignedTransaction:
-        """Let the provider rewrite ``transaction``, sign the rewritten
-        transaction and replace ``transaction`` with it.
+        """Let the provider rewrite ``transaction`` and sign the rewritten one.
 
-        On success ``transaction`` holds the provider's rewritten transaction;
-        continue from it, never from the bytes submitted."""
+        ``transaction`` is left untouched, because a rewritten message cannot be
+        applied to it. Continue from ``SignedTransaction.transaction``, never from
+        the bytes submitted."""
 
 
 class SendingSigner(SolanaSigner):

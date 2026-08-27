@@ -16,20 +16,35 @@ from cryptography.hazmat.primitives.serialization import (
     NoEncryption,
     PrivateFormat,
 )
+from solders.hash import Hash
 from solders.keypair import Keypair
+from solders.message import Message, MessageV0, MessageV1
 from solders.signature import Signature
+from solders.transaction import VersionedTransaction
 
 from solana_keychain import SignerError, SignerErrorCode
-from solana_keychain.core import SendingSigner, TransactionSigner, signed_message_bytes
+from solana_keychain.core import (
+    ModifyingSigner,
+    SendingSigner,
+    TransactionSigner,
+    signed_message_bytes,
+)
+from solana_keychain.core.transaction_util import idempotency_key_from_message
 from solana_keychain.fordefi import (
     FordefiBlackBoxSigner,
     FordefiNativeAutoSigner,
+    FordefiNativeManualSigner,
     FordefiRequestSigner,
     FordefiSignerConfig,
     PemRequestSigner,
     create_fordefi_signer,
 )
-from tests.util import create_test_transaction, create_two_signer_transaction
+from tests.util import (
+    create_test_transaction,
+    create_test_v0_transaction,
+    create_test_v1_transaction,
+    create_two_signer_transaction,
+)
 
 API_BASE_URL = "https://fordefi.example.com"
 ACCESS_TOKEN = "test-access-token"
@@ -62,6 +77,12 @@ def make_black_box_signer(keypair: Keypair, **overrides: Any) -> FordefiBlackBox
 def make_native_signer(keypair: Keypair, **overrides: Any) -> FordefiNativeAutoSigner:
     overrides.setdefault("chain", "solana_devnet")
     return FordefiNativeAutoSigner(make_config(keypair, **overrides))
+
+
+def make_manual_signer(keypair: Keypair, **overrides: Any) -> FordefiNativeManualSigner:
+    overrides.setdefault("chain", "solana_devnet")
+    overrides.setdefault("push_mode", "manual")
+    return FordefiNativeManualSigner(make_config(keypair, **overrides))
 
 
 def mock_vault(body: dict[str, Any], status_code: int = 200) -> None:
@@ -99,16 +120,26 @@ def test_each_mode_exposes_exactly_one_transaction_capability() -> None:
     keypair = Keypair()
     black_box = make_black_box_signer(keypair)
     native = make_native_signer(keypair, chain="solana_mainnet")
+    manual = make_manual_signer(keypair, chain="solana_mainnet")
 
     assert isinstance(black_box, TransactionSigner)
-    assert not isinstance(black_box, SendingSigner)
+    assert not isinstance(black_box, SendingSigner | ModifyingSigner)
     assert isinstance(native, SendingSigner)
-    assert not isinstance(native, TransactionSigner)
+    assert not isinstance(native, TransactionSigner | ModifyingSigner)
+    assert isinstance(manual, ModifyingSigner)
+    assert not isinstance(manual, TransactionSigner | SendingSigner)
 
 
 def test_black_box_signer_rejects_a_native_config() -> None:
     with pytest.raises(SignerError) as excinfo:
         FordefiBlackBoxSigner(make_config(Keypair(), chain="solana_mainnet"))
+    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
+
+
+def test_black_box_signer_rejects_a_push_mode() -> None:
+    """``push_mode`` is meaningless without a chain, so it must not be ignored."""
+    with pytest.raises(SignerError) as excinfo:
+        FordefiBlackBoxSigner(make_config(Keypair(), push_mode="auto"))
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
@@ -118,12 +149,38 @@ def test_native_signer_rejects_a_black_box_config() -> None:
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
-async def test_factory_picks_the_signer_type_from_chain() -> None:
+@pytest.mark.parametrize(
+    ("signer_type", "overrides"),
+    [
+        (FordefiNativeAutoSigner, {"chain": "solana_devnet", "push_mode": "manual"}),
+        (FordefiNativeManualSigner, {"chain": "solana_devnet"}),
+        (FordefiNativeManualSigner, {"chain": "solana_devnet", "push_mode": "auto"}),
+        (FordefiNativeManualSigner, {"push_mode": "manual"}),
+    ],
+)
+def test_native_signer_rejects_the_other_modes_config(
+    signer_type: type[FordefiNativeAutoSigner] | type[FordefiNativeManualSigner],
+    overrides: dict[str, Any],
+) -> None:
+    with pytest.raises(SignerError) as excinfo:
+        signer_type(make_config(Keypair(), **overrides))
+    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
+
+
+async def test_factory_picks_the_signer_type_from_chain_and_push_mode() -> None:
     keypair = Keypair()
     black_box = await create_fordefi_signer(make_config(keypair))
     native = await create_fordefi_signer(make_config(keypair, chain="solana_devnet"))
+    auto = await create_fordefi_signer(
+        make_config(keypair, chain="solana_devnet", push_mode="auto")
+    )
+    manual = await create_fordefi_signer(
+        make_config(keypair, chain="solana_devnet", push_mode="manual")
+    )
     assert isinstance(black_box, FordefiBlackBoxSigner)
     assert isinstance(native, FordefiNativeAutoSigner)
+    assert isinstance(auto, FordefiNativeAutoSigner)
+    assert isinstance(manual, FordefiNativeManualSigner)
 
 
 @pytest.mark.parametrize("field", ["access_token", "vault_id", "public_key"])
@@ -583,6 +640,271 @@ async def test_sign_transaction_native_rejects_multi_signer_before_submitting() 
     assert not respx.calls
 
 
+def replace_blockhash(transaction: VersionedTransaction, blockhash: Hash) -> VersionedTransaction:
+    """Stand in for the rewrite Fordefi performs before signing."""
+    message = transaction.message
+    replaced: Message | MessageV0 | MessageV1
+    if isinstance(message, Message):
+        header = message.header
+        replaced = Message.new_with_compiled_instructions(
+            header.num_required_signatures,
+            header.num_readonly_signed_accounts,
+            header.num_readonly_unsigned_accounts,
+            message.account_keys,
+            blockhash,
+            message.instructions,
+        )
+    elif isinstance(message, MessageV0):
+        replaced = MessageV0(
+            message.header,
+            message.account_keys,
+            blockhash,
+            message.instructions,
+            message.address_table_lookups,
+        )
+    else:
+        replaced = MessageV1(
+            message.header,
+            message.config,
+            blockhash,
+            message.account_keys,
+            message.instructions,
+        )
+    return VersionedTransaction.populate(
+        replaced, [Signature.default()] * replaced.header.num_required_signatures
+    )
+
+
+def vault_signed_wire(
+    keypair: Keypair, transaction: VersionedTransaction, position: int = 0
+) -> tuple[str, Signature]:
+    signature = keypair.sign_message(signed_message_bytes(transaction.message))
+    signatures = list(transaction.signatures)
+    signatures[position] = signature
+    transaction.signatures = signatures
+    return base64.b64encode(bytes(transaction)).decode("ascii"), signature
+
+
+@respx.mock
+@pytest.mark.parametrize("version", ["legacy", "v0", "v1"])
+async def test_manual_signing_returns_the_transaction_fordefi_signed(version: str) -> None:
+    """Fordefi signed bytes it chose, so only its own transaction can be broadcast."""
+    keypair = Keypair()
+    fee = {"type": "priority", "priority_level": "high"}
+    signer = make_manual_signer(keypair, chain="solana_mainnet", fee=fee)
+    builders = {
+        "legacy": create_test_transaction,
+        "v0": create_test_v0_transaction,
+        "v1": create_test_v1_transaction,
+    }
+    transaction = builders[version](keypair.pubkey())
+    original_wire = bytes(transaction)
+    returned = replace_blockhash(transaction, Hash.new_unique())
+    raw_transaction, signature = vault_signed_wire(keypair, returned)
+    mock_sign_flow(
+        status_response("waiting_for_signing_trigger"),
+        status_response("signed", raw_transaction=raw_transaction),
+    )
+
+    result = await signer.modify_and_sign_transaction(transaction)
+
+    assert bytes(transaction) == original_wire, "the caller's transaction must stay untouched"
+    assert bytes(result.transaction) == bytes(returned)
+    assert base64.b64decode(result.encoded_transaction, validate=True) == bytes(returned)
+    assert result.signature == signature
+    assert result.is_complete
+    assert signature.verify(keypair.pubkey(), signed_message_bytes(result.transaction.message))
+
+    assert json.loads(respx.calls[0].request.content)["details"] == {
+        "type": "solana_serialized_transaction_message",
+        "chain": "solana_mainnet",
+        "data": base64.b64encode(signed_message_bytes(transaction.message)).decode("ascii"),
+        "push_mode": "manual",
+        "fee": fee,
+    }
+
+
+@respx.mock
+async def test_manual_idempotence_id_cannot_collide_with_an_auto_create() -> None:
+    """The same bytes under auto were broadcast, so the manual create must not
+    dedupe onto them."""
+    keypair = Keypair()
+    signer = make_manual_signer(keypair, chain="solana_mainnet")
+    transaction = create_test_transaction(keypair.pubkey())
+    message_data = signed_message_bytes(transaction.message)
+    raw_transaction, _ = vault_signed_wire(
+        keypair, replace_blockhash(transaction, Hash.new_unique())
+    )
+    mock_sign_flow(status_response("signed", raw_transaction=raw_transaction))
+
+    await signer.modify_and_sign_transaction(transaction)
+
+    namespaced = f"fordefi:solana:manual:solana_mainnet:{VAULT_ID}:".encode() + message_data
+    observed = respx.calls[0].request.headers["x-idempotence-id"]
+    assert observed == idempotency_key_from_message(namespaced)
+    assert observed != idempotency_key_from_message(message_data)
+
+
+@respx.mock
+async def test_manual_signing_returns_a_partial_multi_signer_transaction() -> None:
+    """Downstream signers have to sign the bytes Fordefi produced, not the
+    caller's, so the rewrite is what they must continue from."""
+    keypair = Keypair()
+    cosigner = Keypair()
+    signer = make_manual_signer(keypair)
+    transaction = create_two_signer_transaction(keypair.pubkey(), cosigner.pubkey())
+    returned = replace_blockhash(transaction, Hash.new_unique())
+    raw_transaction, vault_signature = vault_signed_wire(keypair, returned)
+    mock_sign_flow(status_response("signed", raw_transaction=raw_transaction))
+
+    result = await signer.modify_and_sign_transaction(transaction)
+
+    assert not result.is_complete
+    assert list(result.transaction.signatures) == [vault_signature, Signature.default()]
+    assert all(signature == Signature.default() for signature in transaction.signatures)
+
+
+@respx.mock
+async def test_manual_signing_finds_the_vault_signature_by_account_position() -> None:
+    """The vault pays the fee, but its signature slot is located by account
+    position rather than assumed to be slot zero."""
+    keypair = Keypair()
+    cosigner = Keypair()
+    signer = make_manual_signer(keypair)
+    transaction = create_two_signer_transaction(keypair.pubkey(), cosigner.pubkey())
+    returned = create_two_signer_transaction(cosigner.pubkey(), keypair.pubkey())
+    raw_transaction, vault_signature = vault_signed_wire(keypair, returned, position=1)
+    mock_sign_flow(status_response("signed", raw_transaction=raw_transaction))
+
+    result = await signer.modify_and_sign_transaction(transaction)
+
+    assert result.signature == vault_signature
+    assert list(result.transaction.signatures)[1] == vault_signature
+
+
+@respx.mock
+async def test_manual_signing_rejects_a_signature_over_other_bytes() -> None:
+    """An unverifiable signature must never reach the caller as a signed transaction."""
+    keypair = Keypair()
+    signer = make_manual_signer(keypair)
+    transaction = create_test_transaction(keypair.pubkey())
+    original_wire = bytes(transaction)
+    returned = replace_blockhash(transaction, Hash.new_unique())
+    returned.signatures = [Keypair().sign_message(signed_message_bytes(returned.message))]
+    mock_sign_flow(
+        status_response("signed", raw_transaction=base64.b64encode(bytes(returned)).decode("ascii"))
+    )
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.modify_and_sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert bytes(transaction) == original_wire
+
+
+@respx.mock
+async def test_manual_signing_rejects_an_empty_vault_signature_slot() -> None:
+    keypair = Keypair()
+    signer = make_manual_signer(keypair)
+    returned = replace_blockhash(create_test_transaction(keypair.pubkey()), Hash.new_unique())
+    mock_sign_flow(
+        status_response("signed", raw_transaction=base64.b64encode(bytes(returned)).decode("ascii"))
+    )
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.modify_and_sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+
+
+@respx.mock
+async def test_manual_signing_rejects_a_transaction_the_vault_cannot_sign() -> None:
+    """A returned transaction with no slot for the vault carries no signature of ours."""
+    keypair = Keypair()
+    signer = make_manual_signer(keypair)
+    returned = create_test_transaction(Keypair().pubkey())
+    mock_sign_flow(
+        status_response("signed", raw_transaction=base64.b64encode(bytes(returned)).decode("ascii"))
+    )
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.modify_and_sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+
+
+@respx.mock
+async def test_manual_signing_rejects_a_non_vault_fee_payer_before_submitting() -> None:
+    """Fordefi only rewrites transactions its own vault pays for."""
+    keypair = Keypair()
+    signer = make_manual_signer(keypair)
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.modify_and_sign_transaction(create_test_transaction(Keypair().pubkey()))
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert not respx.calls
+
+
+@respx.mock
+async def test_manual_signing_rejects_a_presigned_transaction_before_submitting() -> None:
+    """Fordefi rewrites the message, which would silently void an existing signature."""
+    keypair = Keypair()
+    signer = make_manual_signer(keypair)
+    transaction = create_test_transaction(keypair.pubkey())
+    transaction.signatures = [keypair.sign_message(signed_message_bytes(transaction.message))]
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.modify_and_sign_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert not respx.calls
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("raw_transaction", "error_code"),
+    [
+        (None, SignerErrorCode.SIGNING_FAILED),
+        ("not-base64!", SignerErrorCode.SERIALIZATION_ERROR),
+        (base64.b64encode(b"not a transaction").decode(), SignerErrorCode.SERIALIZATION_ERROR),
+    ],
+)
+async def test_manual_signing_rejects_an_unusable_wire_transaction(
+    raw_transaction: str | None, error_code: SignerErrorCode
+) -> None:
+    keypair = Keypair()
+    signer = make_manual_signer(keypair)
+    extra = {} if raw_transaction is None else {"raw_transaction": raw_transaction}
+    mock_sign_flow(status_response("signed", **extra))
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.modify_and_sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == error_code
+
+
+@respx.mock
+async def test_manual_signing_failure_is_never_broadcast_unconfirmed() -> None:
+    """Nothing is broadcast in manual mode, so a failure leaves no on-chain doubt."""
+    keypair = Keypair()
+    signer = make_manual_signer(keypair)
+    mock_sign_flow(status_response("error_signing"))
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.modify_and_sign_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert excinfo.value.provider_transaction_id is None
+
+
+@respx.mock
+async def test_manual_mode_signs_messages_through_solana_message() -> None:
+    keypair = Keypair()
+    message = b"manual-native-message"
+    signature = keypair.sign_message(message)
+    signer = make_manual_signer(keypair)
+    mock_sign_flow(status_response("signed", signatures=[{"data": signature_b64(signature)}]))
+
+    assert await signer.sign_message(message) == signature
+    body = json.loads(respx.calls[0].request.content)
+    assert body["type"] == "solana_message"
+    assert "push_mode" not in body["details"]
+
+
 @respx.mock
 async def test_is_available_success() -> None:
     mock_vault({"id": VAULT_ID})
@@ -623,7 +945,11 @@ def test_reprs_never_contain_secrets() -> None:
         private_key_pem=EC_PRIVATE_PEM,
         api_base_url=API_BASE_URL,
     )
-    signer = make_black_box_signer(keypair)
-    for text in (repr(config), repr(signer)):
+    signers = (
+        make_black_box_signer(keypair),
+        make_native_signer(keypair),
+        make_manual_signer(keypair),
+    )
+    for text in (repr(config), *(repr(signer) for signer in signers)):
         assert ACCESS_TOKEN not in text
         assert "PRIVATE KEY" not in text
