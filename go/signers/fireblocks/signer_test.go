@@ -359,6 +359,47 @@ func TestSignTransactionProgramCallBroadcastIsUnconfirmed(t *testing.T) {
 	}
 }
 
+// A PROGRAM_CALL left unresolved by the poll, whether the budget ran out or the
+// poll itself failed, exists on Fireblocks under a known id, so that id is the
+// caller's recovery handle rather than a bare polling error.
+func TestSignTransactionProgramCallUnresolvedPollKeepsTransactionID(t *testing.T) {
+	pub := testutils.TestPublicKey()
+
+	for _, tc := range []struct {
+		name       string
+		pollStatus int
+		pollBody   map[string]any
+	}{
+		{"budget exhausted", http.StatusOK, map[string]any{"id": "tx-789", "status": "SUBMITTED"}},
+		{"poll failed", http.StatusServiceUnavailable, map[string]any{"error": "unavailable"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx, err := testutils.CreateTestTransaction(pub)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			s := newTestSignerWithProgramCall(t, pub.String(), true, func(mux *http.ServeMux) {
+				mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
+					testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-789", "status": "SUBMITTED"})
+				})
+				mux.HandleFunc("/v1/transactions/tx-789", func(w http.ResponseWriter, _ *http.Request) {
+					testutils.WriteJSON(w, tc.pollStatus, tc.pollBody)
+				})
+			})
+
+			_, err = s.SignTransaction(context.Background(), tx)
+			if code, _ := core.CodeOf(err); code != core.CodeBroadcastUnconfirmed {
+				t.Fatalf("got %s, want BROADCAST_UNCONFIRMED", code)
+			}
+			var se *core.SignerError
+			if errors.As(err, &se) && se.ProviderTxID != "tx-789" {
+				t.Errorf("ProviderTxID = %q, want tx-789", se.ProviderTxID)
+			}
+		})
+	}
+}
+
 // A PROGRAM_CALL create that returns 200 with a body that cannot be used as a
 // whole may still have been accepted, so the id in that body is preserved as
 // the caller's recovery handle. A RAW create signs nothing on its own and keeps

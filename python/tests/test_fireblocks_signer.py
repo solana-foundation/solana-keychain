@@ -194,6 +194,37 @@ async def test_program_call_broadcast_despite_sign_only_is_unconfirmed() -> None
 
 
 @respx.mock
+async def test_program_call_polling_timeout_keeps_the_transaction_id() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True, max_poll_attempts=3)
+    transaction = create_test_transaction(keypair.pubkey())
+    mock_program_call_flow({"id": "tx-1", "status": "SUBMITTED"})
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id == "tx-1"
+
+
+@respx.mock
+async def test_program_call_poll_failure_keeps_the_transaction_id() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True)
+    transaction = create_test_transaction(keypair.pubkey())
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(200, json={"id": "tx-1", "status": "SUBMITTED"})
+    )
+    respx.get(f"{TRANSACTIONS_URL}/tx-1").mock(return_value=httpx.Response(503, text="unavailable"))
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id == "tx-1"
+
+
+@respx.mock
 async def test_program_call_create_5xx_is_unconfirmed() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair, use_program_call=True)

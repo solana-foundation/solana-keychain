@@ -368,14 +368,32 @@ impl FireblocksSigner {
         poll_until(
             self.max_poll_attempts,
             self.poll_interval_ms,
-            || {
-                SignerError::RemoteApiError(format!(
+            || match mode {
+                SigningMode::ProgramCall => SignerError::BroadcastUnconfirmed {
+                    provider_tx_id: Some(tx_id.to_string()),
+                    provider_status: None,
+                    detail: format!(
+                        "Fireblocks PROGRAM_CALL polling timeout after {} attempts; the transaction may already be executing",
+                        self.max_poll_attempts
+                    ),
+                },
+                SigningMode::Raw => SignerError::RemoteApiError(format!(
                     "Transaction polling timeout after {} attempts - signing request may still complete",
                     self.max_poll_attempts
-                ))
+                )),
             },
             || async {
-                let response = self.get_transaction(tx_id).await?;
+                let response = self.get_transaction(tx_id).await.map_err(|error| match mode {
+                    SigningMode::ProgramCall => SignerError::BroadcastUnconfirmed {
+                        provider_tx_id: Some(tx_id.to_string()),
+                        provider_status: None,
+                        detail: format!(
+                            "Fireblocks PROGRAM_CALL outcome could not be resolved: {}",
+                            error
+                        ),
+                    },
+                    SigningMode::Raw => error,
+                })?;
 
                 match (mode, response.status.as_str()) {
                     (SigningMode::ProgramCall, "SIGNED") | (SigningMode::Raw, "COMPLETED") => {

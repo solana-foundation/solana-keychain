@@ -223,7 +223,18 @@ class FireblocksSigner(TransactionSigner):
         self, transaction_id: str, *, program_call: bool = False
     ) -> dict[str, Any]:
         async for _ in poll_attempts(self._max_poll_attempts, self._poll_interval_ms):
-            response = await self._get_json(f"/v1/transactions/{quote(transaction_id, safe='')}")
+            try:
+                response = await self._get_json(
+                    f"/v1/transactions/{quote(transaction_id, safe='')}"
+                )
+            except SignerError as error:
+                if not program_call:
+                    raise
+                raise SignerError(
+                    SignerErrorCode.BROADCAST_UNCONFIRMED,
+                    f"Fireblocks PROGRAM_CALL outcome could not be resolved: {error._detail}",
+                    provider_transaction_id=transaction_id,
+                ) from None
             if not isinstance(response, dict):
                 raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
             status = response.get("status")
@@ -243,6 +254,13 @@ class FireblocksSigner(TransactionSigner):
                 raise SignerError(
                     SignerErrorCode.SIGNING_FAILED, f"Transaction {status}: {transaction_id}"
                 )
+        if program_call:
+            raise SignerError(
+                SignerErrorCode.BROADCAST_UNCONFIRMED,
+                f"Fireblocks PROGRAM_CALL polling timeout after {self._max_poll_attempts} "
+                "attempts; the transaction may already be executing",
+                provider_transaction_id=transaction_id,
+            )
         raise SignerError(
             SignerErrorCode.REMOTE_API_ERROR,
             f"Transaction polling timeout after {self._max_poll_attempts} attempts - "

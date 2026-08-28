@@ -356,7 +356,19 @@ class FireblocksSigner<TAddress extends string = string>
         const uri = `/v1/transactions/${encodeURIComponent(transactionId)}`;
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
-            const txResponse = await this.request<TransactionResponse>('GET', uri, undefined, abortSignal);
+            let txResponse: TransactionResponse;
+            try {
+                txResponse = await this.request<TransactionResponse>('GET', uri, undefined, abortSignal);
+            } catch (error) {
+                if (operation !== 'PROGRAM_CALL' || abortSignal?.aborted === true) {
+                    throw error;
+                }
+                return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
+                    cause: error,
+                    message: 'Fireblocks PROGRAM_CALL outcome could not be resolved',
+                    providerTransactionId: transactionId,
+                });
+            }
 
             const status = txResponse.status as FireblocksTransactionStatus;
 
@@ -384,6 +396,12 @@ class FireblocksSigner<TAddress extends string = string>
             await abortableDelay(this.pollIntervalMs, abortSignal);
         }
 
+        if (operation === 'PROGRAM_CALL') {
+            return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
+                message: `Fireblocks PROGRAM_CALL did not resolve within ${this.maxPollAttempts} attempts; the transaction may already be executing`,
+                providerTransactionId: transactionId,
+            });
+        }
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
             message: `Transaction did not complete within ${this.maxPollAttempts} attempts`,
         });

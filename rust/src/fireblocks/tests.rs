@@ -655,6 +655,44 @@ async fn test_program_call_broadcast_despite_sign_only_is_reported_as_unconfirme
     }
 }
 
+/// A PROGRAM_CALL the poll never resolves, whether the attempt budget ran out or
+/// the poll itself failed, exists on Fireblocks under a known id, so that id is
+/// the caller's recovery handle rather than a bare polling error.
+#[tokio::test]
+async fn test_program_call_unresolved_poll_keeps_the_transaction_id() {
+    for poll_response in [
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "tx-789",
+            "status": "SUBMITTED"
+        })),
+        ResponseTemplate::new(503).set_body_string("unavailable"),
+    ] {
+        let mock_server = MockServer::start().await;
+        let keypair = Keypair::new();
+        let mut transaction = create_test_transaction(&keypair_pubkey(&keypair));
+
+        let signer = create_test_signer_program_call(&mock_server.uri(), keypair_pubkey(&keypair));
+
+        mount_program_call_create(
+            &mock_server,
+            &TransactionUtil::serialize_transaction(&transaction).unwrap(),
+        )
+        .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/transactions/tx-789"))
+            .respond_with(poll_response)
+            .mount(&mock_server)
+            .await;
+
+        match signer.sign_transaction(&mut transaction).await {
+            Err(SignerError::BroadcastUnconfirmed { provider_tx_id, .. }) => {
+                assert_eq!(provider_tx_id.as_deref(), Some("tx-789"));
+            }
+            other => unreachable!("expected BroadcastUnconfirmed, got {other:?}"),
+        }
+    }
+}
+
 #[cfg(feature = "sdk-v4")]
 #[tokio::test]
 async fn test_program_call_rejects_a_v1_message_before_any_network_call() {

@@ -246,12 +246,18 @@ func (s *Signer) getTransaction(ctx context.Context, txID string) (transactionRe
 // sign-only PROGRAM_CALL); FAILED/CANCELLED/REJECTED/BLOCKED fail signing; a
 // PROGRAM_CALL that reached the network despite signOnly reports
 // CodeBroadcastUnconfirmed; anything else waits pollInterval and retries.
-// Cancellation of ctx aborts the wait.
+// Cancellation of ctx aborts the wait. A PROGRAM_CALL left unresolved, whether by a
+// failed poll or an exhausted budget, also reports CodeBroadcastUnconfirmed with the
+// transaction id: the request exists on Fireblocks and only its outcome is unknown.
 func (s *Signer) pollForSignature(ctx context.Context, txID string, programCall bool) (transactionResponse, error) {
 	for attempt := 0; attempt < s.maxPollAttempts; attempt++ {
 		response, err := s.getTransaction(ctx, txID)
 		if err != nil {
-			return transactionResponse{}, err
+			if !programCall || ctx.Err() != nil {
+				return transactionResponse{}, err
+			}
+			return transactionResponse{}, core.NewBroadcastUnconfirmedError(txID,
+				"fireblocks PROGRAM_CALL outcome could not be resolved: "+err.Error())
 		}
 
 		if programCall {
@@ -280,5 +286,10 @@ func (s *Signer) pollForSignature(ctx context.Context, txID string, programCall 
 		}
 	}
 
+	if programCall {
+		return transactionResponse{}, core.NewBroadcastUnconfirmedError(txID,
+			"fireblocks PROGRAM_CALL polling timed out after "+strconv.Itoa(s.maxPollAttempts)+
+				" attempts; the transaction may already be executing")
+	}
 	return transactionResponse{}, core.PollTimeoutError("fireblocks", s.maxPollAttempts)
 }

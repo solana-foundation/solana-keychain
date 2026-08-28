@@ -720,6 +720,49 @@ describe('createFireblocksSigner', () => {
             });
         });
 
+        it('keeps the transaction id when the poll itself fails', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ id: 'tx-789', status: 'SUBMITTED' }),
+            });
+            mockFetch.mockResolvedValueOnce({
+                ok: false,
+                status: 503,
+                text: async () => 'upstream unavailable',
+            });
+
+            await expect(signer.signTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_BROADCAST_UNCONFIRMED',
+                context: { providerTransactionId: 'tx-789' },
+            });
+        });
+
+        it('keeps the transaction id when the attempt budget runs out', async () => {
+            const keyPair = await generateKeyPairSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ addresses: [{ address: keyPair.address }] }),
+            });
+            const signer = await createFireblocksSigner({
+                apiKey: TEST_API_KEY,
+                maxPollAttempts: 2,
+                pollIntervalMs: 1,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                useProgramCall: true,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+            const { transaction } = await createProgramCallSigner();
+            mockFetch.mockImplementation(() =>
+                Promise.resolve({ json: async () => ({ id: 'tx-789', status: 'SUBMITTED' }), ok: true }),
+            );
+
+            await expect(signer.signTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_BROADCAST_UNCONFIRMED',
+                context: { providerTransactionId: 'tx-789' },
+            });
+        });
+
         it('reports a 5xx create as BROADCAST_UNCONFIRMED', async () => {
             const { signer, transaction } = await createProgramCallSigner();
             mockFetch.mockResolvedValueOnce({
