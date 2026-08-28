@@ -7,7 +7,7 @@ use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{
     error::SignerError,
     http_client_config::HttpClientConfig,
-    remote_util::parse_json_response,
+    remote_util::{encode_uri_component, parse_json_response},
     signature_util::{signature_from_bytes, verify_or_reject},
     traits::SolanaSigner,
 };
@@ -134,7 +134,11 @@ impl DfnsSigner {
 
     /// Fetch wallet details from Dfns
     async fn get_wallet(&self) -> Result<GetWalletResponse, SignerError> {
-        let url = format!("{}/wallets/{}", self.api_base_url, self.wallet_id);
+        let url = format!(
+            "{}/wallets/{}",
+            self.api_base_url,
+            encode_uri_component(&self.wallet_id)
+        );
         let response = self
             .client
             .get(&url)
@@ -150,7 +154,7 @@ impl DfnsSigner {
         &self,
         request_body: GenerateSignatureRequest,
     ) -> Result<Signature, SignerError> {
-        let http_path = format!("/keys/{}/signatures", self.key_id);
+        let http_path = format!("/keys/{}/signatures", encode_uri_component(&self.key_id));
         let body_json = serde_json::to_string(&request_body)?;
 
         let user_action = auth::sign_user_action(

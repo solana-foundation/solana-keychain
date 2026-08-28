@@ -2,7 +2,7 @@
 
 mod types;
 
-use crate::remote_util::parse_json_response;
+use crate::remote_util::{encode_uri_component, parse_json_response};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::extract_and_verify_returned_signature;
 use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
@@ -12,7 +12,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::Serialize;
-use std::{fmt::Write, str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc};
 use types::{
     InitiateTransactionDetails, InitiateTransactionRequest, SolanaSerializedTransaction,
     TransactionEnvelope, TransactionState, UtilaTransaction, WalletResponse,
@@ -420,32 +420,6 @@ fn trim_wallet_id(value: &str) -> &str {
     } else {
         value
     }
-}
-
-fn encode_uri_component(input: &str) -> String {
-    let mut encoded = String::with_capacity(input.len());
-    for byte in input.bytes() {
-        if matches!(
-            byte,
-            b'A'..=b'Z'
-                | b'a'..=b'z'
-                | b'0'..=b'9'
-                | b'-'
-                | b'_'
-                | b'.'
-                | b'!'
-                | b'~'
-                | b'*'
-                | b'\''
-                | b'('
-                | b')'
-        ) {
-            encoded.push(byte as char);
-        } else {
-            let _ = write!(encoded, "%{byte:02X}");
-        }
-    }
-    encoded
 }
 
 #[cfg(test)]

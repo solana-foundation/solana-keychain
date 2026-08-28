@@ -2,7 +2,7 @@
 
 mod types;
 
-use crate::remote_util::{read_body_capped, validate_https_url};
+use crate::remote_util::{encode_uri_component, read_body_capped, validate_https_url};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::signature_from_base58;
 use crate::traits::SendingSigner;
@@ -11,7 +11,6 @@ use crate::transaction_util::{
     unconfirmed_unless_rejected,
 };
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
-use std::fmt::Write;
 use std::str::FromStr;
 use types::{
     CreateTransactionParams, CreateTransactionRequest, TransactionResponse, WalletResponse,
@@ -254,39 +253,13 @@ impl CrossmintSigner {
 
         let mut url = base.as_str().trim_end_matches('/').to_string();
         url.push_str("/2025-06-09/wallets/");
-        url.push_str(&Self::encode_uri_component(&self.wallet_locator));
+        url.push_str(&encode_uri_component(&self.wallet_locator));
         for segment in segments {
             url.push('/');
-            url.push_str(&Self::encode_uri_component(segment));
+            url.push_str(&encode_uri_component(segment));
         }
 
         Ok(url)
-    }
-
-    fn encode_uri_component(input: &str) -> String {
-        let mut encoded = String::with_capacity(input.len());
-        for byte in input.bytes() {
-            if matches!(
-                byte,
-                b'A'..=b'Z'
-                    | b'a'..=b'z'
-                    | b'0'..=b'9'
-                    | b'-'
-                    | b'_'
-                    | b'.'
-                    | b'!'
-                    | b'~'
-                    | b'*'
-                    | b'\''
-                    | b'('
-                    | b')'
-            ) {
-                encoded.push(byte as char);
-            } else {
-                let _ = write!(encoded, "%{byte:02X}");
-            }
-        }
-        encoded
     }
 
     async fn parse_response_with_required_field<T>(

@@ -87,6 +87,28 @@ async fn test_init_success() {
 }
 
 #[tokio::test]
+async fn test_init_keeps_a_traversal_wallet_id_in_one_path_segment() {
+    let mock_server = MockServer::start().await;
+    let mut signer = create_test_signer_uninit(&mock_server.uri());
+    signer.wallet_id = "wa-scope/../wa-target".to_string();
+
+    Mock::given(method("GET"))
+        .and(path("/wallets/wa-target"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(wallet_response_json()))
+        .expect(0)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/wallets/wa-scope%2F..%2Fwa-target"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(wallet_response_json()))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    signer.init().await.unwrap();
+}
+
+#[tokio::test]
 async fn test_init_api_error() {
     let mock_server = MockServer::start().await;
     let mut signer = create_test_signer_uninit(&mock_server.uri());

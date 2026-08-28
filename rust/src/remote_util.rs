@@ -50,6 +50,39 @@ where
     Err(timeout_error())
 }
 
+/// Percent-encode `input` so it can be interpolated into a URL as a single
+/// path segment: every byte outside the unreserved set is escaped, including
+/// `/`, `?`, `#` and `.`-only sequences that would otherwise let a configured
+/// identifier retarget the request path.
+#[cfg(any(feature = "crossmint", feature = "dfns", feature = "utila"))]
+pub(crate) fn encode_uri_component(input: &str) -> String {
+    use std::fmt::Write;
+
+    let mut encoded = String::with_capacity(input.len());
+    for byte in input.bytes() {
+        if matches!(
+            byte,
+            b'A'..=b'Z'
+                | b'a'..=b'z'
+                | b'0'..=b'9'
+                | b'-'
+                | b'_'
+                | b'.'
+                | b'!'
+                | b'~'
+                | b'*'
+                | b'\''
+                | b'('
+                | b')'
+        ) {
+            encoded.push(byte as char);
+        } else {
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
+}
+
 /// Maximum number of response-body bytes read from a remote signer API
 /// (1 MiB, matching Go's `core.MaxResponseBytes`).
 pub(crate) const MAX_RESPONSE_BYTES: usize = 1024 * 1024;

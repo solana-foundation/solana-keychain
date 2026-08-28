@@ -124,7 +124,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 
 // getWallet fetches the wallet details from Dfns.
 func (s *Signer) getWallet(ctx context.Context) (*getWalletResponse, error) {
-	data, err := s.do(ctx, http.MethodGet, "/wallets/"+s.walletID, nil, nil, "dfns API error")
+	data, err := s.do(ctx, http.MethodGet, "/wallets/"+core.EncodeURIComponent(s.walletID), nil, nil, "dfns API error")
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (s *Signer) getWallet(ctx context.Context) (*getWalletResponse, error) {
 // sendSignatureRequest performs the user-action flow and posts the signature
 // request to the Keys API, returning the combined 64-byte signature.
 func (s *Signer) sendSignatureRequest(ctx context.Context, request generateSignatureRequest) (solana.Signature, error) {
-	httpPath := "/keys/" + s.keyID + "/signatures"
+	httpPath := "/keys/" + core.EncodeURIComponent(s.keyID) + "/signatures"
 	bodyJSON, err := core.MarshalCanonicalJSON(request)
 	if err != nil {
 		return solana.Signature{}, err
