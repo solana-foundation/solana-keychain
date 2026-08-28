@@ -21,6 +21,18 @@ import {
 } from './types.js';
 
 /**
+ * Copy caller-supplied bytes into a fresh, zero-offset `Uint8Array`.
+ *
+ * `@solana/codecs-strings` 8.0.0 mis-slices a `SharedArrayBuffer`-backed view at a
+ * non-zero `byteOffset`, encoding only its tail, so bytes that reach a codec from
+ * outside this library must be copied first. An `ArrayLike` that is not a typed
+ * array is materialised the same way.
+ */
+export function normalizeMessageBytes(bytes: ArrayLike<number>): Uint8Array {
+    return bytes instanceof Uint8Array ? bytes.slice() : new Uint8Array(Array.from(bytes));
+}
+
+/**
  * A UUID derived from SHA-256(message bytes), so a retry of the same bytes
  * reuses the key and the provider deduplicates the create.
  */

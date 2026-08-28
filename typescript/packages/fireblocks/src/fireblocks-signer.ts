@@ -7,6 +7,7 @@ import {
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
+    normalizeMessageBytes,
     providerMayHaveAccepted,
     providerStatus,
     signBatchSequential,
@@ -467,10 +468,7 @@ class FireblocksSigner<TAddress extends string = string>
         return await signBatchStaggered(
             messages,
             async message => {
-                const messageBytes =
-                    message.content instanceof Uint8Array
-                        ? message.content
-                        : new Uint8Array(Array.from(message.content));
+                const messageBytes = normalizeMessageBytes(message.content);
                 const signatureBytes = await this.signRawBytes(messageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: messageBytes,
@@ -499,7 +497,7 @@ class FireblocksSigner<TAddress extends string = string>
         const signOne = async (transaction: (typeof transactions)[number]): Promise<SignatureDictionary> => {
             const signatureBytes = this.useProgramCall
                 ? await this.signProgramCall(transaction, config?.abortSignal)
-                : await this.signRawBytes(new Uint8Array(transaction.messageBytes), config?.abortSignal);
+                : await this.signRawBytes(normalizeMessageBytes(transaction.messageBytes), config?.abortSignal);
             await assertSignatureValid({
                 data: transaction.messageBytes,
                 signature: signatureBytes,

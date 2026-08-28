@@ -7,6 +7,7 @@ import {
     ED25519_SIGNATURE_LENGTH,
     extractAndVerifyReturnedSignature,
     fetchSignerJson,
+    normalizeMessageBytes,
     signBatchStaggered,
     SignerErrorCode,
     SolanaMessageSigner,
@@ -223,7 +224,7 @@ class TurnkeySigner<TAddress extends string = string>
             messages,
             async message => {
                 const bytesToHex = getBase16Decoder().decode;
-                const hexMessage = bytesToHex(message.content);
+                const hexMessage = bytesToHex(normalizeMessageBytes(message.content));
                 const signatureBytes = await this.sign(hexMessage, config?.abortSignal);
                 await assertSignatureValid({
                     data: message.content,

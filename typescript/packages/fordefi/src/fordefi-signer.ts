@@ -11,6 +11,7 @@ import {
     fetchSignerJson,
     idempotencyKeyFromMessage,
     normalizeBaseUrl,
+    normalizeMessageBytes,
     providerMayHaveAccepted,
     providerStatus,
     signBatchSequential,
@@ -502,7 +503,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         messageBytes: ArrayLike<number>,
         abortSignal?: AbortSignal,
     ): Promise<{ sigDict: SignatureDictionary; verificationData: Uint8Array }> {
-        const bytes = messageBytes instanceof Uint8Array ? messageBytes : new Uint8Array(Array.from(messageBytes));
+        const bytes = normalizeMessageBytes(messageBytes);
         base64Decoder ||= getBase64Decoder();
         const base64Data = base64Decoder.decode(bytes);
 
@@ -553,10 +554,10 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
                 this.assertNativeManualTransactionSupported(transaction);
 
                 base64Decoder ||= getBase64Decoder();
-                const base64Data = base64Decoder.decode(new Uint8Array(transaction.messageBytes));
+                const base64Data = base64Decoder.decode(normalizeMessageBytes(transaction.messageBytes));
                 const idempotencyKey = await this.nativeIdempotencyKey(
                     'manual',
-                    new Uint8Array(transaction.messageBytes),
+                    normalizeMessageBytes(transaction.messageBytes),
                 );
                 const txId = await this.submitSolanaTransaction(
                     base64Data,
@@ -698,10 +699,10 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
                 this.assertNativeAutoTransactionSupported(transaction);
 
                 base64Decoder ||= getBase64Decoder();
-                const base64Data = base64Decoder.decode(new Uint8Array(transaction.messageBytes));
+                const base64Data = base64Decoder.decode(normalizeMessageBytes(transaction.messageBytes));
                 const idempotencyKey = await this.nativeIdempotencyKey(
                     'auto',
-                    new Uint8Array(transaction.messageBytes),
+                    normalizeMessageBytes(transaction.messageBytes),
                 );
                 let txId: string;
                 try {
@@ -844,7 +845,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
      */
     private compiledMessageOf(transaction: Transaction): CompiledTransactionMessage {
         try {
-            return getCompiledTransactionMessageDecoder().decode(new Uint8Array(transaction.messageBytes));
+            return getCompiledTransactionMessageDecoder().decode(normalizeMessageBytes(transaction.messageBytes));
         } catch (error) {
             return throwSignerError(SignerErrorCode.PARSING_ERROR, {
                 cause: error,
@@ -959,7 +960,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
      */
     private async signMessage(messageBytes: Uint8Array, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         base64Decoder ||= getBase64Decoder();
-        const base64Data = base64Decoder.decode(messageBytes);
+        const base64Data = base64Decoder.decode(normalizeMessageBytes(messageBytes));
 
         const txId = this.chain
             ? await this.submitSolanaMessage(base64Data, abortSignal)

@@ -32,6 +32,7 @@
         "clean": "rm -rf dist *.tsbuildinfo",
         "prepack": "pnpm run build",
         "test": "vitest run && pnpm run typecheck",
+        "test:unit": "vitest run",
         "typecheck": "tsc --noEmit",
         "test:treeshakability": "agadoo dist/index.js"
     },

@@ -7,6 +7,7 @@ import {
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
     normalizeBaseUrl,
+    normalizeMessageBytes,
     signBatchStaggered,
     SignerErrorCode,
     SolanaMessageSigner,
@@ -173,7 +174,7 @@ class VaultSigner<TAddress extends string = string>
         abortSignal?: AbortSignal,
     ): Promise<SignatureBytes> {
         base64Decoder ||= getBase64Decoder();
-        const bytes = messageBytes instanceof Uint8Array ? messageBytes : new Uint8Array(Array.from(messageBytes));
+        const bytes = normalizeMessageBytes(messageBytes);
         const base64EncodedMessage = base64Decoder.decode(bytes);
         return await this.signWithVault(base64EncodedMessage, abortSignal);
     }

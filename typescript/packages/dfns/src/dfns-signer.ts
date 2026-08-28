@@ -6,6 +6,7 @@ import {
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
+    normalizeMessageBytes,
     signBatchStaggered,
     SignerErrorCode,
     SolanaMessageSigner,
@@ -222,10 +223,7 @@ class DfnsSigner<TAddress extends string = string>
         return await signBatchStaggered(
             messages,
             async message => {
-                const messageBytes =
-                    message.content instanceof Uint8Array
-                        ? message.content
-                        : new Uint8Array(Array.from(message.content));
+                const messageBytes = normalizeMessageBytes(message.content);
                 const signatureBytes = await this.sendSignatureRequest(
                     {
                         kind: 'Message',

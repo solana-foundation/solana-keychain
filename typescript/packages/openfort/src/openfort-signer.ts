@@ -8,6 +8,7 @@ import {
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
     normalizeBaseUrl,
+    normalizeMessageBytes,
     signBatchStaggered,
     SignerErrorCode,
     SolanaMessageSigner,
@@ -210,10 +211,7 @@ class OpenfortSigner<TAddress extends string = string>
         return await signBatchStaggered(
             messages,
             async message => {
-                const messageBytes =
-                    message.content instanceof Uint8Array
-                        ? message.content
-                        : new Uint8Array(Array.from(message.content));
+                const messageBytes = normalizeMessageBytes(message.content);
                 const signatureBytes = await this.signBytes(messageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: messageBytes,
@@ -238,7 +236,7 @@ class OpenfortSigner<TAddress extends string = string>
         return await signBatchStaggered(
             transactions,
             async transaction => {
-                const messageBytes = new Uint8Array(transaction.messageBytes);
+                const messageBytes = normalizeMessageBytes(transaction.messageBytes);
                 const signatureBytes = await this.signBytes(messageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: messageBytes,

@@ -248,6 +248,8 @@ jobs:
             pnpm -F @solana/keychain run typecheck
             pnpm -F @solana/keychain-kit-plugin run typecheck
           fi
+      - name: Run unit tests for @solana/keychain-core
+        run: pnpm -F @solana/keychain-core run test:unit
       - name: Run unit tests for @solana/keychain-kit-plugin
         if: ${{ needs.resolve-signers.outputs.ts_all_signers_enabled == 'true' }}
         run: pnpm -F @solana/keychain-kit-plugin run test:unit

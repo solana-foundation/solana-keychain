@@ -5,6 +5,7 @@ import {
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
+    normalizeMessageBytes,
     signBatchStaggered,
     SignerErrorCode,
     SolanaMessageSigner,
@@ -213,10 +214,7 @@ class GcpKmsSigner<TAddress extends string = string>
         return await signBatchStaggered(
             messages,
             async message => {
-                const messageBytes =
-                    message.content instanceof Uint8Array
-                        ? message.content
-                        : new Uint8Array(Array.from(message.content));
+                const messageBytes = normalizeMessageBytes(message.content);
                 const signatureBytes = await this.signBytes(messageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: messageBytes,
@@ -243,7 +241,7 @@ class GcpKmsSigner<TAddress extends string = string>
         return await signBatchStaggered(
             transactions,
             async transaction => {
-                const txMessageBytes = new Uint8Array(transaction.messageBytes);
+                const txMessageBytes = normalizeMessageBytes(transaction.messageBytes);
                 const signatureBytes = await this.signBytes(txMessageBytes, config?.abortSignal);
                 await assertSignatureValid({
                     data: txMessageBytes,

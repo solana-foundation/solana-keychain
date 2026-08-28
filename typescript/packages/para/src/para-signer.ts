@@ -6,6 +6,7 @@ import {
     createSignatureDictionary,
     fetchSignerJson,
     normalizeBaseUrl,
+    normalizeMessageBytes,
     signBatchStaggered,
     SignerErrorCode,
     SolanaMessageSigner,
@@ -220,7 +221,7 @@ class ParaSigner<TAddress extends string = string>
     }
 
     private async signBytes(data: ArrayLike<number>, abortSignal?: AbortSignal): Promise<SignatureBytes> {
-        const bytes = data instanceof Uint8Array ? data : new Uint8Array(Array.from(data));
+        const bytes = normalizeMessageBytes(data);
         const hexData = getBase16Decoder().decode(bytes);
 
         const url = `${this.apiBaseUrl}/v1/wallets/${this.walletId}/sign-raw`;
