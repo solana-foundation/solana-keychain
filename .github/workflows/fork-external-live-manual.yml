@@ -188,9 +188,11 @@ jobs:
       - name: Validate PR and capture head SHA
         id: pr
         uses: actions/github-script@v9
+        env:
+          PR_NUMBER_INPUT: ${{ inputs.pr_number }}
         with:
           script: |
-            const rawPrNumber = '${{ inputs.pr_number }}';
+            const rawPrNumber = process.env.PR_NUMBER_INPUT;
             const prNumber = Number(rawPrNumber);
             if (!Number.isInteger(prNumber) || prNumber <= 0) {
               core.setFailed(`Invalid pr_number input: ${rawPrNumber}`);
@@ -384,10 +386,13 @@ jobs:
       - name: Verify PR head SHA is unchanged
         id: verify-sha
         uses: actions/github-script@v9
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
         with:
           script: |
-            const prNumber = Number('${{ steps.pr.outputs.pr_number }}');
-            const expectedSha = '${{ steps.pr.outputs.head_sha }}';
+            const prNumber = Number(process.env.PR_NUMBER);
+            const expectedSha = process.env.HEAD_SHA;
 
             const { data: pr } = await github.rest.pulls.get({
               owner: context.repo.owner,
@@ -407,11 +412,15 @@ jobs:
       - name: Post marker and rerun gate
         if: success()
         uses: actions/github-script@v9
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.verify-sha.outputs.head_sha }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
         with:
           script: |
-            const prNumber = Number('${{ steps.pr.outputs.pr_number }}');
-            const headSha = '${{ steps.verify-sha.outputs.head_sha }}';
-            const headRef = '${{ steps.pr.outputs.head_ref }}';
+            const prNumber = Number(process.env.PR_NUMBER);
+            const headSha = process.env.HEAD_SHA;
+            const headRef = process.env.HEAD_REF;
             const marker = `fork-external-live-pass:${headSha}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
