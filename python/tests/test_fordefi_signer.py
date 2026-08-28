@@ -690,6 +690,25 @@ async def test_sign_transaction_native_success() -> None:
 
 
 @respx.mock
+async def test_a_completed_native_send_leaves_no_id_in_the_pending_slot() -> None:
+    """A stale id would send a caller reconciling a transaction they already hold
+    the signature for."""
+    keypair = Keypair()
+    pending = PendingTransactionId()
+    signer = make_native_signer(keypair, chain="solana_devnet", pending_transaction_id=pending)
+    raw_transaction, signature = make_signed_wire_transaction(keypair)
+    mock_sign_flow(
+        status_response("signed"),
+        status_response("completed", raw_transaction=raw_transaction),
+    )
+
+    result = await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
+
+    assert result == signature
+    assert pending.get() is None
+
+
+@respx.mock
 async def test_sign_transaction_native_missing_raw_transaction() -> None:
     keypair = Keypair()
     signer = make_native_signer(keypair, chain="solana_devnet")
