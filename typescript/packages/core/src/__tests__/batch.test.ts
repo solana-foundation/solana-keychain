@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { signBatchStaggered, validateRequestDelayMs } from '../batch.js';
+import { signBatchSequential, signBatchStaggered, validateRequestDelayMs } from '../batch.js';
+import { SignerError, SignerErrorCode, throwSignerError } from '../errors.js';
 
 describe('validateRequestDelayMs', () => {
     afterEach(() => {
@@ -102,5 +103,86 @@ describe('signBatchStaggered', () => {
                 0,
             ),
         ).rejects.toThrow('nope');
+    });
+});
+
+describe('signBatchSequential', () => {
+    it('signs items one at a time, never starting one before the previous finishes', async () => {
+        const inFlight: number[] = [];
+        let concurrent = 0;
+
+        const results = await signBatchSequential(
+            [1, 2, 3],
+            async (item, index) => {
+                concurrent += 1;
+                inFlight.push(concurrent);
+                await Promise.resolve();
+                concurrent -= 1;
+                return item * 10 + index;
+            },
+            0,
+            'completedSignatures',
+        );
+
+        expect(results).toEqual([10, 21, 32]);
+        expect(inFlight).toEqual([1, 1, 1]);
+    });
+
+    it('submits nothing past the failure and reports what completed', async () => {
+        const attempted: number[] = [];
+
+        const error = await signBatchSequential(
+            [1, 2, 3],
+            async item => {
+                attempted.push(item);
+                if (item === 2) {
+                    throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
+                        message: 'unresolved',
+                        providerTransactionId: 'tx-2',
+                    });
+                }
+                return `signed-${item}`;
+            },
+            0,
+            'completedSignatures',
+        ).then(
+            () => {
+                throw new Error('expected the failing item to reject');
+            },
+            (thrown: SignerError) => thrown,
+        );
+
+        expect(attempted).toEqual([1, 2]);
+        expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
+        // The failing item's own context survives alongside the batch position.
+        expect(error.context).toMatchObject({
+            completedSignatures: ['signed-1'],
+            failedIndex: 1,
+            providerTransactionId: 'tx-2',
+        });
+    });
+
+    it('rethrows a non-SignerError unchanged', async () => {
+        const reason = new Error('not ours');
+        await expect(
+            signBatchSequential(
+                [1],
+                () => {
+                    throw reason;
+                },
+                0,
+                'completedSignatures',
+            ),
+        ).rejects.toBe(reason);
+    });
+
+    it('rejects with the abort reason for an already-aborted signal without calling fn', async () => {
+        const reason = new Error('already cancelled');
+        const fn = vi.fn(async (item: number) => item);
+
+        await expect(signBatchSequential([1, 2], fn, 0, 'completedSignatures', AbortSignal.abort(reason))).rejects.toBe(
+            reason,
+        );
+        expect(fn).not.toHaveBeenCalled();
     });
 });

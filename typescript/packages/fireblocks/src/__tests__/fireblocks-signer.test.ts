@@ -12,7 +12,7 @@ import {
 } from '@solana/kit';
 import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { assertIsSolanaTransactionSigner, assertSignatureValid } from '@solana/keychain-core';
+import { assertIsSolanaTransactionSigner, assertSignatureValid, type SignerError } from '@solana/keychain-core';
 
 import { createFireblocksSigner } from '../fireblocks-signer.js';
 import { TEST_API_KEY, TEST_RSA_PRIVATE_KEY, TEST_VAULT_ACCOUNT_ID } from './setup.js';
@@ -813,6 +813,34 @@ describe('createFireblocksSigner', () => {
             await expect(signer.signTransactions([transaction])).rejects.toMatchObject({
                 code: 'SIGNER_BROADCAST_UNCONFIRMED',
             });
+        });
+
+        it('stops a PROGRAM_CALL batch at the first failure and reports what completed', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            mockCreateAndPoll({
+                id: 'tx-789',
+                signedMessages: [{ signature: { fullSig: '42'.repeat(64) } }],
+                status: 'SIGNED',
+            });
+            mockFetch.mockResolvedValueOnce({
+                ok: false,
+                status: 503,
+                text: async () => 'unavailable',
+            });
+
+            const error = await signer.signTransactions([transaction, transaction, transaction]).then(
+                () => {
+                    throw new Error('expected the failing create to reject');
+                },
+                (thrown: SignerError) => thrown,
+            );
+
+            expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            // The third transaction is never created, so no PROGRAM_CALL is left
+            // behind past the failure.
+            expect(error.context?.failedIndex).toBe(1);
+            expect(error.context?.completedSignatures).toHaveLength(1);
+            expect(mockFetch.mock.calls).toHaveLength(4);
         });
 
         it('rejects a v1 message before any PROGRAM_CALL is created', async () => {

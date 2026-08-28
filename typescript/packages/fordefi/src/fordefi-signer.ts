@@ -13,6 +13,7 @@ import {
     normalizeBaseUrl,
     providerMayHaveAccepted,
     providerStatus,
+    signBatchSequential,
     signBatchStaggered,
     SignerError,
     SignerErrorCode,
@@ -525,8 +526,10 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         transactions: readonly (Transaction | (Transaction & TransactionWithLifetime))[],
         config?: TransactionModifyingSignerConfig,
     ): Promise<readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[]> {
-        config?.abortSignal?.throwIfAborted();
-        return await signBatchStaggered(
+        // Each submit is a Fordefi-side create, so the batch runs one at a time:
+        // a concurrent failure would abandon siblings Fordefi has already
+        // accepted and signed.
+        return await signBatchSequential(
             transactions,
             async transaction => {
                 config?.abortSignal?.throwIfAborted();
@@ -538,6 +541,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
                 return await this.finishNativeManualSigning(txId, transaction, config?.abortSignal);
             },
             this.requestDelayMs,
+            'completedTransactions',
             config?.abortSignal,
         );
     }
@@ -660,8 +664,10 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
             });
         }
 
-        config?.abortSignal?.throwIfAborted();
-        return await signBatchStaggered(
+        // Auto mode broadcasts every accepted submit, so the batch runs one at a
+        // time: a concurrent failure would discard both a sibling's unconfirmed
+        // transaction id and the signature of one already on chain.
+        return await signBatchSequential(
             transactions,
             async transaction => {
                 config?.abortSignal?.throwIfAborted();
@@ -707,6 +713,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
                 }
             },
             this.requestDelayMs,
+            'completedSignatures',
             config?.abortSignal,
         );
     }

@@ -47,11 +47,29 @@ func SignMessages(ctx context.Context, s SolanaSigner, messages [][]byte, opts B
 	return out, nil
 }
 
+// BatchServerSideEffects is implemented by a TransactionSigner whose
+// SignTransaction leaves a provider-side request the caller may have to
+// reconcile, even though the signing itself is local-verifiable. Such a signer
+// is batched one transaction at a time.
+type BatchServerSideEffects interface {
+	// HasServerSideEffects reports whether the signer's current mode creates a
+	// provider-side request per transaction.
+	HasServerSideEffects() bool
+}
+
 // SignTransactions signs each transaction with s concurrently, preserving order.
 // See SignMessages for error and concurrency semantics. Only a TransactionSigner
 // can be batched: for a SendingSigner the single nil, err result would hide which
 // transactions the provider already executed.
+//
+// A signer reporting server-side effects through BatchServerSideEffects is signed
+// sequentially instead, and a failure returns the transactions completed before it
+// alongside the error rather than discarding them.
 func SignTransactions(ctx context.Context, s TransactionSigner, txs []*solana.Transaction, opts BatchOptions) ([]SignedTransaction, error) {
+	if effectful, ok := s.(BatchServerSideEffects); ok && effectful.HasServerSideEffects() {
+		return signTransactionsSequential(ctx, s, txs, opts)
+	}
+
 	out := make([]SignedTransaction, len(txs))
 	g, ctx := errgroup.WithContext(ctx)
 	if opts.MaxConcurrency > 0 {
@@ -73,6 +91,26 @@ func SignTransactions(ctx context.Context, s TransactionSigner, txs []*solana.Tr
 	}
 	if err := g.Wait(); err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// signTransactionsSequential signs one transaction at a time, stopping at the
+// first error. The transactions completed before it are returned with the error:
+// each one left a provider-side request, so discarding them would hide work the
+// caller has to reconcile.
+func signTransactionsSequential(ctx context.Context, s TransactionSigner, txs []*solana.Transaction, opts BatchOptions) ([]SignedTransaction, error) {
+	out := make([]SignedTransaction, 0, len(txs))
+	start := time.Now()
+	for i := range txs {
+		if err := stagger(ctx, start, i, opts.RequestDelay); err != nil {
+			return out, err
+		}
+		signed, err := s.SignTransaction(ctx, txs[i])
+		if err != nil {
+			return out, err
+		}
+		out = append(out, signed)
 	}
 	return out, nil
 }

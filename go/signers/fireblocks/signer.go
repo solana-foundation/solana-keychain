@@ -92,6 +92,12 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 	return s.signRawBytes(ctx, message)
 }
 
+// HasServerSideEffects reports whether signing creates a Fireblocks-side request
+// per transaction, which PROGRAM_CALL does and RAW does not. A batch of
+// PROGRAM_CALL transactions is therefore signed sequentially, so a failure cannot
+// abandon siblings Fireblocks has already accepted.
+func (s *Signer) HasServerSideEffects() bool { return s.useProgramCall }
+
 // SignTransaction signs tx and returns the encoded transaction, this signer's
 // signature, and its completeness. The transaction's message bytes are signed
 // remotely with a RAW operation (a sign-only PROGRAM_CALL when

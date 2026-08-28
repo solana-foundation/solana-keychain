@@ -723,6 +723,38 @@ describe('createFordefiSigner', () => {
             });
         });
 
+        it('stops a batch at the first failure and reports the sibling that landed', async () => {
+            const { config, fixture } = await setupNativeBroadcast(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-first'))
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction))
+                .mockResolvedValueOnce({
+                    ok: false,
+                    status: 503,
+                    text: async () => 'unavailable',
+                } as Response);
+
+            const signer = await createFordefiSigner(config);
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [fixture.feePayer]: null },
+            } as never;
+
+            const error = await signer.signAndSendTransactions([mockTx, mockTx, mockTx]).then(
+                () => {
+                    throw new Error('expected the failing submit to reject');
+                },
+                (thrown: SignerError) => thrown,
+            );
+
+            expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            // The first transaction is broadcast and its signature survives; the
+            // third is never submitted, so auto mode cannot broadcast past a failure.
+            expect(error.context?.failedIndex).toBe(1);
+            expect(error.context?.completedSignatures).toStrictEqual([fixture.signature]);
+            expect(vi.mocked(fetch).mock.calls).toHaveLength(3);
+        });
+
         it('keeps a transaction id named in a failed submit body', async () => {
             vi.mocked(fetch).mockResolvedValueOnce({
                 ok: false,

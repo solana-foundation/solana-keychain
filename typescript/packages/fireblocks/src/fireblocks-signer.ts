@@ -9,6 +9,7 @@ import {
     fetchSignerJson,
     providerMayHaveAccepted,
     providerStatus,
+    signBatchSequential,
     signBatchStaggered,
     SignerError,
     SignerErrorCode,
@@ -495,25 +496,35 @@ class FireblocksSigner<TAddress extends string = string>
     ): Promise<readonly SignatureDictionary[]> {
         this.ensureInitialized();
 
-        return await signBatchStaggered(
-            transactions,
-            async transaction => {
-                const signatureBytes = this.useProgramCall
-                    ? await this.signProgramCall(transaction, config?.abortSignal)
-                    : await this.signRawBytes(new Uint8Array(transaction.messageBytes), config?.abortSignal);
-                await assertSignatureValid({
-                    data: transaction.messageBytes,
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-                return createSignatureDictionary({
-                    signature: signatureBytes,
-                    signerAddress: this.address,
-                });
-            },
-            this.requestDelayMs,
-            config?.abortSignal,
-        );
+        const signOne = async (transaction: (typeof transactions)[number]): Promise<SignatureDictionary> => {
+            const signatureBytes = this.useProgramCall
+                ? await this.signProgramCall(transaction, config?.abortSignal)
+                : await this.signRawBytes(new Uint8Array(transaction.messageBytes), config?.abortSignal);
+            await assertSignatureValid({
+                data: transaction.messageBytes,
+                signature: signatureBytes,
+                signerAddress: this.address,
+            });
+            return createSignatureDictionary({
+                signature: signatureBytes,
+                signerAddress: this.address,
+            });
+        };
+
+        // A PROGRAM_CALL create is a Fireblocks-side request the caller may have
+        // to reconcile, so that mode runs one item at a time: a concurrent
+        // failure would discard sibling transaction ids. RAW signing has no
+        // server-side effect worth serializing.
+        if (this.useProgramCall) {
+            return await signBatchSequential(
+                transactions,
+                signOne,
+                this.requestDelayMs,
+                'completedSignatures',
+                config?.abortSignal,
+            );
+        }
+        return await signBatchStaggered(transactions, signOne, this.requestDelayMs, config?.abortSignal);
     }
 
     /**

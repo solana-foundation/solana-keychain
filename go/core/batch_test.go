@@ -107,3 +107,60 @@ func TestStaggerAnchorsToBatchStart(t *testing.T) {
 		t.Fatal("stagger slept relative to slot acquisition instead of batch start")
 	}
 }
+
+// effectfulSigner reports server-side effects, records the order of its calls,
+// and fails the transaction whose message names failAt.
+type effectfulSigner struct {
+	countingSigner
+	failAt   byte
+	signed   []byte
+	inFlight atomic.Int32
+	maxSeen  atomic.Int32
+}
+
+func (e *effectfulSigner) HasServerSideEffects() bool { return true }
+
+func (e *effectfulSigner) SignTransaction(_ context.Context, tx *solana.Transaction) (SignedTransaction, error) {
+	if seen := e.inFlight.Add(1); seen > e.maxSeen.Load() {
+		e.maxSeen.Store(seen)
+	}
+	defer e.inFlight.Add(-1)
+
+	var marker byte
+	if len(tx.Message.AccountKeys) > 0 {
+		marker = tx.Message.AccountKeys[0][0]
+	}
+	if marker == e.failAt {
+		return SignedTransaction{}, NewSignerError(CodeBroadcastUnconfirmed, "unresolved")
+	}
+	e.signed = append(e.signed, marker)
+	return SignedTransaction{}, nil
+}
+
+// A signer with server-side effects is batched one transaction at a time, and a
+// failure returns the transactions completed before it: each left a provider-side
+// request the caller has to reconcile, so discarding them would hide that work.
+func TestSignTransactionsSerializesASignerWithServerSideEffects(t *testing.T) {
+	markedTx := func(marker byte) *solana.Transaction {
+		return &solana.Transaction{
+			Message: solana.Message{AccountKeys: []solana.PublicKey{{marker}}},
+		}
+	}
+
+	s := &effectfulSigner{failAt: 2}
+	out, err := SignTransactions(context.Background(), s,
+		[]*solana.Transaction{markedTx(1), markedTx(2), markedTx(3)}, BatchOptions{})
+
+	if code, _ := CodeOf(err); code != CodeBroadcastUnconfirmed {
+		t.Fatalf("got %s, want BROADCAST_UNCONFIRMED", code)
+	}
+	if len(out) != 1 {
+		t.Errorf("got %d completed transactions, want the one signed before the failure", len(out))
+	}
+	if string(s.signed) != string([]byte{1}) {
+		t.Errorf("signed %v, want only the transaction before the failure", s.signed)
+	}
+	if got := s.maxSeen.Load(); got != 1 {
+		t.Errorf("max concurrent sign calls = %d, want 1", got)
+	}
+}

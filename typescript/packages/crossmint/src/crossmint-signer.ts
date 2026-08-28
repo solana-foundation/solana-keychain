@@ -11,6 +11,7 @@ import {
     providerMayHaveAccepted,
     providerStatus,
     sanitizeRemoteErrorResponse,
+    signBatchSequential,
     SignerError,
     SignerErrorCode,
     SolanaSendingSigner,
@@ -206,38 +207,16 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
         transactions: readonly (Transaction | (Transaction & TransactionWithLifetime))[],
         config?: TransactionSendingSignerConfig,
     ): Promise<readonly SignatureBytes[]> {
-        config?.abortSignal?.throwIfAborted();
-
-        // Sign sequentially, not via Promise.all: each transaction has
-        // irreversible server-side effects (createTransaction, and auto-approval
-        // when signerSecret is set). Concurrent submission means a failure in one
-        // transaction would abandon siblings that Crossmint has already created
-        // and may execute, leading to duplicate spends on retry. Sequential
-        // execution stops on the first error before any further transaction is
-        // created.
-        const results: SignatureBytes[] = [];
-        for (const [index, transaction] of transactions.entries()) {
-            if (this.requestDelayMs > 0 && index > 0) {
-                await abortableDelay(this.requestDelayMs, config?.abortSignal);
-            }
-            config?.abortSignal?.throwIfAborted();
-            // A rejection abandons the signatures already collected, so they and
-            // the failing index travel on the error: the transactions before it
-            // are landed, and only the failing one needs reconciling.
-            try {
-                results.push(await this.signTransactionManaged(transaction, config?.abortSignal));
-            } catch (error) {
-                if (!(error instanceof SignerError)) {
-                    throw error;
-                }
-                throwSignerError(error.code, {
-                    ...error.context,
-                    completedSignatures: [...results],
-                    failedIndex: index,
-                });
-            }
-        }
-        return results;
+        // Each transaction has irreversible server-side effects
+        // (createTransaction, and auto-approval when signerSecret is set), so
+        // the batch runs one at a time.
+        return await signBatchSequential(
+            transactions,
+            async transaction => await this.signTransactionManaged(transaction, config?.abortSignal),
+            this.requestDelayMs,
+            'completedSignatures',
+            config?.abortSignal,
+        );
     }
 
     async isAvailable(): Promise<boolean> {

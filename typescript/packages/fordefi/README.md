@@ -102,7 +102,7 @@ const signer = await createFordefiSigner({
 | `apiBaseUrl` | No | API base URL (default: `https://api.fordefi.com`) |
 | `pollIntervalMs` | No | Polling interval in ms (default: 2000) |
 | `maxPollAttempts` | No | Positive integer max polling attempts (default: 50) |
-| `requestDelayMs` | No | Delay between concurrent requests in ms (default: 0) |
+| `requestDelayMs` | No | Delay between requests in ms (default: 0). Native modes batch sequentially, so this is the gap between items |
 | `requestTimeoutMs` | No | Per-request HTTP timeout in ms (default: 30000) |
 
 ### Custom API-request signer (KMS/HSM)

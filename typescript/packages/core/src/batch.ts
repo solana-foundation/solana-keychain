@@ -1,5 +1,5 @@
 import { abortableDelay } from './abort.js';
-import { SignerErrorCode, throwSignerError } from './errors.js';
+import { SignerError, SignerErrorCode, throwSignerError } from './errors.js';
 
 const MAX_RECOMMENDED_REQUEST_DELAY_MS = 3000;
 
@@ -49,4 +49,53 @@ export async function signBatchStaggered<TItem, TResult>(
             return await fn(item, index);
         }),
     );
+}
+
+/**
+ * Run `fn` over `items` one at a time, stopping at the first rejection, for a
+ * backend whose per-item work has irreversible server-side effects.
+ *
+ * Concurrent submission would abandon siblings the provider has already
+ * accepted and may execute, so a failure in one item leaves duplicate-spend
+ * risk on retry. Running in order means nothing past the failure is ever
+ * submitted, and the results collected before it travel on the error under
+ * `completedKey` alongside `failedIndex`: the items before the failure are
+ * done, and only the failing one needs reconciling.
+ *
+ * @param items - The messages or transactions to sign.
+ * @param fn - Signer-specific function that signs one item.
+ * @param delayMs - Gap between items in ms (a backend's `requestDelayMs`).
+ * @param completedKey - Error-context key the collected results are attached
+ * under, naming what they are (e.g. `completedSignatures`).
+ * @param abortSignal - Checked before each item; items already handed to `fn`
+ * are cancelled by `fn` itself.
+ */
+export async function signBatchSequential<TItem, TResult>(
+    items: readonly TItem[],
+    fn: (item: TItem, index: number) => Promise<TResult>,
+    delayMs: number,
+    completedKey: string,
+    abortSignal?: AbortSignal,
+): Promise<readonly TResult[]> {
+    abortSignal?.throwIfAborted();
+    const results: TResult[] = [];
+    for (const [index, item] of items.entries()) {
+        if (delayMs > 0 && index > 0) {
+            await abortableDelay(delayMs, abortSignal);
+        }
+        abortSignal?.throwIfAborted();
+        try {
+            results.push(await fn(item, index));
+        } catch (error) {
+            if (!(error instanceof SignerError)) {
+                throw error;
+            }
+            throwSignerError(error.code, {
+                ...error.context,
+                [completedKey]: [...results],
+                failedIndex: index,
+            });
+        }
+    }
+    return results;
 }
