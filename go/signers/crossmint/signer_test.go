@@ -351,7 +351,7 @@ func TestSignAndSendTransactionSuccess(t *testing.T) {
 		if marshalErr != nil {
 			t.Errorf("serialize submitted message: %v", marshalErr)
 		}
-		digest := sha256.Sum256(submittedMessage)
+		digest := sha256.Sum256(append([]byte("crossmint:solana:0::"), submittedMessage...))
 		key := digest[:16]
 		key[6] = (key[6] & 0x0f) | 0x40
 		key[8] = (key[8] & 0x3f) | 0x80
@@ -401,6 +401,20 @@ func assertUnconfirmedWithoutID(t *testing.T, err error, wantStatus int) {
 	}
 	if se != nil && se.ProviderStatus != wantStatus {
 		t.Errorf("provider status = %d, want %d", se.ProviderStatus, wantStatus)
+	}
+}
+
+// Pins the exact bytes hashed into the idempotency key. Every language must
+// derive the same key from the same locator and message.
+func TestNamespacedKeyInputIsNamespacedBySignerLocator(t *testing.T) {
+	for _, tc := range []struct{ locator, want string }{
+		{"", "crossmint:solana:0::MSG"},
+		{"server:abc", "crossmint:solana:10:server:abc:MSG"},
+	} {
+		s := &Signer{signerLocator: tc.locator}
+		if got := string(s.namespacedKeyInput([]byte("MSG"))); got != tc.want {
+			t.Errorf("namespacedKeyInput(%q) = %q, want %q", tc.locator, got, tc.want)
+		}
 	}
 }
 

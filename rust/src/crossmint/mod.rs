@@ -568,6 +568,19 @@ impl CrossmintSigner {
         Ok(signature)
     }
 
+    /// Bind the idempotency key to the signer locator as well as the message.
+    /// The create body carries the locator, so two signers on one wallet
+    /// submitting identical bytes are distinct operations and must not
+    /// deduplicate onto each other. The locator is length-delimited because it
+    /// contains colons itself. The wallet locator is left out: it is already the
+    /// request path.
+    fn namespaced_key_input(&self, message_bytes: &[u8]) -> Vec<u8> {
+        let locator = self.signer.as_deref().unwrap_or("");
+        let mut input = format!("crossmint:solana:{}:{}:", locator.len(), locator).into_bytes();
+        input.extend_from_slice(message_bytes);
+        input
+    }
+
     fn extract_signature_from_serialized_transaction(
         &self,
         serialized_transaction: &str,
@@ -668,7 +681,8 @@ impl CrossmintSigner {
     /// response carries no readable transaction id returns `BroadcastUnconfirmed`
     /// with no id.
     ///
-    /// Each create carries an `x-idempotency-key` derived from the message bytes,
+    /// Each create carries an `x-idempotency-key` derived from the message bytes
+    /// and the signer locator,
     /// so replaying these exact bytes cannot create a second transaction; a
     /// rebuilt transaction derives a different key and executes as a new
     /// transfer.
@@ -685,7 +699,8 @@ impl CrossmintSigner {
         let expected_message = transaction.message.serialize();
         let serialized = serialize_wire_transaction(transaction)?;
         let transaction_b58 = bs58::encode(serialized).into_string();
-        let idempotency_key = idempotency_key_from_message(&expected_message);
+        let idempotency_key =
+            idempotency_key_from_message(&self.namespaced_key_input(&expected_message));
 
         let create_response = self
             .create_transaction(transaction_b58, &idempotency_key)

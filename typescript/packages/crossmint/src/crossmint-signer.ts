@@ -75,9 +75,10 @@ let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
  * readable transaction id rejects with `BROADCAST_UNCONFIRMED` and no
  * `providerTransactionId`.
  *
- * Each create carries an `x-idempotency-key` derived from the message bytes, so
- * replaying these exact bytes cannot create a second transaction; a rebuilt
- * transaction derives a different key and executes as a new transfer.
+ * Each create carries an `x-idempotency-key` derived from the message bytes and
+ * the signer locator, so replaying these exact bytes cannot create a second
+ * transaction; a rebuilt transaction derives a different key and executes as a
+ * new transfer.
  *
  * A batch signs sequentially and stops on the first rejection, whose
  * `context.failedIndex` and `context.completedSignatures` carry the failing
@@ -426,7 +427,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
             'POST',
             body,
             abortSignal,
-            await idempotencyKeyFromMessage(transaction.messageBytes),
+            await idempotencyKeyFromMessage(this.namespacedKeyInput(transaction.messageBytes)),
         );
         try {
             return parseTransactionResponse(response, 'create transaction');
@@ -482,6 +483,24 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
             providerName: 'Crossmint',
             url,
         });
+    }
+
+    /**
+     * Binds the idempotency key to the signer locator as well as the message. The
+     * create body carries the locator, so two signers on one wallet submitting
+     * identical bytes are distinct operations and must not deduplicate onto each
+     * other. The locator is length-delimited because it contains colons itself.
+     * The wallet locator is left out: it is already the request path.
+     */
+    private namespacedKeyInput(messageBytes: Transaction['messageBytes']): Uint8Array {
+        const locator = new TextEncoder().encode(this.signer ?? '');
+        const prefix = new TextEncoder().encode(`crossmint:solana:${locator.length}:`);
+        const input = new Uint8Array(prefix.length + locator.length + 1 + messageBytes.length);
+        input.set(prefix);
+        input.set(locator, prefix.length);
+        input.set([0x3a], prefix.length + locator.length);
+        input.set(messageBytes, prefix.length + locator.length + 1);
+        return input;
     }
 
     private async extractSignature(response: CrossmintTransactionResponse): Promise<SignatureBytes> {

@@ -470,13 +470,25 @@ class CrossmintSigner(SendingSigner):
             "Unable to extract signature from Crossmint transaction response",
         )
 
+    def _namespaced_key_input(self, message_bytes: bytes) -> bytes:
+        """Bind the idempotency key to the signer locator as well as the message.
+
+        The create body carries the locator, so two signers on one wallet submitting
+        identical bytes are distinct operations and must not deduplicate onto each
+        other. The locator is length-delimited because it contains colons itself. The
+        wallet locator is left out: it is already the request path.
+        """
+        locator = (self._signer or "").encode()
+        return b"crossmint:solana:%d:%s:" % (len(locator), locator) + message_bytes
+
     async def _execute_managed_transaction(self, transaction: VersionedTransaction) -> Signature:
         self._initialized_pubkey()
         expected_message = signed_message_bytes(transaction.message)
         transaction_b58 = base58.b58encode(bytes(transaction)).decode("ascii")
 
         create_response = await self._create_transaction(
-            transaction_b58, idempotency_key_from_message(expected_message)
+            transaction_b58,
+            idempotency_key_from_message(self._namespaced_key_input(expected_message)),
         )
         provider_transaction_id = str(create_response["id"])
         # Post-create failures leave an outcome Crossmint may still execute, so
@@ -532,9 +544,9 @@ class CrossmintSigner(SendingSigner):
         ``provider_transaction_id``.
 
         Each create carries an ``x-idempotency-key`` derived from the message
-        bytes, so replaying these exact bytes cannot create a second
-        transaction; a rebuilt transaction derives a different key and executes
-        as a new transfer.
+        bytes and the signer locator, so replaying these exact bytes cannot
+        create a second transaction; a rebuilt transaction derives a different
+        key and executes as a new transfer.
 
         A cancellation cannot carry a structured error: it must be re-raised as
         ``asyncio.CancelledError``, and awaiting a cancelled task hands the

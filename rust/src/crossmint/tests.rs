@@ -14,6 +14,14 @@ fn assert_caller_transaction_untouched(tx: &VersionedTransaction) {
     );
 }
 
+/// The key the signer must derive: the message namespaced by the signer locator,
+/// so two signers on one wallet cannot deduplicate onto each other.
+fn expected_idempotency_key(locator: &str, message_bytes: &[u8]) -> String {
+    let mut input = format!("crossmint:solana:{}:{}:", locator.len(), locator).into_bytes();
+    input.extend_from_slice(message_bytes);
+    idempotency_key_from_message(&input)
+}
+
 fn wallet_response(address: &str) -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_json(serde_json::json!({
         "chainType": "solana",
@@ -173,6 +181,24 @@ fn test_new_rejects_insecure_api_base_url() {
     assert!(matches!(err, SignerError::ConfigError(_)));
 }
 
+/// Pins the exact bytes hashed into the idempotency key. Every language must
+/// derive the same key from the same locator and message.
+#[test]
+fn test_the_idempotency_key_input_is_namespaced_by_the_signer_locator() {
+    let mut signer = create_test_signer("https://api.crossmint.com", 1, 1);
+
+    assert_eq!(
+        signer.namespaced_key_input(b"MSG"),
+        b"crossmint:solana:0::MSG".to_vec()
+    );
+
+    signer.signer = Some("server:abc".to_string());
+    assert_eq!(
+        signer.namespaced_key_input(b"MSG"),
+        b"crossmint:solana:10:server:abc:MSG".to_vec()
+    );
+}
+
 #[tokio::test]
 async fn test_init_success() {
     let server = MockServer::start().await;
@@ -305,7 +331,7 @@ async fn test_sign_and_send_transaction_success() {
     let on_chain_transaction =
         bs58::encode(bincode::serialize(&signed_remote_tx).unwrap()).into_string();
 
-    let expected_idempotency_key = idempotency_key_from_message(&local_tx.message.serialize());
+    let expected_idempotency_key = expected_idempotency_key("", &local_tx.message.serialize());
     Mock::given(method("POST"))
         .and(path("/2025-06-09/wallets/test-wallet/transactions"))
         .and(header("x-api-key", "test-api-key"))

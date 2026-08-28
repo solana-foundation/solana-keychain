@@ -1064,8 +1064,26 @@ describe('CrossmintSigner', () => {
             expect(body.params.signer).toBe('my-signer-id');
         });
 
+        // Pins the exact bytes hashed into the idempotency key. Every language must
+        // derive the same key from the same locator and message.
+        it('namespaces the idempotency key input by the signer locator', async () => {
+            vi.mocked(fetch).mockImplementation(() => Promise.resolve(mockWalletResponse()));
+            const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+            const plain = (await createCrossmintSigner(mockConfig)) as any;
+            expect(decode(plain.namespacedKeyInput(new TextEncoder().encode('MSG')))).toBe('crossmint:solana:0::MSG');
+
+            const withLocator = (await createCrossmintSigner({ ...mockConfig, signer: 'server:abc' })) as any;
+            expect(decode(withLocator.namespacedKeyInput(new TextEncoder().encode('MSG')))).toBe(
+                'crossmint:solana:10:server:abc:MSG',
+            );
+        });
+
         it('sends a deterministic x-idempotency-key on the create', async () => {
-            const digest = createHash('sha256').update(MOCK_MESSAGE_BYTES).digest().subarray(0, 16);
+            const digest = createHash('sha256')
+                .update(Buffer.concat([Buffer.from('crossmint:solana:0::'), MOCK_MESSAGE_BYTES]))
+                .digest()
+                .subarray(0, 16);
             digest[6] = (digest[6]! & 0x0f) | 0x40;
             digest[8] = (digest[8]! & 0x3f) | 0x80;
             const hex = digest.toString('hex');

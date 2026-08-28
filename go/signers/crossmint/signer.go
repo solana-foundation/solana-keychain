@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -142,7 +143,8 @@ func (s *Signer) SignMessage(_ context.Context, _ []byte) (solana.Signature, err
 // transaction with Crossmint before retrying. A create whose response carries no
 // readable transaction id returns CodeBroadcastUnconfirmed with no transaction id.
 //
-// Each create carries an x-idempotency-key derived from the message bytes, so
+// Each create carries an x-idempotency-key derived from the message bytes and
+// the signer locator, so
 // replaying these exact bytes cannot create a second transaction; a rebuilt
 // transaction derives a different key and executes as a new transfer.
 func (s *Signer) SignAndSendTransaction(ctx context.Context, tx *solana.Transaction) (solana.Signature, error) {
@@ -159,7 +161,8 @@ func (s *Signer) SignAndSendTransaction(ctx context.Context, tx *solana.Transact
 		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction", err)
 	}
 
-	createResponse, err := s.createTransaction(ctx, base58.Encode(serialized), core.IdempotencyKeyFromMessage(expectedMessage))
+	createResponse, err := s.createTransaction(ctx, base58.Encode(serialized),
+		core.IdempotencyKeyFromMessage(s.namespacedKeyInput(expectedMessage)))
 	if err != nil {
 		return solana.Signature{}, err
 	}
@@ -175,6 +178,16 @@ func (s *Signer) SignAndSendTransaction(ctx context.Context, tx *solana.Transact
 		return solana.Signature{}, core.NewBroadcastUnconfirmedError(createResponse.ID, detail)
 	}
 	return sig, nil
+}
+
+// namespacedKeyInput binds the idempotency key to the signer locator as well as
+// the message. The create body carries the locator, so two signers on one wallet
+// submitting identical bytes are distinct operations and must not deduplicate
+// onto each other. The locator is length-delimited because it contains colons
+// itself. The wallet locator is left out: it is already the request path.
+func (s *Signer) namespacedKeyInput(messageBytes []byte) []byte {
+	prefix := "crossmint:solana:" + strconv.Itoa(len(s.signerLocator)) + ":" + s.signerLocator + ":"
+	return append([]byte(prefix), messageBytes...)
 }
 
 // finishManagedTransaction polls a created transaction to a terminal status and

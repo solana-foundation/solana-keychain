@@ -132,6 +132,16 @@ def test_invalid_config_rejected(overrides: dict[str, Any]) -> None:
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
+def test_the_idempotency_key_input_is_namespaced_by_the_signer_locator() -> None:
+    """Pins the exact bytes hashed into the idempotency key. Every language must
+    derive the same key from the same locator and message."""
+    signer = make_signer()
+    assert signer._namespaced_key_input(b"MSG") == b"crossmint:solana:0::MSG"
+
+    signer = make_signer(signer="server:abc")
+    assert signer._namespaced_key_input(b"MSG") == b"crossmint:solana:10:server:abc:MSG"
+
+
 @respx.mock
 async def test_init_resolves_wallet_with_encoded_locator() -> None:
     keypair = Keypair()
@@ -223,7 +233,11 @@ async def test_sign_and_send_transaction_success_from_embedded_transaction() -> 
     create_body = json.loads(respx.calls[1].request.content)
     assert "signer" not in create_body["params"]
     assert base58.b58decode(create_body["params"]["transaction"]) == unsigned_bytes
-    digest = bytearray(hashlib.sha256(signed_message_bytes(transaction.message)).digest()[:16])
+    digest = bytearray(
+        hashlib.sha256(
+            b"crossmint:solana:0::" + signed_message_bytes(transaction.message)
+        ).digest()[:16]
+    )
     digest[6] = (digest[6] & 0x0F) | 0x40
     digest[8] = (digest[8] & 0x3F) | 0x80
     assert respx.calls[1].request.headers["x-idempotency-key"] == str(
