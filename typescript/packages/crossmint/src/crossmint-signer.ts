@@ -3,6 +3,7 @@ import { getBase16Encoder, getBase58Decoder, getBase58Encoder, getBase64Encoder 
 import {
     abortableDelay,
     assertHttpsUrl,
+    assertSignatureValid,
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
     idempotencyKeyFromMessage,
@@ -309,7 +310,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
                 // ensures the approval is signed and submitted at most once.
                 continue;
             }
-            const terminalSignature = this.resolveTerminalStatus(response, approvalSubmitted);
+            const terminalSignature = await this.resolveTerminalStatus(response, approvalSubmitted);
             if (terminalSignature) {
                 return terminalSignature;
             }
@@ -318,7 +319,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
             response = await this.getTransaction(response.id, abortSignal);
         }
 
-        const terminalSignature = this.resolveTerminalStatus(response, approvalSubmitted);
+        const terminalSignature = await this.resolveTerminalStatus(response, approvalSubmitted);
         if (terminalSignature) {
             return terminalSignature;
         }
@@ -328,14 +329,14 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
         });
     }
 
-    private resolveTerminalStatus(
+    private async resolveTerminalStatus(
         response: CrossmintTransactionResponse,
         approvalSubmitted: boolean,
-    ): SignatureBytes | undefined {
+    ): Promise<SignatureBytes | undefined> {
         const status = response.status as CrossmintTransactionStatus;
         switch (status) {
             case 'success':
-                return this.extractSignature(response);
+                return await this.extractSignature(response);
             case 'failed':
                 return throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                     message: `Crossmint transaction failed: ${stringifyError(response.error)}`,
@@ -483,7 +484,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
         });
     }
 
-    private extractSignature(response: CrossmintTransactionResponse): SignatureBytes {
+    private async extractSignature(response: CrossmintTransactionResponse): Promise<SignatureBytes> {
         let embeddedError: unknown;
         if (response.onChain?.transaction) {
             let executedTransaction: Transaction | undefined;
@@ -496,8 +497,13 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
                 embeddedError = error;
             }
             if (executedTransaction) {
-                const [, feePayerSignature] = Object.entries(executedTransaction.signatures)[0] ?? [];
-                if (feePayerSignature) {
+                const [feePayer, feePayerSignature] = Object.entries(executedTransaction.signatures)[0] ?? [];
+                if (feePayer && feePayerSignature && feePayerSignature.some(byte => byte !== 0)) {
+                    await assertSignatureValid({
+                        data: executedTransaction.messageBytes,
+                        signature: feePayerSignature,
+                        signerAddress: feePayer as Address,
+                    });
                     return feePayerSignature;
                 }
                 embeddedError = new Error('Crossmint transaction carries no fee-payer signature');

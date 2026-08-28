@@ -524,6 +524,54 @@ async fn test_sign_and_send_transaction_accepts_unrelated_signer_key() {
     assert_caller_transaction_untouched(&local_tx);
 }
 
+/// A signature that does not cover the envelope it arrived in identifies no
+/// landed transaction, so returning it would send the caller to look up a
+/// transaction that does not exist and conclude nothing landed.
+#[tokio::test]
+async fn test_sign_and_send_transaction_rejects_a_signature_not_covering_the_returned_message() {
+    let server = MockServer::start().await;
+    let wallet_keypair = Keypair::new();
+    let wallet_pubkey = keypair_pubkey(&wallet_keypair);
+
+    Mock::given(method("GET"))
+        .and(path("/2025-06-09/wallets/test-wallet"))
+        .respond_with(wallet_response(&wallet_pubkey.to_string()))
+        .mount(&server)
+        .await;
+
+    let mut signer = create_test_signer(&server.uri(), 1, 2);
+    signer.init().await.unwrap();
+
+    let local_tx = create_test_transaction(&wallet_pubkey);
+    let mut returned_tx = create_test_transaction(&wallet_pubkey);
+    let signature = keypair_sign_message(&wallet_keypair, b"unrelated bytes");
+    returned_tx.signatures[0] = signature;
+
+    Mock::given(method("POST"))
+        .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "id": "tx-unverifiable",
+            "status": "success",
+            "onChain": {
+                "transaction": bs58::encode(bincode::serialize(&returned_tx).unwrap())
+                    .into_string()
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    match signer
+        .sign_and_send_transaction(&local_tx)
+        .await
+        .unwrap_err()
+    {
+        SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
+            assert_eq!(provider_tx_id.as_deref(), Some("tx-unverifiable"));
+        }
+        other => panic!("Expected BroadcastUnconfirmed error, got: {:?}", other),
+    }
+}
+
 /// Crossmint sponsors gas, so it is the fee payer and the message it signs
 /// differs from the caller's. Its signature must never be placed in the
 /// caller's transaction, which could not verify with it.

@@ -23,6 +23,7 @@ from solana_keychain.core.http import (
     probe_availability,
     provider_may_have_accepted,
 )
+from solana_keychain.core.signature_util import verify_returned_signature
 from solana_keychain.core.signer import SendingSigner, require_initialized
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
@@ -383,12 +384,18 @@ class CrossmintSigner(SendingSigner):
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED, "Invalid account index: not enough account keys"
             )
+        if not account_keys:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Crossmint transaction carries no account keys",
+            )
         signatures = list(transaction.signatures)
         if not signatures or signatures[0] == Signature.default():
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED,
                 "Crossmint transaction carries no signer signature",
             )
+        verify_returned_signature(signatures[0], account_keys[0], signed_message_bytes(message))
         return signatures[0], transaction
 
     @staticmethod

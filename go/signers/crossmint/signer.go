@@ -359,9 +359,9 @@ func (s *Signer) extractSignatureFromResponse(response transactionResponse, expe
 		"unable to extract signature from Crossmint transaction response")
 }
 
-// extractSignatureFromSerializedTransaction decodes the base58 onChain.transaction,
-// locates this wallet's required-signer position, and verifies the signature
-// against that transaction's own message bytes.
+// extractSignatureFromSerializedTransaction decodes the base58 onChain.transaction
+// and returns its fee-payer signature, verified against that transaction's own
+// message bytes.
 //
 // Crossmint sponsors gas, so when it rewrites it becomes the fee payer and the
 // message it signs differs from the caller's. The decoded transaction is returned
@@ -385,9 +385,23 @@ func (s *Signer) extractSignatureFromSerializedTransaction(serializedTransaction
 			"invalid account index: not enough account keys")
 	}
 
+	if len(signerKeys) == 0 {
+		return solana.Signature{}, nil, core.NewSignerError(core.CodeSigningFailed,
+			"Crossmint transaction carries no account keys")
+	}
 	if len(tx.Signatures) == 0 || tx.Signatures[0].IsZero() {
 		return solana.Signature{}, nil, core.NewSignerError(core.CodeSigningFailed,
 			"Crossmint transaction carries no signer signature")
+	}
+
+	returnedMessage, err := tx.Message.MarshalBinary()
+	if err != nil {
+		return solana.Signature{}, nil, core.WrapSignerError(core.CodeSerializationError,
+			"failed to serialize Crossmint returned message", err)
+	}
+	if !core.VerifyEd25519(signerKeys[0], returnedMessage, tx.Signatures[0]) {
+		return solana.Signature{}, nil, core.NewSignerError(core.CodeSigningFailed,
+			"Crossmint fee-payer signature does not verify against the returned message")
 	}
 	return tx.Signatures[0], tx, nil
 }

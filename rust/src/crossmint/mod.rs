@@ -4,7 +4,7 @@ mod types;
 
 use crate::remote_util::{encode_uri_component, read_body_capped, validate_https_url};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
-use crate::signature_util::signature_from_base58;
+use crate::signature_util::{signature_from_base58, verify_or_reject};
 use crate::traits::SendingSigner;
 use crate::transaction_util::{
     deserialize_wire_transaction, idempotency_key_from_message, serialize_wire_transaction,
@@ -594,6 +594,9 @@ impl CrossmintSigner {
                 "Invalid account index: not enough account keys".to_string(),
             ));
         }
+        let fee_payer = *signer_keys.first().ok_or_else(|| {
+            SignerError::SigningFailed("Crossmint transaction carries no account keys".to_string())
+        })?;
 
         let signature = transaction
             .signatures
@@ -605,6 +608,7 @@ impl CrossmintSigner {
                     "Crossmint transaction carries no signer signature".to_string(),
                 )
             })?;
+        verify_or_reject(&signature, &fee_payer, &transaction.message.serialize())?;
         Ok((signature, transaction))
     }
 

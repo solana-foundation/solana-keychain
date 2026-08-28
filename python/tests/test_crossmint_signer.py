@@ -879,7 +879,10 @@ async def test_caller_exact_signature_is_returned_without_touching_the_transacti
 
 
 @respx.mock
-async def test_signature_not_covering_returned_transaction_is_trusted() -> None:
+async def test_signature_not_covering_returned_transaction_is_rejected() -> None:
+    # A signature that does not cover the envelope it arrived in identifies no
+    # landed transaction, so returning it would send the caller to look up a
+    # transaction that does not exist and conclude nothing landed.
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
@@ -897,8 +900,10 @@ async def test_signature_not_covering_returned_transaction_is_trusted() -> None:
         )
     )
 
-    signature = await signer.sign_and_send_transaction(transaction)
-    assert signature == returned.signatures[0]
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_and_send_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id == "tx-1"
 
 
 @respx.mock

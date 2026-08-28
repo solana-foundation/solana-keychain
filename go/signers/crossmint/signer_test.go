@@ -534,6 +534,50 @@ func TestSignAndSendTransactionAcceptsSignatureFromOnChainTransactionBytes(t *te
 	assertCallerTransactionUntouched(t, localTx)
 }
 
+// A signature that does not cover the envelope it arrived in identifies no
+// landed transaction, so returning it would send the caller to look up a
+// transaction that does not exist and conclude nothing landed.
+func TestSignAndSendTransactionRejectsSignatureNotCoveringReturnedMessage(t *testing.T) {
+	priv := testutils.TestPrivateKey()
+	signerPubkey := testutils.PubkeyOf(priv)
+
+	remoteTx, err := testutils.CreateTestTransaction(signerPubkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := core.AddSignature(remoteTx, signerPubkey, testutils.SignWith(priv, []byte("unrelated bytes"))); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := remoteTx.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, signerPubkey.String()))
+	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
+			`{"id":"tx-unverifiable","status":"success","onChain":{"transaction":%q}}`,
+			base58.Encode(raw)))
+	})
+	srv := testutils.StartTLSServer(t, mux)
+
+	cfg := baseConfig(srv)
+	cfg.MaxPollAttempts = 1
+	s := newTestSigner(t, cfg)
+
+	localTx, err := testutils.CreateTestTransaction(signerPubkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignAndSendTransaction(context.Background(), localTx)
+	testutils.AssertCode(t, err, core.CodeBroadcastUnconfirmed)
+	var se *core.SignerError
+	if !errors.As(err, &se) || se.ProviderTxID != "tx-unverifiable" {
+		t.Errorf("error must carry the accepted transaction id, got %v", err)
+	}
+}
+
 // A returned transaction whose message matches the submitted one really is signed
 // over the caller's bytes, so the signature belongs in the caller's transaction.
 // A smart wallet is signed by its delegated signer, not by the wallet address the
