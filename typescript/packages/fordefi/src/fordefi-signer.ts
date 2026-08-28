@@ -14,6 +14,7 @@ import {
     providerMayHaveAccepted,
     providerStatus,
     signBatchStaggered,
+    SignerError,
     SignerErrorCode,
     SolanaMessageSigner,
     SolanaModifyingSigner,
@@ -179,7 +180,8 @@ export interface FordefiSignerConfig {
  * submission rejects with `BROADCAST_UNCONFIRMED` carrying
  * `context.providerTransactionId`; check that transaction with Fordefi before
  * retrying. A submission that fails without a usable response rejects with
- * `BROADCAST_UNCONFIRMED` and no `providerTransactionId`.
+ * `BROADCAST_UNCONFIRMED` carrying any transaction id the failed response
+ * named, and none when no response reached the client at all.
  *
  * Each native create carries an `x-idempotence-id` derived from the message
  * bytes, so replaying these exact bytes cannot create a second transaction; a
@@ -676,10 +678,16 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
                     }
                     // Fordefi may be broadcasting a transaction whose id never reached us.
                     const status = providerStatus(error);
+                    const providerTransactionId =
+                        error instanceof SignerError ? error.context?.providerTransactionId : undefined;
                     return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
                         cause: error,
-                        message: 'Fordefi may have accepted the transaction, but no transaction id was returned',
+                        message:
+                            typeof providerTransactionId === 'string'
+                                ? `Fordefi may have accepted the transaction, but the outcome could not be confirmed (provider transaction id: ${providerTransactionId})`
+                                : 'Fordefi may have accepted the transaction, but no transaction id was returned',
                         ...(status === undefined ? {} : { status }),
+                        ...(typeof providerTransactionId === 'string' ? { providerTransactionId } : {}),
                     });
                 }
                 // Once the submit is accepted Fordefi is already broadcasting

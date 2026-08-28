@@ -405,6 +405,17 @@ async def test_sign_transaction_native_polling_timeout_is_broadcast_unconfirmed(
 
 
 @respx.mock
+async def test_native_submit_server_error_keeps_a_transaction_id_from_the_body() -> None:
+    keypair = Keypair()
+    signer = make_native_signer(keypair, chain="solana_devnet")
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(502, json={"id": "tx-accepted"}))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id == "tx-accepted"
+
+
+@respx.mock
 async def test_native_submit_server_error_is_unconfirmed_without_a_transaction_id() -> None:
     keypair = Keypair()
     signer = make_native_signer(keypair, chain="solana_devnet")

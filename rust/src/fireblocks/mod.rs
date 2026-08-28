@@ -18,7 +18,8 @@ use types::{
 };
 
 use crate::remote_util::{
-    extract_api_error, parse_json_response, poll_until, read_body_capped, PollOutcome,
+    extract_api_error, parse_json_response, poll_until, read_body_capped, transaction_id_in_body,
+    PollOutcome,
 };
 use crate::signature_util::{signature_from_base58, signature_from_hex, verify_or_reject};
 
@@ -348,7 +349,7 @@ impl FireblocksSigner {
             .map_err(|error| unconfirmed_unless_rejected(Some(status), None, error))?;
         // The create may have been accepted even when the body is otherwise
         // unusable, so an id present there is the caller's recovery handle.
-        let provider_tx_id = transaction_id_from_body(&body);
+        let provider_tx_id = transaction_id_in_body(&body);
         serde_json::from_slice(&body).map_err(|_e| {
             #[cfg(feature = "unsafe-debug")]
             log::error!("Failed to parse {CONTEXT} response: {_e}");
@@ -530,17 +531,6 @@ impl TransactionSigner for FireblocksSigner {
             signed_transaction,
         ))
     }
-}
-
-/// Read the transaction id out of a response body that could not be used as a
-/// whole, so an accepted create still yields a handle.
-fn transaction_id_from_body(body: &[u8]) -> Option<String> {
-    serde_json::from_slice::<serde_json::Value>(body)
-        .ok()?
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .filter(|id| !id.is_empty())
-        .map(str::to_string)
 }
 
 #[cfg(test)]

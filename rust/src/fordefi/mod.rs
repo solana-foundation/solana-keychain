@@ -15,7 +15,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::error::SignerError;
 use crate::http_client_config::HttpClientConfig;
 use crate::remote_util::{
-    extract_api_error, parse_json_response, poll_until, read_body_capped, PollOutcome,
+    extract_api_error_with_transaction_id, parse_json_response, poll_until, read_body_capped,
+    transaction_id_in_body, PollOutcome,
 };
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{extract_and_verify_rewritten_transaction, signature_from_base64};
@@ -245,9 +246,9 @@ impl FordefiCore {
         if let Some(id) = idempotence_id {
             builder = builder.header("x-idempotence-id", id);
         }
-        let classify = |status: Option<u16>, error: SignerError| {
+        let classify = |status: Option<u16>, provider_tx_id: Option<String>, error: SignerError| {
             if broadcast_managed {
-                unconfirmed_unless_rejected(status, None, error)
+                unconfirmed_unless_rejected(status, provider_tx_id, error)
             } else {
                 error
             }
@@ -257,22 +258,27 @@ impl FordefiCore {
             .body(body)
             .send()
             .await
-            .map_err(|error| classify(None, error.into()))?;
+            .map_err(|error| classify(None, None, error.into()))?;
 
         let status = response.status().as_u16();
         if !response.status().is_success() {
-            let error = extract_api_error(response, "Fordefi API submit_request").await;
-            return Err(classify(Some(status), error));
+            let (error, provider_tx_id) =
+                extract_api_error_with_transaction_id(response, "Fordefi API submit_request").await;
+            return Err(classify(Some(status), provider_tx_id, error));
         }
 
         let body = read_body_capped(response)
             .await
-            .map_err(|error| classify(Some(status), error))?;
-        let create_response: CreateTransactionResponse =
-            serde_json::from_slice(&body).map_err(|error| classify(Some(status), error.into()))?;
+            .map_err(|error| classify(Some(status), None, error))?;
+        // The submit may have been accepted even when the body is otherwise
+        // unusable, so an id present there is the caller's recovery handle.
+        let provider_tx_id = transaction_id_in_body(&body);
+        let create_response: CreateTransactionResponse = serde_json::from_slice(&body)
+            .map_err(|error| classify(Some(status), provider_tx_id.clone(), error.into()))?;
         if create_response.id.is_empty() {
             return Err(classify(
                 Some(status),
+                provider_tx_id,
                 SignerError::SerializationError(
                     "Fordefi API submit_request returned no transaction id".to_string(),
                 ),

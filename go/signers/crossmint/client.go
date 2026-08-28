@@ -101,7 +101,7 @@ func (s *Signer) createTransaction(ctx context.Context, transaction, idempotency
 	if err != nil {
 		// The create may have been accepted even when the body is otherwise
 		// unusable, so an id present there is the caller's recovery handle.
-		return transactionResponse{}, core.UnconfirmedUnlessRejected(status, transactionIDFromBody(body), err)
+		return transactionResponse{}, core.UnconfirmedUnlessRejected(status, core.TransactionIDInBody(body), err)
 	}
 	return created, nil
 }
@@ -185,22 +185,6 @@ func (s *Signer) doRequest(ctx context.Context, method, u string, body any, idem
 	return core.SendRequest(s.client, req, "crossmint")
 }
 
-// parseResponseWithRequiredField turns non-2xx statuses into RemoteApiError
-// with any extractable API message; a 2xx body missing the required field
-// becomes RemoteApiError (if the body carries an error message) or
-// SerializationError, and only then is the body decoded into T.
-// transactionIDFromBody returns the "id" a response body carries, or "" when the
-// body is undecodable or holds no string id.
-func transactionIDFromBody(body []byte) string {
-	var parsed struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(parsed.ID)
-}
-
 func hasUsableField(value map[string]json.RawMessage, requiredField string) bool {
 	raw, ok := value[requiredField]
 	if !ok {
@@ -213,6 +197,10 @@ func hasUsableField(value map[string]json.RawMessage, requiredField string) bool
 	return true
 }
 
+// parseResponseWithRequiredField turns non-2xx statuses into RemoteApiError
+// with any extractable API message; a 2xx body missing the required field
+// becomes RemoteApiError (if the body carries an error message) or
+// SerializationError, and only then is the body decoded into T.
 func parseResponseWithRequiredField[T any](status int, body []byte, requiredField, opContext string) (T, error) {
 	var zero T
 	var value map[string]json.RawMessage

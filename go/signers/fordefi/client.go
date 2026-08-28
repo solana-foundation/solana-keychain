@@ -122,11 +122,11 @@ func (s *signerCore) signRequest(ctx context.Context, path string, timestamp int
 // broadcastManaged marks a submit whose acceptance means Fordefi is already
 // broadcasting, so an unresolved failure is reported as unconfirmed.
 func (s *signerCore) submitTransaction(ctx context.Context, request transactionRequest, idempotenceID string, broadcastManaged bool) (string, error) {
-	classify := func(status int, err error) error {
+	classify := func(status int, providerTxID string, err error) error {
 		if !broadcastManaged {
 			return err
 		}
-		return core.UnconfirmedUnlessRejected(status, "", err)
+		return core.UnconfirmedUnlessRejected(status, providerTxID, err)
 	}
 
 	body, err := json.Marshal(request)
@@ -153,15 +153,19 @@ func (s *signerCore) submitTransaction(ctx context.Context, request transactionR
 
 	status, respBody, err := s.send(req)
 	if err != nil {
-		return "", classify(status, err)
+		return "", classify(status, "", err)
 	}
+	// The submit may have been accepted even when the body is otherwise unusable,
+	// so an id present there is the caller's recovery handle.
 	if !core.IsSuccess(status) {
-		return "", classify(status, core.NewRemoteAPIError("API error", status, respBody))
+		return "", classify(status, core.TransactionIDInBody(respBody),
+			core.NewRemoteAPIError("API error", status, respBody))
 	}
 
 	var created createTransactionResponse
 	if err := json.Unmarshal(respBody, &created); err != nil || created.ID == "" {
-		return "", classify(status, core.NewSignerError(core.CodeSerializationError, "failed to parse response"))
+		return "", classify(status, core.TransactionIDInBody(respBody),
+			core.NewSignerError(core.CodeSerializationError, "failed to parse response"))
 	}
 	return created.ID, nil
 }

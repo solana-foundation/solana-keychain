@@ -432,8 +432,9 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
         Not retry-safe: any failure after Fordefi accepts the submission raises
         ``BROADCAST_UNCONFIRMED`` carrying ``provider_transaction_id``; check
         that transaction with Fordefi before retrying. A submission that fails
-        without a usable response raises ``BROADCAST_UNCONFIRMED`` with no
-        ``provider_transaction_id``.
+        without a usable response raises ``BROADCAST_UNCONFIRMED`` carrying any
+        transaction id the failed response named, and none when no response
+        reached the client at all.
 
         Each create carries an ``x-idempotence-id`` derived from the message
         bytes, so replaying these exact bytes cannot create a second
@@ -487,6 +488,7 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
             raise SignerError(
                 SignerErrorCode.BROADCAST_UNCONFIRMED,
                 error._detail,
+                provider_transaction_id=error.provider_transaction_id,
                 status_code=error.status_code,
             ) from None
         if self._pending_transaction_id is not None:

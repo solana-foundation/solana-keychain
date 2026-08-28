@@ -134,6 +134,44 @@ pub(crate) async fn extract_api_error(response: reqwest::Response, context: &str
     SignerError::RemoteApiError(format!("{context} error {status}"))
 }
 
+/// The top-level `id` of a response body, when there is one. A provider that
+/// has already accepted a transaction may still answer with a non-2xx status or
+/// an otherwise unusable body, and that id is the caller's only handle for
+/// reconciling it.
+#[cfg(any(feature = "crossmint", feature = "fireblocks", feature = "fordefi"))]
+pub(crate) fn transaction_id_in_body(body: &[u8]) -> Option<String> {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()?
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_string)
+}
+
+/// [`extract_api_error`] plus any transaction id the failed body named, for a
+/// create whose acceptance the caller still has to reconcile.
+#[cfg(feature = "fordefi")]
+pub(crate) async fn extract_api_error_with_transaction_id(
+    response: reqwest::Response,
+    context: &str,
+) -> (SignerError, Option<String>) {
+    let status = response.status().as_u16();
+    let body = read_body_capped(response).await.unwrap_or_default();
+
+    #[cfg(feature = "unsafe-debug")]
+    log::error!(
+        "{context} error - status: {status}, response: {}",
+        String::from_utf8_lossy(&body)
+    );
+    #[cfg(not(feature = "unsafe-debug"))]
+    log::error!("{context} error - status: {status}");
+
+    (
+        SignerError::RemoteApiError(format!("{context} error {status}")),
+        transaction_id_in_body(&body),
+    )
+}
+
 /// Reject a non-success response via [`extract_api_error`], then parse the
 /// body as JSON.
 pub(crate) async fn parse_json_response<T>(

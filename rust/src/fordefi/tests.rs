@@ -921,6 +921,31 @@ async fn test_native_submit_server_error_is_unconfirmed_without_a_transaction_id
     }
 }
 
+/// A failed submit whose body still names the transaction has been accepted as
+/// far as the caller can tell, so that id is their handle for reconciling it.
+#[tokio::test]
+async fn test_native_submit_server_error_keeps_a_transaction_id_from_the_body() {
+    let mock_server = MockServer::start().await;
+    let pubkey = keypair_pubkey(&create_test_keypair());
+    let signer = create_native_test_signer(&mock_server.uri(), pubkey);
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(
+            ResponseTemplate::new(502).set_body_json(serde_json::json!({ "id": "tx-accepted" })),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tx = create_test_transaction(&pubkey);
+    match signer.sign_and_send_transaction(&tx).await.unwrap_err() {
+        SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
+            assert_eq!(provider_tx_id.as_deref(), Some("tx-accepted"));
+        }
+        other => panic!("Expected BroadcastUnconfirmed, got: {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn test_native_submit_accepted_without_an_id_is_unconfirmed() {
     let mock_server = MockServer::start().await;

@@ -718,6 +718,24 @@ describe('createFordefiSigner', () => {
             });
         });
 
+        it('keeps a transaction id named in a failed submit body', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce({
+                ok: false,
+                status: 502,
+                text: async () => JSON.stringify({ id: 'tx-accepted' }),
+            } as Response);
+
+            const signer = await createFordefiSigner(nativeConfig);
+            const failedSubmitTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+            await expect(signer.signAndSendTransactions([failedSubmitTx])).rejects.toMatchObject({
+                code: 'SIGNER_BROADCAST_UNCONFIRMED',
+                context: expect.objectContaining({ providerTransactionId: 'tx-accepted' }) as object,
+            });
+        });
+
         it('should throw on failed state', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-fail'))

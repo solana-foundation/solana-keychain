@@ -683,6 +683,27 @@ func TestSignTransactionNativeSubmitServerErrorIsUnconfirmedWithoutID(t *testing
 	assertBroadcastUnconfirmedWithoutID(t, err, http.StatusBadGateway)
 }
 
+// A failed submit whose body still names the transaction has been accepted as far
+// as the caller can tell, so that id is their handle for reconciling it.
+func TestSignTransactionNativeSubmitServerErrorKeepsIDFromBody(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			testutils.WriteJSON(w, http.StatusBadGateway, map[string]any{"id": "tx-accepted"})
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
+	if err == nil {
+		t.Fatal("expected a failed submit to be reported")
+	}
+	assertBroadcastUnconfirmed(t, err, "tx-accepted")
+}
+
 func TestSignTransactionNativeSubmitWithoutIDIsUnconfirmed(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
