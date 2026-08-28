@@ -689,3 +689,17 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 		}
 	}
 }
+
+// A wallet resource naming another vault must be rejected, not re-parented
+// under the configured vault id.
+func TestNewRejectsWalletResourceFromAnotherVault(t *testing.T) {
+	_, err := New(context.Background(), Config{
+		ServiceAccountEmail:         testEmail,
+		ServiceAccountPrivateKeyPEM: testRSAKey,
+		VaultID:                     "vaults/" + testVaultID,
+		WalletID:                    "vaults/other-vault/wallets/" + testWalletID,
+		Network:                     testNetwork,
+		APIBaseURL:                  "https://127.0.0.1:1",
+	})
+	testutils.AssertCode(t, err, core.CodeConfigError)
+}

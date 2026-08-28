@@ -441,3 +441,17 @@ fn signed_transaction_payload_for_keypair(
 fn server_url() -> String {
     "http://127.0.0.1:1".to_string()
 }
+
+/// A wallet resource naming another vault must be rejected, not re-parented
+/// under the configured vault_id.
+#[test]
+fn test_wallet_resource_naming_a_foreign_vault_is_rejected() {
+    let mut config = config();
+    config.vault_id = "vaults/vault-test".to_string();
+    config.wallet_id = "vaults/other-vault/wallets/wallet-test".to_string();
+
+    assert!(matches!(
+        UtilaSigner::new(config),
+        Err(SignerError::ConfigError(_))
+    ));
+}

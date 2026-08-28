@@ -111,6 +111,17 @@ describe('UtilaSigner', () => {
     });
 
     describe('create', () => {
+        it('rejects a wallet resource naming another vault', async () => {
+            await expect(
+                createUtilaSigner({
+                    ...mockConfig,
+                    vaultId: 'vaults/vault-test',
+                    walletId: 'vaults/other-vault/wallets/wallet-test',
+                }),
+            ).rejects.toMatchObject({ code: 'SIGNER_CONFIG_ERROR' });
+            expect(fetch).not.toHaveBeenCalled();
+        });
+
         it('creates signer from an existing Utila wallet', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
 

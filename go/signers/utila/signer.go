@@ -74,11 +74,17 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		designatedSigners = []string{"users/" + cfg.ServiceAccountEmail}
 	}
 
+	vaultID := strings.TrimPrefix(cfg.VaultID, "vaults/")
+	walletID, err := trimWalletID(cfg.WalletID, vaultID)
+	if err != nil {
+		return nil, err
+	}
+
 	s := &Signer{
 		serviceAccountEmail: cfg.ServiceAccountEmail,
 		signingKey:          signingKey,
-		vaultID:             strings.TrimPrefix(cfg.VaultID, "vaults/"),
-		walletID:            trimWalletID(cfg.WalletID),
+		vaultID:             vaultID,
+		walletID:            walletID,
 		network:             cfg.Network,
 		apiBaseURL:          apiBaseURL,
 		client:              client,
@@ -241,12 +247,20 @@ func extractTransactionID(name string) (string, error) {
 	return name, nil
 }
 
-// trimWalletID reduces a full wallet resource name to the id after the last
-// "/wallets/" marker.
-func trimWalletID(value string) string {
+// trimWalletID reduces a full wallet resource name to its id. A resource that
+// names a vault other than the configured one is rejected rather than silently
+// re-parented: the id would otherwise be looked up under vaultID, resolving a
+// different wallet than the caller wrote down.
+func trimWalletID(value, vaultID string) (string, error) {
 	const marker = "/wallets/"
-	if idx := strings.LastIndex(value, marker); idx >= 0 {
-		return value[idx+len(marker):]
+	idx := strings.LastIndex(value, marker)
+	if idx < 0 {
+		return value, nil
 	}
-	return value
+	walletID := value[idx+len(marker):]
+	if value[:idx] != "vaults/"+vaultID || strings.Contains(walletID, "/") {
+		return "", core.NewSignerError(core.CodeConfigError,
+			"wallet_id resource name must belong to the configured vault_id")
+	}
+	return walletID, nil
 }

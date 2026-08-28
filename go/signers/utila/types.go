@@ -44,7 +44,8 @@ type Config struct {
 	VaultID string
 
 	// WalletID is the Utila wallet id; a full "vaults/{v}/wallets/{w}" resource
-	// name is reduced to the trailing wallet id. Required.
+	// name is reduced to the trailing wallet id, and is rejected unless {v} is
+	// the configured VaultID. Required.
 	WalletID string
 
 	// Network is the Utila network resource name, e.g. "networks/solana-devnet".

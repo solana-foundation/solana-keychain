@@ -124,11 +124,14 @@ impl UtilaSigner {
             .designated_signers
             .unwrap_or_else(|| vec![format!("users/{}", config.service_account_email)]);
 
+        let vault_id = trim_resource_prefix(&config.vault_id, "vaults/").to_string();
+        let wallet_id = trim_wallet_id(&config.wallet_id, &vault_id)?.to_string();
+
         Ok(Self {
             service_account_email: config.service_account_email,
             signing_key: Arc::new(signing_key),
-            vault_id: trim_resource_prefix(&config.vault_id, "vaults/").to_string(),
-            wallet_id: trim_wallet_id(&config.wallet_id).to_string(),
+            vault_id,
+            wallet_id,
             network: config.network,
             api_base_url,
             client,
@@ -414,12 +417,20 @@ fn trim_resource_prefix<'a>(value: &'a str, prefix: &str) -> &'a str {
     value.strip_prefix(prefix).unwrap_or(value)
 }
 
-fn trim_wallet_id(value: &str) -> &str {
-    if let Some((_, wallet_id)) = value.rsplit_once("/wallets/") {
-        wallet_id
-    } else {
-        value
+/// Reduce a full wallet resource name to its id. A resource that names a vault
+/// other than the configured one is rejected rather than silently re-parented:
+/// the id would otherwise be looked up under `vault_id`, resolving a different
+/// wallet than the caller wrote down.
+fn trim_wallet_id<'a>(value: &'a str, vault_id: &str) -> Result<&'a str, SignerError> {
+    let Some((parent, wallet_id)) = value.rsplit_once("/wallets/") else {
+        return Ok(value);
+    };
+    if parent != format!("vaults/{vault_id}") || wallet_id.contains('/') {
+        return Err(SignerError::ConfigError(
+            "wallet_id resource name must belong to the configured vault_id".to_string(),
+        ));
     }
+    Ok(wallet_id)
 }
 
 #[cfg(test)]

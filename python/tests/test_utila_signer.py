@@ -126,6 +126,16 @@ async def test_resource_name_prefixes_are_trimmed() -> None:
     assert str(respx.calls.last.request.url) == WALLET_URL
 
 
+def test_wallet_resource_naming_a_foreign_vault_is_rejected() -> None:
+    with pytest.raises(SignerError) as excinfo:
+        make_signer(
+            vault_id=f"vaults/{VAULT_ID}",
+            wallet_id=f"vaults/other-vault/wallets/{WALLET_ID}",
+        )
+    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
+    assert not respx.calls
+
+
 @respx.mock
 async def test_access_token_claims() -> None:
     await initialized_signer(Keypair())
