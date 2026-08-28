@@ -203,9 +203,11 @@ Native manual lets Fordefi rewrite the recent blockhash and the Compute Budget
 fee instructions, then sign **without** broadcasting, so the caller broadcasts.
 The returned signature covers Fordefi's bytes, not the ones submitted, and the
 rewrite is not diffed against them: Fordefi is trusted for the rewrite. Inspect
-`result.transaction` before broadcasting it. Fordefi must be the fee payer and
-must sign before every downstream signer, so a transaction that is not vault-paid
-or already carries a signature is rejected before submitting.
+`result.transaction` before broadcasting it. Fordefi must be the fee payer, so a
+transaction that is not vault-paid is rejected before submitting, and it must
+sign before every downstream signer: a transaction that already carries
+signatures is accepted, but the rewrite voids them and the returned transaction
+carries only Fordefi's.
 
 The signature is ed25519-verified against the returned transaction's own message
 at the vault's required-signer position; a signature that does not verify, or a

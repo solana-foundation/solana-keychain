@@ -810,18 +810,12 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         }
     }
 
-    /** Fordefi may only rewrite a message the vault pays for and no one has signed yet. */
+    /** Fordefi only rewrites a message the vault pays for. */
     private assertNativeManualTransactionSupported(transaction: Transaction): void {
         if (this.compiledMessageOf(transaction).staticAccounts[0] !== this.address) {
             throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                 address: this.address,
                 message: 'Fordefi native manual signing requires the configured vault to be the transaction fee payer',
-            });
-        }
-        if (Object.values(transaction.signatures).some(signature => signature !== null)) {
-            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-                address: this.address,
-                message: 'Fordefi native manual signing must run before any transaction signatures are applied',
             });
         }
     }

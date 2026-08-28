@@ -837,7 +837,9 @@ impl SendingSigner for FordefiNativeAutoSigner {
 /// with the one the returned signature covers; the rewrite itself is not diffed,
 /// so inspect the result before broadcasting.
 ///
-/// Fordefi must be the fee payer and must sign before every downstream signer.
+/// Fordefi must be the fee payer, and it must sign before every downstream
+/// signer: a transaction that already carries signatures is accepted, but the
+/// rewrite voids them and the returned transaction carries only Fordefi's.
 pub struct FordefiNativeManualSigner {
     core: FordefiCore,
     chain: SolanaChainUniqueId,
@@ -911,22 +913,11 @@ impl FordefiNativeManualSigner {
         Ok((encoded, signature))
     }
 
-    /// Fordefi may only rewrite a message no one has signed yet, and it only
-    /// rewrites one it pays for.
+    /// Fordefi only rewrites a message it pays for.
     fn validate_transaction(&self, transaction: &VersionedTransaction) -> Result<(), SignerError> {
         if transaction.message.static_account_keys().first() != Some(&self.core.public_key) {
             return Err(SignerError::SigningFailed(
                 "Fordefi native manual signing requires the configured vault to be the transaction fee payer"
-                    .to_string(),
-            ));
-        }
-        if transaction
-            .signatures
-            .iter()
-            .any(|signature| *signature != Signature::default())
-        {
-            return Err(SignerError::SigningFailed(
-                "Fordefi native manual signing must run before any transaction signatures are applied"
                     .to_string(),
             ));
         }

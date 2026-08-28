@@ -300,32 +300,33 @@ func TestModifyAndSignTransactionRejectsATransactionItDoesNotPayFor(t *testing.T
 	}
 }
 
-// Rewriting the message invalidates every signature already on the transaction,
-// so manual signing has to run before any of them are collected.
-func TestModifyAndSignTransactionRejectsAnAlreadySignedTransaction(t *testing.T) {
+// Manual signing never broadcasts, so submitting bytes that already carry
+// signatures is the caller's call. The rewrite voids them, and the transaction
+// the caller ends up holding carries only what Fordefi returned.
+func TestModifyAndSignTransactionAcceptsAnAlreadySignedTransaction(t *testing.T) {
 	pub := testutils.TestPublicKey()
-	var requests atomic.Int64
-	s := newManualTestSigner(t, manualConfig(t), pub.String(), func(mux *http.ServeMux) {
-		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
-			requests.Add(1)
-			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "manual-tx-1"})
-		})
-	})
+	returned, _, signature := rewrittenTransaction(t, pub)
+	s := newManualTestSigner(t, manualConfig(t), pub.String(),
+		respondManual(t, "signed", wireBase64(t, returned), make(chan submittedRequest, 1)))
 
 	tx, err := testutils.CreateTestTransaction(pub)
 	if err != nil {
 		t.Fatal(err)
 	}
-	message, err := tx.Message.MarshalBinary()
+	stale := testutils.SignWith(testutils.TestPrivateKey(), []byte("some earlier message"))
+	tx.Signatures = []solana.Signature{stale}
+
+	res, err := s.ModifyAndSignTransaction(context.Background(), tx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx.Signatures = []solana.Signature{testutils.SignWith(testutils.TestPrivateKey(), message)}
-
-	_, err = s.ModifyAndSignTransaction(context.Background(), tx)
-	testutils.AssertCode(t, err, core.CodeSigningFailed)
-	if got := requests.Load(); got != 0 {
-		t.Errorf("rejection must happen before any signing request, server saw %d", got)
+	if res.Signature != signature {
+		t.Errorf("signature = %s, want %s", res.Signature, signature)
+	}
+	for _, got := range tx.Signatures {
+		if got == stale {
+			t.Error("the void signature must not survive the rewrite")
+		}
 	}
 }
 

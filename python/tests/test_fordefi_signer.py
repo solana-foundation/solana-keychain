@@ -947,17 +947,23 @@ async def test_native_auto_rejects_a_presigned_transaction_before_submitting() -
 
 
 @respx.mock
-async def test_manual_signing_rejects_a_presigned_transaction_before_submitting() -> None:
-    """Fordefi rewrites the message, which would silently void an existing signature."""
+async def test_manual_signing_accepts_a_presigned_transaction() -> None:
+    """Manual signing never broadcasts, so submitting signed bytes is the caller's
+    call to make. The rewrite voids those signatures, and the returned transaction
+    carries only Fordefi's."""
     keypair = Keypair()
     signer = make_manual_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())
-    transaction.signatures = [keypair.sign_message(signed_message_bytes(transaction.message))]
+    stale_signature = keypair.sign_message(b"some earlier message")
+    transaction.signatures = [stale_signature]
+    returned = replace_blockhash(transaction, Hash.new_unique())
+    raw_transaction, signature = vault_signed_wire(keypair, returned)
+    mock_sign_flow(status_response("signed", raw_transaction=raw_transaction))
 
-    with pytest.raises(SignerError) as excinfo:
-        await signer.modify_and_sign_transaction(transaction)
-    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
-    assert not respx.calls
+    result = await signer.modify_and_sign_transaction(transaction)
+
+    assert result.signature == signature
+    assert stale_signature not in result.transaction.signatures
 
 
 @respx.mock

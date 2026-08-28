@@ -1054,18 +1054,24 @@ describe('createFordefiSigner', () => {
             expect(fetch).not.toHaveBeenCalled();
         });
 
-        it('rejects an already-signed transaction, whose signatures the rewrite would invalidate', async () => {
+        it('accepts an already-signed transaction and returns only what Fordefi signed', async () => {
+            // Manual signing never broadcasts, so submitting signed bytes is the
+            // caller's call; the rewrite voids those signatures either way.
             const { config, fixture } = await setupNativeManual(0);
-            const signer = await createFordefiSigner(config);
-            const mockTx = {
-                messageBytes: fixture.messageBytes,
-                signatures: { [fixture.feePayer]: MOCK_SIGNATURE_BYTES },
-            } as never;
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
+                .mockResolvedValueOnce(mockPollResponse('signed', undefined, fixture.wireTransaction));
 
-            await expect(signer.modifyAndSignTransactions([mockTx])).rejects.toMatchObject({
-                code: 'SIGNER_SIGNING_FAILED',
-            });
-            expect(fetch).not.toHaveBeenCalled();
+            const signer = await createFordefiSigner(config);
+            const [signed] = await signer.modifyAndSignTransactions([
+                {
+                    messageBytes: fixture.messageBytes,
+                    signatures: { [fixture.feePayer]: MOCK_SIGNATURE_BYTES },
+                } as never,
+            ]);
+
+            expect(signed!.signatures[fixture.feePayer]).toStrictEqual(fixture.signature);
+            expect(signed!.signatures[fixture.feePayer]).not.toStrictEqual(MOCK_SIGNATURE_BYTES);
         });
 
         it('rejects a response without raw_transaction, having nothing to continue from', async () => {

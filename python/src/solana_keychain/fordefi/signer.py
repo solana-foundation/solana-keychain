@@ -620,16 +620,18 @@ class FordefiNativeManualSigner(_FordefiNativeSignerBase, ModifyingSigner):
         caller's ``transaction`` is left untouched and its bytes are not the ones
         the returned signature covers.
 
-        Fordefi must be the transaction fee payer and must sign before every
-        downstream signer, so a transaction that is not vault-paid or already
-        carries a signature is rejected before submitting.
+        Fordefi must be the transaction fee payer, so a transaction that is not
+        vault-paid is rejected before submitting, and it must sign before every
+        downstream signer: a transaction that already carries signatures is
+        accepted, but the rewrite voids them and the returned transaction carries
+        only Fordefi's.
 
         The create carries an ``x-idempotence-id`` derived from the message bytes
         under the push mode, chain, vault and fee it was submitted with, so it can
         never reuse the id of a create made on other terms, such as an auto create
         that did broadcast those same bytes.
         """
-        self._require_unsigned_vault_paid_transaction(transaction)
+        self._require_vault_paid_transaction(transaction)
         message_data = signed_message_bytes(transaction.message)
         transaction_id = await self._post_transaction(
             self._solana_transaction_request(message_data),
@@ -641,19 +643,13 @@ class FordefiNativeManualSigner(_FordefiNativeSignerBase, ModifyingSigner):
         )
         return classify_signed_transaction(returned, serialize_transaction(returned), signature)
 
-    def _require_unsigned_vault_paid_transaction(self, transaction: VersionedTransaction) -> None:
+    def _require_vault_paid_transaction(self, transaction: VersionedTransaction) -> None:
         account_keys = transaction.message.account_keys
         if not account_keys or account_keys[0] != self._public_key:
             raise SignerError(
                 SignerErrorCode.SIGNING_FAILED,
                 "Fordefi native manual signing requires the configured vault to be "
                 "the transaction fee payer",
-            )
-        if any(signature != Signature.default() for signature in transaction.signatures):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Fordefi native manual signing must run before any transaction "
-                "signatures are applied",
             )
 
     @staticmethod

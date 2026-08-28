@@ -510,13 +510,13 @@ func (s *NativeManualSigner) IsAvailable(ctx context.Context) bool { return s.co
 // The rewrite itself is not diffed: what Keychain validates is the signing hop,
 // by verifying the returned signature at the vault's required-signer position
 // against the message Fordefi returned. Preconditions on the caller's input do
-// apply: the vault must be the fee payer and nothing may be signed yet.
+// apply: the vault must be the fee payer.
 //
 // Each create carries an x-idempotence-id derived from the message bytes under
 // the push mode, chain, vault and fee it was submitted with, so a resend on the
 // same terms reuses the Fordefi transaction instead of creating a second one.
 func (s *NativeManualSigner) ModifyAndSignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
-	if err := s.requireUnsignedVaultPaidTransaction(tx); err != nil {
+	if err := s.requireVaultPaidTransaction(tx); err != nil {
 		return core.SignedTransaction{}, err
 	}
 	messageBytes, err := tx.Message.MarshalBinary()
@@ -556,19 +556,12 @@ func (s *NativeManualSigner) ModifyAndSignTransaction(ctx context.Context, tx *s
 	return core.Classify(tx, encoded, signature), nil
 }
 
-// requireUnsignedVaultPaidTransaction rejects a transaction Fordefi may not
-// rewrite: it only signs one it pays for, and rewriting the message invalidates
-// any signature already collected.
-func (s *NativeManualSigner) requireUnsignedVaultPaidTransaction(tx *solana.Transaction) error {
+// requireVaultPaidTransaction rejects a transaction Fordefi may not rewrite: it
+// only signs one it pays for.
+func (s *NativeManualSigner) requireVaultPaidTransaction(tx *solana.Transaction) error {
 	if len(tx.Message.AccountKeys) == 0 || tx.Message.AccountKeys[0] != s.core.pubkey {
 		return core.NewSignerError(core.CodeSigningFailed,
 			"Fordefi native manual signing requires the configured vault to be the transaction fee payer")
-	}
-	for _, signature := range tx.Signatures {
-		if !signature.IsZero() {
-			return core.NewSignerError(core.CodeSigningFailed,
-				"Fordefi native manual signing must run before any transaction signatures are applied")
-		}
 	}
 	return nil
 }

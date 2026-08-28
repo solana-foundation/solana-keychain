@@ -1560,25 +1560,52 @@ async fn test_fordefi_auto_rejects_an_already_signed_transaction() {
     assert!(matches!(error, SignerError::SigningFailed(_)));
 }
 
-/// Fordefi may only rewrite a message nobody has signed yet.
+/// Manual signing never broadcasts, so a caller may submit bytes that already
+/// carry signatures. The rewrite voids them, and the transaction the caller ends
+/// up holding carries only what Fordefi returned.
 #[tokio::test]
-async fn test_fordefi_manual_rejects_an_already_signed_transaction() {
+async fn test_fordefi_manual_accepts_an_already_signed_transaction() {
+    let mock_server = MockServer::start().await;
     let keypair = create_test_keypair();
     let pubkey = keypair_pubkey(&keypair);
-    let signer = create_manual_test_signer("https://api.test.fordefi.com", pubkey);
-    let mut tx = create_test_transaction(&pubkey);
-    add_required_signer(&mut tx, Pubkey::new_unique());
-    tx.signatures = vec![
-        keypair.sign_message(&tx.message.serialize()),
-        Signature::default(),
-    ];
+    let signer = create_manual_test_signer(&mock_server.uri(), pubkey);
 
-    let error = signer
+    let mut tx = create_test_transaction(&pubkey);
+    let stale_signature = keypair.sign_message(&tx.message.serialize());
+    tx.signatures = vec![stale_signature];
+    let rewritten = create_test_transaction(&pubkey);
+    let rewritten_message = rewritten.message.serialize();
+    let wire_b64 = STANDARD.encode(build_mock_wire_transaction(&keypair, &rewritten_message));
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "manual-tx-signed"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/transactions/manual-tx-signed"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "state": "signed",
+            "raw_transaction": wire_b64
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    signer
         .modify_and_sign_transaction(&mut tx)
         .await
-        .expect_err("manual signing must run first");
+        .expect("manual signing should accept a transaction others have signed");
 
-    assert!(matches!(error, SignerError::SigningFailed(_)));
+    assert_eq!(tx.message.serialize(), rewritten_message);
+    assert!(
+        !tx.signatures.contains(&stale_signature),
+        "the void signature must not survive the rewrite"
+    );
 }
 
 /// The one thing manual mode does check: the signature has to cover the message

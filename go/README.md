@@ -234,8 +234,9 @@ and it manages the Compute Budget fee instructions, then signs without
 broadcasting. The rewrite is not diffed: the returned signature is verified
 against the message Fordefi returned, and your transaction is replaced with
 those bytes so it can never hold a message the signature does not cover. Inspect
-the result before broadcasting it. Fordefi must be the fee payer and nothing may
-be signed yet, so run it before every other signer.
+the result before broadcasting it. Fordefi must be the fee payer. Run it before
+every other signer: a transaction that already carries signatures is accepted,
+but the rewrite voids them and the returned bytes carry only Fordefi's.
 
 Crossmint executes every approved transaction server-side and exposes no
 sign-only API, so it offers `SignAndSendTransaction` only. It may rewrite the
