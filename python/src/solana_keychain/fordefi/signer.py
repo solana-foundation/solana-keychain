@@ -451,8 +451,8 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
         replaces the blockhash (and optionally fees), signs, and broadcasts the
         transaction itself, so ``transaction`` is left unmodified and the
         returned signature identifies the on-chain transaction. Only legacy
-        transactions whose sole required signer is the configured vault are
-        supported.
+        transactions whose sole required signer is the configured vault, and
+        which carry no signature yet, are supported.
 
         Not retry-safe: any failure after Fordefi accepts the submission raises
         ``BROADCAST_UNCONFIRMED`` carrying ``provider_transaction_id``; check
@@ -485,6 +485,12 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
                 SignerErrorCode.SIGNING_FAILED,
                 "Fordefi native auto-broadcast currently supports only transactions "
                 "whose sole required signer is the configured vault",
+            )
+        if any(signature != Signature.default() for signature in transaction.signatures):
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi native auto-broadcast must run before any transaction "
+                "signatures are applied",
             )
 
     async def _sign_transaction_native(

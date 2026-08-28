@@ -1542,6 +1542,24 @@ async fn test_fordefi_manual_rejects_a_transaction_it_does_not_pay_for() {
     assert!(matches!(error, SignerError::SigningFailed(_)));
 }
 
+/// Fordefi replaces the blockhash before broadcasting, so re-signing bytes the
+/// vault already signed would land the same transfer a second time.
+#[tokio::test]
+async fn test_fordefi_auto_rejects_an_already_signed_transaction() {
+    let keypair = create_test_keypair();
+    let pubkey = keypair_pubkey(&keypair);
+    let signer = create_native_test_signer("https://api.test.fordefi.com", pubkey);
+    let mut tx = create_test_transaction(&pubkey);
+    tx.signatures = vec![keypair.sign_message(&tx.message.serialize())];
+
+    let error = signer
+        .sign_and_send_transaction(&tx)
+        .await
+        .expect_err("auto-broadcast must not re-sign bytes the vault already signed");
+
+    assert!(matches!(error, SignerError::SigningFailed(_)));
+}
+
 /// Fordefi may only rewrite a message nobody has signed yet.
 #[tokio::test]
 async fn test_fordefi_manual_rejects_an_already_signed_transaction() {

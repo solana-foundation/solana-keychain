@@ -614,6 +614,21 @@ describe('createFordefiSigner', () => {
             expect(fetch).not.toHaveBeenCalled();
         });
 
+        it('rejects an already-signed transaction before submitting remote work', async () => {
+            const signer = await createFordefiSigner(nativeConfig);
+            // Fordefi replaces the blockhash before broadcasting, so re-signing
+            // bytes the vault already signed would land the transfer twice.
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [MOCK_ADDRESS]: MOCK_SIGNATURE_BYTES },
+            } as never;
+
+            await expect(signer.signAndSendTransactions([mockTx])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+            expect(fetch).not.toHaveBeenCalled();
+        });
+
         it('should not expose TransactionSendingSigner in black box mode', async () => {
             const signer = await createFordefiSigner(mockConfig);
             const guardInput = signer as unknown as { [key: string]: unknown; address: typeof signer.address };

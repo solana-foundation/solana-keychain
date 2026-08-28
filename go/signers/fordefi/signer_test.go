@@ -982,3 +982,32 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 		}
 	}
 }
+
+// Fordefi replaces the blockhash before broadcasting, so re-signing bytes the
+// vault already signed would land the same transfer a second time.
+func TestSignAndSendTransactionRejectsAnAlreadySignedTransaction(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	var requests atomic.Int64
+	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			requests.Add(1)
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-1"})
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := tx.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx.Signatures = []solana.Signature{testutils.SignWith(testutils.TestPrivateKey(), message)}
+
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
+	testutils.AssertCode(t, err, core.CodeSigningFailed)
+	if got := requests.Load(); got != 0 {
+		t.Errorf("rejection must happen before any signing request, server saw %d", got)
+	}
+}

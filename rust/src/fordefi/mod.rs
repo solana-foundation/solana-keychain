@@ -768,6 +768,11 @@ impl FordefiNativeAutoSigner {
     /// Native auto-broadcast currently submits message bytes only. Transactions
     /// with additional required signers would also need their partial signatures
     /// forwarded through Fordefi's `details.signatures` request field.
+    ///
+    /// A signature already present can only be the vault's own over these bytes,
+    /// which means they may already be on chain. Fordefi replaces the blockhash
+    /// before broadcasting, so the result would be a second transaction carrying
+    /// the same transfer, outside the network's replay protection.
     fn validate_transaction(&self, transaction: &VersionedTransaction) -> Result<(), SignerError> {
         let required_signatures = transaction.message.header().num_required_signatures as usize;
         if required_signatures != 1
@@ -775,6 +780,16 @@ impl FordefiNativeAutoSigner {
         {
             return Err(SignerError::SigningFailed(
                 "Fordefi native auto-broadcast currently supports only transactions whose sole required signer is the configured vault"
+                    .to_string(),
+            ));
+        }
+        if transaction
+            .signatures
+            .iter()
+            .any(|signature| *signature != Signature::default())
+        {
+            return Err(SignerError::SigningFailed(
+                "Fordefi native auto-broadcast must run before any transaction signatures are applied"
                     .to_string(),
             ));
         }

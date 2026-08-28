@@ -334,7 +334,7 @@ func (s *NativeAutoSigner) SignMessage(ctx context.Context, message []byte) (sol
 // replace the blockhash (and optionally fees), signs, and broadcasts the
 // transaction itself. tx is left untouched and the returned signature is the
 // on-chain identifier. Only transactions whose sole required signer is the
-// configured vault are supported.
+// configured vault, and which carry no signature yet, are supported.
 //
 // Not retry-safe: any failure after Fordefi accepts the submission returns
 // CodeBroadcastUnconfirmed carrying the Fordefi transaction id; check that
@@ -362,11 +362,22 @@ func (s *NativeAutoSigner) IsAvailable(ctx context.Context) bool { return s.core
 // requireSoleRequiredSigner rejects native-mode transactions with additional
 // required signers: native auto-broadcast submits message bytes only, so other
 // signers' partial signatures would be dropped.
+//
+// A signature already present can only be the vault's own over these bytes,
+// which means they may already be on chain. Fordefi replaces the blockhash
+// before broadcasting, so the result would be a second transaction carrying the
+// same transfer, outside the network's replay protection.
 func (s *NativeAutoSigner) requireSoleRequiredSigner(tx *solana.Transaction) error {
 	if tx.Message.Header.NumRequiredSignatures != 1 ||
 		len(tx.Message.AccountKeys) == 0 || tx.Message.AccountKeys[0] != s.core.pubkey {
 		return core.NewSignerError(core.CodeSigningFailed,
 			"Fordefi native auto-broadcast currently supports only transactions whose sole required signer is the configured vault")
+	}
+	for _, signature := range tx.Signatures {
+		if !signature.IsZero() {
+			return core.NewSignerError(core.CodeSigningFailed,
+				"Fordefi native auto-broadcast must run before any transaction signatures are applied")
+		}
 	}
 	return nil
 }

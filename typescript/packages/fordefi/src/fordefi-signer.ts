@@ -187,7 +187,8 @@ export interface FordefiSignerConfig {
  *
  * Native auto mode may replace the recent blockhash and fees before signing and
  * broadcasts the result itself, so it must be used through Kit's
- * {@link TransactionSendingSigner} flow rather than as a partial signer.
+ * {@link TransactionSendingSigner} flow rather than as a partial signer, and it
+ * accepts only an unsigned transaction whose sole required signer is the vault.
  * Instances expose no `signTransactions`, because Kit classifies signers by
  * duck-typed method presence, but do sign messages.
  *
@@ -786,6 +787,11 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
      * The current request schema sends only message bytes. Supporting native
      * multi-signer auto-broadcast would also require forwarding all other
      * partial signatures via Fordefi's `details.signatures` field.
+     *
+     * A signature already present can only be the vault's own over these bytes,
+     * which means they may already be on chain. Fordefi replaces the blockhash
+     * before broadcasting, so the result would be a second transaction carrying
+     * the same transfer, outside the network's replay protection.
      */
     private assertNativeAutoTransactionSupported(transaction: Transaction): void {
         const requiredSignerAddresses = Object.keys(transaction.signatures);
@@ -794,6 +800,12 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
                 address: this.address,
                 message:
                     'Fordefi native auto-broadcast currently supports only transactions whose sole required signer is the configured vault',
+            });
+        }
+        if (Object.values(transaction.signatures).some(signature => signature !== null)) {
+            throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                address: this.address,
+                message: 'Fordefi native auto-broadcast must run before any transaction signatures are applied',
             });
         }
     }

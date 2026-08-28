@@ -932,6 +932,21 @@ async def test_manual_signing_rejects_a_non_vault_fee_payer_before_submitting() 
 
 
 @respx.mock
+async def test_native_auto_rejects_a_presigned_transaction_before_submitting() -> None:
+    """Fordefi replaces the blockhash before broadcasting, so re-signing bytes the
+    vault already signed would land the same transfer a second time."""
+    keypair = Keypair()
+    signer = make_native_signer(keypair)
+    transaction = create_test_transaction(keypair.pubkey())
+    transaction.signatures = [keypair.sign_message(signed_message_bytes(transaction.message))]
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_and_send_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert not respx.calls
+
+
+@respx.mock
 async def test_manual_signing_rejects_a_presigned_transaction_before_submitting() -> None:
     """Fordefi rewrites the message, which would silently void an existing signature."""
     keypair = Keypair()
