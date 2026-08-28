@@ -776,6 +776,20 @@ describe('createFireblocksSigner', () => {
             });
         });
 
+        it('keeps a transaction id named in a failed create body', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: false,
+                status: 503,
+                text: async () => JSON.stringify({ id: 'tx-accepted' }),
+            });
+
+            await expect(signer.signTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_BROADCAST_UNCONFIRMED',
+                context: { providerTransactionId: 'tx-accepted' },
+            });
+        });
+
         it('keeps a 4xx create a plain rejection', async () => {
             const { signer, transaction } = await createProgramCallSigner();
             mockFetch.mockResolvedValueOnce({

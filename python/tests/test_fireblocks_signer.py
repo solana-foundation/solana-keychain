@@ -238,6 +238,20 @@ async def test_program_call_create_5xx_is_unconfirmed() -> None:
 
 
 @respx.mock
+async def test_program_call_create_5xx_keeps_a_transaction_id_from_the_body() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True)
+    transaction = create_test_transaction(keypair.pubkey())
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(503, json={"id": "tx-accepted"}))
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id == "tx-accepted"
+
+
+@respx.mock
 async def test_program_call_create_4xx_stays_a_rejection() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair, use_program_call=True)

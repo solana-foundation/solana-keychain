@@ -206,6 +206,7 @@ class FireblocksSigner(TransactionSigner):
             raise SignerError(
                 SignerErrorCode.BROADCAST_UNCONFIRMED,
                 error._detail,
+                provider_transaction_id=error.provider_transaction_id,
                 status_code=error.status_code,
             ) from None
         transaction_id = response.get("id") if isinstance(response, dict) else None

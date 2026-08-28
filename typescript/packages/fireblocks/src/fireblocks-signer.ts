@@ -10,6 +10,7 @@ import {
     providerMayHaveAccepted,
     providerStatus,
     signBatchStaggered,
+    SignerError,
     SignerErrorCode,
     SolanaMessageSigner,
     SolanaTransactionSigner,
@@ -329,11 +330,16 @@ class FireblocksSigner<TAddress extends string = string>
                 throw error;
             }
             const status = providerStatus(error);
+            const providerTransactionId =
+                error instanceof SignerError ? error.context?.providerTransactionId : undefined;
             return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
                 cause: error,
                 message:
-                    'Fireblocks may have accepted the PROGRAM_CALL, but the outcome could not be confirmed and no transaction id was returned',
+                    typeof providerTransactionId === 'string'
+                        ? `Fireblocks may have accepted the PROGRAM_CALL, but the outcome could not be confirmed (provider transaction id: ${providerTransactionId})`
+                        : 'Fireblocks may have accepted the PROGRAM_CALL, but the outcome could not be confirmed and no transaction id was returned',
                 ...(status === undefined ? {} : { status }),
+                ...(typeof providerTransactionId === 'string' ? { providerTransactionId } : {}),
             });
         }
         if (typeof createResponse.id !== 'string' || createResponse.id.length === 0) {
