@@ -178,12 +178,16 @@ jobs:
     name: fork-external-live-manual
     runs-on: ubuntu-latest
     environment: external-live-tests
+    # This job holds the Doppler-injected provider credentials, so it can read
+    # the pull request but write nothing.
     permissions:
-      actions: write
       contents: read
       id-token: write
-      issues: write
-      pull-requests: write
+      pull-requests: read
+    outputs:
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      head_sha: ${{ steps.verify-sha.outputs.head_sha }}
+      head_ref: ${{ steps.pr.outputs.head_ref }}
     steps:
       - name: Validate PR and capture head SHA
         id: pr
@@ -409,13 +413,24 @@ jobs:
 
             core.setOutput("head_sha", expectedSha);
 
+  announce-pass:
+    needs: fork-external-live-manual
+    name: announce-pass
+    runs-on: ubuntu-latest
+    # No provider credentials reach this job: it only records the pass and asks
+    # the gate to re-evaluate it.
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
       - name: Post marker and rerun gate
-        if: success()
         uses: actions/github-script@v9
         env:
-          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
-          HEAD_SHA: ${{ steps.verify-sha.outputs.head_sha }}
-          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          PR_NUMBER: ${{ needs.fork-external-live-manual.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.fork-external-live-manual.outputs.head_sha }}
+          HEAD_REF: ${{ needs.fork-external-live-manual.outputs.head_ref }}
         with:
           script: |
             const prNumber = Number(process.env.PR_NUMBER);
