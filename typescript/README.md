@@ -86,6 +86,8 @@ const signature = await signAndSendTransaction(signer, transaction, {
 
 Every signing method — `signMessages`, `signTransactions`, `signAndSendTransactions` — takes Kit's optional config as its second argument, so `{ abortSignal }` cancels an in-flight signing request on any backend.
 
+Aborting stops waiting; it does not undo work a provider already accepted. On a backend that broadcasts (Crossmint, Fordefi native auto mode), an abort after the create call has been accepted is reported as `BROADCAST_UNCONFIRMED` with the provider transaction id and the abort reason kept as `cause`, because the transaction may already be on chain. Kit also re-checks the signal after a signer returns, so a signal that fires late can make the call site throw over a signature that was produced and, on a sending backend, a transaction that landed. Reconcile with the provider before retrying.
+
 Use `signerCapabilities(signer)` to inspect a signer at runtime — it returns `{ canModifyTransactions, canSignAndSend, canSignMessages, canSignTransactions }`.
 
 ## Packages
