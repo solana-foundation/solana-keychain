@@ -723,6 +723,42 @@ async fn test_create_accepted_without_an_id_is_unconfirmed() {
 }
 
 #[tokio::test]
+async fn test_create_accepted_with_an_unusable_body_keeps_the_transaction_id() {
+    let server = MockServer::start().await;
+    let wallet_keypair = Keypair::new();
+    let signer_address = keypair_pubkey(&wallet_keypair).to_string();
+
+    Mock::given(method("GET"))
+        .and(path("/2025-06-09/wallets/test-wallet"))
+        .respond_with(wallet_response(&signer_address))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+        .respond_with(
+            ResponseTemplate::new(201).set_body_json(serde_json::json!({ "id": "tx-accepted" })),
+        )
+        .mount(&server)
+        .await;
+
+    let mut signer = create_test_signer(&server.uri(), 1, 1);
+    signer.init().await.unwrap();
+    let tx = create_test_transaction(&signer.pubkey());
+
+    match signer.sign_and_send_transaction(&tx).await.unwrap_err() {
+        SignerError::BroadcastUnconfirmed {
+            provider_tx_id,
+            provider_status,
+            ..
+        } => {
+            assert_eq!(provider_tx_id.as_deref(), Some("tx-accepted"));
+            assert_eq!(provider_status, None);
+        }
+        other => panic!("Expected BroadcastUnconfirmed error, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
 async fn test_create_rejected_by_crossmint_stays_a_plain_failure() {
     let server = MockServer::start().await;
     let wallet_keypair = Keypair::new();

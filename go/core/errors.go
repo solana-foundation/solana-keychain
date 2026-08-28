@@ -127,9 +127,11 @@ func NewBroadcastUnconfirmedError(providerTxID, detail string) *SignerError {
 }
 
 // UnconfirmedUnlessRejected reports a failed create as CodeBroadcastUnconfirmed
-// with no transaction id unless a 4xx rules the transaction out. status is 0 when
-// no response arrived, and is passed on only when the response was the failure.
-func UnconfirmedUnlessRejected(status int, err error) error {
+// unless a 4xx rules the transaction out. status is 0 when no response arrived,
+// and is passed on only when the response was the failure. providerTxID is the id
+// read out of the response body when one was readable there, and "" when the
+// failure came before any id was known.
+func UnconfirmedUnlessRejected(status int, providerTxID string, err error) error {
 	if status >= 400 && status < 500 {
 		return err
 	}
@@ -138,7 +140,7 @@ func UnconfirmedUnlessRejected(status int, err error) error {
 	if errors.As(err, &se) {
 		detail = se.Detail()
 	}
-	out := NewBroadcastUnconfirmedError("", detail)
+	out := NewBroadcastUnconfirmedError(providerTxID, detail)
 	if status >= 400 {
 		out.ProviderStatus = status
 	}

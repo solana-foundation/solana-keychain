@@ -424,6 +424,20 @@ func TestCreateAcceptedWithoutIDIsUnconfirmed(t *testing.T) {
 	assertUnconfirmedWithoutID(t, err, 0)
 }
 
+func TestCreateAcceptedWithUnusableBodyKeepsID(t *testing.T) {
+	s := createStatusSigner(t, http.StatusCreated, `{"id":"tx-accepted","status":123}`)
+	tx, err := testutils.CreateTestTransaction(s.Pubkey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
+	testutils.AssertCode(t, err, core.CodeBroadcastUnconfirmed)
+	var se *core.SignerError
+	if !errors.As(err, &se) || se.ProviderTxID != "tx-accepted" {
+		t.Errorf("error must carry the accepted transaction id, got %v", err)
+	}
+}
+
 func TestCreateRejectionStaysPlainFailure(t *testing.T) {
 	s := createStatusSigner(t, http.StatusBadRequest, `{"message":"invalid transaction"}`)
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())

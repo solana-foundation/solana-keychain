@@ -211,12 +211,20 @@ impl CrossmintSigner {
             .json(&request)
             .send()
             .await
-            .map_err(|error| unconfirmed_unless_rejected(None, error.into()))?;
+            .map_err(|error| unconfirmed_unless_rejected(None, None, error.into()))?;
 
         let status = response.status().as_u16();
-        Self::parse_response_with_required_field(response, "id", "create_transaction")
+        let value = Self::read_json_value(response)
             .await
-            .map_err(|error| unconfirmed_unless_rejected(Some(status), error))
+            .map_err(|error| unconfirmed_unless_rejected(Some(status), None, error))?;
+        // The create may have been accepted even when the body is otherwise
+        // unusable, so an id present there is the caller's recovery handle.
+        let provider_tx_id = value
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        Self::value_to_typed(status, value, "id", "create_transaction")
+            .map_err(|error| unconfirmed_unless_rejected(Some(status), provider_tx_id, error))
     }
 
     async fn get_transaction(
@@ -290,10 +298,26 @@ impl CrossmintSigner {
         T: serde::de::DeserializeOwned,
     {
         let status = response.status().as_u16();
-        let body = read_body_capped(response).await?;
-        let value: serde_json::Value =
-            serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+        let value = Self::read_json_value(response).await?;
+        Self::value_to_typed(status, value, required_field, context)
+    }
 
+    async fn read_json_value(
+        response: reqwest::Response,
+    ) -> Result<serde_json::Value, SignerError> {
+        let body = read_body_capped(response).await?;
+        Ok(serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null))
+    }
+
+    fn value_to_typed<T>(
+        status: u16,
+        value: serde_json::Value,
+        required_field: &str,
+        context: &str,
+    ) -> Result<T, SignerError>
+    where
+        T: serde::de::DeserializeOwned,
+    {
         if status >= 400 {
             let message = Self::extract_error_message(&value)
                 .unwrap_or_else(|| format!("Crossmint API error {status}"));
@@ -642,8 +666,9 @@ impl CrossmintSigner {
     ///
     /// Not retry-safe: any failure after the create is accepted returns
     /// [`SignerError::BroadcastUnconfirmed`] carrying the Crossmint transaction id;
-    /// check that transaction with Crossmint before retrying. A create that fails
-    /// without a usable response returns `BroadcastUnconfirmed` with no id.
+    /// check that transaction with Crossmint before retrying. A create whose
+    /// response carries no readable transaction id returns `BroadcastUnconfirmed`
+    /// with no id.
     ///
     /// Each create carries an `x-idempotency-key` derived from the message bytes,
     /// so replaying these exact bytes cannot create a second transaction; a

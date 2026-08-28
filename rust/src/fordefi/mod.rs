@@ -246,7 +246,7 @@ impl FordefiCore {
         }
         let classify = |status: Option<u16>, error: SignerError| {
             if broadcast_managed {
-                unconfirmed_unless_rejected(status, error)
+                unconfirmed_unless_rejected(status, None, error)
             } else {
                 error
             }

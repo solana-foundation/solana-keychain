@@ -10,6 +10,7 @@ import {
     providerMayHaveAccepted,
     providerStatus,
     sanitizeRemoteErrorResponse,
+    SignerError,
     SignerErrorCode,
     SolanaSendingSigner,
     throwSignerError,
@@ -69,8 +70,8 @@ let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
  *
  * Not retry-safe: any failure after the create is accepted rejects with
  * `BROADCAST_UNCONFIRMED` carrying `context.providerTransactionId`; check that
- * transaction with Crossmint before retrying. A create that fails without a
- * usable response rejects with `BROADCAST_UNCONFIRMED` and no
+ * transaction with Crossmint before retrying. A create whose response carries no
+ * readable transaction id rejects with `BROADCAST_UNCONFIRMED` and no
  * `providerTransactionId`.
  *
  * Each create carries an `x-idempotency-key` derived from the message bytes, so
@@ -242,10 +243,16 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
             }
             // Crossmint may be executing a transaction whose id never reached us.
             const status = providerStatus(error);
+            const providerTransactionId =
+                error instanceof SignerError ? error.context?.providerTransactionId : undefined;
             return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
                 cause: error,
-                message: 'Crossmint may have created the transaction, but no transaction id was returned',
+                message:
+                    typeof providerTransactionId === 'string'
+                        ? `Crossmint may have created the transaction, but the outcome could not be confirmed (provider transaction id: ${providerTransactionId})`
+                        : 'Crossmint may have created the transaction, but no transaction id was returned',
                 ...(status === undefined ? {} : { status }),
+                ...(typeof providerTransactionId === 'string' ? { providerTransactionId } : {}),
             });
         }
         // Post-create failures leave an outcome Crossmint may still execute, so
@@ -402,7 +409,21 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
             abortSignal,
             await idempotencyKeyFromMessage(transaction.messageBytes),
         );
-        return parseTransactionResponse(response, 'create transaction');
+        try {
+            return parseTransactionResponse(response, 'create transaction');
+        } catch (error) {
+            // The create may have been accepted even when the body is otherwise
+            // unusable, so an id present there is the caller's recovery handle.
+            const providerTransactionId = providerTransactionIdOf(response);
+            if (providerTransactionId === undefined) {
+                throw error;
+            }
+            return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+                cause: error,
+                message: 'Failed to create transaction: unusable response body',
+                providerTransactionId,
+            });
+        }
     }
 
     private async getTransaction(
@@ -501,6 +522,11 @@ async function fetchWallet(
     }
 
     return wallet as CrossmintWalletResponse;
+}
+
+function providerTransactionIdOf(payload: unknown): string | undefined {
+    const id = (payload as { id?: unknown } | null | undefined)?.id;
+    return typeof id === 'string' && id.length > 0 ? id : undefined;
 }
 
 function parseTransactionResponse(payload: unknown, context: string): CrossmintTransactionResponse {
