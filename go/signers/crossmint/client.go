@@ -95,13 +95,13 @@ func (s *Signer) createTransaction(ctx context.Context, transaction, idempotency
 	}}
 	status, body, err := s.doRequest(ctx, http.MethodPost, u, req, idempotencyKey)
 	if err != nil {
-		return transactionResponse{}, core.UnconfirmedUnlessRejected(status, "", err)
+		return transactionResponse{}, core.UnconfirmedUnlessRejected(status, "", idempotencyKey, err)
 	}
 	created, err := parseResponseWithRequiredField[transactionResponse](status, body, "id", "create_transaction")
 	if err != nil {
 		// The create may have been accepted even when the body is otherwise
 		// unusable, so an id present there is the caller's recovery handle.
-		return transactionResponse{}, core.UnconfirmedUnlessRejected(status, core.TransactionIDInBody(body), err)
+		return transactionResponse{}, core.UnconfirmedUnlessRejected(status, core.TransactionIDInBody(body), idempotencyKey, err)
 	}
 	return created, nil
 }

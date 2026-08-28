@@ -936,6 +936,13 @@ describe('CrossmintSigner', () => {
             expect(error.context?.cause).toMatchObject({ code: 'SIGNER_REMOTE_API_ERROR' });
             expect(error.context?.providerTransactionId).toBeUndefined();
             expect(error.context?.status).toBe(503);
+            // With no transaction id to check, the key the bytes went out under
+            // is the caller's only handle on a safe resend.
+            const sentKey = (vi.mocked(fetch).mock.calls[1]![1]!.headers as Record<string, string>)[
+                'x-idempotency-key'
+            ];
+            expect(sentKey).toBeDefined();
+            expect(error.context?.idempotencyKey).toBe(sentKey);
         });
 
         it('keeps a transaction id named in a 5xx creation body', async () => {

@@ -52,6 +52,10 @@ class SignerError(Exception):
 
     ``status_code`` is the remote HTTP status when the failure came from a response,
     and ``None`` otherwise.
+
+    ``idempotency_key`` is the key an ambiguous create was submitted under, when the
+    backend sends one. With no ``provider_transaction_id`` to check, resending the
+    identical bytes under that key is the only recovery that cannot double-spend.
     """
 
     def __init__(
@@ -61,6 +65,7 @@ class SignerError(Exception):
         *,
         provider_transaction_id: str | None = None,
         status_code: int | None = None,
+        idempotency_key: str | None = None,
     ) -> None:
         message = _GENERIC_MESSAGES[code]
         if provider_transaction_id is not None:
@@ -70,6 +75,7 @@ class SignerError(Exception):
         self._detail = detail
         self.provider_transaction_id = provider_transaction_id
         self.status_code = status_code
+        self.idempotency_key = idempotency_key
 
     def __repr__(self) -> str:
         return f"SignerError({self.code.value})"

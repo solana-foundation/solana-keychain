@@ -554,7 +554,16 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
 
                 base64Decoder ||= getBase64Decoder();
                 const base64Data = base64Decoder.decode(new Uint8Array(transaction.messageBytes));
-                const txId = await this.submitSolanaTransaction(base64Data, 'manual', config?.abortSignal);
+                const idempotencyKey = await this.nativeIdempotencyKey(
+                    'manual',
+                    new Uint8Array(transaction.messageBytes),
+                );
+                const txId = await this.submitSolanaTransaction(
+                    base64Data,
+                    'manual',
+                    idempotencyKey,
+                    config?.abortSignal,
+                );
                 return await this.finishNativeManualSigning(txId, transaction, config?.abortSignal);
             },
             this.requestDelayMs,
@@ -690,9 +699,13 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
 
                 base64Decoder ||= getBase64Decoder();
                 const base64Data = base64Decoder.decode(new Uint8Array(transaction.messageBytes));
+                const idempotencyKey = await this.nativeIdempotencyKey(
+                    'auto',
+                    new Uint8Array(transaction.messageBytes),
+                );
                 let txId: string;
                 try {
-                    txId = await this.submitSolanaTransaction(base64Data, 'auto', config?.abortSignal);
+                    txId = await this.submitSolanaTransaction(base64Data, 'auto', idempotencyKey, config?.abortSignal);
                 } catch (error) {
                     if (!providerMayHaveAccepted(error)) {
                         throw error;
@@ -703,6 +716,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
                         error instanceof SignerError ? error.context?.providerTransactionId : undefined;
                     return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
                         cause: error,
+                        idempotencyKey,
                         message:
                             typeof providerTransactionId === 'string'
                                 ? `Fordefi may have accepted the transaction, but the outcome could not be confirmed (provider transaction id: ${providerTransactionId})`
@@ -722,6 +736,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
                 } catch (error) {
                     return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
                         cause: error,
+                        idempotencyKey,
                         message: `Fordefi may have executed the transaction, but the outcome could not be confirmed (provider transaction id: ${txId})`,
                         providerTransactionId: txId,
                     });
@@ -885,6 +900,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
     private async submitSolanaTransaction(
         base64Data: string,
         pushMode: FordefiPushMode,
+        idempotencyKey: string,
         abortSignal?: AbortSignal,
     ): Promise<string> {
         const requestBody: FordefiSolanaTransactionRequest = {
@@ -900,13 +916,11 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
             type: 'solana_transaction',
             vault_id: this.vaultId,
         };
-        base64Encoder ||= getBase64Encoder();
-        const messageBytes = new Uint8Array(base64Encoder.encode(base64Data));
-        return await this.submitTransaction(
-            requestBody,
-            await idempotencyKeyFromMessage(this.namespaceIdempotencyInput(pushMode, messageBytes)),
-            abortSignal,
-        );
+        return await this.submitTransaction(requestBody, idempotencyKey, abortSignal);
+    }
+
+    private async nativeIdempotencyKey(pushMode: FordefiPushMode, messageBytes: Uint8Array): Promise<string> {
+        return await idempotencyKeyFromMessage(this.namespaceIdempotencyInput(pushMode, messageBytes));
     }
 
     /**

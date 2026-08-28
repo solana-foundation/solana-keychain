@@ -852,10 +852,24 @@ async fn test_create_server_error_is_unconfirmed_without_a_transaction_id() {
         SignerError::BroadcastUnconfirmed {
             provider_tx_id,
             provider_status,
+            idempotency_key,
             ..
         } => {
             assert_eq!(provider_tx_id, None);
             assert_eq!(provider_status, Some(503));
+            let sent = server
+                .received_requests()
+                .await
+                .expect("requests are recorded")
+                .into_iter()
+                .find(|request| request.method == wiremock::http::Method::POST)
+                .expect("the create was sent");
+            let sent_key = sent.headers["x-idempotency-key"].to_str().unwrap();
+            assert_eq!(
+                idempotency_key.as_deref(),
+                Some(sent_key),
+                "with no transaction id to check, the key the bytes went out under is the only handle on a resend"
+            );
         }
         other => panic!("Expected BroadcastUnconfirmed error, got: {:?}", other),
     }

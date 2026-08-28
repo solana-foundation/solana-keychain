@@ -126,7 +126,7 @@ func (s *signerCore) submitTransaction(ctx context.Context, request transactionR
 		if !broadcastManaged {
 			return err
 		}
-		return core.UnconfirmedUnlessRejected(status, providerTxID, err)
+		return core.UnconfirmedUnlessRejected(status, providerTxID, idempotenceID, err)
 	}
 
 	body, err := json.Marshal(request)

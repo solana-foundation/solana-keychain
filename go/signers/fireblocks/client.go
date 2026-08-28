@@ -188,7 +188,7 @@ func (s *Signer) createTransaction(ctx context.Context, request createTransactio
 		if !programCall {
 			return err
 		}
-		return core.UnconfirmedUnlessRejected(status, transactionIDFromBody(respBody), err)
+		return core.UnconfirmedUnlessRejected(status, transactionIDFromBody(respBody), "", err)
 	}
 
 	body, err := json.Marshal(request)

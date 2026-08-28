@@ -161,8 +161,8 @@ func (s *Signer) SignAndSendTransaction(ctx context.Context, tx *solana.Transact
 		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction", err)
 	}
 
-	createResponse, err := s.createTransaction(ctx, base58.Encode(serialized),
-		core.IdempotencyKeyFromMessage(s.namespacedKeyInput(expectedMessage)))
+	idempotencyKey := core.IdempotencyKeyFromMessage(s.namespacedKeyInput(expectedMessage))
+	createResponse, err := s.createTransaction(ctx, base58.Encode(serialized), idempotencyKey)
 	if err != nil {
 		return solana.Signature{}, err
 	}
@@ -175,7 +175,9 @@ func (s *Signer) SignAndSendTransaction(ctx context.Context, tx *solana.Transact
 		if errors.As(err, &se) {
 			detail = se.Detail()
 		}
-		return solana.Signature{}, core.NewBroadcastUnconfirmedError(createResponse.ID, detail)
+		unconfirmed := core.NewBroadcastUnconfirmedError(createResponse.ID, detail)
+		unconfirmed.IdempotencyKey = idempotencyKey
+		return solana.Signature{}, unconfirmed
 	}
 	return sig, nil
 }

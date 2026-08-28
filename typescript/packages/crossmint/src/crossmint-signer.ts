@@ -233,9 +233,10 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
      * has already accepted, so an aborted transaction may still land server-side.
      */
     private async signTransactionManaged(transaction: Transaction, abortSignal?: AbortSignal): Promise<SignatureBytes> {
+        const idempotencyKey = await idempotencyKeyFromMessage(this.namespacedKeyInput(transaction.messageBytes));
         let created: CrossmintTransactionResponse;
         try {
-            created = await this.createTransaction(transaction, abortSignal);
+            created = await this.createTransaction(transaction, idempotencyKey, abortSignal);
         } catch (error) {
             if (!providerMayHaveAccepted(error)) {
                 throw error;
@@ -246,6 +247,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
                 error instanceof SignerError ? error.context?.providerTransactionId : undefined;
             return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
                 cause: error,
+                idempotencyKey,
                 message:
                     typeof providerTransactionId === 'string'
                         ? `Crossmint may have created the transaction, but the outcome could not be confirmed (provider transaction id: ${providerTransactionId})`
@@ -261,6 +263,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
         } catch (error) {
             return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
                 cause: error,
+                idempotencyKey,
                 message: `Crossmint may have executed the transaction, but the outcome could not be confirmed (provider transaction id: ${created.id})`,
                 providerTransactionId: created.id,
             });
@@ -385,6 +388,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
 
     private async createTransaction(
         transaction: Transaction,
+        idempotencyKey: string,
         abortSignal?: AbortSignal,
     ): Promise<CrossmintTransactionResponse> {
         const wireTransaction = getBase64EncodedWireTransaction(transaction);
@@ -401,13 +405,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
         };
 
         const path = `/${API_VERSION}/wallets/${encodeURIComponent(this.walletLocator)}/transactions`;
-        const response = await this.request(
-            path,
-            'POST',
-            body,
-            abortSignal,
-            await idempotencyKeyFromMessage(this.namespacedKeyInput(transaction.messageBytes)),
-        );
+        const response = await this.request(path, 'POST', body, abortSignal, idempotencyKey);
         try {
             return parseTransactionResponse(response, 'create transaction');
         } catch (error) {

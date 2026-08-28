@@ -8,6 +8,9 @@ export const SignerErrorCode = {
      * the provider has accepted the transaction; `context.providerTransactionId`
      * carries the provider-side id to check before retrying, and `context.status`
      * the provider's HTTP status when its response was the failure.
+     * `context.idempotencyKey` carries the key the create went out under, when
+     * the backend sends one: with no transaction id to check, resending the
+     * identical bytes under that key is the only safe recovery.
      */
     BROADCAST_UNCONFIRMED: 'SIGNER_BROADCAST_UNCONFIRMED',
     CONFIG_ERROR: 'SIGNER_CONFIG_ERROR',

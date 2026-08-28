@@ -75,6 +75,12 @@ type SignerError struct {
 	// ProviderStatus is the provider's HTTP status when its response was the
 	// failure, and 0 otherwise. Exported for the same reason as ProviderTxID.
 	ProviderStatus int
+	// IdempotencyKey is the key an ambiguous create was submitted under, when
+	// the backend sends one ("" otherwise). With no ProviderTxID to check,
+	// resending the identical bytes under this key is the only recovery that
+	// cannot land the transfer twice. Exported for the same reason as
+	// ProviderTxID: it is derived from the message and carries no secret.
+	IdempotencyKey string
 	detail         string
 	cause          error
 }
@@ -133,8 +139,9 @@ func NewBroadcastUnconfirmedError(providerTxID, detail string) *SignerError {
 // transaction out. status is 0 when no response arrived,
 // and is passed on only when the response was the failure. providerTxID is the id
 // read out of the response body when one was readable there, and "" when the
-// failure came before any id was known.
-func UnconfirmedUnlessRejected(status int, providerTxID string, err error) error {
+// failure came before any id was known. idempotencyKey is the key the create was
+// submitted under, and "" for a backend that sends none.
+func UnconfirmedUnlessRejected(status int, providerTxID, idempotencyKey string, err error) error {
 	if status >= 400 && status < 500 && status != http.StatusRequestTimeout {
 		return err
 	}
@@ -144,6 +151,7 @@ func UnconfirmedUnlessRejected(status int, providerTxID string, err error) error
 		detail = se.Detail()
 	}
 	out := NewBroadcastUnconfirmedError(providerTxID, detail)
+	out.IdempotencyKey = idempotencyKey
 	if status >= 400 {
 		out.ProviderStatus = status
 	}

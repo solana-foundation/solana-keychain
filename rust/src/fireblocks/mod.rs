@@ -337,16 +337,16 @@ impl FireblocksSigner {
         }
 
         let response =
-            response.map_err(|error| unconfirmed_unless_rejected(None, None, error.into()))?;
+            response.map_err(|error| unconfirmed_unless_rejected(None, None, None, error.into()))?;
         let status = response.status().as_u16();
         if !response.status().is_success() {
             let error = extract_api_error(response, CONTEXT).await;
-            return Err(unconfirmed_unless_rejected(Some(status), None, error));
+            return Err(unconfirmed_unless_rejected(Some(status), None, None, error));
         }
 
         let body = read_body_capped(response)
             .await
-            .map_err(|error| unconfirmed_unless_rejected(Some(status), None, error))?;
+            .map_err(|error| unconfirmed_unless_rejected(Some(status), None, None, error))?;
         // The create may have been accepted even when the body is otherwise
         // unusable, so an id present there is the caller's recovery handle.
         let provider_tx_id = transaction_id_in_body(&body);
@@ -356,6 +356,7 @@ impl FireblocksSigner {
             unconfirmed_unless_rejected(
                 Some(status),
                 provider_tx_id,
+                None,
                 SignerError::SerializationError(format!("Failed to parse {CONTEXT} response")),
             )
         })
@@ -373,6 +374,7 @@ impl FireblocksSigner {
                 SigningMode::ProgramCall => SignerError::BroadcastUnconfirmed {
                     provider_tx_id: Some(tx_id.to_string()),
                     provider_status: None,
+                    idempotency_key: None,
                     detail: format!(
                         "Fireblocks PROGRAM_CALL polling timeout after {} attempts; the transaction may already be executing",
                         self.max_poll_attempts
@@ -388,6 +390,7 @@ impl FireblocksSigner {
                     SigningMode::ProgramCall => SignerError::BroadcastUnconfirmed {
                         provider_tx_id: Some(tx_id.to_string()),
                         provider_status: None,
+                        idempotency_key: None,
                         detail: format!(
                             "Fireblocks PROGRAM_CALL outcome could not be resolved: {}",
                             error
@@ -404,6 +407,7 @@ impl FireblocksSigner {
                         Err(SignerError::BroadcastUnconfirmed {
                             provider_tx_id: Some(tx_id.to_string()),
                             provider_status: None,
+                            idempotency_key: None,
                             detail: format!(
                                 "Fireblocks broadcast the PROGRAM_CALL despite signOnly (status {}); the transaction may already be executing",
                                 response.status

@@ -57,13 +57,16 @@ pub enum SignerError {
     /// transaction. Retrying blindly risks a duplicate spend; check the provider
     /// transaction id first.
     ///
-    /// Both fields are `None` when the create failed without a usable response:
-    /// nothing to check, and the only safe recovery is replaying the identical
-    /// bytes.
+    /// `provider_tx_id` and `provider_status` are `None` when the create failed
+    /// without a usable response: nothing to check, and the only safe recovery
+    /// is replaying the identical bytes. `idempotency_key` is the key those
+    /// bytes were submitted under, when the backend sends one, so a resend can
+    /// be recognised as the same request instead of a second transfer.
     #[error("Broadcast unconfirmed; the provider may have executed the transaction (provider transaction id: {})", provider_tx_id.as_deref().unwrap_or("unknown"))]
     BroadcastUnconfirmed {
         provider_tx_id: Option<String>,
         provider_status: Option<u16>,
+        idempotency_key: Option<String>,
         detail: String,
     },
 
@@ -143,11 +146,16 @@ impl fmt::Debug for SignerError {
             SignerError::ConfigError(_) => write!(f, "SignerError::ConfigError([REDACTED])"),
             SignerError::NotAvailable(_) => write!(f, "SignerError::NotAvailable([REDACTED])"),
             SignerError::IoError(_) => write!(f, "SignerError::IoError([REDACTED])"),
-            SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
+            SignerError::BroadcastUnconfirmed {
+                provider_tx_id,
+                idempotency_key,
+                ..
+            } => {
                 write!(
                     f,
-                    "SignerError::BroadcastUnconfirmed(provider_tx_id: {}, [REDACTED])",
-                    provider_tx_id.as_deref().unwrap_or("unknown")
+                    "SignerError::BroadcastUnconfirmed(provider_tx_id: {}, idempotency_key: {}, [REDACTED])",
+                    provider_tx_id.as_deref().unwrap_or("unknown"),
+                    idempotency_key.as_deref().unwrap_or("unknown")
                 )
             }
             SignerError::Other(_) => write!(f, "SignerError::Other([REDACTED])"),

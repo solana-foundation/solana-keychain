@@ -339,6 +339,23 @@ async def test_create_server_error_keeps_a_transaction_id_from_the_body() -> Non
 
 
 @respx.mock
+async def test_an_unconfirmed_create_carries_the_key_it_was_submitted_under() -> None:
+    # With no transaction id to check, the key the bytes went out under is the
+    # only handle on a resend that cannot land the transfer twice.
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    route = respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(503, json={"message": "unavailable"})
+    )
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id is None
+    sent_key = route.calls[0].request.headers["x-idempotency-key"]
+    assert excinfo.value.idempotency_key == sent_key
+
+
+@respx.mock
 async def test_create_accepted_without_an_id_is_unconfirmed() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)

@@ -78,11 +78,14 @@ pub(crate) fn idempotency_key_from_message(message_bytes: &[u8]) -> String {
 /// `status` is `None` when no response arrived, and is passed on only when the
 /// response was the failure. `provider_tx_id` is the id read out of the response
 /// body when one was readable there, and `None` when the failure came before any
-/// id was known.
+/// id was known. `idempotency_key` is the key the create was submitted under,
+/// which is the only recovery handle left when no id was returned: replaying the
+/// identical bytes under it cannot create a second transaction.
 #[cfg(any(feature = "crossmint", feature = "fireblocks", feature = "fordefi"))]
 pub(crate) fn unconfirmed_unless_rejected(
     status: Option<u16>,
     provider_tx_id: Option<String>,
+    idempotency_key: Option<&str>,
     error: SignerError,
 ) -> SignerError {
     if matches!(status, Some(status) if (400..500).contains(&status) && status != 408) {
@@ -91,6 +94,7 @@ pub(crate) fn unconfirmed_unless_rejected(
     SignerError::BroadcastUnconfirmed {
         provider_tx_id,
         provider_status: status.filter(|status| *status >= 400),
+        idempotency_key: idempotency_key.map(str::to_string),
         detail: error.detail_string(),
     }
 }

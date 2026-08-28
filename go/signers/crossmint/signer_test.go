@@ -428,6 +428,40 @@ func TestCreateServerErrorIsUnconfirmedWithoutID(t *testing.T) {
 	assertUnconfirmedWithoutID(t, err, http.StatusServiceUnavailable)
 }
 
+// With no transaction id to check, the key the bytes went out under is the
+// caller's only handle on a resend that cannot land the transfer twice.
+func TestUnconfirmedCreateCarriesTheKeyItWasSubmittedUnder(t *testing.T) {
+	var sentKey string
+	priv := testutils.TestPrivateKey()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, testutils.PubkeyOf(priv).String()))
+	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, r *http.Request) {
+		sentKey = r.Header.Get("x-idempotency-key")
+		testutils.WriteRawJSON(w, http.StatusServiceUnavailable, `{"message":"unavailable"}`)
+	})
+	cfg := baseConfig(testutils.StartTLSServer(t, mux))
+	cfg.MaxPollAttempts = 1
+	s := newTestSigner(t, cfg)
+	tx, err := testutils.CreateTestTransaction(s.Pubkey())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
+
+	assertUnconfirmedWithoutID(t, err, http.StatusServiceUnavailable)
+	var se *core.SignerError
+	if !errors.As(err, &se) {
+		t.Fatalf("expected a SignerError, got %v", err)
+	}
+	if sentKey == "" {
+		t.Fatal("the create carried no idempotency key")
+	}
+	if se.IdempotencyKey != sentKey {
+		t.Errorf("IdempotencyKey = %q, want %q", se.IdempotencyKey, sentKey)
+	}
+}
+
 func TestCreateAcceptedWithoutIDIsUnconfirmed(t *testing.T) {
 	s := createStatusSigner(t, http.StatusCreated, `{"status":"pending"}`)
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())

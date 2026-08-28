@@ -521,10 +521,11 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
     ) -> SignedTransaction:
         self._require_sole_required_signer(transaction)
         message_data = signed_message_bytes(transaction.message)
+        idempotency_key = self._native_idempotence_id(message_data)
         try:
             transaction_id = await self._post_transaction(
                 self._solana_transaction_request(message_data),
-                idempotence_id=self._native_idempotence_id(message_data),
+                idempotence_id=idempotency_key,
             )
         except asyncio.CancelledError as error:
             # The re-raise must stay a CancelledError for asyncio, so the warning
@@ -545,6 +546,7 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
                 error._detail,
                 provider_transaction_id=error.provider_transaction_id,
                 status_code=error.status_code,
+                idempotency_key=idempotency_key,
             ) from None
         if self._pending_transaction_id is not None:
             self._pending_transaction_id.set(transaction_id)
@@ -568,6 +570,7 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
                 SignerErrorCode.BROADCAST_UNCONFIRMED,
                 error._detail,
                 provider_transaction_id=transaction_id,
+                idempotency_key=idempotency_key,
             ) from None
         self._clear_pending_transaction_id()
         return signed

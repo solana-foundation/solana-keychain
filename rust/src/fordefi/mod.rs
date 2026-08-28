@@ -273,7 +273,7 @@ impl FordefiCore {
         }
         let classify = |status: Option<u16>, provider_tx_id: Option<String>, error: SignerError| {
             if broadcast_managed {
-                unconfirmed_unless_rejected(status, provider_tx_id, error)
+                unconfirmed_unless_rejected(status, provider_tx_id, idempotence_id, error)
             } else {
                 error
             }
@@ -746,6 +746,7 @@ impl FordefiNativeAutoSigner {
             SignerError::BroadcastUnconfirmed {
                 provider_tx_id: Some(tx_id),
                 provider_status: None,
+                idempotency_key: None,
                 detail: error.detail_string(),
             }
         });

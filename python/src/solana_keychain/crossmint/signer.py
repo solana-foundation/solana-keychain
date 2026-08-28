@@ -255,6 +255,7 @@ class CrossmintSigner(SendingSigner):
                 error._detail,
                 provider_transaction_id=error.provider_transaction_id,
                 status_code=error.status_code,
+                idempotency_key=idempotency_key,
             ) from None
 
     async def _get_transaction(self, transaction_id: str) -> dict[str, Any]:
@@ -470,10 +471,8 @@ class CrossmintSigner(SendingSigner):
         expected_message = signed_message_bytes(transaction.message)
         transaction_b58 = base58.b58encode(bytes(transaction)).decode("ascii")
 
-        create_response = await self._create_transaction(
-            transaction_b58,
-            idempotency_key_from_message(self._namespaced_key_input(expected_message)),
-        )
+        idempotency_key = idempotency_key_from_message(self._namespaced_key_input(expected_message))
+        create_response = await self._create_transaction(transaction_b58, idempotency_key)
         provider_transaction_id = str(create_response["id"])
         # Post-create failures leave an outcome Crossmint may still execute, so
         # they surface as BROADCAST_UNCONFIRMED with the transaction id.
@@ -499,6 +498,7 @@ class CrossmintSigner(SendingSigner):
                 SignerErrorCode.BROADCAST_UNCONFIRMED,
                 error._detail,
                 provider_transaction_id=provider_transaction_id,
+                idempotency_key=idempotency_key,
             ) from None
         self._clear_pending_transaction_id()
         return signature
