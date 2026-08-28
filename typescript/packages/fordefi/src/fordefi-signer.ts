@@ -611,7 +611,8 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
      * Recover the lifetime of the returned transaction from its compiled
      * message. Fordefi does not report the `lastValidBlockHeight` of a blockhash
      * it refreshed, so Kit substitutes `U64_MAX`; the caller's own constraint is
-     * kept instead whenever the lifetime survived the rewrite.
+     * kept instead whenever the blockhash survived the rewrite. A durable nonce
+     * constraint is complete as decoded, so the returned one always wins.
      */
     private async readReturnedLifetime(
         originalTransaction: Transaction | (Transaction & TransactionWithLifetime),
@@ -630,14 +631,11 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
 
         if ('lifetimeConstraint' in originalTransaction) {
             const originalLifetime = originalTransaction.lifetimeConstraint;
-            const lifetimeSurvived =
-                ('blockhash' in originalLifetime &&
-                    'blockhash' in returnedLifetime &&
-                    originalLifetime.blockhash === returnedLifetime.blockhash) ||
-                ('nonce' in originalLifetime &&
-                    'nonce' in returnedLifetime &&
-                    originalLifetime.nonce === returnedLifetime.nonce);
-            if (lifetimeSurvived) {
+            const blockhashSurvived =
+                'blockhash' in originalLifetime &&
+                'blockhash' in returnedLifetime &&
+                originalLifetime.blockhash === returnedLifetime.blockhash;
+            if (blockhashSurvived) {
                 return originalLifetime;
             }
         }

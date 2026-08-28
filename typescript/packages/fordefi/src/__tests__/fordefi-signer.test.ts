@@ -13,6 +13,17 @@ import {
     type SignerError,
 } from '@solana/keychain-core';
 import { createCosignedWireTransaction, createSignedWireTransaction } from '@solana/keychain-test-utils';
+import {
+    compileTransaction,
+    createTransactionMessage,
+    generateKeyPairSigner,
+    getBase64EncodedWireTransaction,
+    type Nonce,
+    partiallySignTransaction,
+    pipe,
+    setTransactionMessageFeePayer,
+    setTransactionMessageLifetimeUsingDurableNonce,
+} from '@solana/kit';
 import { isTransactionModifyingSigner, isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
 
 vi.mock('@solana/keychain-core', async importOriginal => {
@@ -40,6 +51,8 @@ const MOCK_ADDRESS = '11111111111111111111111111111111';
 
 const { privateKey: testPrivateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const TEST_PEM = testPrivateKey.export({ type: 'sec1', format: 'pem' }) as string;
+
+const NONCE_VALUE = '11111111111111111111111111111111' as Nonce;
 
 const MOCK_SIGNATURE_BYTES = new Uint8Array(64).fill(0xab);
 const MOCK_SIGNATURE_BASE64 = Buffer.from(MOCK_SIGNATURE_BYTES).toString('base64');
@@ -94,6 +107,32 @@ async function setupNativeManual(version: 0 | 1) {
         pushMode: 'manual',
     } satisfies FordefiSignerConfig & { chain: SolanaChainUniqueId; pushMode: 'manual' };
     return { config, fixture };
+}
+
+// A durable-nonce wire transaction whose nonce account is generated, so a
+// caller constraint naming a different account is distinguishable.
+async function createNonceWireTransaction() {
+    const feePayerSigner = await generateKeyPairSigner();
+    const nonceAccount = await generateKeyPairSigner();
+    const message = pipe(
+        createTransactionMessage({ version: 0 }),
+        tx => setTransactionMessageFeePayer(feePayerSigner.address, tx),
+        tx =>
+            setTransactionMessageLifetimeUsingDurableNonce(
+                {
+                    nonce: NONCE_VALUE,
+                    nonceAccountAddress: nonceAccount.address,
+                    nonceAuthorityAddress: feePayerSigner.address,
+                },
+                tx,
+            ),
+    );
+    const signed = await partiallySignTransaction([feePayerSigner.keyPair], compileTransaction(message));
+    return {
+        feePayer: feePayerSigner.address,
+        nonceAccountAddress: nonceAccount.address,
+        wireTransaction: getBase64EncodedWireTransaction(signed),
+    };
 }
 
 function unsignedManualTransaction(feePayer: string, messageBytes: Uint8Array<ArrayBufferLike> = new Uint8Array(32)) {
@@ -1001,6 +1040,33 @@ describe('createFordefiSigner', () => {
             ]);
 
             expect(results[0]!.lifetimeConstraint).toStrictEqual(lifetimeConstraint);
+        });
+
+        it('takes the nonce account from the returned transaction, not the caller constraint', async () => {
+            const nonceFixture = await createNonceWireTransaction();
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
+                .mockResolvedValueOnce(mockPollResponse('signed', undefined, nonceFixture.wireTransaction));
+
+            const signer = await createFordefiSigner({
+                ...mockConfig,
+                chain: 'solana_mainnet',
+                publicKey: nonceFixture.feePayer,
+                pushMode: 'manual',
+            } as FordefiSignerConfig);
+            const staleNonceAccount = (await generateKeyPairSigner()).address;
+            const results = await signer.modifyAndSignTransactions([
+                {
+                    lifetimeConstraint: { nonce: NONCE_VALUE, nonceAccountAddress: staleNonceAccount },
+                    messageBytes: new Uint8Array(32),
+                    signatures: { [nonceFixture.feePayer]: null },
+                } as never,
+            ]);
+
+            expect(results[0]!.lifetimeConstraint).toStrictEqual({
+                nonce: NONCE_VALUE,
+                nonceAccountAddress: nonceFixture.nonceAccountAddress,
+            });
         });
 
         it('should reject pushMode manual without chain', async () => {
