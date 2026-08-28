@@ -131,7 +131,7 @@ pub(crate) async fn extract_api_error(response: reqwest::Response, context: &str
         log::error!("{context} error - status: {status}");
     }
 
-    SignerError::RemoteApiError(format!("{context} error {status}"))
+    SignerError::remote_api(format!("{context} error {status}"))
 }
 
 /// The top-level `id` of a response body, when there is one. A provider that
@@ -167,7 +167,7 @@ pub(crate) async fn extract_api_error_with_transaction_id(
     log::error!("{context} error - status: {status}");
 
     (
-        SignerError::RemoteApiError(format!("{context} error {status}")),
+        SignerError::remote_api(format!("{context} error {status}")),
         transaction_id_in_body(&body),
     )
 }

@@ -378,7 +378,7 @@ impl FireblocksSigner {
                         self.max_poll_attempts
                     ),
                 },
-                SigningMode::Raw => SignerError::RemoteApiError(format!(
+                SigningMode::Raw => SignerError::remote_api(format!(
                     "Transaction polling timeout after {} attempts - signing request may still complete",
                     self.max_poll_attempts
                 )),

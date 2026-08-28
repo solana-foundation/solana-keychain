@@ -149,7 +149,7 @@ impl AwsKmsSigner {
                 #[cfg(feature = "unsafe-debug")]
                 log::error!("AWS KMS Sign operation failed: {_e:?}");
 
-                SignerError::RemoteApiError("AWS KMS Sign operation failed".to_string())
+                SignerError::remote_api("AWS KMS Sign operation failed".to_string())
             })?;
 
         let signature_blob = response.signature().ok_or_else(|| {

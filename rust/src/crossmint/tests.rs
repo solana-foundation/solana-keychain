@@ -991,7 +991,7 @@ async fn test_create_rejected_by_crossmint_stays_a_plain_failure() {
     let tx = create_test_transaction(&signer.pubkey());
 
     match signer.sign_and_send_transaction(&tx).await.unwrap_err() {
-        SignerError::RemoteApiError(_) => {}
+        SignerError::RemoteApiError { .. } => {}
         other => panic!("Expected RemoteApiError, got: {:?}", other),
     }
 }

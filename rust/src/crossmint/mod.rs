@@ -308,7 +308,7 @@ impl CrossmintSigner {
         if status >= 400 {
             let message = Self::extract_error_message(&value)
                 .unwrap_or_else(|| format!("Crossmint API error {status}"));
-            return Err(SignerError::RemoteApiError(format!("{context}: {message}")));
+            return Err(SignerError::remote_api(format!("{context}: {message}")));
         }
 
         // A blank string is as unusable as an absent field: it would be spliced
@@ -320,7 +320,7 @@ impl CrossmintSigner {
                 .is_some_and(|id| id.trim().is_empty())
         {
             if let Some(message) = Self::extract_error_message(&value) {
-                return Err(SignerError::RemoteApiError(format!("{context}: {message}")));
+                return Err(SignerError::remote_api(format!("{context}: {message}")));
             }
 
             return Err(SignerError::SerializationError(format!(
@@ -395,7 +395,7 @@ impl CrossmintSigner {
                 "Crossmint transaction is awaiting approval; additional signer approvals are required"
                     .to_string(),
             )),
-            _ => Err(SignerError::RemoteApiError(format!(
+            _ => Err(SignerError::remote_api(format!(
                 "Crossmint transaction polling timed out after {} attempts",
                 self.max_poll_attempts
             ))),

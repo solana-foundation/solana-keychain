@@ -7,7 +7,10 @@ fn test_display_is_redacted_for_all_variants() {
         SignerError::InvalidPrivateKey(secret.to_string()),
         SignerError::InvalidPublicKey(secret.to_string()),
         SignerError::SigningFailed(secret.to_string()),
-        SignerError::RemoteApiError(secret.to_string()),
+        SignerError::RemoteApiError {
+            detail: secret.to_string(),
+            provider_tx_id: Some("tx-id".to_string()),
+        },
         SignerError::HttpError(secret.to_string()),
         SignerError::SerializationError(secret.to_string()),
         SignerError::ConfigError(secret.to_string()),
@@ -45,7 +48,7 @@ fn test_display_messages_are_stable_and_generic() {
         "Signing failed"
     );
     assert_eq!(
-        format!("{}", SignerError::RemoteApiError("x".to_string())),
+        format!("{}", SignerError::remote_api("x")),
         "Remote API error"
     );
     assert_eq!(
@@ -87,4 +90,20 @@ fn test_broadcast_unconfirmed_surfaces_tx_id_but_not_detail() {
     let debug = format!("{err:?}");
     assert!(debug.contains("provider-tx-123"));
     assert!(!debug.contains("sensitive-detail"));
+}
+
+#[test]
+fn test_remote_api_error_surfaces_a_pending_tx_id_but_not_detail() {
+    let err = SignerError::RemoteApiError {
+        detail: "sensitive-detail".to_string(),
+        provider_tx_id: Some("provider-tx-123".to_string()),
+    };
+    let debug = format!("{err:?}");
+    assert!(debug.contains("provider-tx-123"));
+    assert!(!debug.contains("sensitive-detail"));
+    assert_eq!(err.detail_string(), "sensitive-detail");
+    assert_eq!(format!("{err}"), "Remote API error");
+
+    let plain = format!("{:?}", SignerError::remote_api("sensitive-detail"));
+    assert_eq!(plain, "SignerError::RemoteApiError([REDACTED])");
 }

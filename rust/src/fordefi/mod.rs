@@ -346,11 +346,9 @@ impl FordefiCore {
         poll_until(
             self.max_poll_attempts,
             self.poll_interval_ms,
-            || {
-                SignerError::RemoteApiError(format!(
-                    "Polling timeout after {} attempts",
-                    self.max_poll_attempts
-                ))
+            || SignerError::RemoteApiError {
+                detail: format!("Polling timeout after {} attempts", self.max_poll_attempts),
+                provider_tx_id: Some(tx_id.to_string()),
             },
             || async {
                 let response = self

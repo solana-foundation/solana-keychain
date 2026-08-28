@@ -168,14 +168,14 @@ impl VaultSigner {
             .send()
             .await
             .map_err(|e| {
-                SignerError::RemoteApiError(format!("Failed to send request to Vault: {e}"))
+                SignerError::remote_api(format!("Failed to send request to Vault: {e}"))
             })?;
 
         let result: serde_json::Value = parse_json_response(response, "Vault API").await?;
 
-        let signature_b64 = result["data"]["signature"].as_str().ok_or_else(|| {
-            SignerError::RemoteApiError("No signature in Vault response".to_string())
-        })?;
+        let signature_b64 = result["data"]["signature"]
+            .as_str()
+            .ok_or_else(|| SignerError::remote_api("No signature in Vault response".to_string()))?;
 
         // Remove a versioned Vault transit prefix (e.g., "vault:v1:", "vault:v2:", ...).
         let signature_b64 = Self::strip_vault_signature_prefix(signature_b64);

@@ -334,7 +334,7 @@ async fn test_turnkey_sign_unauthorized() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        SignerError::RemoteApiError(_)
+        SignerError::RemoteApiError { .. }
     ));
 }
 

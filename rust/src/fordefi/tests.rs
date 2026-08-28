@@ -555,11 +555,16 @@ async fn test_fordefi_sign_transaction_poll_timeout() {
 
     let mut tx = create_test_transaction(&pubkey);
     let result = signer.sign_transaction(&mut tx).await;
-    assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err(),
-        SignerError::RemoteApiError(_)
-    ));
+    match result.unwrap_err() {
+        SignerError::RemoteApiError { provider_tx_id, .. } => {
+            assert_eq!(
+                provider_tx_id.as_deref(),
+                Some("tx-pending"),
+                "giving up waiting still leaves a request Fordefi may sign later"
+            );
+        }
+        other => panic!("Expected RemoteApiError, got: {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -582,7 +587,7 @@ async fn test_fordefi_submit_unauthorized() {
     let result = signer.sign_transaction(&mut tx).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(matches!(err, SignerError::RemoteApiError(_)));
+    assert!(matches!(err, SignerError::RemoteApiError { .. }));
     assert_eq!(err.to_string(), "Remote API error");
 }
 
@@ -1037,7 +1042,7 @@ async fn test_native_submit_rejected_by_fordefi_stays_a_plain_failure() {
 
     let tx = create_test_transaction(&pubkey);
     match signer.sign_and_send_transaction(&tx).await.unwrap_err() {
-        SignerError::RemoteApiError(_) => {}
+        SignerError::RemoteApiError { .. } => {}
         other => panic!("Expected RemoteApiError, got: {other:?}"),
     }
 }
@@ -1057,7 +1062,7 @@ async fn test_black_box_submit_server_error_is_not_reported_as_unconfirmed() {
 
     let mut tx = create_test_transaction(&pubkey);
     match signer.sign_transaction(&mut tx).await.unwrap_err() {
-        SignerError::RemoteApiError(_) => {}
+        SignerError::RemoteApiError { .. } => {}
         other => panic!("Expected RemoteApiError, got: {other:?}"),
     }
 }
@@ -1483,6 +1488,48 @@ fn test_canonical_fee_separates_every_fee_shape() {
 
 /// The idempotency key is namespaced so the same bytes cannot collide with an
 /// auto create that did broadcast them.
+#[tokio::test]
+async fn test_fordefi_manual_poll_timeout_carries_the_transaction_id() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let pubkey = keypair_pubkey(&keypair);
+    let signer = create_manual_test_signer(&mock_server.uri(), pubkey);
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "manual-tx-slow"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/transactions/manual-tx-slow"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "state": "pending_signature"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let mut tx = create_test_transaction(&pubkey);
+    match signer
+        .modify_and_sign_transaction(&mut tx)
+        .await
+        .unwrap_err()
+    {
+        SignerError::RemoteApiError { provider_tx_id, .. } => {
+            assert_eq!(
+                provider_tx_id.as_deref(),
+                Some("manual-tx-slow"),
+                "manual mode broadcasts nothing, so the id is the only handle on \
+                 a request that may still be signed"
+            );
+        }
+        other => panic!("Expected RemoteApiError, got: {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn test_fordefi_manual_namespaces_the_idempotency_key() {
     let mock_server = MockServer::start().await;

@@ -247,7 +247,7 @@ async fn test_para_init_unauthorized() {
     let result = signer.init().await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(matches!(err, SignerError::RemoteApiError(_)));
+    assert!(matches!(err, SignerError::RemoteApiError { .. }));
     assert_eq!(err.to_string(), "Remote API error");
 }
 
@@ -353,7 +353,7 @@ async fn test_para_sign_unauthorized() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        SignerError::RemoteApiError(_)
+        SignerError::RemoteApiError { .. }
     ));
 }
 

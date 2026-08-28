@@ -19,8 +19,17 @@ pub enum SignerError {
     SigningFailed(String),
 
     /// Remote API error (any remote signer backend: Vault, Privy, Turnkey, Fireblocks, AWS/GCP KMS, Dfns, Crossmint, CDP, Para, Openfort, Utila, Fordefi)
+    ///
+    /// `provider_tx_id` carries the provider's id for a request it accepted but
+    /// did not finish, so a caller who gives up waiting can still look the
+    /// request up. It is `None` for every failure that left no such request
+    /// behind. Nothing was broadcast: a backend that may have put a transaction
+    /// on chain reports [`SignerError::BroadcastUnconfirmed`] instead.
     #[error("Remote API error")]
-    RemoteApiError(String),
+    RemoteApiError {
+        detail: String,
+        provider_tx_id: Option<String>,
+    },
 
     /// HTTP request error
     #[error("HTTP request failed")]
@@ -64,19 +73,28 @@ pub enum SignerError {
 }
 
 impl SignerError {
+    /// A remote API failure that left no pending provider request behind.
+    pub fn remote_api(detail: impl Into<String>) -> Self {
+        Self::RemoteApiError {
+            detail: detail.into(),
+            provider_tx_id: None,
+        }
+    }
+
     pub(crate) fn detail_string(&self) -> String {
         match self {
             Self::InvalidPrivateKey(detail)
             | Self::InvalidPublicKey(detail)
             | Self::SigningFailed(detail)
-            | Self::RemoteApiError(detail)
             | Self::HttpError(detail)
             | Self::SerializationError(detail)
             | Self::ConfigError(detail)
             | Self::NotAvailable(detail)
             | Self::IoError(detail)
             | Self::Other(detail) => detail.clone(),
-            Self::BroadcastUnconfirmed { detail, .. } => detail.clone(),
+            Self::RemoteApiError { detail, .. } | Self::BroadcastUnconfirmed { detail, .. } => {
+                detail.clone()
+            }
         }
     }
 }
@@ -111,9 +129,13 @@ impl fmt::Debug for SignerError {
                 write!(f, "SignerError::InvalidPublicKey([REDACTED])")
             }
             SignerError::SigningFailed(_) => write!(f, "SignerError::SigningFailed([REDACTED])"),
-            SignerError::RemoteApiError(_) => {
-                write!(f, "SignerError::RemoteApiError([REDACTED])")
-            }
+            SignerError::RemoteApiError { provider_tx_id, .. } => match provider_tx_id {
+                Some(id) => write!(
+                    f,
+                    "SignerError::RemoteApiError(provider_tx_id: {id}, [REDACTED])"
+                ),
+                None => write!(f, "SignerError::RemoteApiError([REDACTED])"),
+            },
             SignerError::HttpError(_) => write!(f, "SignerError::HttpError([REDACTED])"),
             SignerError::SerializationError(_) => {
                 write!(f, "SignerError::SerializationError([REDACTED])")

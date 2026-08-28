@@ -352,7 +352,7 @@ async fn test_sign_transaction_timeout() {
 
     let signer = create_test_signer(&server.uri(), Some(keypair_pubkey(&keypair)));
     let result = signer.sign_transaction(&mut transaction).await;
-    assert!(matches!(result, Err(SignerError::RemoteApiError(_))));
+    assert!(matches!(result, Err(SignerError::RemoteApiError { .. })));
 }
 
 #[tokio::test]

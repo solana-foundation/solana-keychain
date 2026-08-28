@@ -260,7 +260,7 @@ async fn test_sign_message_api_error() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        SignerError::RemoteApiError(_)
+        SignerError::RemoteApiError { .. }
     ));
 }
 
@@ -383,7 +383,7 @@ async fn test_sign_transaction_api_error() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        SignerError::RemoteApiError(_)
+        SignerError::RemoteApiError { .. }
     ));
 }
 

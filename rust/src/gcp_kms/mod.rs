@@ -61,9 +61,10 @@ impl GcpKmsSigner {
 
     /// Create a new GcpKmsSigner from a configuration object.
     pub async fn from_config(config: GcpKmsSignerConfig) -> Result<Self, SignerError> {
-        let client = KeyManagementService::builder().build().await.map_err(|e| {
-            SignerError::RemoteApiError(format!("Failed to create KMS client: {e}"))
-        })?;
+        let client = KeyManagementService::builder()
+            .build()
+            .await
+            .map_err(|e| SignerError::remote_api(format!("Failed to create KMS client: {e}")))?;
 
         Self::with_client(client, config.key_name, config.public_key)
     }
@@ -103,7 +104,7 @@ impl GcpKmsSigner {
                 #[cfg(feature = "unsafe-debug")]
                 log::error!("GCP KMS Sign operation failed: {_e:?}");
 
-                SignerError::RemoteApiError("GCP KMS Sign operation failed".to_string())
+                SignerError::remote_api("GCP KMS Sign operation failed".to_string())
             })?;
 
         let sig = signature_from_bytes(response.signature.as_ref())?;

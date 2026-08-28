@@ -120,7 +120,7 @@ async fn test_with_client_builder_enforces_no_redirect_policy() {
     let result = signer.sign_message(b"redirect-message").await;
     assert!(matches!(
         result.unwrap_err(),
-        SignerError::RemoteApiError(_)
+        SignerError::RemoteApiError { .. }
     ));
 }
 
@@ -265,7 +265,7 @@ async fn test_sign_message_api_error() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        SignerError::RemoteApiError(_)
+        SignerError::RemoteApiError { .. }
     ));
 }
 
@@ -300,7 +300,7 @@ async fn test_sign_message_refuses_redirects() {
     let result = signer.sign_message(b"hello").await;
     assert!(matches!(
         result.unwrap_err(),
-        SignerError::RemoteApiError(_)
+        SignerError::RemoteApiError { .. }
     ));
 }
 

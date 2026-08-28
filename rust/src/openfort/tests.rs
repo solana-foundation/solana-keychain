@@ -147,7 +147,7 @@ async fn test_init_unauthorized() {
 
     let mut signer = create_uninitialized_test_signer(&mock_server.uri());
     let err = signer.init().await.unwrap_err();
-    assert!(matches!(err, SignerError::RemoteApiError(_)));
+    assert!(matches!(err, SignerError::RemoteApiError { .. }));
 }
 
 #[tokio::test]
@@ -369,7 +369,7 @@ async fn test_sign_unauthorized() {
     let result = signer.sign_message(b"test").await;
     assert!(matches!(
         result.unwrap_err(),
-        SignerError::RemoteApiError(_)
+        SignerError::RemoteApiError { .. }
     ));
 }
 

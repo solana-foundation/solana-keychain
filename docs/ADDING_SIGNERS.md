@@ -138,7 +138,7 @@ impl YourServiceSigner {
         // 3. Check for errors — use generic messages, never expose raw API response text
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            return Err(SignerError::RemoteApiError(format!(
+            return Err(SignerError::remote_api(format!(
                 "YourService API returned status {status}"
             )));
         }
@@ -1082,7 +1082,7 @@ Always use the existing error types. Both `Display` and `Debug` on `SignerError`
 
 ```rust
 // Good — generic message, no raw API data
-return Err(SignerError::RemoteApiError(format!(
+return Err(SignerError::remote_api(format!(
     "YourService API returned status {status}"
 )));
 
@@ -1094,7 +1094,7 @@ let bytes = base64::decode(data)
 let decoded = STANDARD.decode(&api_response.signature).expect("decode failed");
 
 // BAD — never include raw API error text
-return Err(SignerError::RemoteApiError(format!("API error: {error_body}")));
+return Err(SignerError::remote_api(format!("API error: {error_body}")));
 ```
 
 ### Security Requirements

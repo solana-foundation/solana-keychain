@@ -420,7 +420,7 @@ async fn test_gcp_kms_sign_api_error() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        SignerError::RemoteApiError(_)
+        SignerError::RemoteApiError { .. }
     ));
 }
 
@@ -475,7 +475,7 @@ async fn test_gcp_kms_sign_unauthorized() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        SignerError::RemoteApiError(_)
+        SignerError::RemoteApiError { .. }
     ));
 }
 

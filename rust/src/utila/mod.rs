@@ -288,7 +288,7 @@ impl UtilaSigner {
             }
         }
 
-        Err(SignerError::RemoteApiError(format!(
+        Err(SignerError::remote_api(format!(
             "Utila transaction polling timed out after {} attempts",
             self.max_poll_attempts
         )))
