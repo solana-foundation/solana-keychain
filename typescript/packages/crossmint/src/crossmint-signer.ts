@@ -77,6 +77,10 @@ let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
  * Each create carries an `x-idempotency-key` derived from the message bytes, so
  * replaying these exact bytes cannot create a second transaction; a rebuilt
  * transaction derives a different key and executes as a new transfer.
+ *
+ * A batch signs sequentially and stops on the first rejection, whose
+ * `context.failedIndex` and `context.completedSignatures` carry the failing
+ * position and the signatures that already landed.
  */
 class CrossmintSigner<TAddress extends string = string> implements SolanaSendingSigner<TAddress> {
     // No signTransactions/signMessages: Kit classifies signers by duck-typed
@@ -215,7 +219,21 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
                 await abortableDelay(this.requestDelayMs, config?.abortSignal);
             }
             config?.abortSignal?.throwIfAborted();
-            results.push(await this.signTransactionManaged(transaction, config?.abortSignal));
+            // A rejection abandons the signatures already collected, so they and
+            // the failing index travel on the error: the transactions before it
+            // are landed, and only the failing one needs reconciling.
+            try {
+                results.push(await this.signTransactionManaged(transaction, config?.abortSignal));
+            } catch (error) {
+                if (!(error instanceof SignerError)) {
+                    throw error;
+                }
+                throwSignerError(error.code, {
+                    ...error.context,
+                    completedSignatures: [...results],
+                    failedIndex: index,
+                });
+            }
         }
         return results;
     }

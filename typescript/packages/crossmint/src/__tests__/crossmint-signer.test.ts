@@ -293,13 +293,15 @@ describe('CrossmintSigner', () => {
                 pollIntervalMs: 1,
             });
 
-            await expect(
-                signer.signAndSendTransactions([
-                    createMockTransaction(),
-                    createMockTransaction(),
-                    createMockTransaction(),
-                ]),
-            ).rejects.toMatchObject({ code: 'SIGNER_BROADCAST_UNCONFIRMED' });
+            const error = await signer
+                .signAndSendTransactions([createMockTransaction(), createMockTransaction(), createMockTransaction()])
+                .catch((thrown: unknown) => thrown);
+
+            expect(error).toMatchObject({
+                code: 'SIGNER_BROADCAST_UNCONFIRMED',
+                context: { failedIndex: 1 },
+            });
+            expect((error as { context?: Record<string, unknown> }).context?.completedSignatures).toHaveLength(1);
 
             // wallet create + tx0 create + tx1 create = 3 fetches; tx2 must not be created.
             expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
