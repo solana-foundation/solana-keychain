@@ -15,6 +15,33 @@ from solana_keychain.core.signer import SignedTransaction
 ED25519_SIGNATURE_LENGTH = 64
 
 
+class PendingTransactionId:
+    """A slot a broadcast-managed signer writes the accepted provider transaction
+    id into, so the id survives a cancelled call.
+
+    A cancellation must be re-raised as ``asyncio.CancelledError``, which carries
+    no structured field, and awaiting a cancelled task hands the awaiter a fresh
+    instance without the raised message. Pass an instance of this class to the
+    signer configuration, and read it after a cancellation to learn which
+    provider transaction to reconcile before retrying. A call that returns
+    normally clears the slot, since the id is then already in the result or the
+    error.
+    """
+
+    def __init__(self) -> None:
+        self._provider_transaction_id: str | None = None
+
+    def get(self) -> str | None:
+        """The provider transaction id left behind by a cancelled call, if any."""
+        return self._provider_transaction_id
+
+    def set(self, provider_transaction_id: str) -> None:
+        self._provider_transaction_id = provider_transaction_id
+
+    def clear(self) -> None:
+        self._provider_transaction_id = None
+
+
 def idempotency_key_from_message(message_bytes: bytes) -> str:
     """A UUID derived from SHA-256(message bytes), so a retry of the same bytes
     reuses the key and the provider deduplicates the create."""

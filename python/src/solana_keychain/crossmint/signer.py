@@ -26,6 +26,7 @@ from solana_keychain.core.http import (
 from solana_keychain.core.signer import SendingSigner, require_initialized
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
+    PendingTransactionId,
     idempotency_key_from_message,
     signed_message_bytes,
 )
@@ -74,6 +75,7 @@ class CrossmintSignerConfig:
     poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS
     max_poll_attempts: int = DEFAULT_MAX_POLL_ATTEMPTS
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
+    pending_transaction_id: PendingTransactionId | None = None
 
 
 class CrossmintSigner(SendingSigner):
@@ -109,6 +111,7 @@ class CrossmintSigner(SendingSigner):
         self._poll_interval_ms = config.poll_interval_ms
         self._max_poll_attempts = config.max_poll_attempts
         self._http_client = config.http_client
+        self._pending_transaction_id = config.pending_transaction_id
         self._public_key: Pubkey | None = None
 
         self._signing_key: Keypair | None = None
@@ -464,11 +467,14 @@ class CrossmintSigner(SendingSigner):
         provider_transaction_id = str(create_response["id"])
         # Post-create failures leave an outcome Crossmint may still execute, so
         # they surface as BROADCAST_UNCONFIRMED with the transaction id.
+        if self._pending_transaction_id is not None:
+            self._pending_transaction_id.set(provider_transaction_id)
         try:
-            return await self._finish_managed_transaction(create_response, expected_message)
+            signature = await self._finish_managed_transaction(create_response, expected_message)
         except asyncio.CancelledError as error:
             # Awaiting a cancelled task strips the raised instance, so the id is
-            # also logged; the re-raise must stay a CancelledError for asyncio.
+            # also logged and left in the registered slot; the re-raise must stay
+            # a CancelledError for asyncio.
             _logger.warning(
                 "Crossmint may have executed cancelled transaction %s; check it before retrying",
                 provider_transaction_id,
@@ -478,11 +484,18 @@ class CrossmintSigner(SendingSigner):
                 f"not be confirmed (provider transaction id: {provider_transaction_id})"
             ) from error
         except SignerError as error:
+            self._clear_pending_transaction_id()
             raise SignerError(
                 SignerErrorCode.BROADCAST_UNCONFIRMED,
                 error._detail,
                 provider_transaction_id=provider_transaction_id,
             ) from None
+        self._clear_pending_transaction_id()
+        return signature
+
+    def _clear_pending_transaction_id(self) -> None:
+        if self._pending_transaction_id is not None:
+            self._pending_transaction_id.clear()
 
     async def _finish_managed_transaction(
         self, create_response: dict[str, Any], expected_message: bytes
@@ -508,6 +521,12 @@ class CrossmintSigner(SendingSigner):
         bytes, so replaying these exact bytes cannot create a second
         transaction; a rebuilt transaction derives a different key and executes
         as a new transfer.
+
+        A cancellation cannot carry a structured error: it must be re-raised as
+        ``asyncio.CancelledError``, and awaiting a cancelled task hands the
+        awaiter a fresh instance without the raised message. Pass a
+        ``PendingTransactionId`` as ``pending_transaction_id`` in the config and
+        read it after a cancellation to recover the accepted transaction id.
         """
         return await self._execute_managed_transaction(transaction)
 

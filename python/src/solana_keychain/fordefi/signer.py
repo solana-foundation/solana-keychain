@@ -43,6 +43,7 @@ from solana_keychain.core.signer import (
 )
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
+    PendingTransactionId,
     add_signature_to_transaction,
     classify_signed_transaction,
     get_signing_keypair_position,
@@ -114,6 +115,7 @@ class FordefiSignerConfig:
     fee: dict[str, Any] | None = None
     push_mode: FordefiPushMode | None = None
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
+    pending_transaction_id: PendingTransactionId | None = None
 
 
 class _FordefiSignerBase(SolanaSigner):
@@ -162,6 +164,7 @@ class _FordefiSignerBase(SolanaSigner):
         self._poll_interval_ms = config.poll_interval_ms
         self._max_poll_attempts = config.max_poll_attempts
         self._http_client = config.http_client
+        self._pending_transaction_id = config.pending_transaction_id
         try:
             self._public_key = Pubkey.from_string(config.public_key)
         except Exception:
@@ -436,6 +439,12 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
         bytes, so replaying these exact bytes cannot create a second
         transaction; a rebuilt transaction derives a different id and is
         broadcast again.
+
+        A cancellation cannot carry a structured error: it must be re-raised as
+        ``asyncio.CancelledError``, and awaiting a cancelled task hands the
+        awaiter a fresh instance without the raised message. Pass a
+        ``PendingTransactionId`` as ``pending_transaction_id`` in the config and
+        read it after a cancellation to recover the accepted transaction id.
         """
         signed = await self._sign_transaction_native(transaction)
         return signed.signature
@@ -480,11 +489,14 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
                 error._detail,
                 status_code=error.status_code,
             ) from None
+        if self._pending_transaction_id is not None:
+            self._pending_transaction_id.set(transaction_id)
         try:
-            return await self._finish_native_broadcast(transaction_id)
+            signed = await self._finish_native_broadcast(transaction_id)
         except asyncio.CancelledError as error:
             # Awaiting a cancelled task strips the raised instance, so the id is
-            # also logged; the re-raise must stay a CancelledError for asyncio.
+            # also logged and left in the registered slot; the re-raise must stay
+            # a CancelledError for asyncio.
             _logger.warning(
                 "Fordefi may have executed cancelled transaction %s; check it before retrying",
                 transaction_id,
@@ -494,11 +506,18 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
                 f"not be confirmed (provider transaction id: {transaction_id})"
             ) from error
         except SignerError as error:
+            self._clear_pending_transaction_id()
             raise SignerError(
                 SignerErrorCode.BROADCAST_UNCONFIRMED,
                 error._detail,
                 provider_transaction_id=transaction_id,
             ) from None
+        self._clear_pending_transaction_id()
+        return signed
+
+    def _clear_pending_transaction_id(self) -> None:
+        if self._pending_transaction_id is not None:
+            self._pending_transaction_id.clear()
 
     async def _finish_native_broadcast(self, transaction_id: str) -> SignedTransaction:
         result = await self._poll_for_result(transaction_id, pushable=True)

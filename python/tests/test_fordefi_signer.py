@@ -25,6 +25,7 @@ from solders.transaction import VersionedTransaction
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.core import (
     ModifyingSigner,
+    PendingTransactionId,
     SendingSigner,
     TransactionSigner,
     signed_message_bytes,
@@ -535,6 +536,33 @@ async def test_sign_transaction_native_cancellation_carries_the_transaction_id(
             await task
     assert observed and "tx-1" in observed[0]
     assert "tx-1" in caplog.text
+
+
+@respx.mock
+async def test_native_cancellation_leaves_the_transaction_id_in_the_pending_slot() -> None:
+    """Awaiting a cancelled task discards the raised message, so the registered
+    slot is the only structured carrier for the id the caller must reconcile."""
+    keypair = Keypair()
+    pending = PendingTransactionId()
+    signer = make_native_signer(keypair, chain="solana_devnet", pending_transaction_id=pending)
+    polling = asyncio.Event()
+
+    async def hang(_request: httpx.Request) -> httpx.Response:
+        polling.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"id": "tx-1"}))
+    respx.get(f"{TRANSACTIONS_URL}/tx-1").mock(side_effect=hang)
+
+    task = asyncio.create_task(
+        signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
+    )
+    await polling.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert pending.get() == "tx-1"
 
 
 @respx.mock

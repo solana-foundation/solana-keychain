@@ -22,6 +22,7 @@ from solana_keychain.core.signer import (
 )
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
+    PendingTransactionId,
     add_signature_to_transaction,
     classify_signed_transaction,
     get_signing_keypair_position,
@@ -34,6 +35,7 @@ __all__ = [
     "DEFAULT_REQUEST_TIMEOUT_SECONDS",
     "ED25519_SIGNATURE_LENGTH",
     "ModifyingSigner",
+    "PendingTransactionId",
     "SendTransactionFn",
     "SendingSigner",
     "SignedTransaction",
