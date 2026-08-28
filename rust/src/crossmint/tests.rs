@@ -42,6 +42,7 @@ fn create_test_signer(
         poll_interval_ms,
         max_poll_attempts,
         signing_key: None,
+        pending_transaction_id: None,
     }
 }
 
@@ -328,6 +329,106 @@ async fn test_sign_and_send_transaction_success() {
 
     assert_eq!(signature, expected_signature);
     assert_caller_transaction_untouched(&local_tx);
+}
+
+/// Dropping the signing future after the create was accepted runs no further
+/// code, so the registered slot is the only carrier for the id the caller must
+/// reconcile.
+#[tokio::test]
+async fn test_a_cancelled_send_leaves_the_transaction_id_in_the_pending_slot() {
+    let server = MockServer::start().await;
+    let keypair = Keypair::new();
+    let signer_pubkey = keypair_pubkey(&keypair);
+
+    Mock::given(method("GET"))
+        .and(path("/2025-06-09/wallets/test-wallet"))
+        .respond_with(wallet_response(&signer_pubkey.to_string()))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "id": "tx-accepted",
+            "status": "pending",
+            "chainType": "solana",
+            "walletType": "smart"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/2025-06-09/wallets/test-wallet/transactions/tx-accepted",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_secs(30))
+                .set_body_json(serde_json::json!({ "id": "tx-accepted", "status": "pending" })),
+        )
+        .mount(&server)
+        .await;
+
+    let mut signer = create_test_signer(&server.uri(), 1, 100);
+    signer.init().await.unwrap();
+    let pending = PendingTransactionId::new();
+    let signer = signer.with_pending_transaction_id(pending.clone());
+
+    let local_tx = create_test_transaction(&signer_pubkey);
+    let cancelled = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        signer.sign_and_send_transaction(&local_tx),
+    )
+    .await;
+
+    assert!(cancelled.is_err(), "the poll should still be in flight");
+    assert_eq!(pending.get(), Some("tx-accepted".to_string()));
+}
+
+/// A call that returns normally clears the slot: its id is already in the
+/// result or the error.
+#[tokio::test]
+async fn test_a_completed_send_clears_the_pending_slot() {
+    let server = MockServer::start().await;
+    let keypair = Keypair::new();
+    let signer_pubkey = keypair_pubkey(&keypair);
+
+    Mock::given(method("GET"))
+        .and(path("/2025-06-09/wallets/test-wallet"))
+        .respond_with(wallet_response(&signer_pubkey.to_string()))
+        .mount(&server)
+        .await;
+
+    let local_tx = create_test_transaction(&signer_pubkey);
+    let mut signed_remote_tx = local_tx.clone();
+    let expected_signature = keypair_sign_message(&keypair, &signed_remote_tx.message.serialize());
+    TransactionUtil::add_signature_to_transaction(
+        &mut signed_remote_tx,
+        &signer_pubkey,
+        expected_signature,
+    )
+    .unwrap();
+    let on_chain_transaction =
+        bs58::encode(bincode::serialize(&signed_remote_tx).unwrap()).into_string();
+
+    Mock::given(method("POST"))
+        .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "id": "tx-123",
+            "status": "success",
+            "chainType": "solana",
+            "walletType": "smart",
+            "onChain": { "transaction": on_chain_transaction }
+        })))
+        .mount(&server)
+        .await;
+
+    let mut signer = create_test_signer(&server.uri(), 1, 2);
+    signer.init().await.unwrap();
+    let pending = PendingTransactionId::new();
+    let signer = signer.with_pending_transaction_id(pending.clone());
+
+    signer.sign_and_send_transaction(&local_tx).await.unwrap();
+
+    assert_eq!(pending.get(), None);
 }
 
 /// A smart wallet is signed by its delegated signer, not by the wallet address

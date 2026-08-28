@@ -8,7 +8,7 @@ use crate::signature_util::signature_from_base58;
 use crate::traits::SendingSigner;
 use crate::transaction_util::{
     deserialize_wire_transaction, idempotency_key_from_message, serialize_wire_transaction,
-    unconfirmed_unless_rejected,
+    unconfirmed_unless_rejected, PendingTransactionId,
 };
 use crate::{error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner};
 use std::str::FromStr;
@@ -55,6 +55,7 @@ pub struct CrossmintSigner {
     poll_interval_ms: u64,
     max_poll_attempts: u32,
     signing_key: Option<ed25519_dalek::SigningKey>,
+    pending_transaction_id: Option<PendingTransactionId>,
 }
 
 impl std::fmt::Debug for CrossmintSigner {
@@ -134,7 +135,19 @@ impl CrossmintSigner {
             poll_interval_ms,
             max_poll_attempts,
             signing_key,
+            pending_transaction_id: None,
         })
+    }
+
+    /// Register a slot the signer writes the accepted Crossmint transaction id
+    /// into, so the id survives a cancelled `sign_and_send_transaction`.
+    ///
+    /// A call that returns normally clears the slot: its id is already in the
+    /// returned signature's transaction or in
+    /// [`SignerError::BroadcastUnconfirmed`].
+    pub fn with_pending_transaction_id(mut self, pending: PendingTransactionId) -> Self {
+        self.pending_transaction_id = Some(pending);
+        self
     }
 
     fn initialized_pubkey(&self) -> Result<Pubkey, SignerError> {
@@ -647,6 +660,10 @@ impl CrossmintSigner {
     /// so replaying these exact bytes cannot create a second transaction; a
     /// rebuilt transaction derives a different key and executes as a new
     /// transfer.
+    ///
+    /// Cancelling this future returns nothing at all, so an accepted transaction
+    /// id reaches the caller only through
+    /// [`with_pending_transaction_id`](Self::with_pending_transaction_id).
     async fn execute_managed_transaction(
         &self,
         transaction: &VersionedTransaction,
@@ -662,15 +679,25 @@ impl CrossmintSigner {
             .create_transaction(transaction_b58, &idempotency_key)
             .await?;
         let provider_tx_id = create_response.id.clone();
+        // Cancelling this future runs no further code, so the registered slot is
+        // the only way the accepted id reaches the caller in that case.
+        if let Some(pending) = &self.pending_transaction_id {
+            pending.set(&provider_tx_id);
+        }
         // Post-create failures leave an outcome Crossmint may still execute, so
         // they surface as BroadcastUnconfirmed with the transaction id.
-        self.finish_managed_transaction(create_response, &expected_message)
+        let result = self
+            .finish_managed_transaction(create_response, &expected_message)
             .await
             .map_err(|error| SignerError::BroadcastUnconfirmed {
                 provider_tx_id: Some(provider_tx_id),
                 provider_status: None,
                 detail: error.detail_string(),
-            })
+            });
+        if let Some(pending) = &self.pending_transaction_id {
+            pending.clear();
+        }
+        result
     }
 
     async fn finish_managed_transaction(

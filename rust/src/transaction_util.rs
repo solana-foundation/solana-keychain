@@ -3,6 +3,53 @@ use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use base64::{engine::general_purpose::STANDARD, Engine};
 
+/// A slot a broadcast-managed signer writes the accepted provider transaction
+/// id into, so the id survives a cancelled call.
+///
+/// Dropping a future runs none of its code, so a signer cancelled after the
+/// provider accepted the transaction returns nothing at all, not even an error
+/// carrying the id. Register a clone of this slot on the signer, and read it
+/// after a cancellation to learn which provider transaction to reconcile before
+/// retrying. A call that returns normally clears the slot, since the id is then
+/// already in the result or the error.
+///
+/// ```no_run
+/// # use solana_keychain::transaction_util::PendingTransactionId;
+/// let pending = PendingTransactionId::new();
+/// // let signer = signer.with_pending_transaction_id(pending.clone());
+/// // ... cancel the signing future ...
+/// if let Some(provider_tx_id) = pending.get() {
+///     println!("check {provider_tx_id} with the provider before retrying");
+/// }
+/// ```
+#[cfg(any(feature = "crossmint", feature = "fordefi"))]
+#[derive(Clone, Debug, Default)]
+pub struct PendingTransactionId(std::sync::Arc<std::sync::Mutex<Option<String>>>);
+
+#[cfg(any(feature = "crossmint", feature = "fordefi"))]
+impl PendingTransactionId {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The provider transaction id left behind by a cancelled call, if any.
+    pub fn get(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|slot| slot.clone())
+    }
+
+    pub(crate) fn set(&self, provider_tx_id: &str) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = Some(provider_tx_id.to_string());
+        }
+    }
+
+    pub(crate) fn clear(&self) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = None;
+        }
+    }
+}
+
 /// A UUID derived from SHA-256(message bytes), so a retry of the same bytes
 /// reuses the key and the provider deduplicates the create.
 #[cfg(any(feature = "crossmint", feature = "fordefi"))]

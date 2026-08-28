@@ -24,7 +24,8 @@ use crate::traits::{
     TransactionSigner,
 };
 use crate::transaction_util::{
-    idempotency_key_from_message, unconfirmed_unless_rejected, TransactionUtil,
+    idempotency_key_from_message, unconfirmed_unless_rejected, PendingTransactionId,
+    TransactionUtil,
 };
 pub use request_signer::{FordefiRequestSigner, PemRequestSigner};
 use types::{
@@ -608,6 +609,7 @@ pub struct FordefiNativeAutoSigner {
     core: FordefiCore,
     chain: SolanaChainUniqueId,
     fee: Option<FordefiSolanaFee>,
+    pending_transaction_id: Option<PendingTransactionId>,
 }
 
 impl std::fmt::Debug for FordefiNativeAutoSigner {
@@ -645,7 +647,19 @@ impl FordefiNativeAutoSigner {
             core: FordefiCore::build(&config)?,
             chain,
             fee: config.fee,
+            pending_transaction_id: None,
         })
+    }
+
+    /// Register a slot the signer writes the accepted Fordefi transaction id
+    /// into, so the id survives a cancelled `sign_and_send_transaction`.
+    ///
+    /// A call that returns normally clears the slot: its id is already in the
+    /// returned signature's transaction or in
+    /// [`SignerError::BroadcastUnconfirmed`].
+    pub fn with_pending_transaction_id(mut self, pending: PendingTransactionId) -> Self {
+        self.pending_transaction_id = Some(pending);
+        self
     }
 
     /// Sign and broadcast via the native Solana path: submit → poll → parse wire tx.
@@ -661,6 +675,10 @@ impl FordefiNativeAutoSigner {
     /// Each native create carries an `x-idempotence-id` derived from the message
     /// bytes, so replaying these exact bytes cannot create a second transaction; a
     /// rebuilt transaction derives a different id and is broadcast again.
+    ///
+    /// Cancelling this future returns nothing at all, so an accepted transaction
+    /// id reaches the caller only through
+    /// [`with_pending_transaction_id`](Self::with_pending_transaction_id).
     async fn sign_and_broadcast(
         &self,
         transaction: &VersionedTransaction,
@@ -681,13 +699,22 @@ impl FordefiNativeAutoSigner {
         // this client cannot rule out. Report those as BroadcastUnconfirmed
         // carrying the Fordefi transaction id instead of a generic error a
         // caller might blindly retry into a duplicate spend.
-        self.finish_broadcast(&tx_id)
-            .await
-            .map_err(|error| SignerError::BroadcastUnconfirmed {
+        // Cancelling this future runs no further code, so the registered slot is
+        // the only way the accepted id reaches the caller in that case.
+        if let Some(pending) = &self.pending_transaction_id {
+            pending.set(&tx_id);
+        }
+        let result = self.finish_broadcast(&tx_id).await.map_err(|error| {
+            SignerError::BroadcastUnconfirmed {
                 provider_tx_id: Some(tx_id),
                 provider_status: None,
                 detail: error.detail_string(),
-            })
+            }
+        });
+        if let Some(pending) = &self.pending_transaction_id {
+            pending.clear();
+        }
+        result
     }
 
     async fn finish_broadcast(&self, tx_id: &str) -> Result<Signature, SignerError> {

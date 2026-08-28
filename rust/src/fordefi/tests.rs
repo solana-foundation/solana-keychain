@@ -98,6 +98,7 @@ fn create_native_test_signer(base_url: &str, pubkey: Pubkey) -> FordefiNativeAut
         core: create_test_core(base_url, pubkey, test_request_signer()),
         chain: SolanaChainUniqueId::SolanaMainnet,
         fee: None,
+        pending_transaction_id: None,
     }
 }
 
@@ -851,6 +852,47 @@ async fn test_fordefi_native_sign_transaction_missing_raw_transaction() {
         }
         other => panic!("Expected BroadcastUnconfirmed, got: {other:?}"),
     }
+}
+
+/// Dropping the signing future after Fordefi accepted the submit runs no
+/// further code, so the registered slot is the only carrier for the id the
+/// caller must reconcile.
+#[tokio::test]
+async fn test_a_cancelled_native_send_leaves_the_transaction_id_in_the_pending_slot() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let pubkey = keypair_pubkey(&keypair);
+    let pending = PendingTransactionId::new();
+    let signer = create_native_test_signer(&mock_server.uri(), pubkey)
+        .with_pending_transaction_id(pending.clone());
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "id": "native-tx-accepted" })),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/transactions/native-tx-accepted"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_secs(30))
+                .set_body_json(serde_json::json!({ "state": "pending" })),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tx = create_test_transaction(&pubkey);
+    let cancelled = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        signer.sign_and_send_transaction(&tx),
+    )
+    .await;
+
+    assert!(cancelled.is_err(), "the poll should still be in flight");
+    assert_eq!(pending.get(), Some("native-tx-accepted".to_string()));
 }
 
 #[tokio::test]

@@ -126,6 +126,8 @@ pub use fordefi::{
 pub use openfort::{OpenfortSigner, OpenfortSignerConfig};
 #[cfg(feature = "para")]
 pub use para::{ParaSigner, ParaSignerConfig};
+#[cfg(any(feature = "crossmint", feature = "fordefi"))]
+pub use transaction_util::PendingTransactionId;
 #[cfg(feature = "utila")]
 pub use utila::{UtilaSigner, UtilaSignerConfig};
 
