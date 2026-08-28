@@ -71,8 +71,10 @@ pub(crate) fn idempotency_key_from_message(message_bytes: &[u8]) -> String {
     )
 }
 
-/// A 4xx is the only create outcome that rules out a transaction; anything else
-/// (no response, timeout, 5xx, unusable success body) may already be executing.
+/// A 4xx other than 408 is the only create outcome that rules out a transaction;
+/// anything else (no response, timeout, 5xx, unusable success body) may already be
+/// executing. A 408 is a timeout reached while the request was being processed, so
+/// it does not rule the transaction out either.
 /// `status` is `None` when no response arrived, and is passed on only when the
 /// response was the failure. `provider_tx_id` is the id read out of the response
 /// body when one was readable there, and `None` when the failure came before any
@@ -83,7 +85,7 @@ pub(crate) fn unconfirmed_unless_rejected(
     provider_tx_id: Option<String>,
     error: SignerError,
 ) -> SignerError {
-    if matches!(status, Some(status) if (400..500).contains(&status)) {
+    if matches!(status, Some(status) if (400..500).contains(&status) && status != 408) {
         return error;
     }
     SignerError::BroadcastUnconfirmed {

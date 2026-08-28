@@ -46,12 +46,14 @@ export function providerStatus(error: unknown): number | undefined {
 }
 
 /**
- * A 4xx is the only create outcome that rules out a transaction; anything else
- * (no response, timeout, 5xx, unusable success body) may already be executing.
+ * A 4xx other than 408 is the only create outcome that rules out a transaction;
+ * anything else (no response, timeout, 5xx, unusable success body) may already be
+ * executing. A 408 is a timeout reached while the request was being processed, so
+ * it does not rule the transaction out either.
  */
 export function providerMayHaveAccepted(error: unknown): boolean {
     const status = providerStatus(error);
-    return status === undefined || status < 400 || status >= 500;
+    return status === undefined || status < 400 || status >= 500 || status === 408;
 }
 
 function throwResponseTooLarge(providerName: string, status: number): never {

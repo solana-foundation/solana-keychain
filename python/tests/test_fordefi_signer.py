@@ -442,6 +442,21 @@ async def test_native_submit_accepted_without_an_id_is_unconfirmed() -> None:
 
 
 @respx.mock
+async def test_native_submit_timed_out_while_processing_is_unconfirmed() -> None:
+    """A 408 is a timeout reached while the create was processed, not a rejection."""
+    keypair = Keypair()
+    signer = make_native_signer(keypair, chain="solana_devnet")
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(408, json={"detail": "Reached time out while processing"})
+    )
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id is None
+    assert excinfo.value.status_code == 408
+
+
+@respx.mock
 async def test_native_submit_rejected_by_fordefi_stays_a_plain_failure() -> None:
     keypair = Keypair()
     signer = make_native_signer(keypair, chain="solana_devnet")

@@ -4,6 +4,7 @@ package core
 
 import (
 	"errors"
+	"net/http"
 	"regexp"
 	"strings"
 )
@@ -127,12 +128,14 @@ func NewBroadcastUnconfirmedError(providerTxID, detail string) *SignerError {
 }
 
 // UnconfirmedUnlessRejected reports a failed create as CodeBroadcastUnconfirmed
-// unless a 4xx rules the transaction out. status is 0 when no response arrived,
+// unless a 4xx other than 408 rules the transaction out. A 408 is a timeout
+// reached while the request was being processed, so it does not rule the
+// transaction out. status is 0 when no response arrived,
 // and is passed on only when the response was the failure. providerTxID is the id
 // read out of the response body when one was readable there, and "" when the
 // failure came before any id was known.
 func UnconfirmedUnlessRejected(status int, providerTxID string, err error) error {
-	if status >= 400 && status < 500 {
+	if status >= 400 && status < 500 && status != http.StatusRequestTimeout {
 		return err
 	}
 	detail := err.Error()

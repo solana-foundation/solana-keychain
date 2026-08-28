@@ -702,6 +702,26 @@ func TestSignTransactionNativeSubmitWithoutIDIsUnconfirmed(t *testing.T) {
 	assertBroadcastUnconfirmedWithoutID(t, err, 0)
 }
 
+// A 408 is a timeout reached while the create was being processed, not a rejection.
+func TestSignTransactionNativeSubmitProcessingTimeoutIsUnconfirmed(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusRequestTimeout)
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
+	if err == nil {
+		t.Fatal("expected a timed-out submit to be reported")
+	}
+	assertBroadcastUnconfirmedWithoutID(t, err, http.StatusRequestTimeout)
+}
+
 func TestSignTransactionNativeSubmitRejectionStaysPlainFailure(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {

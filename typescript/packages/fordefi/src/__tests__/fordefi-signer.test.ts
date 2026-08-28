@@ -660,6 +660,28 @@ describe('createFordefiSigner', () => {
             expect(error.context?.providerTransactionId).toBeUndefined();
         });
 
+        it('reports a submit that timed out while processing as unconfirmed', async () => {
+            const signer = await createFordefiSigner(nativeConfig);
+            vi.mocked(fetch).mockResolvedValueOnce(
+                new Response(JSON.stringify({ detail: 'Reached time out while processing the request' }), {
+                    status: 408,
+                }),
+            );
+
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+            const error = await signer.signAndSendTransactions([mockTx]).then(
+                () => {
+                    throw new Error('expected the submit failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+            expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            expect(error.context?.status).toBe(408);
+        });
+
         it('keeps a 4xx on submit a plain failure', async () => {
             const signer = await createFordefiSigner(nativeConfig);
             vi.mocked(fetch).mockResolvedValueOnce(
