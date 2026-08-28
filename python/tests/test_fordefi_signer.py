@@ -239,6 +239,24 @@ def test_black_box_config_rejects_a_fee() -> None:
     assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
 
 
+def test_black_box_config_rejects_a_pending_transaction_id() -> None:
+    """Black box signing never broadcasts, so the slot would never be written."""
+    with pytest.raises(SignerError) as excinfo:
+        make_black_box_signer(Keypair(), pending_transaction_id=PendingTransactionId())
+    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
+
+
+def test_manual_config_rejects_a_pending_transaction_id() -> None:
+    """Manual signing never broadcasts, so the slot would never be written."""
+    with pytest.raises(SignerError) as excinfo:
+        make_manual_signer(
+            Keypair(),
+            chain="solana_devnet",
+            pending_transaction_id=PendingTransactionId(),
+        )
+    assert excinfo.value.code == SignerErrorCode.CONFIG_ERROR
+
+
 def test_config_rejects_zero_max_poll_attempts() -> None:
     with pytest.raises(SignerError) as excinfo:
         make_black_box_signer(Keypair(), max_poll_attempts=0)

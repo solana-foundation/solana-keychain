@@ -101,6 +101,10 @@ class FordefiSignerConfig:
     ``fee`` is the native-mode fee configuration passed through verbatim,
     e.g. ``{"type": "priority", "priority_level": "medium"}`` or
     ``{"type": "custom", "priority_fee": "1000"}``. Requires ``chain``.
+
+    ``pending_transaction_id`` is native-auto only: it is the recovery handle for
+    a send whose outcome could not be confirmed, and only the broadcasting mode
+    can leave one behind. The other two signers reject it.
     """
 
     access_token: str = field(repr=False)
@@ -294,7 +298,8 @@ class FordefiBlackBoxSigner(_FordefiSignerBase, TransactionSigner):
     does not broadcast, so the caller submits the returned encoded transaction
     to an RPC. ``config.chain``, ``config.fee``, ``config.push_mode`` and
     ``config.max_priority_fee_lamports`` must be unset; they select a native
-    Solana signer.
+    Solana signer. ``config.pending_transaction_id`` must be unset too: nothing
+    is broadcast here, so there is no unconfirmed send to recover.
     """
 
     def __init__(self, config: FordefiSignerConfig) -> None:
@@ -304,6 +309,7 @@ class FordefiBlackBoxSigner(_FordefiSignerBase, TransactionSigner):
                 "chain, fee and push_mode select native Solana mode; use "
                 "FordefiNativeAutoSigner or FordefiNativeManualSigner",
             )
+        _reject_pending_transaction_id(config)
         super().__init__(config)
 
     def _black_box_request(self, data: bytes) -> dict[str, Any]:
@@ -341,6 +347,23 @@ class FordefiBlackBoxSigner(_FordefiSignerBase, TransactionSigner):
         signature = await self._sign_black_box(message)
         verify_returned_signature(signature, self._public_key, message)
         return signature
+
+
+def _reject_pending_transaction_id(config: FordefiSignerConfig) -> None:
+    """Reject a recovery slot on a signer that never broadcasts.
+
+    Args:
+        config: The configuration handed to a non-broadcasting signer.
+
+    Raises:
+        SignerError: ``CONFIG_ERROR`` when ``pending_transaction_id`` is set.
+    """
+    if config.pending_transaction_id is not None:
+        raise SignerError(
+            SignerErrorCode.CONFIG_ERROR,
+            "pending_transaction_id is only used by FordefiNativeAutoSigner, "
+            "the mode that broadcasts",
+        )
 
 
 def _canonical_fee(fee: dict[str, Any] | None) -> str:
@@ -595,7 +618,9 @@ class FordefiNativeManualSigner(_FordefiNativeSignerBase, ModifyingSigner):
     with ``push_mode: manual``: Fordefi rewrites the blockhash and the Compute
     Budget fee instructions and signs without broadcasting, so the caller
     broadcasts the transaction Fordefi returned. ``config.chain`` must be set and
-    ``config.push_mode`` must be ``manual``.
+    ``config.push_mode`` must be ``manual``. ``config.pending_transaction_id``
+    must be unset: nothing is broadcast here, so there is no unconfirmed send to
+    recover.
     """
 
     _push_mode: FordefiPushMode = "manual"
@@ -606,6 +631,7 @@ class FordefiNativeManualSigner(_FordefiNativeSignerBase, ModifyingSigner):
                 SignerErrorCode.CONFIG_ERROR,
                 'push_mode must be "manual" here; use FordefiNativeAutoSigner for auto',
             )
+        _reject_pending_transaction_id(config)
         super().__init__(config)
 
     async def modify_and_sign_transaction(
