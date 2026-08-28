@@ -169,7 +169,13 @@ class CrossmintSigner(SendingSigner):
             json_body=json_body,
             client=self._http_client,
         )
-        if not isinstance(response, dict) or response.get(required_field) is None:
+        # A blank string is as unusable as an absent field: it would be spliced
+        # into a request path or handed back as a recovery handle.
+        if (
+            not isinstance(response, dict)
+            or (value := response.get(required_field)) is None
+            or (isinstance(value, str) and not value.strip())
+        ):
             message = self._extract_error_message(response)
             if message is not None:
                 raise SignerError(SignerErrorCode.REMOTE_API_ERROR, f"{context}: {message}")

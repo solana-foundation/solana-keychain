@@ -234,6 +234,7 @@ impl CrossmintSigner {
         let provider_tx_id = value
             .get("id")
             .and_then(serde_json::Value::as_str)
+            .filter(|id| !id.trim().is_empty())
             .map(str::to_string);
         Self::value_to_typed(status, value, "id", "create_transaction")
             .map_err(|error| unconfirmed_unless_rejected(Some(status), provider_tx_id, error))
@@ -310,7 +311,14 @@ impl CrossmintSigner {
             return Err(SignerError::RemoteApiError(format!("{context}: {message}")));
         }
 
-        if value.get(required_field).is_none() {
+        // A blank string is as unusable as an absent field: it would be spliced
+        // into a request path or handed back as a recovery handle.
+        let field = value.get(required_field);
+        if field.is_none()
+            || field
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|id| id.trim().is_empty())
+        {
             if let Some(message) = Self::extract_error_message(&value) {
                 return Err(SignerError::RemoteApiError(format!("{context}: {message}")));
             }

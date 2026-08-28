@@ -198,7 +198,19 @@ func transactionIDFromBody(body []byte) string {
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return ""
 	}
-	return parsed.ID
+	return strings.TrimSpace(parsed.ID)
+}
+
+func hasUsableField(value map[string]json.RawMessage, requiredField string) bool {
+	raw, ok := value[requiredField]
+	if !ok {
+		return false
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return strings.TrimSpace(s) != ""
+	}
+	return true
 }
 
 func parseResponseWithRequiredField[T any](status int, body []byte, requiredField, opContext string) (T, error) {
@@ -215,7 +227,9 @@ func parseResponseWithRequiredField[T any](status int, body []byte, requiredFiel
 		return zero, core.NewSignerError(core.CodeRemoteAPIError, opContext+": "+core.SanitizeRemoteResponse(message))
 	}
 
-	if _, ok := value[requiredField]; !ok {
+	// A blank string is as unusable as an absent field: it would be spliced
+	// into a request path or handed back as a recovery handle.
+	if !hasUsableField(value, requiredField) {
 		if message, ok := extractErrorMessage(value); ok {
 			return zero, core.NewSignerError(core.CodeRemoteAPIError, opContext+": "+core.SanitizeRemoteResponse(message))
 		}

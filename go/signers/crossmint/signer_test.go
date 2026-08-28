@@ -424,6 +424,18 @@ func TestCreateAcceptedWithoutIDIsUnconfirmed(t *testing.T) {
 	assertUnconfirmedWithoutID(t, err, 0)
 }
 
+// A blank create id is no handle at all: taken at face value it would be
+// spliced into the poll and approval URLs and reported as a recovery handle.
+func TestCreateAcceptedWithBlankIDIsUnconfirmedWithoutOne(t *testing.T) {
+	s := createStatusSigner(t, http.StatusCreated, `{"id":"   ","status":"pending"}`)
+	tx, err := testutils.CreateTestTransaction(s.Pubkey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
+	assertUnconfirmedWithoutID(t, err, 0)
+}
+
 func TestCreateAcceptedWithUnusableBodyKeepsID(t *testing.T) {
 	s := createStatusSigner(t, http.StatusCreated, `{"id":"tx-accepted","status":123}`)
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())

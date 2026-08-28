@@ -333,6 +333,21 @@ async def test_create_accepted_without_an_id_is_unconfirmed() -> None:
 
 
 @respx.mock
+async def test_create_accepted_with_a_blank_id_is_unconfirmed_without_one() -> None:
+    # A blank create id is no handle at all: taken at face value it would be
+    # spliced into the poll and approval URLs and reported as a recovery handle.
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(200, json={"id": "   ", "status": "pending"})
+    )
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id is None
+
+
+@respx.mock
 async def test_create_rejected_by_crossmint_stays_a_plain_failure() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)
