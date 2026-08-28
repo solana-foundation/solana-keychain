@@ -418,6 +418,17 @@ async def test_native_submit_server_error_is_unconfirmed_without_a_transaction_i
 
 
 @respx.mock
+async def test_native_submit_accepted_with_an_empty_id_is_unconfirmed() -> None:
+    keypair = Keypair()
+    signer = make_native_signer(keypair, chain="solana_devnet")
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"id": ""}))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id is None
+
+
+@respx.mock
 async def test_native_submit_accepted_without_an_id_is_unconfirmed() -> None:
     keypair = Keypair()
     signer = make_native_signer(keypair, chain="solana_devnet")

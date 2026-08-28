@@ -270,6 +270,14 @@ impl FordefiCore {
             .map_err(|error| classify(Some(status), error))?;
         let create_response: CreateTransactionResponse =
             serde_json::from_slice(&body).map_err(|error| classify(Some(status), error.into()))?;
+        if create_response.id.is_empty() {
+            return Err(classify(
+                Some(status),
+                SignerError::SerializationError(
+                    "Fordefi API submit_request returned no transaction id".to_string(),
+                ),
+            ));
+        }
         Ok(create_response.id)
     }
 

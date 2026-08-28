@@ -617,6 +617,24 @@ describe('createFordefiSigner', () => {
             expect(error.context?.status).toBeUndefined();
         });
 
+        it('reports an accepted submit with an empty id as unconfirmed', async () => {
+            const signer = await createFordefiSigner(nativeConfig);
+            vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ id: '' }), { status: 200 }));
+
+            const mockTx = {
+                messageBytes: new Uint8Array(32),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+            const error = await signer.signAndSendTransactions([mockTx]).then(
+                () => {
+                    throw new Error('expected the submit failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+            expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            expect(error.context?.providerTransactionId).toBeUndefined();
+        });
+
         it('keeps a 4xx on submit a plain failure', async () => {
             const signer = await createFordefiSigner(nativeConfig);
             vi.mocked(fetch).mockResolvedValueOnce(

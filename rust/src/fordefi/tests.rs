@@ -945,6 +945,27 @@ async fn test_native_submit_accepted_without_an_id_is_unconfirmed() {
 }
 
 #[tokio::test]
+async fn test_native_submit_accepted_with_an_empty_id_is_unconfirmed() {
+    let mock_server = MockServer::start().await;
+    let pubkey = keypair_pubkey(&create_test_keypair());
+    let signer = create_native_test_signer(&mock_server.uri(), pubkey);
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": "" })))
+        .mount(&mock_server)
+        .await;
+
+    let tx = create_test_transaction(&pubkey);
+    match signer.sign_and_send_transaction(&tx).await.unwrap_err() {
+        SignerError::BroadcastUnconfirmed { provider_tx_id, .. } => {
+            assert_eq!(provider_tx_id, None);
+        }
+        other => panic!("Expected BroadcastUnconfirmed, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn test_native_submit_rejected_by_fordefi_stays_a_plain_failure() {
     let mock_server = MockServer::start().await;
     let pubkey = keypair_pubkey(&create_test_keypair());
