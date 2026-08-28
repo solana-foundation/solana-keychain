@@ -17,6 +17,7 @@ from solana_keychain.core.http import (
     fetch_signer_json,
     normalize_base_url,
     probe_availability,
+    provider_may_have_accepted,
 )
 from solana_keychain.core.poll import poll_attempts
 from solana_keychain.core.signature_util import verify_returned_signature
@@ -178,21 +179,43 @@ class FireblocksSigner(TransactionSigner):
             f"{self._vault_account_id} asset {self._asset_id}; cannot choose a signing identity",
         )
 
-    async def _create_transaction(self, request: dict[str, Any]) -> str:
+    async def _create_transaction(self, request: dict[str, Any], *, program_call: bool) -> str:
+        """Create a signing request.
+
+        A PROGRAM_CALL create that neither succeeds nor is rejected by a 4xx
+        leaves a request Fireblocks may still act on, so it raises
+        ``BROADCAST_UNCONFIRMED``; check Fireblocks before retrying. A RAW
+        create signs nothing on its own and keeps the plain failure.
+        """
         uri = "/v1/transactions"
         body = json.dumps(request, separators=(",", ":"))
         headers = self._auth_headers(uri, body)
         headers["Content-Type"] = "application/json"
-        response = await fetch_signer_json(
-            url=f"{self._api_base_url}{uri}",
-            provider_name="Fireblocks",
-            method="POST",
-            headers=headers,
-            content=body.encode(),
-            client=self._http_client,
-        )
+        try:
+            response = await fetch_signer_json(
+                url=f"{self._api_base_url}{uri}",
+                provider_name="Fireblocks",
+                method="POST",
+                headers=headers,
+                content=body.encode(),
+                client=self._http_client,
+            )
+        except SignerError as error:
+            if not program_call or not provider_may_have_accepted(error.status_code):
+                raise
+            raise SignerError(
+                SignerErrorCode.BROADCAST_UNCONFIRMED,
+                error._detail,
+                status_code=error.status_code,
+            ) from None
         transaction_id = response.get("id") if isinstance(response, dict) else None
-        if not isinstance(transaction_id, str):
+        if not isinstance(transaction_id, str) or not transaction_id:
+            if program_call:
+                raise SignerError(
+                    SignerErrorCode.BROADCAST_UNCONFIRMED,
+                    "Fireblocks accepted the PROGRAM_CALL but returned no transaction id, "
+                    "so the outcome cannot be confirmed",
+                )
             raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
         return transaction_id
 
@@ -270,7 +293,8 @@ class FireblocksSigner(TransactionSigner):
                 "operation": "RAW",
                 "source": {"type": "VAULT_ACCOUNT", "id": self._vault_account_id},
                 "extraParameters": {"rawMessageData": {"messages": [{"content": message.hex()}]}},
-            }
+            },
+            program_call=False,
         )
         response = await self._poll_for_signature(transaction_id)
         signature = self._extract_signature(response)
@@ -303,7 +327,8 @@ class FireblocksSigner(TransactionSigner):
                     "signOnly": True,
                     "useDurableNonce": False,
                 },
-            }
+            },
+            program_call=True,
         )
         response = await self._poll_for_signature(transaction_id, program_call=True)
         signature = self._extract_signature(response, allow_tx_hash_carrier=True)

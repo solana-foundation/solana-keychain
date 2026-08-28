@@ -178,8 +178,19 @@ func (s *Signer) selectVaultAddress(addresses []vaultAddress) (string, error) {
 	}
 }
 
-// createTransaction creates a signing request in Fireblocks.
-func (s *Signer) createTransaction(ctx context.Context, request createTransactionRequest) (createTransactionResponse, error) {
+// createTransaction creates a signing request in Fireblocks. A PROGRAM_CALL
+// create that neither succeeds nor is rejected by a 4xx leaves a request
+// Fireblocks may still act on, so it reports CodeBroadcastUnconfirmed with any
+// transaction id the response carried; a RAW create signs nothing on its own
+// and keeps the plain failure.
+func (s *Signer) createTransaction(ctx context.Context, request createTransactionRequest, programCall bool) (createTransactionResponse, error) {
+	ambiguous := func(status int, respBody []byte, err error) error {
+		if !programCall {
+			return err
+		}
+		return core.UnconfirmedUnlessRejected(status, transactionIDFromBody(respBody), err)
+	}
+
 	body, err := json.Marshal(request)
 	if err != nil {
 		return createTransactionResponse{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize fireblocks request", err)
@@ -187,17 +198,30 @@ func (s *Signer) createTransaction(ctx context.Context, request createTransactio
 
 	status, respBody, err := s.doRequest(ctx, http.MethodPost, "/v1/transactions", string(body))
 	if err != nil {
-		return createTransactionResponse{}, err
+		return createTransactionResponse{}, ambiguous(status, nil, err)
 	}
 	if !core.IsSuccess(status) {
-		return createTransactionResponse{}, core.NewRemoteAPIError("API error", status, respBody)
+		return createTransactionResponse{}, ambiguous(status, respBody, core.NewRemoteAPIError("API error", status, respBody))
 	}
 
 	var created createTransactionResponse
 	if err := json.Unmarshal(respBody, &created); err != nil {
-		return createTransactionResponse{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse response", err)
+		return createTransactionResponse{}, ambiguous(status, respBody,
+			core.WrapSignerError(core.CodeSerializationError, "failed to parse response", err))
 	}
 	return created, nil
+}
+
+// transactionIDFromBody reads the transaction id out of a response body that
+// could not be used as a whole, so an accepted create still yields a handle.
+func transactionIDFromBody(body []byte) string {
+	var parsed struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return ""
+	}
+	return parsed.ID
 }
 
 // getTransaction fetches the current status of a Fireblocks transaction.

@@ -502,6 +502,61 @@ async fn test_program_call_signs_only_and_takes_the_signature_from_signed_messag
 }
 
 #[tokio::test]
+async fn test_program_call_create_with_an_unusable_body_keeps_the_transaction_id() {
+    let mock_server = MockServer::start().await;
+    let keypair = Keypair::new();
+    let mut transaction = create_test_transaction(&keypair_pubkey(&keypair));
+    let signer = create_test_signer_program_call(&mock_server.uri(), keypair_pubkey(&keypair));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/transactions"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            br#"{"id":"tx-accepted","status":123}"#.to_vec(),
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let error = signer.sign_transaction(&mut transaction).await.unwrap_err();
+
+    match error {
+        SignerError::BroadcastUnconfirmed {
+            provider_tx_id,
+            provider_status,
+            ..
+        } => {
+            assert_eq!(provider_tx_id, Some("tx-accepted".to_string()));
+            assert_eq!(provider_status, None);
+        }
+        other => panic!("expected BroadcastUnconfirmed, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_raw_create_with_an_unusable_body_stays_a_plain_failure() {
+    let mock_server = MockServer::start().await;
+    let signer = create_test_signer(&mock_server.uri());
+
+    Mock::given(method("POST"))
+        .and(path("/v1/transactions"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            br#"{"id":"tx-accepted","status":123}"#.to_vec(),
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let error = signer.sign_message(b"hello").await.unwrap_err();
+
+    assert!(
+        matches!(error, SignerError::SerializationError(_)),
+        "a RAW create signs nothing on its own, so it must not report BroadcastUnconfirmed: {error:?}"
+    );
+}
+
+#[tokio::test]
 async fn test_program_call_accepts_the_signature_carried_as_tx_hash() {
     let mock_server = MockServer::start().await;
     let keypair = Keypair::new();

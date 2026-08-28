@@ -720,6 +720,44 @@ describe('createFireblocksSigner', () => {
             });
         });
 
+        it('reports a 5xx create as BROADCAST_UNCONFIRMED', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: false,
+                status: 503,
+                text: async () => 'upstream unavailable',
+            });
+
+            await expect(signer.signTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_BROADCAST_UNCONFIRMED',
+            });
+        });
+
+        it('keeps a 4xx create a plain rejection', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: false,
+                status: 400,
+                text: async () => 'bad request',
+            });
+
+            await expect(signer.signTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_REMOTE_API_ERROR',
+            });
+        });
+
+        it('reports an accepted create with no transaction id as BROADCAST_UNCONFIRMED', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ status: 'SUBMITTED' }),
+            });
+
+            await expect(signer.signTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_BROADCAST_UNCONFIRMED',
+            });
+        });
+
         it('rejects a v1 message before any PROGRAM_CALL is created', async () => {
             const { signer } = await createProgramCallSigner();
             const v1Transaction = {

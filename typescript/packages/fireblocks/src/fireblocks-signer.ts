@@ -7,6 +7,8 @@ import {
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
+    providerMayHaveAccepted,
+    providerStatus,
     signBatchStaggered,
     SignerErrorCode,
     SolanaMessageSigner,
@@ -301,13 +303,46 @@ class FireblocksSigner<TAddress extends string = string>
             },
         };
 
-        const createResponse = await this.request<CreateTransactionResponse>(
-            'POST',
-            '/v1/transactions',
-            request,
-            abortSignal,
-        );
-        return await this.pollForSignature(createResponse.id, 'PROGRAM_CALL', abortSignal);
+        const transactionId = await this.createProgramCallTransaction(request, abortSignal);
+        return await this.pollForSignature(transactionId, 'PROGRAM_CALL', abortSignal);
+    }
+
+    /**
+     * Create the PROGRAM_CALL signing request. A create that neither succeeds
+     * nor is rejected by a 4xx leaves a request Fireblocks may still act on, so
+     * it surfaces as BROADCAST_UNCONFIRMED; check Fireblocks before retrying.
+     */
+    private async createProgramCallTransaction(
+        request: CreateTransactionRequest,
+        abortSignal?: AbortSignal,
+    ): Promise<string> {
+        let createResponse: CreateTransactionResponse;
+        try {
+            createResponse = await this.request<CreateTransactionResponse>(
+                'POST',
+                '/v1/transactions',
+                request,
+                abortSignal,
+            );
+        } catch (error) {
+            if (!providerMayHaveAccepted(error)) {
+                throw error;
+            }
+            const status = providerStatus(error);
+            return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
+                cause: error,
+                message:
+                    'Fireblocks may have accepted the PROGRAM_CALL, but the outcome could not be confirmed and no transaction id was returned',
+                ...(status === undefined ? {} : { status }),
+            });
+        }
+        if (typeof createResponse.id !== 'string' || createResponse.id.length === 0) {
+            return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
+                message:
+                    'Fireblocks accepted the PROGRAM_CALL but returned no transaction id, so the outcome cannot be confirmed',
+            });
+        }
+        return createResponse.id;
     }
 
     /**

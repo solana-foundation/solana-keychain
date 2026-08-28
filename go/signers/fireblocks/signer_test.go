@@ -359,6 +359,45 @@ func TestSignTransactionProgramCallBroadcastIsUnconfirmed(t *testing.T) {
 	}
 }
 
+// A PROGRAM_CALL create that returns 200 with a body that cannot be used as a
+// whole may still have been accepted, so the id in that body is preserved as
+// the caller's recovery handle. A RAW create signs nothing on its own and keeps
+// the plain failure.
+func TestCreateWithUnusableBody(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		useProgramCall bool
+		wantCode       core.Code
+		wantTxID       string
+	}{
+		{"program call reports unconfirmed with the id", true, core.CodeBroadcastUnconfirmed, "tx-accepted"},
+		{"raw stays a plain failure", false, core.CodeSerializationError, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pub := testutils.TestPublicKey()
+			s := newTestSignerWithProgramCall(t, pub.String(), tc.useProgramCall, func(mux *http.ServeMux) {
+				mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = io.WriteString(w, `{"id":"tx-accepted","status":123}`)
+				})
+			})
+
+			tx, err := testutils.CreateTestTransaction(pub)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.SignTransaction(context.Background(), tx)
+			if code, _ := core.CodeOf(err); code != tc.wantCode {
+				t.Fatalf("got %s, want %s", code, tc.wantCode)
+			}
+			var se *core.SignerError
+			if errors.As(err, &se) && se.ProviderTxID != tc.wantTxID {
+				t.Errorf("ProviderTxID = %q, want %q", se.ProviderTxID, tc.wantTxID)
+			}
+		})
+	}
+}
+
 // PROGRAM_CALL accepts legacy and v0 only, so a v1 message is rejected before
 // any transaction is created.
 func TestSignTransactionProgramCallRejectsV1(t *testing.T) {

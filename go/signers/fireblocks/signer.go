@@ -191,7 +191,7 @@ func (s *Signer) signProgramCall(ctx context.Context, tx *solana.Transaction, me
 
 // requestAndPollSignature creates a signing request and polls it to completion.
 func (s *Signer) requestAndPollSignature(ctx context.Context, request createTransactionRequest, programCall bool) (solana.Signature, error) {
-	created, err := s.createTransaction(ctx, request)
+	created, err := s.createTransaction(ctx, request, programCall)
 	if err != nil {
 		return solana.Signature{}, err
 	}

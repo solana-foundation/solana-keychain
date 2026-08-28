@@ -194,6 +194,59 @@ async def test_program_call_broadcast_despite_sign_only_is_unconfirmed() -> None
 
 
 @respx.mock
+async def test_program_call_create_5xx_is_unconfirmed() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True)
+    transaction = create_test_transaction(keypair.pubkey())
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(503, text="unavailable"))
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+
+
+@respx.mock
+async def test_program_call_create_4xx_stays_a_rejection() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True)
+    transaction = create_test_transaction(keypair.pubkey())
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(400, text="bad request"))
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+
+    assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
+
+
+@respx.mock
+async def test_program_call_accepted_create_without_an_id_is_unconfirmed() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True)
+    transaction = create_test_transaction(keypair.pubkey())
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(200, json={"status": "SUBMITTED"})
+    )
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+
+
+@respx.mock
+async def test_raw_create_5xx_stays_a_plain_failure() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(503, text="unavailable"))
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_message(b"hello")
+
+    assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
+
+
+@respx.mock
 async def test_program_call_rejects_v1_message_before_creating_a_transaction() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair, use_program_call=True)

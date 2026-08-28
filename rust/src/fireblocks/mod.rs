@@ -7,7 +7,8 @@ use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
 use crate::{
     error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner,
-    transaction_util, transaction_util::TransactionUtil,
+    transaction_util, transaction_util::unconfirmed_unless_rejected,
+    transaction_util::TransactionUtil,
 };
 use std::{str::FromStr, sync::Arc};
 use types::{
@@ -16,7 +17,9 @@ use types::{
     TransactionResponse, TransactionSource, VaultAddress, VaultAddressesResponse,
 };
 
-use crate::remote_util::{parse_json_response, poll_until, PollOutcome};
+use crate::remote_util::{
+    extract_api_error, parse_json_response, poll_until, read_body_capped, PollOutcome,
+};
 use crate::signature_util::{signature_from_base58, signature_from_hex, verify_or_reject};
 
 const DEFAULT_POLL_INTERVAL_MS: u64 = 1000;
@@ -234,7 +237,7 @@ impl FireblocksSigner {
             })),
         };
 
-        let create_response = self.create_transaction(request).await?;
+        let create_response = self.create_transaction(request, SigningMode::Raw).await?;
         let tx_response = self
             .poll_for_completion(&create_response.id, SigningMode::Raw)
             .await?;
@@ -277,7 +280,9 @@ impl FireblocksSigner {
             })),
         };
 
-        let create_response = self.create_transaction(request).await?;
+        let create_response = self
+            .create_transaction(request, SigningMode::ProgramCall)
+            .await?;
         let tx_response = self
             .poll_for_completion(&create_response.id, SigningMode::ProgramCall)
             .await?;
@@ -299,10 +304,18 @@ impl FireblocksSigner {
         Ok(sig)
     }
 
+    /// Create a signing request. A PROGRAM_CALL create that neither succeeds
+    /// nor is rejected by a 4xx leaves a request Fireblocks may still act on,
+    /// so it reports `BroadcastUnconfirmed` with any transaction id the
+    /// response carried; a RAW create signs nothing on its own and keeps the
+    /// plain failure.
     async fn create_transaction(
         &self,
         request: CreateTransactionRequest,
+        mode: SigningMode,
     ) -> Result<CreateTransactionResponse, SignerError> {
+        const CONTEXT: &str = "Fireblocks API create_transaction";
+
         let uri = "/v1/transactions";
         let body = serde_json::to_string(&request)?;
         let token = self.create_auth_token(uri, &body)?;
@@ -316,9 +329,35 @@ impl FireblocksSigner {
             .header("Authorization", format!("Bearer {}", token))
             .body(body)
             .send()
-            .await?;
+            .await;
 
-        parse_json_response(response, "Fireblocks API create_transaction").await
+        if matches!(mode, SigningMode::Raw) {
+            return parse_json_response(response?, CONTEXT).await;
+        }
+
+        let response =
+            response.map_err(|error| unconfirmed_unless_rejected(None, None, error.into()))?;
+        let status = response.status().as_u16();
+        if !response.status().is_success() {
+            let error = extract_api_error(response, CONTEXT).await;
+            return Err(unconfirmed_unless_rejected(Some(status), None, error));
+        }
+
+        let body = read_body_capped(response)
+            .await
+            .map_err(|error| unconfirmed_unless_rejected(Some(status), None, error))?;
+        // The create may have been accepted even when the body is otherwise
+        // unusable, so an id present there is the caller's recovery handle.
+        let provider_tx_id = transaction_id_from_body(&body);
+        serde_json::from_slice(&body).map_err(|_e| {
+            #[cfg(feature = "unsafe-debug")]
+            log::error!("Failed to parse {CONTEXT} response: {_e}");
+            unconfirmed_unless_rejected(
+                Some(status),
+                provider_tx_id,
+                SignerError::SerializationError(format!("Failed to parse {CONTEXT} response")),
+            )
+        })
     }
 
     async fn poll_for_completion(
@@ -473,6 +512,17 @@ impl TransactionSigner for FireblocksSigner {
             signed_transaction,
         ))
     }
+}
+
+/// Read the transaction id out of a response body that could not be used as a
+/// whole, so an accepted create still yields a handle.
+fn transaction_id_from_body(body: &[u8]) -> Option<String> {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()?
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
 }
 
 #[cfg(test)]

@@ -30,7 +30,7 @@ pub(crate) fn idempotency_key_from_message(message_bytes: &[u8]) -> String {
 /// response was the failure. `provider_tx_id` is the id read out of the response
 /// body when one was readable there, and `None` when the failure came before any
 /// id was known.
-#[cfg(any(feature = "crossmint", feature = "fordefi"))]
+#[cfg(any(feature = "crossmint", feature = "fireblocks", feature = "fordefi"))]
 pub(crate) fn unconfirmed_unless_rejected(
     status: Option<u16>,
     provider_tx_id: Option<String>,
