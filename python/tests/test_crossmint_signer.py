@@ -307,6 +307,20 @@ async def test_create_server_error_is_unconfirmed_without_a_transaction_id() -> 
 
 
 @respx.mock
+async def test_create_server_error_keeps_a_transaction_id_from_the_body() -> None:
+    # A 5xx can still name a transaction Crossmint accepted; that id is the
+    # caller's only handle for reconciling it.
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(503, json={"id": "tx-accepted"}))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.provider_transaction_id == "tx-accepted"
+    assert excinfo.value.status_code == 503
+
+
+@respx.mock
 async def test_create_accepted_without_an_id_is_unconfirmed() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)

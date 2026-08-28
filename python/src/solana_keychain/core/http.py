@@ -189,6 +189,7 @@ async def _request_json(
             SignerErrorCode.REMOTE_API_ERROR,
             f"{provider_name} API error: {response.status_code}: "
             f"{sanitize_remote_error_response(error_text)}",
+            provider_transaction_id=_transaction_id_in_body(body),
             status_code=response.status_code,
         )
     try:
@@ -197,6 +198,23 @@ async def _request_json(
         raise SignerError(
             SignerErrorCode.PARSING_ERROR, f"Failed to parse {provider_name} response"
         ) from None
+
+
+def _transaction_id_in_body(body: bytes) -> str | None:
+    """The top-level ``id`` of a failed response body, when there is one.
+
+    A provider that has already accepted a transaction may still answer with a
+    non-2xx status, and that id is the caller's only handle for reconciling it.
+    """
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        return None
+    if isinstance(parsed, dict):
+        transaction_id = parsed.get("id")
+        if isinstance(transaction_id, str) and transaction_id.strip():
+            return transaction_id
+    return None
 
 
 async def _read_bounded_body(response: httpx.Response, provider_name: str) -> bytes:

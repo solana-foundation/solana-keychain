@@ -878,6 +878,28 @@ describe('CrossmintSigner', () => {
             expect(error.context?.status).toBe(503);
         });
 
+        it('keeps a transaction id named in a 5xx creation body', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse()) // create()
+                .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'tx-accepted' }), { status: 503 }));
+
+            const signer = await createCrossmintSigner({
+                ...mockConfig,
+                maxPollAttempts: 1,
+                pollIntervalMs: 1,
+            });
+
+            const error = await signer.signAndSendTransactions([createMockTransaction()]).then(
+                () => {
+                    throw new Error('expected the create failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+            expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            expect(error.context?.providerTransactionId).toBe('tx-accepted');
+            expect(error.context?.status).toBe(503);
+        });
+
         it('reports an accepted create with no id as unconfirmed', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()

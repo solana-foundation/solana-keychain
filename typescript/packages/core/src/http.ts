@@ -111,6 +111,23 @@ async function readCappedResponseText(response: Response, providerName: string):
 }
 
 /**
+ * The top-level `id` of a failed response body, when there is one. A provider
+ * that has already accepted a transaction may still answer with a non-2xx
+ * status, and that id is the caller's only handle for reconciling it.
+ */
+function transactionIdInBody(body: string): string | undefined {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(body);
+    } catch {
+        return undefined;
+    }
+    if (typeof parsed !== 'object' || parsed === null) return undefined;
+    const transactionId = (parsed as { id?: unknown }).id;
+    return typeof transactionId === 'string' && transactionId.trim() ? transactionId : undefined;
+}
+
+/**
  * Perform a remote signer API request and parse the JSON response, mapping
  * failures to the standard signer error pipeline:
  * - network failure or timeout → `HTTP_ERROR`
@@ -163,8 +180,10 @@ export async function fetchSignerJson<TResponse>(options: FetchSignerJsonOptions
             if (error instanceof SignerError) throw error;
             errorText = 'Failed to read error response';
         }
+        const providerTransactionId = transactionIdInBody(errorText);
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `${providerName} API error: ${response.status}`,
+            ...(providerTransactionId === undefined ? {} : { providerTransactionId }),
             response: sanitizeRemoteErrorResponse(errorText),
             status: response.status,
         });
