@@ -26,7 +26,11 @@ from solana_keychain.crossmint import (
     create_crossmint_signer,
 )
 from solana_keychain.crossmint.derive import derive_signing_key, parse_api_key
-from tests.util import create_test_transaction, create_two_signer_transaction
+from tests.util import (
+    create_test_transaction,
+    create_test_v1_transaction,
+    create_two_signer_transaction,
+)
 
 API_BASE_URL = "https://crossmint.example.com/api"
 API_KEY = "sk_staging_" + base58.b58encode(b"project-123:nacl-sig").decode()
@@ -608,6 +612,31 @@ async def test_rewritten_transaction_is_reported_as_a_broadcast_result() -> None
     assert not expected_signature.verify(
         keypair.pubkey(), signed_message_bytes(transaction.message)
     )
+
+
+@respx.mock
+async def test_a_v1_returned_transaction_yields_its_signature() -> None:
+    """The signer submits v1 transactions, so a v1 envelope coming back is not an
+    unsupported version: rejecting it would discard a signature already in hand."""
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    transaction = create_test_transaction(keypair.pubkey())
+
+    rewritten = create_test_v1_transaction(keypair.pubkey())
+    expected_signature = keypair.sign_message(signed_message_bytes(rewritten.message))
+    rewritten.signatures = [expected_signature]
+
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=tx_response(
+                "success",
+                onChain={"transaction": base58.b58encode(bytes(rewritten)).decode()},
+            ),
+        )
+    )
+
+    assert await signer.sign_and_send_transaction(transaction) == expected_signature
 
 
 @respx.mock

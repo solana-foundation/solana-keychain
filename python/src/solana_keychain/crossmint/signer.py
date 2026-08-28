@@ -10,7 +10,6 @@ from urllib.parse import quote
 import base58
 import httpx
 from solders.keypair import Keypair
-from solders.message import Message, MessageV0
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
@@ -373,11 +372,6 @@ class CrossmintSigner(SendingSigner):
             ) from None
 
         message = transaction.message
-        if not isinstance(message, (Message, MessageV0)):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Crossmint returned a transaction with an unsupported message version",
-            )
         num_required = message.header.num_required_signatures
         account_keys = list(message.account_keys)
         if len(account_keys) < num_required:
@@ -397,16 +391,6 @@ class CrossmintSigner(SendingSigner):
             )
         verify_returned_signature(signatures[0], account_keys[0], signed_message_bytes(message))
         return signatures[0], transaction
-
-    @staticmethod
-    def _executed_message_bytes(transaction: VersionedTransaction) -> bytes:
-        message = transaction.message
-        if not isinstance(message, (Message, MessageV0)):
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Crossmint returned a transaction with an unsupported message version",
-            )
-        return signed_message_bytes(message)
 
     @staticmethod
     def _broadcast_transaction_id(transaction: VersionedTransaction) -> Signature:
@@ -447,7 +431,7 @@ class CrossmintSigner(SendingSigner):
                     if not isinstance(on_chain.get("txId"), str):
                         raise
                 else:
-                    if self._executed_message_bytes(returned) == expected_message:
+                    if signed_message_bytes(returned.message) == expected_message:
                         return signature
                     return self._broadcast_transaction_id(returned)
 
