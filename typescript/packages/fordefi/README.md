@@ -72,7 +72,7 @@ Requirements and caveats:
 - Fordefi may rewrite the message: at minimum the recent blockhash, and it manages the Compute Budget fee instructions, so a compute-unit limit or price you set yourself may not survive. What changed is **not** diffed, so inspect the result before broadcasting if its contents matter to you.
 - The returned signature is verified with ed25519 against the message Fordefi returned, at the vault's required-signer position. A mismatch fails and is never handed back.
 - Fordefi refreshes the blockhash but does not report its `lastValidBlockHeight`, so a refreshed lifetime carries Kit's `U64_MAX` placeholder; broadcast promptly rather than relying on local expiry detection.
-- The create carries an `x-idempotence-id` derived from the message bytes under a manual-specific namespace, so resending the same bytes reuses the Fordefi transaction instead of creating a second one, and cannot collide with an auto create that did broadcast them.
+- The create carries an `x-idempotence-id` derived from the message bytes under the push mode, chain, vault and fee it was submitted with, so resending the same bytes on the same terms reuses the Fordefi transaction instead of creating a second one, and cannot collide with a create made on other terms, such as an auto create that did broadcast them.
 
 ### Black box mode
 

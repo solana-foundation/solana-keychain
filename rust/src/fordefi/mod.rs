@@ -41,6 +41,31 @@ const DEFAULT_POLL_INTERVAL_MS: u64 = 2000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 50;
 const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Render a fee as `type|priority_level|unit_price|priority_fee`, with empty
+/// segments for the fields the variant does not carry. The field order is fixed
+/// so an idempotency key derived from it stays stable.
+fn canonical_fee(fee: Option<&FordefiSolanaFee>) -> String {
+    match fee {
+        None => String::new(),
+        Some(FordefiSolanaFee::Custom {
+            unit_price,
+            priority_fee,
+        }) => format!(
+            "custom||{}|{}",
+            unit_price.as_deref().unwrap_or_default(),
+            priority_fee.as_deref().unwrap_or_default()
+        ),
+        Some(FordefiSolanaFee::Priority { priority_level }) => {
+            let level = match priority_level {
+                FordefiPriorityLevel::Low => "low",
+                FordefiPriorityLevel::Medium => "medium",
+                FordefiPriorityLevel::High => "high",
+            };
+            format!("priority|{level}||")
+        }
+    }
+}
+
 /// Configuration for creating a Fordefi signer.
 ///
 /// `chain` selects the signer type: `None` builds a [`FordefiBlackBoxSigner`].
@@ -400,9 +425,9 @@ impl FordefiCore {
     ///
     /// The create carries an `x-idempotence-id` derived from the message bytes,
     /// so replaying these exact bytes cannot create a second transaction; a
-    /// rebuilt transaction derives a different id. The manual-mode key is
-    /// namespaced so the same bytes submitted for signing cannot collide with an
-    /// earlier auto create that did broadcast them.
+    /// rebuilt transaction derives a different id. The key is namespaced by push
+    /// mode, chain, vault and fee, so the same bytes submitted under any of them
+    /// cannot collide with a create that carried different terms.
     async fn submit_solana_transaction(
         &self,
         chain: &SolanaChainUniqueId,
@@ -424,19 +449,20 @@ impl FordefiCore {
             },
         };
 
-        let idempotency_key = match push_mode {
-            FordefiPushMode::Auto => idempotency_key_from_message(data_bytes),
-            FordefiPushMode::Manual => {
-                let mut namespaced = format!(
-                    "fordefi:solana:manual:{}:{}:",
-                    chain.as_str(),
-                    self.vault_id
-                )
-                .into_bytes();
-                namespaced.extend_from_slice(data_bytes);
-                idempotency_key_from_message(&namespaced)
-            }
+        let mode = match push_mode {
+            FordefiPushMode::Auto => "auto",
+            FordefiPushMode::Manual => "manual",
         };
+        let mut namespaced = format!(
+            "fordefi:solana:{}:{}:{}:{}:",
+            mode,
+            chain.as_str(),
+            self.vault_id,
+            canonical_fee(fee)
+        )
+        .into_bytes();
+        namespaced.extend_from_slice(data_bytes);
+        let idempotency_key = idempotency_key_from_message(&namespaced);
 
         self.submit_request(
             &request,

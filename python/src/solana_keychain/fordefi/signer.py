@@ -343,6 +343,23 @@ class FordefiBlackBoxSigner(_FordefiSignerBase, TransactionSigner):
         return signature
 
 
+def _canonical_fee(fee: dict[str, Any] | None) -> str:
+    """Render a fee as ``type|priority_level|unit_price|priority_fee``.
+
+    The field order is fixed so an idempotency key derived from it stays stable.
+
+    Args:
+        fee: Native-mode fee configuration, or ``None``.
+
+    Returns:
+        The canonical rendering, empty when no fee is configured.
+    """
+    if fee is None:
+        return ""
+    fields = ("type", "priority_level", "unit_price", "priority_fee")
+    return "|".join(str(fee.get(field, "")) for field in fields)
+
+
 class _FordefiNativeSignerBase(_FordefiSignerBase):
     """Shared native-mode plumbing: chain validation and the native request bodies."""
 
@@ -379,6 +396,13 @@ class _FordefiNativeSignerBase(_FordefiSignerBase):
             "type": "solana_transaction",
             "details": details,
         }
+
+    def _native_idempotence_id(self, message_data: bytes) -> str:
+        namespace = (
+            f"fordefi:solana:{self._push_mode}:{self._chain}:"
+            f"{self._vault_id}:{_canonical_fee(self._fee)}:"
+        ).encode()
+        return idempotency_key_from_message(namespace + message_data)
 
     def _solana_message_request(self, data: bytes) -> dict[str, Any]:
         return {
@@ -438,9 +462,10 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
         reached the client at all.
 
         Each create carries an ``x-idempotence-id`` derived from the message
-        bytes, so replaying these exact bytes cannot create a second
-        transaction; a rebuilt transaction derives a different id and is
-        broadcast again.
+        bytes under the push mode, chain, vault and fee it was submitted with, so
+        replaying these exact bytes on the same terms cannot create a second
+        transaction; a rebuilt transaction, or a different fee, derives a
+        different id and is broadcast again.
 
         A cancellation cannot carry a structured error: it must be re-raised as
         ``asyncio.CancelledError``, and awaiting a cancelled task hands the
@@ -470,7 +495,7 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
         try:
             transaction_id = await self._post_transaction(
                 self._solana_transaction_request(message_data),
-                idempotence_id=idempotency_key_from_message(message_data),
+                idempotence_id=self._native_idempotence_id(message_data),
             )
         except asyncio.CancelledError as error:
             # The re-raise must stay a CancelledError for asyncio, so the warning
@@ -594,24 +619,21 @@ class FordefiNativeManualSigner(_FordefiNativeSignerBase, ModifyingSigner):
         carries a signature is rejected before submitting.
 
         The create carries an ``x-idempotence-id`` derived from the message bytes
-        under a manual-specific namespace, so it can never reuse the id of an
-        auto create that did broadcast those same bytes.
+        under the push mode, chain, vault and fee it was submitted with, so it can
+        never reuse the id of a create made on other terms, such as an auto create
+        that did broadcast those same bytes.
         """
         self._require_unsigned_vault_paid_transaction(transaction)
         message_data = signed_message_bytes(transaction.message)
         transaction_id = await self._post_transaction(
             self._solana_transaction_request(message_data),
-            idempotence_id=self._manual_idempotence_id(message_data),
+            idempotence_id=self._native_idempotence_id(message_data),
         )
         result = await self._poll_for_result(transaction_id, pushable=False)
         returned, signature = extract_and_verify_rewritten_transaction(
             self._decode_raw_transaction(result), self._public_key, "Fordefi"
         )
         return classify_signed_transaction(returned, serialize_transaction(returned), signature)
-
-    def _manual_idempotence_id(self, message_data: bytes) -> str:
-        namespace = f"fordefi:solana:manual:{self._chain}:{self._vault_id}:".encode()
-        return idempotency_key_from_message(namespace + message_data)
 
     def _require_unsigned_vault_paid_transaction(self, transaction: VersionedTransaction) -> None:
         account_keys = transaction.message.account_keys

@@ -341,9 +341,11 @@ func (s *NativeAutoSigner) SignMessage(ctx context.Context, message []byte) (sol
 // transaction with Fordefi before retrying. A submission that fails without a
 // usable response returns CodeBroadcastUnconfirmed with no transaction id.
 //
-// Each create carries an x-idempotence-id derived from the message bytes, so
-// replaying these exact bytes cannot create a second Fordefi transaction; a
-// rebuilt transaction derives a different id and is broadcast again.
+// Each create carries an x-idempotence-id derived from the message bytes under
+// the push mode, chain, vault and fee it was submitted with, so replaying these
+// exact bytes on the same terms cannot create a second Fordefi transaction; a
+// rebuilt transaction, or a different fee, derives a different id and is
+// broadcast again.
 func (s *NativeAutoSigner) SignAndSendTransaction(ctx context.Context, tx *solana.Transaction) (solana.Signature, error) {
 	signed, err := s.signTransactionNative(ctx, tx)
 	if err != nil {
@@ -393,7 +395,7 @@ func (s *NativeAutoSigner) signTransactionNative(ctx context.Context, tx *solana
 			PushMode: PushModeAuto,
 			Fee:      s.fee,
 		},
-	}, core.IdempotencyKeyFromMessage(messageBytes), true)
+	}, nativeIdempotencyKey(PushModeAuto, s.chain, s.core.vaultID, s.fee, messageBytes), true)
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}
@@ -499,9 +501,9 @@ func (s *NativeManualSigner) IsAvailable(ctx context.Context) bool { return s.co
 // against the message Fordefi returned. Preconditions on the caller's input do
 // apply: the vault must be the fee payer and nothing may be signed yet.
 //
-// Each create carries an x-idempotence-id derived from the message bytes under a
-// manual-specific namespace, so a resend of these exact bytes reuses the Fordefi
-// transaction instead of creating a second one.
+// Each create carries an x-idempotence-id derived from the message bytes under
+// the push mode, chain, vault and fee it was submitted with, so a resend on the
+// same terms reuses the Fordefi transaction instead of creating a second one.
 func (s *NativeManualSigner) ModifyAndSignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
 	if err := s.requireUnsignedVaultPaidTransaction(tx); err != nil {
 		return core.SignedTransaction{}, err
@@ -561,10 +563,27 @@ func (s *NativeManualSigner) requireUnsignedVaultPaidTransaction(tx *solana.Tran
 }
 
 // idempotencyKey namespaces the manual key so the same message bytes cannot
-// collide with an earlier auto create that did broadcast them.
+// collide with an earlier create carrying other terms.
 func (s *NativeManualSigner) idempotencyKey(messageBytes []byte) string {
-	namespaced := []byte("fordefi:solana:manual:" + string(s.chain) + ":" + s.core.vaultID + ":")
+	return nativeIdempotencyKey(PushModeManual, s.chain, s.core.vaultID, s.fee, messageBytes)
+}
+
+// nativeIdempotencyKey binds a native key to the push mode, chain, vault and fee
+// the create carries, so identical message bytes submitted under different terms
+// are not deduplicated into each other.
+func nativeIdempotencyKey(pushMode PushMode, chain Chain, vaultID string, fee *Fee, messageBytes []byte) string {
+	namespaced := []byte("fordefi:solana:" + string(pushMode) + ":" + string(chain) + ":" +
+		vaultID + ":" + canonicalFee(fee) + ":")
 	return core.IdempotencyKeyFromMessage(append(namespaced, messageBytes...))
+}
+
+// canonicalFee renders a fee as type|priority_level|unit_price|priority_fee. The
+// field order is fixed so a key derived from it stays stable.
+func canonicalFee(fee *Fee) string {
+	if fee == nil {
+		return ""
+	}
+	return fee.Type + "|" + string(fee.PriorityLevel) + "|" + fee.UnitPrice + "|" + fee.PriorityFee
 }
 
 // extractAndVerifyRewritten decodes the wire transaction a native response

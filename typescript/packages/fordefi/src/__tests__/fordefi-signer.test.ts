@@ -43,7 +43,7 @@ vi.mock('@solana/keychain-core', async importOriginal => {
 });
 
 import { createFordefiSigner, type FordefiSignerConfig } from '../fordefi-signer.js';
-import type { SolanaChainUniqueId } from '../types.js';
+import type { FordefiSolanaFee, SolanaChainUniqueId } from '../types.js';
 
 global.fetch = vi.fn();
 
@@ -535,13 +535,10 @@ describe('createFordefiSigner', () => {
 
         it('sends a deterministic x-idempotence-id on the native create', async () => {
             const messageBytes = new Uint8Array(32).fill(0xab);
-            const digest = createHash('sha256').update(messageBytes).digest().subarray(0, 16);
-            digest[6] = (digest[6]! & 0x0f) | 0x40;
-            digest[8] = (digest[8]! & 0x3f) | 0x80;
-            const hex = digest.toString('hex');
-            const expectedId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
-
             const { config, fixture } = await setupNativeBroadcast(1);
+            const namespace = Buffer.from(`fordefi:solana:auto:solana_mainnet:${config.vaultId}::`, 'utf8');
+            const expectedId = idempotencyKeyOf(Buffer.concat([namespace, Buffer.from(messageBytes)]));
+
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-native'))
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
@@ -552,6 +549,38 @@ describe('createFordefiSigner', () => {
 
             const postOpts = vi.mocked(fetch).mock.calls[0]![1] as RequestInit;
             expect(postOpts.headers).toHaveProperty('x-idempotence-id', expectedId);
+        });
+
+        it('binds the x-idempotence-id to the fee the create carries', async () => {
+            const messageBytes = new Uint8Array(32).fill(0xab);
+            const { config, fixture } = await setupNativeBroadcast(1);
+            const fees: (FordefiSolanaFee | undefined)[] = [
+                undefined,
+                { priority_level: 'low', type: 'priority' },
+                { priority_level: 'high', type: 'priority' },
+                { type: 'custom', unit_price: '10' },
+                { priority_fee: '10', type: 'custom' },
+            ];
+            const observed = new Set<string>();
+
+            for (const fee of fees) {
+                vi.mocked(fetch)
+                    .mockResolvedValueOnce(mockCreateTxResponse('tx-native'))
+                    .mockResolvedValueOnce(
+                        mockPollResponse('completed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction),
+                    );
+                const signer = await createFordefiSigner({ ...config, ...(fee ? { fee } : {}) });
+                await signer.signAndSendTransactions([
+                    { messageBytes, signatures: { [fixture.feePayer]: null } } as never,
+                ]);
+                const { calls } = vi.mocked(fetch).mock;
+                const postOpts = calls[calls.length - 2]![1] as RequestInit;
+                observed.add((postOpts.headers as Record<string, string>)['x-idempotence-id']!);
+            }
+
+            // Fordefi rewrites the Compute Budget instructions from the fee, so
+            // the same bytes under a different fee are a different operation.
+            expect(observed.size).toBe(fees.length);
         });
 
         it('does not expose the partial-signer method in native mode', async () => {
@@ -901,7 +930,7 @@ describe('createFordefiSigner', () => {
             const signer = await createFordefiSigner(config);
             await signer.modifyAndSignTransactions([unsignedManualTransaction(fixture.feePayer, messageBytes)]);
 
-            const namespace = Buffer.from(`fordefi:solana:manual:solana_mainnet:${config.vaultId}:`, 'utf8');
+            const namespace = Buffer.from(`fordefi:solana:manual:solana_mainnet:${config.vaultId}::`, 'utf8');
             const postOpts = vi.mocked(fetch).mock.calls[0]![1] as RequestInit;
             expect(postOpts.headers).toHaveProperty(
                 'x-idempotence-id',
@@ -1053,7 +1082,7 @@ describe('createFordefiSigner', () => {
                 chain: 'solana_mainnet',
                 publicKey: nonceFixture.feePayer,
                 pushMode: 'manual',
-            } as FordefiSignerConfig);
+            } satisfies FordefiSignerConfig & { chain: SolanaChainUniqueId; pushMode: 'manual' });
             const staleNonceAccount = (await generateKeyPairSigner()).address;
             const results = await signer.modifyAndSignTransactions([
                 {

@@ -598,11 +598,10 @@ func TestSignTransactionNativeSuccess(t *testing.T) {
 			if decodeErr != nil {
 				t.Errorf("decode submitted message: %v", decodeErr)
 			}
-			digest := sha256.Sum256(submittedMessage)
-			id := digest[:16]
-			id[6] = (id[6] & 0x0f) | 0x40
-			id[8] = (id[8] & 0x3f) | 0x80
-			want := fmt.Sprintf("%x-%x-%x-%x-%x", id[0:4], id[4:6], id[6:8], id[8:10], id[10:16])
+			namespaced := append(
+				[]byte("fordefi:solana:auto:solana_devnet:"+testVaultID+":priority|medium||:"),
+				submittedMessage...)
+			want := core.IdempotencyKeyFromMessage(namespaced)
 			if got := r.Header.Get("x-idempotence-id"); got != want {
 				t.Errorf("x-idempotence-id = %q, want %q", got, want)
 			}

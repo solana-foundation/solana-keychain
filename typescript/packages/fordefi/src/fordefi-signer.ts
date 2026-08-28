@@ -89,6 +89,20 @@ const FAILURE_STATES = new Set([
 ]);
 
 /**
+ * Render a fee as `type|priority_level|unit_price|priority_fee`, with empty
+ * segments for the fields the variant does not carry. The field order is fixed
+ * so an idempotency key derived from it stays stable.
+ */
+function canonicalFee(fee?: FordefiSolanaFee): string {
+    if (!fee) {
+        return '';
+    }
+    return fee.type === 'priority'
+        ? `priority|${fee.priority_level}||`
+        : `custom||${fee.unit_price ?? ''}|${fee.priority_fee ?? ''}`;
+}
+
+/**
  * Signs Fordefi API-request payloads for the `x-signature` header.
  *
  * Implementations receive the fully-formatted payload (`{path}|{timestamp}|{body}`)
@@ -185,8 +199,10 @@ export interface FordefiSignerConfig {
  * named, and none when no response reached the client at all.
  *
  * Each native create carries an `x-idempotence-id` derived from the message
- * bytes, so replaying these exact bytes cannot create a second transaction; a
- * rebuilt transaction derives a different id and is broadcast again.
+ * bytes under the push mode, chain, vault and fee it was submitted with, so
+ * replaying these exact bytes on the same terms cannot create a second
+ * transaction; a rebuilt transaction, or a different fee, derives a different id
+ * and is broadcast again.
  */
 export interface FordefiNativeSigner<TAddress extends string = string>
     extends SolanaSendingSigner<TAddress>, SolanaMessageSigner<TAddress> {}
@@ -864,20 +880,20 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         const messageBytes = new Uint8Array(base64Encoder.encode(base64Data));
         return await this.submitTransaction(
             requestBody,
-            await idempotencyKeyFromMessage(
-                pushMode === 'manual' ? this.namespaceManualIdempotencyInput(messageBytes) : messageBytes,
-            ),
+            await idempotencyKeyFromMessage(this.namespaceIdempotencyInput(pushMode, messageBytes)),
             abortSignal,
         );
     }
 
     /**
-     * Namespaced so the same bytes submitted for signing cannot collide with an
-     * earlier auto create that did broadcast them.
+     * Namespaced so the same bytes submitted under a different push mode, chain,
+     * vault or fee cannot collide with an earlier create carrying other terms.
      */
-    private namespaceManualIdempotencyInput(messageBytes: Uint8Array): Uint8Array {
+    private namespaceIdempotencyInput(pushMode: FordefiPushMode, messageBytes: Uint8Array): Uint8Array {
         utf8Encoder ||= getUtf8Encoder();
-        const namespace = utf8Encoder.encode(`fordefi:solana:manual:${this.chain!}:${this.vaultId}:`);
+        const namespace = utf8Encoder.encode(
+            `fordefi:solana:${pushMode}:${this.chain!}:${this.vaultId}:${canonicalFee(this.fee)}:`,
+        );
         const namespaced = new Uint8Array(namespace.length + messageBytes.length);
         namespaced.set(namespace);
         namespaced.set(messageBytes, namespace.length);

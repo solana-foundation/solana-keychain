@@ -244,9 +244,35 @@ func TestManualIdempotencyKeyIsNamespacedAwayFromAuto(t *testing.T) {
 		t.Error("the manual key must not equal the auto key for the same message bytes")
 	}
 
-	namespaced := append([]byte("fordefi:solana:manual:solana_devnet:"+testVaultID+":"), message...)
+	namespaced := append([]byte("fordefi:solana:manual:solana_devnet:"+testVaultID+"::"), message...)
 	if got, want := s.idempotencyKey(message), core.IdempotencyKeyFromMessage(namespaced); got != want {
 		t.Errorf("manual key = %q, want the key over the namespaced bytes %q", got, want)
+	}
+}
+
+// Fordefi rewrites the Compute Budget instructions from the fee the create
+// carries, so two creates over identical bytes with different fees are different
+// operations and must not deduplicate onto each other.
+func TestNativeIdempotencyKeyBindsChainAndFee(t *testing.T) {
+	message := []byte("serialized message bytes")
+	base := nativeIdempotencyKey(PushModeAuto, ChainSolanaMainnet, testVaultID, nil, message)
+
+	variants := map[string]string{
+		"another chain": nativeIdempotencyKey(PushModeAuto, ChainSolanaDevnet, testVaultID, nil, message),
+		"another vault": nativeIdempotencyKey(PushModeAuto, ChainSolanaMainnet, "other-vault", nil, message),
+		"a custom fee": nativeIdempotencyKey(PushModeAuto, ChainSolanaMainnet, testVaultID,
+			&Fee{Type: FeeTypeCustom, UnitPrice: "10"}, message),
+		"a high priority fee": nativeIdempotencyKey(PushModeAuto, ChainSolanaMainnet, testVaultID,
+			&Fee{Type: FeeTypePriority, PriorityLevel: PriorityHigh}, message),
+		"a low priority fee": nativeIdempotencyKey(PushModeAuto, ChainSolanaMainnet, testVaultID,
+			&Fee{Type: FeeTypePriority, PriorityLevel: PriorityLow}, message),
+	}
+	seen := map[string]string{base: "no fee"}
+	for name, key := range variants {
+		if previous, collided := seen[key]; collided {
+			t.Errorf("%s produced the same key as %s", name, previous)
+		}
+		seen[key] = name
 	}
 }
 

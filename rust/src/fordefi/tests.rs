@@ -776,7 +776,13 @@ async fn test_fordefi_native_sign_transaction_success() {
     let wire_bytes = build_mock_wire_transaction(&keypair, &message_data);
     let wire_b64 = STANDARD.encode(&wire_bytes);
 
-    let expected_idempotence_id = idempotency_key_from_message(&message_data);
+    let mut namespaced = format!(
+        "fordefi:solana:auto:{}:test-vault-id::",
+        SolanaChainUniqueId::SolanaMainnet.as_str()
+    )
+    .into_bytes();
+    namespaced.extend_from_slice(&message_data);
+    let expected_idempotence_id = idempotency_key_from_message(&namespaced);
     Mock::given(method("POST"))
         .and(path("/api/v1/transactions"))
         .and(header("Authorization", "Bearer test-token"))
@@ -1442,6 +1448,39 @@ async fn test_fordefi_manual_replaces_the_callers_transaction() {
     );
 }
 
+/// Fordefi rewrites the Compute Budget instructions from the fee the create
+/// carries, so two creates over identical bytes with different fees are
+/// different operations and must not deduplicate onto each other.
+#[test]
+fn test_canonical_fee_separates_every_fee_shape() {
+    let rendered = [
+        canonical_fee(None),
+        canonical_fee(Some(&FordefiSolanaFee::Priority {
+            priority_level: FordefiPriorityLevel::Low,
+        })),
+        canonical_fee(Some(&FordefiSolanaFee::Priority {
+            priority_level: FordefiPriorityLevel::Medium,
+        })),
+        canonical_fee(Some(&FordefiSolanaFee::Priority {
+            priority_level: FordefiPriorityLevel::High,
+        })),
+        canonical_fee(Some(&FordefiSolanaFee::Custom {
+            unit_price: Some("10".to_string()),
+            priority_fee: None,
+        })),
+        canonical_fee(Some(&FordefiSolanaFee::Custom {
+            unit_price: None,
+            priority_fee: Some("10".to_string()),
+        })),
+    ];
+    let unique: std::collections::HashSet<&String> = rendered.iter().collect();
+    assert_eq!(
+        unique.len(),
+        rendered.len(),
+        "every fee shape must render distinctly: {rendered:?}"
+    );
+}
+
 /// The idempotency key is namespaced so the same bytes cannot collide with an
 /// auto create that did broadcast them.
 #[tokio::test]
@@ -1455,7 +1494,7 @@ async fn test_fordefi_manual_namespaces_the_idempotency_key() {
     let message_data = tx.message.serialize();
     let auto_key = idempotency_key_from_message(&message_data);
     let mut namespaced = format!(
-        "fordefi:solana:manual:{}:test-vault-id:",
+        "fordefi:solana:manual:{}:test-vault-id::",
         SolanaChainUniqueId::SolanaMainnet.as_str()
     )
     .into_bytes();

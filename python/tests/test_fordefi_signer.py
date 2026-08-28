@@ -1,9 +1,7 @@
 import asyncio
 import base64
-import hashlib
 import json
 import logging
-import uuid
 from typing import Any
 
 import httpx
@@ -664,10 +662,13 @@ async def test_sign_transaction_native_success() -> None:
     assert body["details"]["data"] == base64.b64encode(
         signed_message_bytes(transaction.message)
     ).decode("ascii")
-    digest = bytearray(hashlib.sha256(signed_message_bytes(transaction.message)).digest()[:16])
-    digest[6] = (digest[6] & 0x0F) | 0x40
-    digest[8] = (digest[8] & 0x3F) | 0x80
-    assert respx.calls[0].request.headers["x-idempotence-id"] == str(uuid.UUID(bytes=bytes(digest)))
+    namespaced = (
+        f"fordefi:solana:auto:solana_mainnet:{VAULT_ID}:priority|high||:".encode()
+        + signed_message_bytes(transaction.message)
+    )
+    assert respx.calls[0].request.headers["x-idempotence-id"] == idempotency_key_from_message(
+        namespaced
+    )
 
 
 @respx.mock
@@ -806,10 +807,31 @@ async def test_manual_idempotence_id_cannot_collide_with_an_auto_create() -> Non
 
     await signer.modify_and_sign_transaction(transaction)
 
-    namespaced = f"fordefi:solana:manual:solana_mainnet:{VAULT_ID}:".encode() + message_data
+    namespaced = f"fordefi:solana:manual:solana_mainnet:{VAULT_ID}::".encode() + message_data
     observed = respx.calls[0].request.headers["x-idempotence-id"]
     assert observed == idempotency_key_from_message(namespaced)
     assert observed != idempotency_key_from_message(message_data)
+
+
+async def test_native_idempotence_id_binds_the_fee() -> None:
+    """Fordefi rewrites the Compute Budget instructions from the fee the create
+    carries, so identical bytes under different fees are different operations."""
+    keypair = Keypair()
+    message_data = signed_message_bytes(create_test_transaction(keypair.pubkey()).message)
+    fees: list[dict[str, Any] | None] = [
+        None,
+        {"type": "priority", "priority_level": "low"},
+        {"type": "priority", "priority_level": "high"},
+        {"type": "custom", "unit_price": "10"},
+        {"type": "custom", "priority_fee": "10"},
+    ]
+    observed = {
+        make_native_signer(keypair, chain="solana_mainnet", fee=fee)._native_idempotence_id(
+            message_data
+        )
+        for fee in fees
+    }
+    assert len(observed) == len(fees), "every fee must derive its own idempotence id"
 
 
 @respx.mock
