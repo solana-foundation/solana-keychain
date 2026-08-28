@@ -52,7 +52,7 @@ impl PendingTransactionId {
 
 /// A UUID derived from SHA-256(message bytes), so a retry of the same bytes
 /// reuses the key and the provider deduplicates the create.
-#[cfg(any(feature = "crossmint", feature = "fordefi"))]
+#[cfg(any(feature = "crossmint", feature = "fireblocks", feature = "fordefi"))]
 pub(crate) fn idempotency_key_from_message(message_bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(message_bytes);
