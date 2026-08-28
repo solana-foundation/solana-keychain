@@ -33,10 +33,15 @@ const (
 // Wire types for the Fireblocks REST API.
 
 type createTransactionRequest struct {
-	AssetID         string            `json:"assetId"`
-	Operation       string            `json:"operation"`
-	Source          transactionSource `json:"source"`
-	ExtraParameters any               `json:"extraParameters"`
+	AssetID   string            `json:"assetId"`
+	Operation string            `json:"operation"`
+	Source    transactionSource `json:"source"`
+	// ExternalTxID is a message-derived id Fireblocks enforces as unique, so a
+	// resend of the same bytes is rejected rather than signed twice, and an
+	// accepted create stays findable when its response was lost. Only set for
+	// the operation that leaves a request Fireblocks may act on by itself.
+	ExternalTxID    string `json:"externalTxId,omitempty"`
+	ExtraParameters any    `json:"extraParameters"`
 }
 
 type transactionSource struct {
@@ -188,7 +193,7 @@ func (s *Signer) createTransaction(ctx context.Context, request createTransactio
 		if !programCall {
 			return err
 		}
-		return core.UnconfirmedUnlessRejected(status, transactionIDFromBody(respBody), "", err)
+		return core.UnconfirmedUnlessRejected(status, transactionIDFromBody(respBody), request.ExternalTxID, err)
 	}
 
 	body, err := json.Marshal(request)

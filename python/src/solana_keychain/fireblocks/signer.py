@@ -30,6 +30,7 @@ from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
     classify_signed_transaction,
+    idempotency_key_from_message,
     serialize_transaction,
     signed_message_bytes,
 )
@@ -208,6 +209,7 @@ class FireblocksSigner(TransactionSigner):
                 error._detail,
                 provider_transaction_id=error.provider_transaction_id,
                 status_code=error.status_code,
+                idempotency_key=request.get("externalTxId"),
             ) from None
         transaction_id = response.get("id") if isinstance(response, dict) else None
         if not isinstance(transaction_id, str) or not transaction_id:
@@ -216,6 +218,7 @@ class FireblocksSigner(TransactionSigner):
                     SignerErrorCode.BROADCAST_UNCONFIRMED,
                     "Fireblocks accepted the PROGRAM_CALL but returned no transaction id, "
                     "so the outcome cannot be confirmed",
+                    idempotency_key=request.get("externalTxId"),
                 )
             raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
         return transaction_id
@@ -320,6 +323,24 @@ class FireblocksSigner(TransactionSigner):
         verify_returned_signature(signature, public_key, message)
         return signature
 
+    def _external_tx_id(self, message: bytes) -> str:
+        """Derive the ``externalTxId`` a PROGRAM_CALL create carries.
+
+        Bound to the asset and vault account as well as the message: the same bytes
+        submitted against a different vault are a different operation and must not
+        deduplicate onto each other.
+
+        Args:
+            message: The message bytes being submitted for signing.
+
+        Returns:
+            The message-derived id.
+        """
+        namespace = (
+            f"fireblocks:solana:program_call:{self._asset_id}:{self._vault_account_id}:"
+        ).encode()
+        return idempotency_key_from_message(namespace + message)
+
     async def _sign_program_call(
         self, transaction: VersionedTransaction, message: bytes
     ) -> Signature:
@@ -336,10 +357,12 @@ class FireblocksSigner(TransactionSigner):
                 "Fireblocks PROGRAM_CALL accepts legacy and v0 messages only; a v1 message "
                 "cannot be signed in this mode",
             )
+        external_tx_id = self._external_tx_id(message)
         transaction_id = await self._create_transaction(
             {
                 "assetId": self._asset_id,
                 "operation": "PROGRAM_CALL",
+                "externalTxId": external_tx_id,
                 "source": {"type": "VAULT_ACCOUNT", "id": self._vault_account_id},
                 "extraParameters": {
                     "programCallData": serialize_transaction(transaction),

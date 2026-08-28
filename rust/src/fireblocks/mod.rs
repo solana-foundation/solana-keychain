@@ -7,8 +7,8 @@ use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
 use crate::{
     error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner,
-    transaction_util, transaction_util::unconfirmed_unless_rejected,
-    transaction_util::TransactionUtil,
+    transaction_util, transaction_util::idempotency_key_from_message,
+    transaction_util::unconfirmed_unless_rejected, transaction_util::TransactionUtil,
 };
 use std::{str::FromStr, sync::Arc};
 use types::{
@@ -236,6 +236,7 @@ impl FireblocksSigner {
                     }],
                 },
             })),
+            external_tx_id: None,
         };
 
         let create_response = self.create_transaction(request, SigningMode::Raw).await?;
@@ -246,6 +247,20 @@ impl FireblocksSigner {
         verify_or_reject(&sig, &public_key, message)?;
 
         Ok(sig)
+    }
+
+    /// The `externalTxId` a PROGRAM_CALL create carries, bound to the asset and
+    /// vault account as well as the message: the same bytes submitted against a
+    /// different vault are a different operation and must not deduplicate onto
+    /// each other.
+    fn external_tx_id(&self, message_bytes: &[u8]) -> String {
+        let mut namespaced = format!(
+            "fireblocks:solana:program_call:{}:{}:",
+            self.asset_id, self.vault_account_id
+        )
+        .into_bytes();
+        namespaced.extend_from_slice(message_bytes);
+        idempotency_key_from_message(&namespaced)
     }
 
     /// Sign a transaction with the PROGRAM_CALL operation in sign-only mode.
@@ -279,6 +294,7 @@ impl FireblocksSigner {
                 sign_only: true,
                 use_durable_nonce: false,
             })),
+            external_tx_id: Some(self.external_tx_id(message_bytes)),
         };
 
         let create_response = self
@@ -318,6 +334,7 @@ impl FireblocksSigner {
         const CONTEXT: &str = "Fireblocks API create_transaction";
 
         let uri = "/v1/transactions";
+        let external_tx_id = request.external_tx_id.clone();
         let body = serde_json::to_string(&request)?;
         let token = self.create_auth_token(uri, &body)?;
 
@@ -336,17 +353,23 @@ impl FireblocksSigner {
             return parse_json_response(response?, CONTEXT).await;
         }
 
-        let response =
-            response.map_err(|error| unconfirmed_unless_rejected(None, None, None, error.into()))?;
+        let response = response.map_err(|error| {
+            unconfirmed_unless_rejected(None, None, external_tx_id.as_deref(), error.into())
+        })?;
         let status = response.status().as_u16();
         if !response.status().is_success() {
             let error = extract_api_error(response, CONTEXT).await;
-            return Err(unconfirmed_unless_rejected(Some(status), None, None, error));
+            return Err(unconfirmed_unless_rejected(
+                Some(status),
+                None,
+                external_tx_id.as_deref(),
+                error,
+            ));
         }
 
-        let body = read_body_capped(response)
-            .await
-            .map_err(|error| unconfirmed_unless_rejected(Some(status), None, None, error))?;
+        let body = read_body_capped(response).await.map_err(|error| {
+            unconfirmed_unless_rejected(Some(status), None, external_tx_id.as_deref(), error)
+        })?;
         // The create may have been accepted even when the body is otherwise
         // unusable, so an id present there is the caller's recovery handle.
         let provider_tx_id = transaction_id_in_body(&body);
@@ -356,7 +379,7 @@ impl FireblocksSigner {
             unconfirmed_unless_rejected(
                 Some(status),
                 provider_tx_id,
-                None,
+                external_tx_id.as_deref(),
                 SignerError::SerializationError(format!("Failed to parse {CONTEXT} response")),
             )
         })

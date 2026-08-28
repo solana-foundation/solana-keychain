@@ -17,6 +17,7 @@ from solders.signature import Signature
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.core import serialize_transaction, signed_message_bytes
+from solana_keychain.core.transaction_util import idempotency_key_from_message
 from solana_keychain.fireblocks import (
     FireblocksSigner,
     FireblocksSignerConfig,
@@ -147,6 +148,52 @@ async def test_program_call_requests_sign_only_and_uses_signed_messages() -> Non
         "signOnly": True,
         "useDurableNonce": False,
     }
+
+
+@respx.mock
+async def test_program_call_create_carries_a_message_derived_external_tx_id() -> None:
+    """The id has to be derived from the submitted bytes and the vault they go to:
+    it is both what stops a resend from signing twice and what makes an accepted
+    create findable when its response was lost."""
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True)
+    transaction = create_test_transaction(keypair.pubkey())
+    message = signed_message_bytes(transaction.message)
+    signature = keypair.sign_message(message)
+    mock_program_call_flow(
+        {
+            "id": "tx-1",
+            "status": "SIGNED",
+            "signedMessages": [{"signature": {"fullSig": bytes(signature).hex()}}],
+        }
+    )
+
+    await signer.sign_transaction(transaction)
+
+    namespace = f"fireblocks:solana:program_call:SOL:{VAULT_ACCOUNT_ID}:".encode()
+    request_body = json.loads(respx.calls[1].request.content)
+    assert request_body["externalTxId"] == idempotency_key_from_message(namespace + message)
+
+
+@respx.mock
+async def test_raw_create_carries_no_external_tx_id() -> None:
+    """RAW signs nothing on its own, and the same message may legitimately be
+    signed again, so it must not carry a uniqueness constraint."""
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    message = b"hello"
+    signature = keypair.sign_message(message)
+    mock_program_call_flow(
+        {
+            "id": "tx-1",
+            "status": "COMPLETED",
+            "signedMessages": [{"signature": {"fullSig": bytes(signature).hex()}}],
+        }
+    )
+
+    await signer.sign_message(message)
+
+    assert "externalTxId" not in json.loads(respx.calls[1].request.content)
 
 
 @respx.mock

@@ -1,4 +1,4 @@
-import { getBase58Decoder } from '@solana/codecs-strings';
+import { getBase58Decoder, getUtf8Encoder } from '@solana/codecs-strings';
 import {
     address,
     appendTransactionMessageInstruction,
@@ -12,7 +12,12 @@ import {
 } from '@solana/kit';
 import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { assertIsSolanaTransactionSigner, assertSignatureValid, type SignerError } from '@solana/keychain-core';
+import {
+    assertIsSolanaTransactionSigner,
+    assertSignatureValid,
+    idempotencyKeyFromMessage,
+    type SignerError,
+} from '@solana/keychain-core';
 
 import { createFireblocksSigner } from '../fireblocks-signer.js';
 import { TEST_API_KEY, TEST_RSA_PRIVATE_KEY, TEST_VAULT_ACCOUNT_ID } from './setup.js';
@@ -673,6 +678,28 @@ describe('createFireblocksSigner', () => {
                 operation: 'PROGRAM_CALL',
             });
             expect(result[0]).toHaveProperty(signer.address);
+        });
+
+        // The id has to be derived from the submitted bytes and the vault they go
+        // to: it is both what stops a resend from signing twice and what makes an
+        // accepted create findable when its response was lost.
+        it('carries a message-derived externalTxId on the create', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            mockCreateAndPoll({
+                id: 'tx-789',
+                signedMessages: [{ signature: { fullSig: '42'.repeat(64) } }],
+                status: 'SIGNED',
+            });
+
+            await signer.signTransactions([transaction]);
+
+            const namespace = getUtf8Encoder().encode(`fireblocks:solana:program_call:SOL:${TEST_VAULT_ACCOUNT_ID}:`);
+            const messageBytes = new Uint8Array(transaction.messageBytes);
+            const namespaced = new Uint8Array(namespace.length + messageBytes.length);
+            namespaced.set(namespace);
+            namespaced.set(messageBytes, namespace.length);
+            const createBody = JSON.parse(mockFetch.mock.calls[1]![1].body as string);
+            expect(createBody.externalTxId).toBe(await idempotencyKeyFromMessage(namespaced));
         });
 
         it('accepts the signature carried as txHash', async () => {

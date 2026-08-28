@@ -261,6 +261,92 @@ func TestSignTransactionProgramCallSignOnly(t *testing.T) {
 	}
 }
 
+// The id has to be derived from the submitted bytes and the vault they go to: it
+// is both what stops a resend from signing twice and what makes an accepted
+// create findable when its response was lost.
+func TestSignTransactionProgramCallCarriesAMessageDerivedExternalTxID(t *testing.T) {
+	priv := testutils.TestPrivateKey()
+	pub := testutils.TestPublicKey()
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgBytes, err := tx.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature := solana.SignatureFromBytes(ed25519.Sign(priv, msgBytes))
+
+	s, created := programCallSigner(t, pub.String(), map[string]any{
+		"id":     "tx-789",
+		"status": "SIGNED",
+		"signedMessages": []map[string]any{
+			{"signature": map[string]string{"fullSig": hex.EncodeToString(signature[:])}},
+		},
+	})
+
+	if _, err := s.SignTransaction(context.Background(), tx); err != nil {
+		t.Fatal(err)
+	}
+
+	want := core.IdempotencyKeyFromMessage(
+		append([]byte("fireblocks:solana:program_call:SOL:"+testVaultID+":"), msgBytes...))
+	request := created.Load()
+	if request == nil {
+		t.Fatal("no create request recorded")
+	}
+	if got := (*request)["externalTxId"]; got != want {
+		t.Errorf("externalTxId = %v, want %s", got, want)
+	}
+}
+
+// RAW signs nothing on its own, and the same message may legitimately be signed
+// again, so it must not carry a uniqueness constraint.
+func TestSignMessageRawCarriesNoExternalTxID(t *testing.T) {
+	priv := testutils.TestPrivateKey()
+	pub := testutils.TestPublicKey()
+	message := []byte("hello")
+	signature := solana.SignatureFromBytes(ed25519.Sign(priv, message))
+
+	created := &atomic.Pointer[map[string]any]{}
+	s := newTestSigner(t, pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Error(err)
+			}
+			created.Store(&decoded)
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-raw", "status": "SUBMITTED"})
+		})
+		mux.HandleFunc("/v1/transactions/tx-raw", func(w http.ResponseWriter, _ *http.Request) {
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
+				"id":     "tx-raw",
+				"status": "COMPLETED",
+				"signedMessages": []map[string]any{
+					{"signature": map[string]string{"fullSig": hex.EncodeToString(signature[:])}},
+				},
+			})
+		})
+	})
+
+	if _, err := s.SignMessage(context.Background(), message); err != nil {
+		t.Fatal(err)
+	}
+
+	request := created.Load()
+	if request == nil {
+		t.Fatal("no create request recorded")
+	}
+	if _, present := (*request)["externalTxId"]; present {
+		t.Error("a RAW create must carry no externalTxId")
+	}
+}
+
 // The signature may arrive as the txHash of the signed transaction.
 func TestSignTransactionProgramCallTxHashCarrier(t *testing.T) {
 	priv := testutils.TestPrivateKey()

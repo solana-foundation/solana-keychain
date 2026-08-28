@@ -173,9 +173,10 @@ func (s *Signer) signProgramCall(ctx context.Context, tx *solana.Transaction, me
 	}
 
 	request := createTransactionRequest{
-		AssetID:   s.assetID,
-		Operation: operationProgramCall,
-		Source:    transactionSource{Type: sourceVaultAccount, ID: s.vaultAccountID},
+		AssetID:      s.assetID,
+		Operation:    operationProgramCall,
+		Source:       transactionSource{Type: sourceVaultAccount, ID: s.vaultAccountID},
+		ExternalTxID: s.externalTxID(message),
 		ExtraParameters: programCallExtraParameters{
 			ProgramCallData: encoded,
 			SignOnly:        true,
@@ -193,6 +194,15 @@ func (s *Signer) signProgramCall(ctx context.Context, tx *solana.Transaction, me
 			"signature verification failed - the signature returned for the PROGRAM_CALL does not match the vault public key over the submitted message")
 	}
 	return sig, nil
+}
+
+// externalTxID derives the externalTxId a PROGRAM_CALL create carries, bound to
+// the asset and vault account as well as the message: the same bytes submitted
+// against a different vault are a different operation and must not deduplicate
+// onto each other.
+func (s *Signer) externalTxID(message []byte) string {
+	namespace := "fireblocks:solana:program_call:" + s.assetID + ":" + s.vaultAccountID + ":"
+	return core.IdempotencyKeyFromMessage(append([]byte(namespace), message...))
 }
 
 // requestAndPollSignature creates a signing request and polls it to completion.

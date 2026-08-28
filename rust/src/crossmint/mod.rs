@@ -223,12 +223,14 @@ impl CrossmintSigner {
             .json(&request)
             .send()
             .await
-            .map_err(|error| unconfirmed_unless_rejected(None, None, Some(idempotency_key), error.into()))?;
+            .map_err(|error| {
+                unconfirmed_unless_rejected(None, None, Some(idempotency_key), error.into())
+            })?;
 
         let status = response.status().as_u16();
-        let value = Self::read_json_value(response)
-            .await
-            .map_err(|error| unconfirmed_unless_rejected(Some(status), None, Some(idempotency_key), error))?;
+        let value = Self::read_json_value(response).await.map_err(|error| {
+            unconfirmed_unless_rejected(Some(status), None, Some(idempotency_key), error)
+        })?;
         // The create may have been accepted even when the body is otherwise
         // unusable, so an id present there is the caller's recovery handle.
         let provider_tx_id = value
@@ -236,8 +238,9 @@ impl CrossmintSigner {
             .and_then(serde_json::Value::as_str)
             .filter(|id| !id.trim().is_empty())
             .map(str::to_string);
-        Self::value_to_typed(status, value, "id", "create_transaction")
-            .map_err(|error| unconfirmed_unless_rejected(Some(status), provider_tx_id, Some(idempotency_key), error))
+        Self::value_to_typed(status, value, "id", "create_transaction").map_err(|error| {
+            unconfirmed_unless_rejected(Some(status), provider_tx_id, Some(idempotency_key), error)
+        })
     }
 
     async fn get_transaction(

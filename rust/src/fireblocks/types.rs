@@ -11,6 +11,12 @@ pub struct CreateTransactionRequest {
     pub source: TransactionSource,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra_parameters: Option<ExtraParameters>,
+    /// Message-derived id Fireblocks enforces as unique, so a resend of the same
+    /// bytes is rejected rather than signed twice, and an accepted create stays
+    /// findable when its response was lost. Only set for the operation that
+    /// leaves a request Fireblocks may act on by itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_tx_id: Option<String>,
 }
 
 #[derive(Serialize)]
