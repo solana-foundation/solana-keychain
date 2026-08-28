@@ -211,7 +211,7 @@ func (s *Signer) pollSignedTransaction(ctx context.Context, transaction utilaTra
 	case transaction.State.isTerminalFailure():
 		return utilaTransaction{}, terminalStateError(transaction.State)
 	default:
-		return utilaTransaction{}, core.PollTimeoutError("utila", s.maxPollAttempts)
+		return utilaTransaction{}, core.PollTimeoutError("utila", s.maxPollAttempts, "")
 	}
 }
 

@@ -398,6 +398,10 @@ func TestSignMessagePollingTimeout(t *testing.T) {
 	if errors.As(err, &se) && !strings.Contains(se.Detail(), "polling timed out") {
 		t.Errorf("detail = %q, want polling timeout message", se.Detail())
 	}
+	// The request is still pending at Fordefi, so its id is the caller's handle.
+	if errors.As(err, &se) && se.ProviderTxID != "tx-123" {
+		t.Errorf("ProviderTxID = %q, want tx-123", se.ProviderTxID)
+	}
 }
 
 func TestSignMessageAPIErrorSanitizesBodyIntoDetail(t *testing.T) {

@@ -309,10 +309,15 @@ describe('createFordefiSigner', () => {
 
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockCreateTxResponse())
-                .mockResolvedValue(mockPollResponse('pending_signature'));
+                // A Response body is single-use, so every poll needs a fresh one.
+                .mockImplementation(() => Promise.resolve(mockPollResponse('pending_signature')));
 
             const mockTx = { messageBytes: new Uint8Array(32) } as never;
-            await expect(signer.signTransactions([mockTx])).rejects.toThrow();
+            // The request is still pending at Fordefi, so its id is the caller's handle.
+            await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
+                code: 'SIGNER_REMOTE_API_ERROR',
+                context: expect.objectContaining({ providerTransactionId: 'tx-123' }) as object,
+            });
         });
 
         it('should handle submit API error', async () => {

@@ -969,6 +969,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
 
         return throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `Polling timeout after ${this.maxPollAttempts} attempts`,
+            providerTransactionId: txId,
         });
     }
 

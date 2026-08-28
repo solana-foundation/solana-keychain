@@ -240,6 +240,7 @@ class _FordefiSignerBase(SolanaSigner):
         raise SignerError(
             SignerErrorCode.REMOTE_API_ERROR,
             f"Polling timeout after {self._max_poll_attempts} attempts",
+            provider_transaction_id=transaction_id,
         )
 
     @staticmethod

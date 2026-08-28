@@ -222,7 +222,7 @@ func (s *signerCore) pollForResult(ctx context.Context, txID string, pushable bo
 		}
 	}
 
-	return transactionStatusResponse{}, core.PollTimeoutError("fordefi", s.maxPollAttempts)
+	return transactionStatusResponse{}, core.PollTimeoutError("fordefi", s.maxPollAttempts, txID)
 }
 
 // extractSignature pulls the 64-byte Ed25519 signature out of a completed poll

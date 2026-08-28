@@ -251,7 +251,7 @@ func (s *Signer) pollTransaction(ctx context.Context, response transactionRespon
 	case response.Status == "awaiting-approval" && !approvalSubmitted:
 		return transactionResponse{}, core.NewSignerError(core.CodeSigningFailed, awaitingApprovalDetail)
 	default:
-		return transactionResponse{}, core.PollTimeoutError("crossmint", s.maxPollAttempts)
+		return transactionResponse{}, core.PollTimeoutError("crossmint", s.maxPollAttempts, "")
 	}
 }
 

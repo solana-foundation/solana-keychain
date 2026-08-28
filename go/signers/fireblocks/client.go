@@ -291,5 +291,5 @@ func (s *Signer) pollForSignature(ctx context.Context, txID string, programCall 
 			"fireblocks PROGRAM_CALL polling timed out after "+strconv.Itoa(s.maxPollAttempts)+
 				" attempts; the transaction may already be executing")
 	}
-	return transactionResponse{}, core.PollTimeoutError("fireblocks", s.maxPollAttempts)
+	return transactionResponse{}, core.PollTimeoutError("fireblocks", s.maxPollAttempts, "")
 }

@@ -135,8 +135,12 @@ func ResolvePollBounds(interval, defaultInterval time.Duration, attempts, defaul
 
 // PollTimeoutError reports that a transaction never reached a terminal state
 // within the attempt budget; the signing request may still complete remotely.
-func PollTimeoutError(provider string, attempts int) error {
-	return NewSignerError(CodeRemoteAPIError,
+// providerTxID names the request left pending, so the caller can reconcile it,
+// and is "" when no id is known.
+func PollTimeoutError(provider string, attempts int, providerTxID string) error {
+	err := NewSignerError(CodeRemoteAPIError,
 		provider+" transaction polling timed out after "+strconv.Itoa(attempts)+
 			" attempts; the signing request may still complete")
+	err.ProviderTxID = providerTxID
+	return err
 }
