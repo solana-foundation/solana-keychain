@@ -130,7 +130,8 @@ func (s Signer) GoString() string { return s.String() }
 
 // fetchWallet retrieves wallet info from GET /v1/wallets/{walletId}.
 func (s *Signer) fetchWallet(ctx context.Context) (*walletResponse, error) {
-	body, err := s.doRequest(ctx, http.MethodGet, s.baseURL+"/v1/wallets/"+s.walletID, nil)
+	body, err := s.doRequest(ctx, http.MethodGet,
+		s.baseURL+"/v1/wallets/"+core.EncodeURIComponent(s.walletID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +149,8 @@ func (s *Signer) signBytes(ctx context.Context, data []byte) (solana.Signature, 
 		return solana.Signature{}, core.NewNotInitializedError("para")
 	}
 	request := signRawRequest{Data: hex.EncodeToString(data), Encoding: "hex"}
-	body, err := s.doRequest(ctx, http.MethodPost, s.baseURL+"/v1/wallets/"+s.walletID+"/sign-raw", &request)
+	body, err := s.doRequest(ctx, http.MethodPost,
+		s.baseURL+"/v1/wallets/"+core.EncodeURIComponent(s.walletID)+"/sign-raw", &request)
 	if err != nil {
 		return solana.Signature{}, err
 	}

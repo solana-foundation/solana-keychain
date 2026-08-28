@@ -120,7 +120,7 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 // postRPC sends a wallet RPC request with Privy auth and
 // authorization-signature headers and returns the response body on 2xx.
 func (s *Signer) postRPC(ctx context.Context, request any) ([]byte, error) {
-	url := s.apiBaseURL + "/wallets/" + s.walletID + "/rpc"
+	url := s.apiBaseURL + "/wallets/" + core.EncodeURIComponent(s.walletID) + "/rpc"
 	reqBody, err := json.Marshal(request)
 	if err != nil {
 		return nil, core.WrapSignerError(core.CodeSerializationError, "failed to serialize privy signing request", err)
@@ -162,7 +162,7 @@ func (s *Signer) authHeader() string {
 
 // fetchPublicKey resolves the wallet's Solana address via GET /wallets/{id}.
 func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
-	url := s.apiBaseURL + "/wallets/" + s.walletID
+	url := s.apiBaseURL + "/wallets/" + core.EncodeURIComponent(s.walletID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return solana.PublicKey{}, core.WrapSignerError(core.CodeHTTPError, "failed to build privy wallet request", err)

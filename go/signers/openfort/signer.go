@@ -114,7 +114,8 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 // fetchPublicKey calls GET /v2/accounts/{accountId} (bearer auth only, no
 // wallet JWT) and parses the Solana address.
 func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+accountsPath+"/"+s.accountID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		s.baseURL+accountsPath+"/"+core.EncodeURIComponent(s.accountID), nil)
 	if err != nil {
 		return solana.PublicKey{}, core.WrapSignerError(core.CodeHTTPError, "failed to build openfort request", err)
 	}
@@ -141,7 +142,7 @@ func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 // message bytes. The body bytes sent over the wire are exactly the bytes the
 // JWT's reqHash is computed over.
 func (s *Signer) callSign(ctx context.Context, message []byte) (signResponse, error) {
-	path := backendPath + "/" + s.accountID + "/sign"
+	path := backendPath + "/" + core.EncodeURIComponent(s.accountID) + "/sign"
 	body, err := core.MarshalCanonicalJSON(map[string]any{"data": "0x" + hex.EncodeToString(message)})
 	if err != nil {
 		return signResponse{}, err

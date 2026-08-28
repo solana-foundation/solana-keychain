@@ -492,3 +492,29 @@ func TestDoPreservesTransportSignerError(t *testing.T) {
 		t.Errorf("got code %s, want CONFIG_ERROR", code)
 	}
 }
+
+// A dot-segment account id must reach the wire as one percent-encoded path
+// segment, so a normalizing route cannot resolve it to a different account.
+func TestNewEscapesAccountIDAsOnePathSegment(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"address": testPubkey})
+	}))
+	defer srv.Close()
+
+	_, err := New(context.Background(), Config{
+		SecretKey:    testSecretKey,
+		AccountID:    "acc_a/../acc_b",
+		WalletSecret: testWalletSecretB64(),
+		APIBaseURL:   srv.URL,
+		HTTPClient:   srv.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := accountsPath + "/acc_a%2F..%2Facc_b"; gotPath != want {
+		t.Errorf("request path = %q, want %q", gotPath, want)
+	}
+}

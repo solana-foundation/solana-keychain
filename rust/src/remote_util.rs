@@ -54,7 +54,12 @@ where
 /// path segment: every byte outside the unreserved set is escaped, including
 /// `/`, `?`, `#` and `.`-only sequences that would otherwise let a configured
 /// identifier retarget the request path.
-#[cfg(any(feature = "crossmint", feature = "dfns", feature = "utila"))]
+#[cfg(any(
+    feature = "crossmint",
+    feature = "dfns",
+    feature = "openfort",
+    feature = "utila"
+))]
 pub(crate) fn encode_uri_component(input: &str) -> String {
     use std::fmt::Write;
 
