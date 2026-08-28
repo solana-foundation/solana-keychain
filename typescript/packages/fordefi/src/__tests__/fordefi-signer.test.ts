@@ -14,14 +14,20 @@ import {
 } from '@solana/keychain-core';
 import { createCosignedWireTransaction, createSignedWireTransaction } from '@solana/keychain-test-utils';
 import {
+    AccountRole,
+    type Address,
+    appendTransactionMessageInstruction,
+    blockhash,
     compileTransaction,
     createTransactionMessage,
     generateKeyPairSigner,
     getBase64EncodedWireTransaction,
     type Nonce,
+    type ReadonlyUint8Array,
     partiallySignTransaction,
     pipe,
     setTransactionMessageFeePayer,
+    setTransactionMessageLifetimeUsingBlockhash,
     setTransactionMessageLifetimeUsingDurableNonce,
 } from '@solana/kit';
 import { isTransactionModifyingSigner, isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
@@ -48,6 +54,8 @@ import type { FordefiSolanaFee, SolanaChainUniqueId } from '../types.js';
 global.fetch = vi.fn();
 
 const MOCK_ADDRESS = '11111111111111111111111111111111';
+const COMPUTE_BUDGET_PROGRAM_ADDRESS = 'ComputeBudget111111111111111111111111111111' as Address;
+const RENT_SYSVAR_ADDRESS = 'SysvarRent111111111111111111111111111111111';
 
 const { privateKey: testPrivateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const TEST_PEM = testPrivateKey.export({ type: 'sec1', format: 'pem' }) as string;
@@ -130,12 +138,42 @@ async function createNonceWireTransaction() {
     const signed = await partiallySignTransaction([feePayerSigner.keyPair], compileTransaction(message));
     return {
         feePayer: feePayerSigner.address,
+        messageBytes: signed.messageBytes,
         nonceAccountAddress: nonceAccount.address,
         wireTransaction: getBase64EncodedWireTransaction(signed),
     };
 }
 
-function unsignedManualTransaction(feePayer: string, messageBytes: Uint8Array<ArrayBufferLike> = new Uint8Array(32)) {
+// The native guards read the fee payer and the required-signer count out of the
+// compiled message, so a caller transaction needs real message bytes.
+function compiledMessageBytes(feePayer: string, extraSigner?: string) {
+    return compileTransaction(
+        pipe(
+            createTransactionMessage({ version: 0 }),
+            tx => setTransactionMessageFeePayer(feePayer as Address, tx),
+            tx =>
+                setTransactionMessageLifetimeUsingBlockhash(
+                    { blockhash: blockhash(MOCK_ADDRESS), lastValidBlockHeight: 100n },
+                    tx,
+                ),
+            tx =>
+                extraSigner === undefined
+                    ? tx
+                    : appendTransactionMessageInstruction(
+                          {
+                              accounts: [{ address: extraSigner as Address, role: AccountRole.READONLY_SIGNER }],
+                              programAddress: COMPUTE_BUDGET_PROGRAM_ADDRESS,
+                          },
+                          tx,
+                      ),
+        ),
+    ).messageBytes;
+}
+
+function unsignedManualTransaction(
+    feePayer: string,
+    messageBytes: Uint8Array<ArrayBufferLike> | ReadonlyUint8Array = compiledMessageBytes(feePayer),
+) {
     return { messageBytes, signatures: { [feePayer]: null } } as never;
 }
 
@@ -490,7 +528,7 @@ describe('createFordefiSigner', () => {
                 ).toBe(true);
 
                 const mockTx = {
-                    messageBytes: new Uint8Array(32),
+                    messageBytes: fixture.messageBytes,
                     signatures: { [fixture.feePayer]: null },
                 } as never;
                 const results = await signer.signAndSendTransactions([mockTx]);
@@ -522,7 +560,7 @@ describe('createFordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-native'))
                 .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
 
-            const messageBytes = new Uint8Array(32).fill(0xcd);
+            const messageBytes = new Uint8Array(fixture.messageBytes);
             const signer = await createFordefiSigner(config);
             await signer.signAndSendTransactions([
                 { messageBytes: sharedOffsetView(messageBytes), signatures: { [fixture.feePayer]: null } } as never,
@@ -534,8 +572,8 @@ describe('createFordefiSigner', () => {
         });
 
         it('sends a deterministic x-idempotence-id on the native create', async () => {
-            const messageBytes = new Uint8Array(32).fill(0xab);
             const { config, fixture } = await setupNativeBroadcast(1);
+            const messageBytes = new Uint8Array(fixture.messageBytes);
             const namespace = Buffer.from(`fordefi:solana:auto:solana_mainnet:${config.vaultId}::`, 'utf8');
             const expectedId = idempotencyKeyOf(Buffer.concat([namespace, Buffer.from(messageBytes)]));
 
@@ -552,8 +590,8 @@ describe('createFordefiSigner', () => {
         });
 
         it('binds the x-idempotence-id to the fee the create carries', async () => {
-            const messageBytes = new Uint8Array(32).fill(0xab);
             const { config, fixture } = await setupNativeBroadcast(1);
+            const messageBytes = new Uint8Array(fixture.messageBytes);
             const fees: (FordefiSolanaFee | undefined)[] = [
                 undefined,
                 { priority_level: 'low', type: 'priority' },
@@ -601,11 +639,26 @@ describe('createFordefiSigner', () => {
         it('should reject native multi-signer auto-broadcast before submitting remote work', async () => {
             const signer = await createFordefiSigner(nativeConfig);
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: compiledMessageBytes(MOCK_ADDRESS, RENT_SYSVAR_ADDRESS),
                 signatures: {
                     [MOCK_ADDRESS]: null,
                     '22222222222222222222222222222222': null,
                 },
+            } as never;
+
+            await expect(signer.signAndSendTransactions([mockTx])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+            expect(fetch).not.toHaveBeenCalled();
+        });
+
+        it('reads the required signers from the message, not from the signature map', async () => {
+            const signer = await createFordefiSigner(nativeConfig);
+            // A caller-built signature map can name the vault while the message it
+            // came with requires someone else, so only the message is authoritative.
+            const mockTx = {
+                messageBytes: compiledMessageBytes(MOCK_ADDRESS, RENT_SYSVAR_ADDRESS),
+                signatures: { [MOCK_ADDRESS]: null },
             } as never;
 
             await expect(signer.signAndSendTransactions([mockTx])).rejects.toMatchObject({
@@ -619,7 +672,7 @@ describe('createFordefiSigner', () => {
             // Fordefi replaces the blockhash before broadcasting, so re-signing
             // bytes the vault already signed would land the transfer twice.
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: compiledMessageBytes(MOCK_ADDRESS),
                 signatures: { [MOCK_ADDRESS]: MOCK_SIGNATURE_BYTES },
             } as never;
 
@@ -651,7 +704,7 @@ describe('createFordefiSigner', () => {
 
             const signer = await createFordefiSigner({ ...config, pollIntervalMs: 1 });
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: fixture.messageBytes,
                 signatures: { [fixture.feePayer]: null },
             } as never;
             const results = await signer.signAndSendTransactions([mockTx]);
@@ -674,7 +727,7 @@ describe('createFordefiSigner', () => {
 
             const signer = await createFordefiSigner(config);
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: compiledMessageBytes(fixture.cosigner),
                 signatures: { [fixture.cosigner]: null },
             } as never;
 
@@ -697,7 +750,7 @@ describe('createFordefiSigner', () => {
             vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ message: 'boom' }), { status: 502 }));
 
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: compiledMessageBytes(MOCK_ADDRESS),
                 signatures: { [MOCK_ADDRESS]: null },
             } as never;
             const error = await signer.signAndSendTransactions([mockTx]).then(
@@ -716,7 +769,7 @@ describe('createFordefiSigner', () => {
             vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ state: 'pending' }), { status: 200 }));
 
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: compiledMessageBytes(MOCK_ADDRESS),
                 signatures: { [MOCK_ADDRESS]: null },
             } as never;
             const error = await signer.signAndSendTransactions([mockTx]).then(
@@ -735,7 +788,7 @@ describe('createFordefiSigner', () => {
             vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ id: '' }), { status: 200 }));
 
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: compiledMessageBytes(MOCK_ADDRESS),
                 signatures: { [MOCK_ADDRESS]: null },
             } as never;
             const error = await signer.signAndSendTransactions([mockTx]).then(
@@ -757,7 +810,7 @@ describe('createFordefiSigner', () => {
             );
 
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: compiledMessageBytes(MOCK_ADDRESS),
                 signatures: { [MOCK_ADDRESS]: null },
             } as never;
             const error = await signer.signAndSendTransactions([mockTx]).then(
@@ -777,7 +830,7 @@ describe('createFordefiSigner', () => {
             );
 
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: compiledMessageBytes(MOCK_ADDRESS),
                 signatures: { [MOCK_ADDRESS]: null },
             } as never;
             const error = await signer.signAndSendTransactions([mockTx]).then(
@@ -796,7 +849,7 @@ describe('createFordefiSigner', () => {
 
             const signer = await createFordefiSigner(nativeConfig);
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: compiledMessageBytes(MOCK_ADDRESS),
                 signatures: { [MOCK_ADDRESS]: null },
             } as never;
             await expect(signer.signAndSendTransactions([mockTx])).rejects.toMatchObject({
@@ -819,7 +872,7 @@ describe('createFordefiSigner', () => {
 
             const signer = await createFordefiSigner(config);
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: fixture.messageBytes,
                 signatures: { [fixture.feePayer]: null },
             } as never;
 
@@ -847,7 +900,7 @@ describe('createFordefiSigner', () => {
 
             const signer = await createFordefiSigner(nativeConfig);
             const failedSubmitTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: compiledMessageBytes(MOCK_ADDRESS),
                 signatures: { [MOCK_ADDRESS]: null },
             } as never;
             await expect(signer.signAndSendTransactions([failedSubmitTx])).rejects.toMatchObject({
@@ -863,7 +916,7 @@ describe('createFordefiSigner', () => {
 
             const signer = await createFordefiSigner(nativeConfig);
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: compiledMessageBytes(MOCK_ADDRESS),
                 signatures: { [MOCK_ADDRESS]: null },
             } as never;
             await expect(signer.signAndSendTransactions([mockTx])).rejects.toMatchObject({
@@ -924,7 +977,7 @@ describe('createFordefiSigner', () => {
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
                 .mockResolvedValueOnce(mockPollResponse('signed', undefined, fixture.wireTransaction));
 
-            const messageBytes = new Uint8Array(32).fill(0xcd);
+            const messageBytes = new Uint8Array(fixture.messageBytes);
             const signer = await createFordefiSigner(config);
             await signer.modifyAndSignTransactions([
                 unsignedManualTransaction(fixture.feePayer, sharedOffsetView(messageBytes)),
@@ -936,8 +989,8 @@ describe('createFordefiSigner', () => {
         });
 
         it('namespaces the x-idempotence-id so the same bytes cannot reuse an auto create', async () => {
-            const messageBytes = new Uint8Array(32).fill(0xab);
             const { config, fixture } = await setupNativeManual(0);
+            const messageBytes = new Uint8Array(fixture.messageBytes);
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
                 .mockResolvedValueOnce(mockPollResponse('signed', undefined, fixture.wireTransaction));
@@ -975,8 +1028,24 @@ describe('createFordefiSigner', () => {
             const { config, fixture } = await setupNativeManual(0);
             const signer = await createFordefiSigner(config);
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: compiledMessageBytes(RENT_SYSVAR_ADDRESS),
                 signatures: { '22222222222222222222222222222222': null, [fixture.feePayer]: null },
+            } as never;
+
+            await expect(signer.modifyAndSignTransactions([mockTx])).rejects.toMatchObject({
+                code: 'SIGNER_SIGNING_FAILED',
+            });
+            expect(fetch).not.toHaveBeenCalled();
+        });
+
+        it('reads the fee payer from the message, not from the signature map', async () => {
+            const { config, fixture } = await setupNativeManual(0);
+            const signer = await createFordefiSigner(config);
+            // The map's first key is the vault, but the message it came with is paid
+            // for by someone else, and the message is what Fordefi would rewrite.
+            const mockTx = {
+                messageBytes: compiledMessageBytes(RENT_SYSVAR_ADDRESS),
+                signatures: { [fixture.feePayer]: null },
             } as never;
 
             await expect(signer.modifyAndSignTransactions([mockTx])).rejects.toMatchObject({
@@ -989,7 +1058,7 @@ describe('createFordefiSigner', () => {
             const { config, fixture } = await setupNativeManual(0);
             const signer = await createFordefiSigner(config);
             const mockTx = {
-                messageBytes: new Uint8Array(32),
+                messageBytes: fixture.messageBytes,
                 signatures: { [fixture.feePayer]: MOCK_SIGNATURE_BYTES },
             } as never;
 
@@ -1078,7 +1147,7 @@ describe('createFordefiSigner', () => {
             const results = await signer.modifyAndSignTransactions([
                 {
                     lifetimeConstraint,
-                    messageBytes: new Uint8Array(32),
+                    messageBytes: fixture.messageBytes,
                     signatures: { [fixture.feePayer]: null },
                 } as never,
             ]);
@@ -1102,7 +1171,7 @@ describe('createFordefiSigner', () => {
             const results = await signer.modifyAndSignTransactions([
                 {
                     lifetimeConstraint: { nonce: NONCE_VALUE, nonceAccountAddress: staleNonceAccount },
-                    messageBytes: new Uint8Array(32),
+                    messageBytes: nonceFixture.messageBytes,
                     signatures: { [nonceFixture.feePayer]: null },
                 } as never,
             ]);

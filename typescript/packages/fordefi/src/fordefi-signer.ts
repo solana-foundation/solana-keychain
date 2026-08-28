@@ -36,7 +36,7 @@ import {
     TransactionSendingSigner,
     TransactionSendingSignerConfig,
 } from '@solana/signers';
-import { getCompiledTransactionMessageDecoder } from '@solana/transaction-messages';
+import { type CompiledTransactionMessage, getCompiledTransactionMessageDecoder } from '@solana/transaction-messages';
 import {
     assertIsTransactionWithinSizeLimit,
     Base64EncodedWireTransaction,
@@ -794,8 +794,8 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
      * the same transfer, outside the network's replay protection.
      */
     private assertNativeAutoTransactionSupported(transaction: Transaction): void {
-        const requiredSignerAddresses = Object.keys(transaction.signatures);
-        if (requiredSignerAddresses.length !== 1 || requiredSignerAddresses[0] !== this.address) {
+        const { header, staticAccounts } = this.compiledMessageOf(transaction);
+        if (header.numSignerAccounts !== 1 || staticAccounts[0] !== this.address) {
             throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                 address: this.address,
                 message:
@@ -812,7 +812,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
 
     /** Fordefi may only rewrite a message the vault pays for and no one has signed yet. */
     private assertNativeManualTransactionSupported(transaction: Transaction): void {
-        if (Object.keys(transaction.signatures)[0] !== this.address) {
+        if (this.compiledMessageOf(transaction).staticAccounts[0] !== this.address) {
             throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                 address: this.address,
                 message: 'Fordefi native manual signing requires the configured vault to be the transaction fee payer',
@@ -822,6 +822,24 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
             throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                 address: this.address,
                 message: 'Fordefi native manual signing must run before any transaction signatures are applied',
+            });
+        }
+    }
+
+    /**
+     * The fee payer and the required-signer count are properties of the message,
+     * not of the signature dictionary a caller hands over alongside it.
+     *
+     * The copy is what the submit path needs anyway: a `SharedArrayBuffer`-backed
+     * view at a non-zero offset is mis-sliced by the codecs.
+     */
+    private compiledMessageOf(transaction: Transaction): CompiledTransactionMessage {
+        try {
+            return getCompiledTransactionMessageDecoder().decode(new Uint8Array(transaction.messageBytes));
+        } catch (error) {
+            return throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                cause: error,
+                message: 'Failed to decode the transaction message Fordefi was asked to sign',
             });
         }
     }
