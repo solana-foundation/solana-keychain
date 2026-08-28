@@ -96,8 +96,16 @@ async function setupNativeManual(version: 0 | 1) {
     return { config, fixture };
 }
 
-function unsignedManualTransaction(feePayer: string, messageBytes = new Uint8Array(32)) {
+function unsignedManualTransaction(feePayer: string, messageBytes: Uint8Array<ArrayBufferLike> = new Uint8Array(32)) {
     return { messageBytes, signatures: { [feePayer]: null } } as never;
+}
+
+// The base64 codec mis-slices a SharedArrayBuffer-backed view at a non-zero
+// byteOffset, so this shape only encodes correctly from a normalized copy.
+function sharedOffsetView(bytes: Uint8Array) {
+    const shared = new Uint8Array(new SharedArrayBuffer(bytes.length + 8));
+    shared.set(bytes, 8);
+    return shared.subarray(8);
 }
 
 function idempotencyKeyOf(input: Uint8Array) {
@@ -464,6 +472,23 @@ describe('createFordefiSigner', () => {
             },
         );
 
+        it('submits the whole caller message when messageBytes is an offset view', async () => {
+            const { config, fixture } = await setupNativeBroadcast(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-native'))
+                .mockResolvedValueOnce(mockPollResponse('completed', MOCK_SIGNATURE_BASE64, fixture.wireTransaction));
+
+            const messageBytes = new Uint8Array(32).fill(0xcd);
+            const signer = await createFordefiSigner(config);
+            await signer.signAndSendTransactions([
+                { messageBytes: sharedOffsetView(messageBytes), signatures: { [fixture.feePayer]: null } } as never,
+            ]);
+
+            const postOpts = vi.mocked(fetch).mock.calls[0]![1] as RequestInit;
+            const body = JSON.parse(postOpts.body as string);
+            expect(new Uint8Array(Buffer.from(body.details.data as string, 'base64'))).toStrictEqual(messageBytes);
+        });
+
         it('sends a deterministic x-idempotence-id on the native create', async () => {
             const messageBytes = new Uint8Array(32).fill(0xab);
             const digest = createHash('sha256').update(messageBytes).digest().subarray(0, 16);
@@ -731,6 +756,23 @@ describe('createFordefiSigner', () => {
             expect(body.type).toBe('solana_transaction');
             expect(body.details.type).toBe('solana_serialized_transaction_message');
             expect(body.details.push_mode).toBe('manual');
+        });
+
+        it('submits the whole caller message when messageBytes is an offset view', async () => {
+            const { config, fixture } = await setupNativeManual(0);
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
+                .mockResolvedValueOnce(mockPollResponse('signed', undefined, fixture.wireTransaction));
+
+            const messageBytes = new Uint8Array(32).fill(0xcd);
+            const signer = await createFordefiSigner(config);
+            await signer.modifyAndSignTransactions([
+                unsignedManualTransaction(fixture.feePayer, sharedOffsetView(messageBytes)),
+            ]);
+
+            const postOpts = vi.mocked(fetch).mock.calls[0]![1] as RequestInit;
+            const body = JSON.parse(postOpts.body as string);
+            expect(new Uint8Array(Buffer.from(body.details.data as string, 'base64'))).toStrictEqual(messageBytes);
         });
 
         it('namespaces the x-idempotence-id so the same bytes cannot reuse an auto create', async () => {

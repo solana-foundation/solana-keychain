@@ -531,7 +531,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
                 this.assertNativeManualTransactionSupported(transaction);
 
                 base64Decoder ||= getBase64Decoder();
-                const base64Data = base64Decoder.decode(transaction.messageBytes);
+                const base64Data = base64Decoder.decode(new Uint8Array(transaction.messageBytes));
                 const txId = await this.submitSolanaTransaction(base64Data, 'manual', config?.abortSignal);
                 return await this.finishNativeManualSigning(txId, transaction, config?.abortSignal);
             },
@@ -666,7 +666,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
                 this.assertNativeAutoTransactionSupported(transaction);
 
                 base64Decoder ||= getBase64Decoder();
-                const base64Data = base64Decoder.decode(transaction.messageBytes);
+                const base64Data = base64Decoder.decode(new Uint8Array(transaction.messageBytes));
                 let txId: string;
                 try {
                     txId = await this.submitSolanaTransaction(base64Data, 'auto', config?.abortSignal);
