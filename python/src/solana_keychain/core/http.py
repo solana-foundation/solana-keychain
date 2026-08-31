@@ -181,8 +181,21 @@ async def _request_json(
                 SignerErrorCode.HTTP_ERROR, f"{provider_name} response was a redirect"
             )
         body = await _read_bounded_body(response, provider_name)
-    finally:
+    except BaseException:
+        try:
+            await response.aclose()
+        except BaseException:
+            pass
+        raise
+    try:
         await response.aclose()
+    except Exception as error:
+        raise SignerError(
+            SignerErrorCode.HTTP_ERROR,
+            f"{provider_name} response cleanup failed: {error}",
+            provider_transaction_id=_transaction_id_in_body(body),
+            status_code=response.status_code,
+        ) from None
     if not response.is_success:
         error_text = body.decode(response.encoding or "utf-8", errors="replace")
         raise SignerError(
@@ -232,8 +245,13 @@ async def _read_bounded_body(response: httpx.Response, provider_name: str) -> by
                     SignerErrorCode.PARSING_ERROR,
                     f"{provider_name} response exceeded maximum size",
                 )
-    except httpx.HTTPError as error:
+    except SignerError:
+        raise
+    except Exception as error:
         raise SignerError(
-            SignerErrorCode.HTTP_ERROR, f"{provider_name} network request failed: {error}"
+            SignerErrorCode.HTTP_ERROR,
+            f"{provider_name} response stream failed: {error}",
+            provider_transaction_id=_transaction_id_in_body(bytes(body)),
+            status_code=response.status_code,
         ) from None
     return bytes(body)

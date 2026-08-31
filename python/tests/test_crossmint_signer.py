@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
 import base58
@@ -39,6 +40,17 @@ WALLET_LOCATOR = "email:user@test.com:solana"
 ENCODED_LOCATOR = "email%3Auser%40test.com%3Asolana"
 WALLET_URL = f"{API_BASE_URL}/2025-06-09/wallets/{ENCODED_LOCATOR}"
 TRANSACTIONS_URL = f"{WALLET_URL}/transactions"
+
+
+class CloseFailingStream(httpx.AsyncByteStream):
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield self._body
+
+    async def aclose(self) -> None:
+        raise RuntimeError("response cleanup failed")
 
 
 def assert_caller_transaction_untouched(transaction: VersionedTransaction) -> None:
@@ -349,6 +361,32 @@ async def test_an_unconfirmed_create_carries_the_key_it_was_submitted_under() ->
     assert excinfo.value.provider_transaction_id is None
     sent_key = route.calls[0].request.headers["x-idempotency-key"]
     assert excinfo.value.idempotency_key == sent_key
+
+
+@respx.mock
+async def test_create_close_failure_is_unconfirmed_with_recovery_context() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    transaction = create_test_transaction(keypair.pubkey())
+    submitted_keys: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        submitted_keys.append(request.headers["x-idempotency-key"])
+        return httpx.Response(
+            200,
+            stream=CloseFailingStream(b'{"id":"tx-accepted","status":"pending"}'),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        signer._http_client = client
+        with pytest.raises(SignerError) as excinfo:
+            await signer.sign_and_send_transaction(transaction)
+
+    error = excinfo.value
+    assert error.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert error.provider_transaction_id == "tx-accepted"
+    assert error.status_code == 200
+    assert error.idempotency_key == submitted_keys[0]
 
 
 @respx.mock

@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import AsyncIterator
 
 import httpx
 import pytest
@@ -59,6 +60,26 @@ def test_sanitize_truncates_long_payloads() -> None:
 
 
 URL = "https://api.example.com/endpoint"
+
+
+class CloseFailingStream(httpx.AsyncByteStream):
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield self._body
+
+    async def aclose(self) -> None:
+        raise RuntimeError("response cleanup failed")
+
+
+class ReadFailingStream(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield b'{"id":"tx-accepted"}'
+        raise RuntimeError("response stream failed")
+
+    async def aclose(self) -> None:
+        pass
 
 
 @respx.mock
@@ -139,6 +160,47 @@ async def test_caller_supplied_client_is_used_and_not_closed() -> None:
             url=URL, provider_name="Test", method="POST", json_body={"a": 1}, client=client
         ) == {"ok": 1}
         assert not client.is_closed
+
+
+async def test_response_close_failure_is_http_error_with_recovery_context() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=CloseFailingStream(b'{"id":"tx-accepted"}'))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(SignerError) as excinfo:
+            await fetch_signer_json(url=URL, provider_name="Test", client=client)
+
+    error = excinfo.value
+    assert error.code == SignerErrorCode.HTTP_ERROR
+    assert error.provider_transaction_id == "tx-accepted"
+    assert error.status_code == 200
+
+
+async def test_response_stream_failure_is_http_error_with_recovery_context() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=ReadFailingStream())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(SignerError) as excinfo:
+            await fetch_signer_json(url=URL, provider_name="Test", client=client)
+
+    error = excinfo.value
+    assert error.code == SignerErrorCode.HTTP_ERROR
+    assert error.provider_transaction_id == "tx-accepted"
+    assert error.status_code == 200
+
+
+async def test_response_close_failure_does_not_mask_body_error() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        body = b"x" * (MAX_RESPONSE_BYTES + 1)
+        return httpx.Response(200, stream=CloseFailingStream(body))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(SignerError) as excinfo:
+            await fetch_signer_json(url=URL, provider_name="Test", client=client)
+
+    assert excinfo.value.code == SignerErrorCode.PARSING_ERROR
+    assert excinfo.value._detail == "Test response exceeded maximum size"
 
 
 async def test_probe_availability_returns_the_probe_result() -> None:
