@@ -23,7 +23,8 @@ import {
     isSolanaSendingSigner,
     isSolanaSigner,
     isSolanaTransactionSigner,
-    type SignerError,
+    SignerError,
+    SignerErrorCode,
 } from '@solana/keychain-core';
 import { isMessagePartialSigner, isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
 import { getTransactionDecoder } from '@solana/transactions';
@@ -912,6 +913,39 @@ describe('CrossmintSigner', () => {
             expect(error.context?.cause).toMatchObject({ code: 'SIGNER_HTTP_ERROR' });
             expect(error.context?.providerTransactionId).toBeUndefined();
             expect(error.context?.status).toBeUndefined();
+        });
+
+        it('treats a status-bearing caller abort during creation as unconfirmed', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
+            const signer = await createCrossmintSigner({
+                ...mockConfig,
+                maxPollAttempts: 1,
+                pollIntervalMs: 1,
+            });
+            const controller = new AbortController();
+            const reason = new SignerError(SignerErrorCode.REMOTE_API_ERROR, { status: 400 });
+            vi.mocked(fetch).mockImplementationOnce(async (_input, init) => {
+                controller.abort(reason);
+                expect(init?.signal?.aborted).toBe(true);
+                throw new Error('aborted');
+            });
+
+            const error = await signer
+                .signAndSendTransactions([createMockTransaction()], { abortSignal: controller.signal })
+                .then(
+                    () => {
+                        throw new Error('expected the create failure to be reported');
+                    },
+                    (thrown: SignerError) => thrown,
+                );
+
+            const sentKey = (vi.mocked(fetch).mock.calls[1]![1]!.headers as Record<string, string>)[
+                'x-idempotency-key'
+            ];
+            expect(error.code).toBe(SignerErrorCode.BROADCAST_UNCONFIRMED);
+            expect(error.context?.cause).toBe(reason);
+            expect(error.context?.status).toBeUndefined();
+            expect(error.context?.idempotencyKey).toBe(sentKey);
         });
 
         it('reports a 5xx during transaction creation as unconfirmed with no transaction id', async () => {

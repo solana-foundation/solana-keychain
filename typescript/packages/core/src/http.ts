@@ -1,5 +1,11 @@
 import { anyAbortSignal } from './abort.js';
-import { sanitizeRemoteErrorResponse, SignerError, SignerErrorCode, throwSignerError } from './errors.js';
+import {
+    createSignerError,
+    sanitizeRemoteErrorResponse,
+    SignerError,
+    SignerErrorCode,
+    throwSignerError,
+} from './errors.js';
 
 /** Default timeout applied to remote signer API requests. */
 export const DEFAULT_FETCH_TIMEOUT_MS = 60_000;
@@ -10,6 +16,14 @@ export const DEFAULT_FETCH_TIMEOUT_MS = 60_000;
  * instead of being buffered unbounded.
  */
 export const MAX_RESPONSE_BYTES = 1024 * 1024;
+
+const providerResponseErrors = new WeakSet<SignerError>();
+
+function throwProviderResponseError(code: SignerErrorCode, context: Record<string, unknown>): never {
+    const error = createSignerError(code, context);
+    providerResponseErrors.add(error);
+    throw error;
+}
 
 export interface FetchSignerJsonOptions {
     /**
@@ -41,7 +55,8 @@ export interface FetchSignerJsonOptions {
 
 /** The provider's HTTP status when its response was the failure. */
 export function providerStatus(error: unknown): number | undefined {
-    const status = error instanceof SignerError ? error.context?.status : undefined;
+    const status =
+        error instanceof SignerError && providerResponseErrors.has(error) ? error.context?.status : undefined;
     return typeof status === 'number' ? status : undefined;
 }
 
@@ -57,7 +72,7 @@ export function providerMayHaveAccepted(error: unknown): boolean {
 }
 
 function throwResponseTooLarge(providerName: string, status: number): never {
-    throwSignerError(SignerErrorCode.PARSING_ERROR, {
+    throwProviderResponseError(SignerErrorCode.PARSING_ERROR, {
         maxResponseBytes: MAX_RESPONSE_BYTES,
         message: `${providerName} response exceeded maximum size`,
         status,
@@ -181,7 +196,7 @@ export async function fetchSignerJson<TResponse>(options: FetchSignerJsonOptions
             errorText = 'Failed to read error response';
         }
         const providerTransactionId = transactionIdInBody(errorText);
-        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+        throwProviderResponseError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `${providerName} API error: ${response.status}`,
             ...(providerTransactionId === undefined ? {} : { providerTransactionId }),
             response: sanitizeRemoteErrorResponse(errorText),

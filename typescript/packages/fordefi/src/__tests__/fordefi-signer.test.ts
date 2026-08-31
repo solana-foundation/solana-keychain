@@ -10,7 +10,8 @@ import {
     isSolanaSendingSigner,
     isSolanaSigner,
     isSolanaTransactionSigner,
-    type SignerError,
+    SignerError,
+    SignerErrorCode,
 } from '@solana/keychain-core';
 import { createCosignedWireTransaction, createSignedWireTransaction } from '@solana/keychain-test-utils';
 import {
@@ -751,6 +752,36 @@ describe('createFordefiSigner', () => {
             expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
             expect(error.context?.providerTransactionId).toBeUndefined();
             expect(error.context?.status).toBe(502);
+        });
+
+        it('treats a status-bearing caller abort during submit as unconfirmed', async () => {
+            const signer = await createFordefiSigner(nativeConfig);
+            const controller = new AbortController();
+            const reason = new SignerError(SignerErrorCode.REMOTE_API_ERROR, { status: 400 });
+            vi.mocked(fetch).mockImplementationOnce(async (_input, init) => {
+                controller.abort(reason);
+                expect(init?.signal?.aborted).toBe(true);
+                throw new Error('aborted');
+            });
+            const mockTx = {
+                messageBytes: compiledMessageBytes(MOCK_ADDRESS),
+                signatures: { [MOCK_ADDRESS]: null },
+            } as never;
+
+            const error = await signer.signAndSendTransactions([mockTx], { abortSignal: controller.signal }).then(
+                () => {
+                    throw new Error('expected the submit failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+
+            const postOpts = vi.mocked(fetch).mock.calls[0]![1] as RequestInit;
+            expect(error.code).toBe(SignerErrorCode.BROADCAST_UNCONFIRMED);
+            expect(error.context?.cause).toBe(reason);
+            expect(error.context?.status).toBeUndefined();
+            expect(error.context?.idempotencyKey).toBe(
+                (postOpts.headers as Record<string, string>)['x-idempotence-id'],
+            );
         });
 
         it('reports an accepted submit with no id as unconfirmed', async () => {

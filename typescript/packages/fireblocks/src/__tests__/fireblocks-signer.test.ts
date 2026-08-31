@@ -16,7 +16,8 @@ import {
     assertIsSolanaTransactionSigner,
     assertSignatureValid,
     idempotencyKeyFromMessage,
-    type SignerError,
+    SignerError,
+    SignerErrorCode,
 } from '@solana/keychain-core';
 
 import { createFireblocksSigner } from '../fireblocks-signer.js';
@@ -798,6 +799,30 @@ describe('createFireblocksSigner', () => {
             await expect(signer.signTransactions([transaction])).rejects.toMatchObject({
                 code: 'SIGNER_BROADCAST_UNCONFIRMED',
             });
+        });
+
+        it('treats a status-bearing caller abort during create as unconfirmed', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            const controller = new AbortController();
+            const reason = new SignerError(SignerErrorCode.REMOTE_API_ERROR, { status: 400 });
+            mockFetch.mockImplementationOnce(async (_input, init) => {
+                controller.abort(reason);
+                expect(init?.signal?.aborted).toBe(true);
+                throw new Error('aborted');
+            });
+
+            const error = await signer.signTransactions([transaction], { abortSignal: controller.signal }).then(
+                () => {
+                    throw new Error('expected the create failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+
+            const createBody = JSON.parse(mockFetch.mock.calls[1]![1].body as string);
+            expect(error.code).toBe(SignerErrorCode.BROADCAST_UNCONFIRMED);
+            expect(error.context?.cause).toBe(reason);
+            expect(error.context?.status).toBeUndefined();
+            expect(error.context?.idempotencyKey).toBe(createBody.externalTxId);
         });
 
         it('keeps a transaction id named in a failed create body', async () => {

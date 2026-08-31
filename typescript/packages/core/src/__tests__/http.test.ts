@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SignerError, SignerErrorCode } from '../errors.js';
-import { fetchSignerJson, MAX_RESPONSE_BYTES } from '../http.js';
+import { fetchSignerJson, MAX_RESPONSE_BYTES, providerMayHaveAccepted, providerStatus } from '../http.js';
 
 function mockFetch(impl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) {
     const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(impl as typeof fetch);
@@ -175,6 +175,13 @@ describe('fetchSignerJson', () => {
         ).rejects.toBe(reason);
     });
 
+    it('does not treat a status-bearing caller abort reason as a provider response', () => {
+        const reason = new SignerError(SignerErrorCode.REMOTE_API_ERROR, { status: 401 });
+
+        expect(providerStatus(reason)).toBeUndefined();
+        expect(providerMayHaveAccepted(reason)).toBe(true);
+    });
+
     it('throws the abort reason rather than PARSING_ERROR when the caller aborts during the body read', async () => {
         const controller = new AbortController();
         const reason = new Error('caller cancelled');
@@ -247,6 +254,7 @@ describe('fetchSignerJson', () => {
         expect(error.message).toBe('Test API error: 502');
         expect(error.context?.status).toBe(502);
         expect(error.context?.response).toBe('boom bad');
+        expect(providerStatus(error)).toBe(502);
     });
 
     it('accepts a success body of exactly MAX_RESPONSE_BYTES', async () => {
