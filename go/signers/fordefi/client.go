@@ -163,7 +163,7 @@ func (s *signerCore) submitTransaction(ctx context.Context, request transactionR
 	}
 
 	var created createTransactionResponse
-	if err := json.Unmarshal(respBody, &created); err != nil || created.ID == "" {
+	if err := json.Unmarshal(respBody, &created); err != nil || strings.TrimSpace(created.ID) == "" {
 		return "", classify(status, core.TransactionIDInBody(respBody),
 			core.NewSignerError(core.CodeSerializationError, "failed to parse response"))
 	}

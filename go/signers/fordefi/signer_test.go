@@ -723,6 +723,30 @@ func TestSignTransactionNativeSubmitWithoutIDIsUnconfirmed(t *testing.T) {
 	assertBroadcastUnconfirmedWithoutID(t, err, 0)
 }
 
+func TestSignTransactionNativeSubmitWhitespaceIDIsUnconfirmed(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	calls := 0
+	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			calls++
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": " \t"})
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignAndSendTransaction(context.Background(), tx)
+	if err == nil {
+		t.Fatal("expected an accepted submit with a whitespace id to be reported")
+	}
+	assertBroadcastUnconfirmedWithoutID(t, err, 0)
+	if calls != 1 {
+		t.Fatalf("expected 1 create call, got %d", calls)
+	}
+}
+
 func TestSignTransactionNativeSubmitProcessingTimeoutIsUnconfirmed(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {

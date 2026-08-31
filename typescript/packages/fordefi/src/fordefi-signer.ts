@@ -860,7 +860,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
             idempotenceId,
             abortSignal,
         );
-        if (!createResponse.id) {
+        if (!createResponse.id?.trim()) {
             return throwSignerError(SignerErrorCode.SERIALIZATION_ERROR, {
                 message: 'Fordefi returned no transaction id',
             });

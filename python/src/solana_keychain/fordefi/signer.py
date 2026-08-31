@@ -221,7 +221,7 @@ class _FordefiSignerBase(SolanaSigner):
             client=self._http_client,
         )
         transaction_id = response.get("id") if isinstance(response, dict) else None
-        if not isinstance(transaction_id, str) or not transaction_id:
+        if not isinstance(transaction_id, str) or not transaction_id.strip():
             raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
         return transaction_id
 

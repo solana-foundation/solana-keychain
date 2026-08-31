@@ -297,7 +297,7 @@ impl FordefiCore {
         let provider_tx_id = transaction_id_in_body(&body);
         let create_response: CreateTransactionResponse = serde_json::from_slice(&body)
             .map_err(|error| classify(Some(status), provider_tx_id.clone(), error.into()))?;
-        if create_response.id.is_empty() {
+        if create_response.id.trim().is_empty() {
             return Err(classify(
                 Some(status),
                 provider_tx_id,
