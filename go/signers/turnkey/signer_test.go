@@ -595,8 +595,11 @@ func TestCreateStamp(t *testing.T) {
 	if err := json.Unmarshal(decoded, &payload); err != nil {
 		t.Fatalf("stamp is not valid JSON: %v", err)
 	}
-	if payload["public_key"] != pubHex {
-		t.Errorf("public_key = %q, want %q", payload["public_key"], pubHex)
+	if payload["publicKey"] != pubHex {
+		t.Errorf("publicKey = %q, want %q", payload["publicKey"], pubHex)
+	}
+	if len(payload) != 3 {
+		t.Errorf("stamp keys = %v, want exactly publicKey, scheme, signature", payload)
 	}
 	if payload["scheme"] != stampScheme {
 		t.Errorf("scheme = %q, want %q", payload["scheme"], stampScheme)

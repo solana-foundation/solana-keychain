@@ -248,7 +248,7 @@ impl TurnkeySigner {
         let signature_hex = hex::encode(signature_der);
 
         let stamp = serde_json::json!({
-            "public_key": self.api_public_key,
+            "publicKey": self.api_public_key,
             "signature": signature_hex,
             "scheme": "SIGNATURE_SCHEME_TK_API_P256"
         });

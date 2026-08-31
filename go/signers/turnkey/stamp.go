@@ -51,10 +51,9 @@ func validateAPIKeyMaterial(privateKeyHex, publicKeyHex string) error {
 	return nil
 }
 
-// stampPayload is the JSON body of the X-Stamp header. Keys are snake_case and
-// marshal in alphabetical order.
+// stampPayload is the JSON body of the X-Stamp header.
 type stampPayload struct {
-	PublicKey string `json:"public_key"`
+	PublicKey string `json:"publicKey"`
 	Scheme    string `json:"scheme"`
 	Signature string `json:"signature"`
 }
