@@ -63,6 +63,36 @@ async fn test_privy_fetch_public_key() {
 }
 
 #[tokio::test]
+async fn test_privy_fetch_public_key_encodes_wallet_id_as_one_path_segment() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+
+    Mock::given(method("GET"))
+        .and(path("/wallets/scope%2F..%2Fvictim"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "scope/../victim",
+            "address": keypair.pubkey().to_string(),
+            "chain_type": "solana"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut signer = PrivySigner::new(
+        "test-app-id".to_string(),
+        "test-app-secret".to_string(),
+        "scope/../victim".to_string(),
+    )
+    .unwrap();
+    signer.client = reqwest::Client::new();
+    signer.api_base_url = mock_server.uri();
+
+    signer.init().await.unwrap();
+
+    assert_eq!(signer.pubkey(), keypair.pubkey());
+}
+
+#[tokio::test]
 async fn test_privy_sign_message_rejects_oversized_response_body() {
     let mock_server = MockServer::start().await;
     let keypair = create_test_keypair();
@@ -181,6 +211,63 @@ async fn test_privy_sign_message_authorization_context_headers() {
     let result = signer.sign_message(&message).await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), signature);
+}
+
+#[tokio::test]
+async fn test_privy_rpc_encodes_wallet_id_in_request_and_authorization_url() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let message = [1, 2, 3, 4];
+    let signature = keypair.sign_message(&message);
+    let authorization_url = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let captured_url = std::sync::Arc::clone(&authorization_url);
+
+    Mock::given(method("POST"))
+        .and(path("/wallets/scope%2F..%2Fvictim/rpc"))
+        .and(header(
+            "privy-authorization-signature",
+            "authorization-signature",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "method": "signMessage",
+            "data": {
+                "signature": STANDARD.encode(signature),
+                "encoding": "base64"
+            }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut signer = PrivySigner::from_config(PrivySignerConfig {
+        app_id: "test-app-id".to_string(),
+        app_secret: "test-app-secret".to_string(),
+        wallet_id: "scope/../victim".to_string(),
+        api_base_url: Some(mock_server.uri()),
+        http_client_config: None,
+        authorization_context: Some(PrivyAuthorizationConfig::Provider(std::sync::Arc::new(
+            move |request| {
+                *captured_url.lock().unwrap() = Some(request.url.clone());
+                Ok(Some(PrivyAuthorizationContext {
+                    signatures: vec!["authorization-signature".to_string()],
+                    ..Default::default()
+                }))
+            },
+        ))),
+        authorization_request_expiry: PrivyAuthorizationRequestExpiry::Omit,
+    })
+    .unwrap();
+    signer.client = reqwest::Client::new();
+    signer.public_key = Some(keypair.pubkey());
+
+    let returned = signer.sign_message(&message).await.unwrap();
+    let expected_url = format!("{}/wallets/scope%2F..%2Fvictim/rpc", mock_server.uri());
+
+    assert_eq!(returned, signature);
+    assert_eq!(
+        authorization_url.lock().unwrap().as_deref(),
+        Some(expected_url.as_str())
+    );
 }
 
 #[tokio::test]

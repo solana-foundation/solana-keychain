@@ -58,6 +58,7 @@ where
     feature = "crossmint",
     feature = "dfns",
     feature = "openfort",
+    feature = "privy",
     feature = "utila"
 ))]
 pub(crate) fn encode_uri_component(input: &str) -> String {

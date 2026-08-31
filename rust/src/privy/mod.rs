@@ -3,7 +3,9 @@
 mod authorization;
 mod types;
 
-use crate::remote_util::{extract_api_error, parse_json_response, read_body_capped};
+use crate::remote_util::{
+    encode_uri_component, extract_api_error, parse_json_response, read_body_capped,
+};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{
     extract_and_verify_returned_signature, signature_from_base64, verify_or_reject,
@@ -152,7 +154,8 @@ impl PrivySigner {
 
     /// Fetch the public key from Privy API
     async fn fetch_public_key(&self) -> Result<Pubkey, SignerError> {
-        let url = format!("{}/wallets/{}", self.api_base_url, self.wallet_id);
+        let wallet_id = encode_uri_component(&self.wallet_id);
+        let url = format!("{}/wallets/{wallet_id}", self.api_base_url);
 
         let response = self
             .client
@@ -174,7 +177,8 @@ impl PrivySigner {
     /// POST a wallet RPC request with Privy auth and authorization-signature
     /// headers, returning the response body on 2xx.
     async fn post_rpc<T: serde::Serialize>(&self, request: &T) -> Result<String, SignerError> {
-        let url = format!("{}/wallets/{}/rpc", self.api_base_url, self.wallet_id);
+        let wallet_id = encode_uri_component(&self.wallet_id);
+        let url = format!("{}/wallets/{wallet_id}/rpc", self.api_base_url);
 
         let authorization_headers = prepare_privy_authorization_headers(
             &self.app_id,
