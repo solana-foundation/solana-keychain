@@ -712,6 +712,7 @@ impl CrossmintSigner {
                 provider_tx_id: Some(provider_tx_id),
                 provider_status: None,
                 idempotency_key: Some(idempotency_key),
+                transaction_signature: None,
                 detail: error.detail_string(),
             });
         if let Some(pending) = &self.pending_transaction_id {

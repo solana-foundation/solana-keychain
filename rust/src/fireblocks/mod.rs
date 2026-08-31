@@ -412,6 +412,7 @@ impl FireblocksSigner {
                     provider_tx_id: Some(tx_id.to_string()),
                     provider_status: None,
                     idempotency_key: None,
+                    transaction_signature: None,
                     detail: format!(
                         "Fireblocks PROGRAM_CALL polling timeout after {} attempts; the transaction may already be executing",
                         self.max_poll_attempts
@@ -428,6 +429,7 @@ impl FireblocksSigner {
                         provider_tx_id: Some(tx_id.to_string()),
                         provider_status: None,
                         idempotency_key: None,
+                        transaction_signature: None,
                         detail: format!(
                             "Fireblocks PROGRAM_CALL outcome could not be resolved: {}",
                             error
@@ -445,6 +447,7 @@ impl FireblocksSigner {
                             provider_tx_id: Some(tx_id.to_string()),
                             provider_status: None,
                             idempotency_key: None,
+                            transaction_signature: None,
                             detail: format!(
                                 "Fireblocks broadcast the PROGRAM_CALL despite signOnly (status {}); the transaction may already be executing",
                                 response.status

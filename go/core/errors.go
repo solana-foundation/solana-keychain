@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/solana-foundation/solana-go/v2"
 )
 
 // Code identifies a category of signer error. The string values are stable
@@ -77,8 +79,11 @@ type SignerError struct {
 	ProviderStatus int
 	// IdempotencyKey is the key used to submit an ambiguous create, when available.
 	IdempotencyKey string
-	detail         string
-	cause          error
+	// TransactionSignature identifies a completed transaction passed to a
+	// caller-managed broadcast whose outcome could not be confirmed.
+	TransactionSignature solana.Signature
+	detail               string
+	cause                error
 }
 
 // NewSignerError builds a SignerError with a (private) detail string.

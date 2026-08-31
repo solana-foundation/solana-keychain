@@ -68,6 +68,7 @@ pub(crate) fn unconfirmed_unless_rejected(
         provider_tx_id,
         provider_status: status.filter(|status| *status >= 400),
         idempotency_key: idempotency_key.map(str::to_string),
+        transaction_signature: None,
         detail: error.detail_string(),
     }
 }

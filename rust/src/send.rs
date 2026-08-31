@@ -18,8 +18,9 @@ use crate::traits::{ModifyingSigner, SignTransactionResult, TransactionSigner};
 /// # Errors
 ///
 /// [`SignerError::SigningFailed`] when the transaction is still partially
-/// signed. Backend signing errors and anything `send` returns propagate
-/// unchanged.
+/// signed. Backend signing errors propagate unchanged. A `send` failure becomes
+/// [`SignerError::BroadcastUnconfirmed`] carrying the completed transaction's
+/// fee-payer signature.
 pub async fn sign_and_send<S, F, Fut>(
     signer: &S,
     tx: &mut VersionedTransaction,
@@ -30,7 +31,8 @@ where
     F: FnOnce(String) -> Fut,
     Fut: Future<Output = Result<Signature, SignerError>>,
 {
-    broadcast_complete(signer.sign_transaction(tx).await?, send).await
+    let result = signer.sign_transaction(tx).await?;
+    broadcast_complete(result, tx.signatures.first().copied(), send).await
 }
 
 /// Let the signer rewrite `tx`, then get the rewritten transaction on chain.
@@ -47,11 +49,13 @@ where
     F: FnOnce(String) -> Fut,
     Fut: Future<Output = Result<Signature, SignerError>>,
 {
-    broadcast_complete(signer.modify_and_sign_transaction(tx).await?, send).await
+    let result = signer.modify_and_sign_transaction(tx).await?;
+    broadcast_complete(result, tx.signatures.first().copied(), send).await
 }
 
 async fn broadcast_complete<F, Fut>(
     result: SignTransactionResult,
+    transaction_signature: Option<Signature>,
     send: F,
 ) -> Result<Signature, SignerError>
 where
@@ -67,7 +71,22 @@ where
                 .to_string(),
         ));
     }
-    send(encoded_transaction).await
+    let transaction_signature = transaction_signature
+        .filter(|signature| *signature != Signature::default())
+        .ok_or_else(|| {
+            SignerError::SigningFailed(
+                "Broadcast transaction has no fee payer signature to identify it by".to_string(),
+            )
+        })?;
+    send(encoded_transaction)
+        .await
+        .map_err(|error| SignerError::BroadcastUnconfirmed {
+            provider_tx_id: None,
+            provider_status: None,
+            idempotency_key: None,
+            transaction_signature: Some(Box::new(transaction_signature)),
+            detail: error.detail_string(),
+        })
 }
 
 pub(crate) fn require_broadcast_signature(signature: Signature) -> Result<Signature, SignerError> {

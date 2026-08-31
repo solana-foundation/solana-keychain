@@ -21,6 +21,7 @@ fn test_display_is_redacted_for_all_variants() {
             provider_tx_id: Some("tx-id".to_string()),
             provider_status: None,
             idempotency_key: Some("idem-key".to_string()),
+            transaction_signature: None,
             detail: secret.to_string(),
         },
     ];
@@ -84,6 +85,7 @@ fn test_broadcast_unconfirmed_surfaces_tx_id_but_not_detail() {
         provider_tx_id: Some("provider-tx-123".to_string()),
         provider_status: None,
         idempotency_key: Some("idem-key-123".to_string()),
+        transaction_signature: None,
         detail: "sensitive-detail".to_string(),
     };
     let display = format!("{err}");

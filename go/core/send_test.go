@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/solana-foundation/solana-go/v2"
@@ -22,12 +23,20 @@ func (baseSigner) IsAvailable(context.Context) bool { return true }
 // transactionSigner records that it signed and returns a configurable result.
 type transactionSigner struct {
 	baseSigner
-	signed    SignedTransaction
-	signCalls int
+	signed               SignedTransaction
+	transactionSignature solana.Signature
+	signCalls            int
 }
 
-func (s *transactionSigner) SignTransaction(context.Context, *solana.Transaction) (SignedTransaction, error) {
+func (s *transactionSigner) SignTransaction(_ context.Context, tx *solana.Transaction) (SignedTransaction, error) {
 	s.signCalls++
+	if s.signed.IsComplete() {
+		sig := s.transactionSignature
+		if sig.IsZero() {
+			sig = s.signed.Signature
+		}
+		tx.Signatures = []solana.Signature{sig}
+	}
 	return s.signed, nil
 }
 
@@ -46,12 +55,20 @@ func (s *sendingSigner) SignAndSendTransaction(context.Context, *solana.Transact
 // signing it: it records the call and returns a configurable result.
 type modifyingSigner struct {
 	baseSigner
-	signed      SignedTransaction
-	modifyCalls int
+	signed               SignedTransaction
+	transactionSignature solana.Signature
+	modifyCalls          int
 }
 
-func (s *modifyingSigner) ModifyAndSignTransaction(context.Context, *solana.Transaction) (SignedTransaction, error) {
+func (s *modifyingSigner) ModifyAndSignTransaction(_ context.Context, tx *solana.Transaction) (SignedTransaction, error) {
 	s.modifyCalls++
+	if s.signed.IsComplete() {
+		sig := s.transactionSignature
+		if sig.IsZero() {
+			sig = s.signed.Signature
+		}
+		tx.Signatures = []solana.Signature{sig}
+	}
 	return s.signed, nil
 }
 
@@ -167,6 +184,33 @@ func TestSignAndSendTransactionBroadcastsWhatAModifyingSignerRewrote(t *testing.
 	}
 	if sig != s.signed.Signature {
 		t.Errorf("got signature %v, want %v", sig, s.signed.Signature)
+	}
+}
+
+func TestSignAndSendTransactionCallbackFailureKeepsRewrittenSignature(t *testing.T) {
+	want := completeSignature(8).Signature
+	s := &modifyingSigner{
+		signed:               completeSignature(3),
+		transactionSignature: want,
+	}
+	callbackErr := errors.New("connection reset")
+
+	_, err := SignAndSendTransaction(context.Background(), s, &solana.Transaction{},
+		func(context.Context, string) (solana.Signature, error) {
+			return solana.Signature{}, callbackErr
+		})
+	if code, ok := CodeOf(err); !ok || code != CodeBroadcastUnconfirmed {
+		t.Fatalf("got code %q (ok=%v), want CodeBroadcastUnconfirmed", code, ok)
+	}
+	if !errors.Is(err, callbackErr) {
+		t.Error("callback failure was not preserved as the cause")
+	}
+	var signerErr *SignerError
+	if !errors.As(err, &signerErr) {
+		t.Fatalf("expected SignerError, got %T", err)
+	}
+	if signerErr.TransactionSignature != want {
+		t.Errorf("TransactionSignature = %v, want %v", signerErr.TransactionSignature, want)
 	}
 }
 

@@ -3,6 +3,8 @@
 use std::fmt;
 use thiserror::Error;
 
+use crate::sdk_adapter::Signature;
+
 /// Errors that can occur during signing operations
 #[derive(Error)]
 pub enum SignerError {
@@ -51,20 +53,18 @@ pub enum SignerError {
     #[error("IO error")]
     IoError(String),
 
-    /// The provider may have executed the transaction, but the outcome could not
-    /// be confirmed. Raised by broadcast-managed signers (Fordefi native mode,
-    /// Crossmint) for any failure after the provider has accepted the
-    /// transaction. Retrying blindly risks a duplicate spend; check the provider
-    /// transaction id first.
+    /// The provider or a caller-supplied sender may have executed the transaction,
+    /// but the outcome could not be confirmed. Retrying blindly risks a duplicate
+    /// spend; reconcile the provider id or transaction signature first.
     ///
-    /// `provider_tx_id` and `provider_status` are `None` when the create failed
-    /// without a usable response: nothing to check, and the only safe recovery
-    /// is replaying the identical bytes.
+    /// `transaction_signature` identifies the completed transaction passed to a
+    /// caller-managed sender. Provider-managed broadcasts leave it `None`.
     #[error("Broadcast unconfirmed; the provider may have executed the transaction (provider transaction id: {})", provider_tx_id.as_deref().unwrap_or("unknown"))]
     BroadcastUnconfirmed {
         provider_tx_id: Option<String>,
         provider_status: Option<u16>,
         idempotency_key: Option<String>,
+        transaction_signature: Option<Box<Signature>>,
         detail: String,
     },
 

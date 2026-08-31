@@ -43,6 +43,8 @@ class StubTransactionSigner(_StubBase, TransactionSigner):
         self._is_complete = is_complete
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
+        if self._is_complete:
+            transaction.signatures = [self._signature]
         return SignedTransaction(
             encoded_transaction=ENCODED,
             signature=self._signature,
@@ -52,18 +54,24 @@ class StubTransactionSigner(_StubBase, TransactionSigner):
 
 
 class StubModifyingSigner(_StubBase, ModifyingSigner):
-    def __init__(self, *, is_complete: bool = True) -> None:
+    def __init__(
+        self, *, is_complete: bool = True, transaction_signature: Signature = SIGNATURE
+    ) -> None:
         super().__init__()
         self._is_complete = is_complete
+        self._transaction_signature = transaction_signature
 
     async def modify_and_sign_transaction(
         self, transaction: VersionedTransaction
     ) -> SignedTransaction:
+        rewritten = create_test_transaction(self.pubkey)
+        if self._is_complete:
+            rewritten.signatures = [self._transaction_signature]
         return SignedTransaction(
             encoded_transaction=REWRITTEN_ENCODED,
             signature=self._signature,
             is_complete=self._is_complete,
-            transaction=create_test_transaction(self.pubkey),
+            transaction=rewritten,
         )
 
 
@@ -120,6 +128,22 @@ async def test_modifying_signer_broadcasts_the_rewritten_transaction() -> None:
     )
     assert sent == [REWRITTEN_ENCODED]
     assert signature == broadcast_signature
+
+
+async def test_callback_failure_keeps_the_rewritten_transaction_signature() -> None:
+    transaction_signature = Signature.from_bytes(bytes([3] * 64))
+    signer = StubModifyingSigner(transaction_signature=transaction_signature)
+    callback_error = RuntimeError("connection reset")
+
+    async def send(encoded: str) -> Signature:
+        assert encoded == REWRITTEN_ENCODED
+        raise callback_error
+
+    with pytest.raises(SignerError) as excinfo:
+        await sign_and_send_transaction(signer, create_test_transaction(signer.pubkey), send)
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.transaction_signature == transaction_signature
+    assert excinfo.value.__cause__ is callback_error
 
 
 async def test_modifying_signer_without_a_sender_is_rejected() -> None:

@@ -2,6 +2,8 @@
 
 from enum import Enum, unique
 
+from solders.signature import Signature
+
 
 @unique
 class SignerErrorCode(str, Enum):
@@ -56,6 +58,9 @@ class SignerError(Exception):
     ``idempotency_key`` is the key an ambiguous create was submitted under, when the
     backend sends one. With no ``provider_transaction_id`` to check, resending the
     identical bytes under that key is the only recovery that cannot double-spend.
+
+    ``transaction_signature`` identifies the completed transaction supplied to a
+    caller-managed broadcast whose outcome could not be confirmed.
     """
 
     def __init__(
@@ -66,6 +71,7 @@ class SignerError(Exception):
         provider_transaction_id: str | None = None,
         status_code: int | None = None,
         idempotency_key: str | None = None,
+        transaction_signature: Signature | None = None,
     ) -> None:
         message = _GENERIC_MESSAGES[code]
         if provider_transaction_id is not None:
@@ -76,6 +82,7 @@ class SignerError(Exception):
         self.provider_transaction_id = provider_transaction_id
         self.status_code = status_code
         self.idempotency_key = idempotency_key
+        self.transaction_signature = transaction_signature
 
     def __repr__(self) -> str:
         return f"SignerError({self.code.value})"

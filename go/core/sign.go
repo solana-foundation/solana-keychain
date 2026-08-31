@@ -79,7 +79,9 @@ type SendTransactionFn func(ctx context.Context, encodedTransaction string) (sol
 // broadcasts the result, which for a ModifyingSigner is the transaction its
 // provider rewrote.
 //
-// send is checked before signing so a missing one cannot waste a signature.
+// send is checked before signing so a missing one cannot waste a signature. A
+// send failure reports CodeBroadcastUnconfirmed with the completed transaction's
+// fee-payer signature.
 func SignAndSendTransaction(ctx context.Context, s SolanaSigner, tx *solana.Transaction, send SendTransactionFn) (solana.Signature, error) {
 	if sender, ok := s.(SendingSigner); ok {
 		sig, err := sender.SignAndSendTransaction(ctx, tx)
@@ -112,7 +114,19 @@ func SignAndSendTransaction(ctx context.Context, s SolanaSigner, tx *solana.Tran
 		return solana.Signature{}, NewSignerError(CodeSigningFailed,
 			"transaction is still missing signatures after signing and cannot be broadcast")
 	}
-	return send(ctx, signed.EncodedTransaction)
+	if len(tx.Signatures) == 0 || tx.Signatures[0].IsZero() {
+		return solana.Signature{}, NewSignerError(CodeSigningFailed,
+			"broadcast transaction has no fee payer signature to identify it by")
+	}
+	sig, err := send(ctx, signed.EncodedTransaction)
+	if err == nil {
+		return sig, nil
+	}
+	unconfirmed := NewBroadcastUnconfirmedError("",
+		"the transaction may have been broadcast; reconcile its signature before retrying")
+	unconfirmed.TransactionSignature = tx.Signatures[0]
+	unconfirmed.cause = err
+	return solana.Signature{}, unconfirmed
 }
 
 // signOnlyEntryPoint returns the entry point s uses to sign a transaction the

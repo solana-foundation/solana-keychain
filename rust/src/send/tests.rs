@@ -1,10 +1,10 @@
 use async_trait::async_trait;
 
-use super::{require_broadcast_signature, sign_and_send};
+use super::{modify_and_send, require_broadcast_signature, sign_and_send};
 use crate::error::SignerError;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::test_util::create_test_transaction;
-use crate::traits::{SignTransactionResult, SolanaSigner, TransactionSigner};
+use crate::traits::{ModifyingSigner, SignTransactionResult, SolanaSigner, TransactionSigner};
 
 const ENCODED: &str = "encoded-transaction";
 
@@ -41,14 +41,29 @@ impl SolanaSigner for StubSigner {
 impl TransactionSigner for StubSigner {
     async fn sign_transaction(
         &self,
-        _tx: &mut VersionedTransaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
         let signed = (ENCODED.to_string(), self.signature);
         Ok(if self.complete {
+            tx.signatures[0] = Signature::from([8u8; 64]);
             SignTransactionResult::Complete(signed)
         } else {
             SignTransactionResult::Partial(signed)
         })
+    }
+}
+
+#[async_trait]
+impl ModifyingSigner for StubSigner {
+    async fn modify_and_sign_transaction(
+        &self,
+        tx: &mut VersionedTransaction,
+    ) -> Result<SignTransactionResult, SignerError> {
+        tx.signatures[0] = Signature::from([8u8; 64]);
+        Ok(SignTransactionResult::Complete((
+            ENCODED.to_string(),
+            self.signature,
+        )))
     }
 }
 
@@ -66,6 +81,29 @@ async fn sign_only_signer_broadcasts_the_encoded_transaction() {
     .unwrap();
 
     assert_eq!(signature, broadcast_signature);
+}
+
+#[tokio::test]
+async fn modifying_callback_failure_keeps_the_rewritten_transaction_signature() {
+    let signer = StubSigner::new(true);
+    let mut tx = create_test_transaction(&Pubkey::new_unique());
+
+    let error = modify_and_send(&signer, &mut tx, |_| async {
+        Err(SignerError::HttpError("connection reset".to_string()))
+    })
+    .await
+    .unwrap_err();
+
+    match error {
+        SignerError::BroadcastUnconfirmed {
+            transaction_signature,
+            ..
+        } => assert_eq!(
+            transaction_signature,
+            Some(Box::new(Signature::from([8u8; 64])))
+        ),
+        other => panic!("expected BroadcastUnconfirmed, got {other:?}"),
+    }
 }
 
 /// A partially signed transaction cannot land, so it must never be broadcast.

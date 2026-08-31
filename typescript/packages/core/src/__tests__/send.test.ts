@@ -19,6 +19,7 @@ function signatureBytes(seed: number): SignatureBytes {
 const FEE_PAYER_SIGNATURE = signatureBytes(1);
 const SIGNER_SIGNATURE = signatureBytes(2);
 const SENT_SIGNATURE = signatureBytes(3);
+const REWRITTEN_FEE_PAYER_SIGNATURE = signatureBytes(4);
 
 function createTransaction(): SignableTransaction {
     return {
@@ -129,6 +130,30 @@ describe('signAndSendTransaction', () => {
         expect(sentTransaction.signatures).toStrictEqual({
             [FEE_PAYER]: FEE_PAYER_SIGNATURE,
             [SIGNER_ADDRESS]: SIGNER_SIGNATURE,
+        });
+    });
+
+    it('keeps the rewritten transaction signature when the send function rejects', async () => {
+        const transaction = createTransaction();
+        const rewritten = Object.freeze({
+            ...transaction,
+            signatures: Object.freeze({
+                [FEE_PAYER]: REWRITTEN_FEE_PAYER_SIGNATURE,
+                [SIGNER_ADDRESS]: SIGNER_SIGNATURE,
+            }),
+        }) as SignableTransaction;
+        const callbackError = new Error('connection reset');
+
+        await expect(
+            signAndSendTransaction(createModifyingSigner({ transactions: [rewritten] }), transaction, {
+                sendTransaction: async () => {
+                    throw callbackError;
+                },
+            }),
+        ).rejects.toMatchObject({
+            cause: callbackError,
+            code: SignerErrorCode.BROADCAST_UNCONFIRMED,
+            context: { transactionSignature: REWRITTEN_FEE_PAYER_SIGNATURE },
         });
     });
 

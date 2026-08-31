@@ -33,7 +33,9 @@ async def sign_and_send_transaction(
     Raises ``CONFIG_ERROR`` when a signing-only signer is given no
     ``send_transaction``, and ``SIGNING_FAILED`` when the sending signer returns
     no signature, the signed transaction is still missing signatures, or the
-    signer has none of the three capabilities.
+    signer has none of the three capabilities. A ``send_transaction`` failure
+    raises ``BROADCAST_UNCONFIRMED`` with the completed transaction's fee-payer
+    signature.
     """
     if isinstance(signer, SendingSigner):
         signature = await signer.sign_and_send_transaction(transaction)
@@ -66,4 +68,17 @@ async def sign_and_send_transaction(
             SignerErrorCode.SIGNING_FAILED,
             "transaction is still missing signatures after signing and cannot be broadcast",
         )
-    return await send_transaction(signed.encoded_transaction)
+    transaction_signature = signed.transaction.signatures[0]
+    if transaction_signature == Signature.default():
+        raise SignerError(
+            SignerErrorCode.SIGNING_FAILED,
+            "broadcast transaction has no fee payer signature to identify it by",
+        )
+    try:
+        return await send_transaction(signed.encoded_transaction)
+    except Exception as error:
+        raise SignerError(
+            SignerErrorCode.BROADCAST_UNCONFIRMED,
+            "the transaction may have been broadcast; reconcile its signature before retrying",
+            transaction_signature=transaction_signature,
+        ) from error

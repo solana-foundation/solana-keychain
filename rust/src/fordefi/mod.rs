@@ -739,6 +739,7 @@ impl FordefiNativeAutoSigner {
                 provider_tx_id: Some(tx_id),
                 provider_status: None,
                 idempotency_key: None,
+                transaction_signature: None,
                 detail: error.detail_string(),
             }
         });

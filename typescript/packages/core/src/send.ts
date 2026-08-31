@@ -7,7 +7,7 @@ import type {
 } from '@solana/transactions';
 import { isFullySignedTransaction } from '@solana/transactions';
 
-import { SignerErrorCode, throwSignerError } from './errors.js';
+import { createSignerError, SignerErrorCode, throwSignerError } from './errors.js';
 import type { SolanaSigner } from './types.js';
 import { isSolanaModifyingSigner, isSolanaSendingSigner } from './utils.js';
 
@@ -60,7 +60,9 @@ export type SignAndSendTransactionConfig = Readonly<{
  * @throws {SignerError} `SIGNER_CONFIG_ERROR` when the signer cannot broadcast
  * and no `sendTransaction` was supplied; `SIGNER_SIGNING_FAILED` when the signer
  * returns no signature or the transaction is still missing signatures after
- * signing. Backend-specific signing errors propagate unchanged.
+ * signing; `SIGNER_BROADCAST_UNCONFIRMED` when `sendTransaction` rejects after
+ * receiving the completed transaction. Backend-specific signing errors
+ * propagate unchanged.
  *
  * @example
  * ```typescript
@@ -130,17 +132,30 @@ export async function signAndSendTransaction<TAddress extends string>(
         });
     }
 
-    const signature = await sendTransaction(signedTransaction, { abortSignal });
-    if (signature) {
-        return signature;
-    }
-
     const feePayerSignature = Object.values(signedTransaction.signatures)[0];
     if (!feePayerSignature) {
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
             address: signer.address,
             message: 'Broadcast transaction has no fee payer signature to identify it by',
         });
+    }
+
+    let signature: SignatureBytes | void;
+    try {
+        signature = await sendTransaction(signedTransaction, { abortSignal });
+    } catch (cause) {
+        throw createSignerError(
+            SignerErrorCode.BROADCAST_UNCONFIRMED,
+            {
+                address: signer.address,
+                message: 'The transaction may have been broadcast; reconcile its signature before retrying',
+                transactionSignature: feePayerSignature,
+            },
+            cause,
+        );
+    }
+    if (signature) {
+        return signature;
     }
     return feePayerSignature;
 }

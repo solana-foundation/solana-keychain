@@ -9,8 +9,8 @@ export const SignerErrorCode = {
      * carries the provider-side id to check before retrying, and `context.status`
      * the provider's HTTP status when its response was the failure.
      * `context.idempotencyKey` carries the key the create went out under, when
-     * the backend sends one: with no transaction id to check, resending the
-     * identical bytes under that key is the only safe recovery.
+     * the backend sends one. `context.transactionSignature` identifies a
+     * completed transaction passed to a caller-managed sender.
      */
     BROADCAST_UNCONFIRMED: 'SIGNER_BROADCAST_UNCONFIRMED',
     CONFIG_ERROR: 'SIGNER_CONFIG_ERROR',
@@ -56,14 +56,18 @@ function replaceDisallowedControlChars(input: string): string {
  * Extends Error with code and context properties
  */
 export class SignerError extends Error {
+    readonly cause?: unknown;
     readonly code: SignerErrorCode;
     readonly context?: Record<string, unknown>;
 
-    constructor(code: SignerErrorCode, context?: Record<string, unknown>) {
+    constructor(code: SignerErrorCode, context?: Record<string, unknown>, cause?: unknown) {
         const message =
             context?.message && typeof context.message === 'string' ? context.message : `Signer error: ${code}`;
         super(message);
         this.name = 'SignerError';
+        if (cause !== undefined) {
+            this.cause = cause;
+        }
         this.code = code;
         this.context = context;
     }
@@ -72,8 +76,12 @@ export class SignerError extends Error {
 /**
  * Helper function to create signer-specific errors
  */
-export function createSignerError(code: SignerErrorCode, context?: Record<string, unknown>): SignerError {
-    return new SignerError(code, context);
+export function createSignerError(
+    code: SignerErrorCode,
+    context?: Record<string, unknown>,
+    cause?: unknown,
+): SignerError {
+    return new SignerError(code, context, cause);
 }
 
 /**
