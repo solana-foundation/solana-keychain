@@ -178,8 +178,6 @@ jobs:
     name: fork-external-live-manual
     runs-on: ubuntu-latest
     environment: external-live-tests
-    # This job holds the Doppler-injected provider credentials, so it can read
-    # the pull request but write nothing.
     permissions:
       contents: read
       id-token: write
@@ -417,8 +415,6 @@ jobs:
     needs: fork-external-live-manual
     name: announce-pass
     runs-on: ubuntu-latest
-    # No provider credentials reach this job: it only records the pass and asks
-    # the gate to re-evaluate it.
     permissions:
       actions: write
       contents: read

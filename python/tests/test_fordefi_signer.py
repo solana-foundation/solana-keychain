@@ -403,7 +403,6 @@ async def test_sign_message_polling_timeout() -> None:
     with pytest.raises(SignerError) as excinfo:
         await signer.sign_message(b"hello")
     assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
-    # The request is still pending at Fordefi, so its id is the caller's handle.
     assert excinfo.value.provider_transaction_id == "tx-1"
     assert len(respx.calls) == 4
 

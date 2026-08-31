@@ -218,9 +218,6 @@ func TestNewSuccess(t *testing.T) {
 	}
 }
 
-// TestNewKeepsWalletIDInOnePathSegment checks that traversal sequences and
-// URL metacharacters in a configured wallet id cannot retarget the request
-// path.
 func TestNewKeepsWalletIDInOnePathSegment(t *testing.T) {
 	for _, tc := range []struct{ walletID, wantPath string }{
 		{"wa-scope/../wa-target", "/wallets/wa-scope%2F..%2Fwa-target"},

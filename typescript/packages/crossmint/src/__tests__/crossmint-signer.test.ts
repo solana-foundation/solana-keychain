@@ -65,7 +65,6 @@ function testPrivateKey(seed: Uint8Array) {
         type: 'pkcs8',
     });
 }
-// Returned signatures are verified against the returned message bytes, so the
 // decoded envelopes these tests hand back must be signed for real.
 function testKeypair(seedByte: number) {
     const privateKey = testPrivateKey(new Uint8Array(32).fill(seedByte));
@@ -936,8 +935,6 @@ describe('CrossmintSigner', () => {
             expect(error.context?.cause).toMatchObject({ code: 'SIGNER_REMOTE_API_ERROR' });
             expect(error.context?.providerTransactionId).toBeUndefined();
             expect(error.context?.status).toBe(503);
-            // With no transaction id to check, the key the bytes went out under
-            // is the caller's only handle on a safe resend.
             const sentKey = (vi.mocked(fetch).mock.calls[1]![1]!.headers as Record<string, string>)[
                 'x-idempotency-key'
             ];
@@ -1071,8 +1068,6 @@ describe('CrossmintSigner', () => {
             expect(body.params.signer).toBe('my-signer-id');
         });
 
-        // Pins the exact bytes hashed into the idempotency key. Every language must
-        // derive the same key from the same locator and message.
         it('namespaces the idempotency key input by the signer locator', async () => {
             vi.mocked(fetch).mockImplementation(() => Promise.resolve(mockWalletResponse()));
             const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);

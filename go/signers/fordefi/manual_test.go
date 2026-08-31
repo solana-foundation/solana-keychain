@@ -250,9 +250,6 @@ func TestManualIdempotencyKeyIsNamespacedAwayFromAuto(t *testing.T) {
 	}
 }
 
-// Fordefi rewrites the Compute Budget instructions from the fee the create
-// carries, so two creates over identical bytes with different fees are different
-// operations and must not deduplicate onto each other.
 func TestNativeIdempotencyKeyBindsChainAndFee(t *testing.T) {
 	message := []byte("serialized message bytes")
 	base := nativeIdempotencyKey(PushModeAuto, ChainSolanaMainnet, testVaultID, nil, message)
@@ -300,9 +297,6 @@ func TestModifyAndSignTransactionRejectsATransactionItDoesNotPayFor(t *testing.T
 	}
 }
 
-// Manual signing never broadcasts, so submitting bytes that already carry
-// signatures is the caller's call. The rewrite voids them, and the transaction
-// the caller ends up holding carries only what Fordefi returned.
 func TestModifyAndSignTransactionAcceptsAnAlreadySignedTransaction(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	returned, _, signature := rewrittenTransaction(t, pub)

@@ -56,11 +56,7 @@ export interface CreateRawTransactionRequest {
 
 export interface CreateProgramCallTransactionRequest {
     assetId: string;
-    /**
-     * Message-derived id Fireblocks enforces as unique, so a resend of the same
-     * bytes is rejected rather than signed twice, and an accepted create stays
-     * findable when its response was lost.
-     */
+    /** Message-derived id Fireblocks uses to deduplicate PROGRAM_CALL creates. */
     externalTxId: string;
     extraParameters: ProgramCallExtraParameters;
     operation: 'PROGRAM_CALL';

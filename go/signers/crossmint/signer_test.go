@@ -404,8 +404,6 @@ func assertUnconfirmedWithoutID(t *testing.T, err error, wantStatus int) {
 	}
 }
 
-// Pins the exact bytes hashed into the idempotency key. Every language must
-// derive the same key from the same locator and message.
 func TestNamespacedKeyInputIsNamespacedBySignerLocator(t *testing.T) {
 	for _, tc := range []struct{ locator, want string }{
 		{"", "crossmint:solana:0::MSG"},
@@ -428,8 +426,6 @@ func TestCreateServerErrorIsUnconfirmedWithoutID(t *testing.T) {
 	assertUnconfirmedWithoutID(t, err, http.StatusServiceUnavailable)
 }
 
-// With no transaction id to check, the key the bytes went out under is the
-// caller's only handle on a resend that cannot land the transfer twice.
 func TestUnconfirmedCreateCarriesTheKeyItWasSubmittedUnder(t *testing.T) {
 	var sentKey string
 	priv := testutils.TestPrivateKey()
@@ -472,8 +468,6 @@ func TestCreateAcceptedWithoutIDIsUnconfirmed(t *testing.T) {
 	assertUnconfirmedWithoutID(t, err, 0)
 }
 
-// A blank create id is no handle at all: taken at face value it would be
-// spliced into the poll and approval URLs and reported as a recovery handle.
 func TestCreateAcceptedWithBlankIDIsUnconfirmedWithoutOne(t *testing.T) {
 	s := createStatusSigner(t, http.StatusCreated, `{"id":"   ","status":"pending"}`)
 	tx, err := testutils.CreateTestTransaction(s.Pubkey())
@@ -582,9 +576,6 @@ func TestSignAndSendTransactionAcceptsSignatureFromOnChainTransactionBytes(t *te
 	assertCallerTransactionUntouched(t, localTx)
 }
 
-// A signature that does not cover the envelope it arrived in identifies no
-// landed transaction, so returning it would send the caller to look up a
-// transaction that does not exist and conclude nothing landed.
 func TestSignAndSendTransactionRejectsSignatureNotCoveringReturnedMessage(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	signerPubkey := testutils.PubkeyOf(priv)

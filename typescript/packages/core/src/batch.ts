@@ -51,25 +51,7 @@ export async function signBatchStaggered<TItem, TResult>(
     );
 }
 
-/**
- * Run `fn` over `items` one at a time, stopping at the first rejection, for a
- * backend whose per-item work has irreversible server-side effects.
- *
- * Concurrent submission would abandon siblings the provider has already
- * accepted and may execute, so a failure in one item leaves duplicate-spend
- * risk on retry. Running in order means nothing past the failure is ever
- * submitted, and the results collected before it travel on the error under
- * `completedKey` alongside `failedIndex`: the items before the failure are
- * done, and only the failing one needs reconciling.
- *
- * @param items - The messages or transactions to sign.
- * @param fn - Signer-specific function that signs one item.
- * @param delayMs - Gap between items in ms (a backend's `requestDelayMs`).
- * @param completedKey - Error-context key the collected results are attached
- * under, naming what they are (e.g. `completedSignatures`).
- * @param abortSignal - Checked before each item; items already handed to `fn`
- * are cancelled by `fn` itself.
- */
+/** Signs items sequentially so completed provider-side work is retained on failure. */
 export async function signBatchSequential<TItem, TResult>(
     items: readonly TItem[],
     fn: (item: TItem, index: number) => Promise<TResult>,

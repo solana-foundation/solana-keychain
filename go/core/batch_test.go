@@ -108,8 +108,6 @@ func TestStaggerAnchorsToBatchStart(t *testing.T) {
 	}
 }
 
-// effectfulSigner reports server-side effects, records the order of its calls,
-// and fails the transaction whose message names failAt.
 type effectfulSigner struct {
 	countingSigner
 	failAt   byte
@@ -137,9 +135,6 @@ func (e *effectfulSigner) SignTransaction(_ context.Context, tx *solana.Transact
 	return SignedTransaction{}, nil
 }
 
-// A signer with server-side effects is batched one transaction at a time, and a
-// failure returns the transactions completed before it: each left a provider-side
-// request the caller has to reconcile, so discarding them would hide that work.
 func TestSignTransactionsSerializesASignerWithServerSideEffects(t *testing.T) {
 	markedTx := func(marker byte) *solana.Transaction {
 		return &solana.Transaction{

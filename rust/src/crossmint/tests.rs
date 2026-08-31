@@ -14,8 +14,6 @@ fn assert_caller_transaction_untouched(tx: &VersionedTransaction) {
     );
 }
 
-/// The key the signer must derive: the message namespaced by the signer locator,
-/// so two signers on one wallet cannot deduplicate onto each other.
 fn expected_idempotency_key(locator: &str, message_bytes: &[u8]) -> String {
     let mut input = format!("crossmint:solana:{}:{}:", locator.len(), locator).into_bytes();
     input.extend_from_slice(message_bytes);
@@ -181,8 +179,6 @@ fn test_new_rejects_insecure_api_base_url() {
     assert!(matches!(err, SignerError::ConfigError(_)));
 }
 
-/// Pins the exact bytes hashed into the idempotency key. Every language must
-/// derive the same key from the same locator and message.
 #[test]
 fn test_the_idempotency_key_input_is_namespaced_by_the_signer_locator() {
     let mut signer = create_test_signer("https://api.crossmint.com", 1, 1);
@@ -357,9 +353,6 @@ async fn test_sign_and_send_transaction_success() {
     assert_caller_transaction_untouched(&local_tx);
 }
 
-/// Dropping the signing future after the create was accepted runs no further
-/// code, so the registered slot is the only carrier for the id the caller must
-/// reconcile.
 #[tokio::test]
 async fn test_a_cancelled_send_leaves_the_transaction_id_in_the_pending_slot() {
     let server = MockServer::start().await;
@@ -409,8 +402,6 @@ async fn test_a_cancelled_send_leaves_the_transaction_id_in_the_pending_slot() {
     assert_eq!(pending.get(), Some("tx-accepted".to_string()));
 }
 
-/// A call that returns normally clears the slot: its id is already in the
-/// result or the error.
 #[tokio::test]
 async fn test_a_completed_send_clears_the_pending_slot() {
     let server = MockServer::start().await;
@@ -550,9 +541,6 @@ async fn test_sign_and_send_transaction_accepts_unrelated_signer_key() {
     assert_caller_transaction_untouched(&local_tx);
 }
 
-/// A signature that does not cover the envelope it arrived in identifies no
-/// landed transaction, so returning it would send the caller to look up a
-/// transaction that does not exist and conclude nothing landed.
 #[tokio::test]
 async fn test_sign_and_send_transaction_rejects_a_signature_not_covering_the_returned_message() {
     let server = MockServer::start().await;
@@ -911,8 +899,6 @@ async fn test_create_accepted_without_an_id_is_unconfirmed() {
     }
 }
 
-/// A blank create id is no handle at all: taken at face value it would be
-/// spliced into the poll and approval URLs and reported as a recovery handle.
 #[tokio::test]
 async fn test_create_accepted_with_a_blank_id_is_unconfirmed_without_one() {
     let server = MockServer::start().await;

@@ -247,10 +247,6 @@ func extractTransactionID(name string) (string, error) {
 	return name, nil
 }
 
-// trimWalletID reduces a full wallet resource name to its id. A resource that
-// names a vault other than the configured one is rejected rather than silently
-// re-parented: the id would otherwise be looked up under vaultID, resolving a
-// different wallet than the caller wrote down.
 func trimWalletID(value, vaultID string) (string, error) {
 	const marker = "/wallets/"
 	idx := strings.LastIndex(value, marker)

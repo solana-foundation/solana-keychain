@@ -471,8 +471,6 @@ fn test_from_config_rejects_non_https_base_url() {
     }
 }
 
-/// A dot-segment account id must become one percent-encoded path segment, so
-/// the URL cannot be retargeted and the JWT `uris` claim keeps matching it.
 #[test]
 fn test_paths_escape_the_account_id_as_one_segment() {
     let mut signer = create_uninitialized_test_signer("https://api.openfort.xyz");

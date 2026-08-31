@@ -196,10 +196,6 @@ func (s *Signer) signProgramCall(ctx context.Context, tx *solana.Transaction, me
 	return sig, nil
 }
 
-// externalTxID derives the externalTxId a PROGRAM_CALL create carries, bound to
-// the asset and vault account as well as the message: the same bytes submitted
-// against a different vault are a different operation and must not deduplicate
-// onto each other.
 func (s *Signer) externalTxID(message []byte) string {
 	namespace := "fireblocks:solana:program_call:" + s.assetID + ":" + s.vaultAccountID + ":"
 	return core.IdempotencyKeyFromMessage(append([]byte(namespace), message...))

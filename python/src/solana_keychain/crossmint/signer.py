@@ -169,8 +169,6 @@ class CrossmintSigner(SendingSigner):
             json_body=json_body,
             client=self._http_client,
         )
-        # A blank string is as unusable as an absent field: it would be spliced
-        # into a request path or handed back as a recovery handle.
         if (
             not isinstance(response, dict)
             or (value := response.get(required_field)) is None
@@ -481,9 +479,6 @@ class CrossmintSigner(SendingSigner):
         try:
             signature = await self._finish_managed_transaction(create_response, expected_message)
         except asyncio.CancelledError as error:
-            # Awaiting a cancelled task strips the raised instance, so the id is
-            # also logged and left in the registered slot; the re-raise must stay
-            # a CancelledError for asyncio.
             _logger.warning(
                 "Crossmint may have executed cancelled transaction %s; check it before retrying",
                 provider_transaction_id,

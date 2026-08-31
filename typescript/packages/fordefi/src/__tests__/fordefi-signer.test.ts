@@ -118,7 +118,6 @@ async function setupNativeManual(version: 0 | 1) {
 }
 
 // A durable-nonce wire transaction whose nonce account is generated, so a
-// caller constraint naming a different account is distinguishable.
 async function createNonceWireTransaction() {
     const feePayerSigner = await generateKeyPairSigner();
     const nonceAccount = await generateKeyPairSigner();
@@ -144,8 +143,6 @@ async function createNonceWireTransaction() {
     };
 }
 
-// The native guards read the fee payer and the required-signer count out of the
-// compiled message, so a caller transaction needs real message bytes.
 function compiledMessageBytes(feePayer: string, extraSigner?: string) {
     return compileTransaction(
         pipe(
@@ -178,7 +175,6 @@ function unsignedManualTransaction(
 }
 
 // The base64 codec mis-slices a SharedArrayBuffer-backed view at a non-zero
-// byteOffset, so this shape only encodes correctly from a normalized copy.
 function sharedOffsetView(bytes: Uint8Array) {
     const shared = new Uint8Array(new SharedArrayBuffer(bytes.length + 8));
     shared.set(bytes, 8);
@@ -390,7 +386,6 @@ describe('createFordefiSigner', () => {
                 .mockImplementation(() => Promise.resolve(mockPollResponse('pending_signature')));
 
             const mockTx = { messageBytes: new Uint8Array(32) } as never;
-            // The request is still pending at Fordefi, so its id is the caller's handle.
             await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
                 code: 'SIGNER_REMOTE_API_ERROR',
                 context: expect.objectContaining({ providerTransactionId: 'tx-123' }) as object,
@@ -616,8 +611,6 @@ describe('createFordefiSigner', () => {
                 observed.add((postOpts.headers as Record<string, string>)['x-idempotence-id']!);
             }
 
-            // Fordefi rewrites the Compute Budget instructions from the fee, so
-            // the same bytes under a different fee are a different operation.
             expect(observed.size).toBe(fees.length);
         });
 
@@ -654,8 +647,6 @@ describe('createFordefiSigner', () => {
 
         it('reads the required signers from the message, not from the signature map', async () => {
             const signer = await createFordefiSigner(nativeConfig);
-            // A caller-built signature map can name the vault while the message it
-            // came with requires someone else, so only the message is authoritative.
             const mockTx = {
                 messageBytes: compiledMessageBytes(MOCK_ADDRESS, RENT_SYSVAR_ADDRESS),
                 signatures: { [MOCK_ADDRESS]: null },
@@ -669,8 +660,6 @@ describe('createFordefiSigner', () => {
 
         it('rejects an already-signed transaction before submitting remote work', async () => {
             const signer = await createFordefiSigner(nativeConfig);
-            // Fordefi replaces the blockhash before broadcasting, so re-signing
-            // bytes the vault already signed would land the transfer twice.
             const mockTx = {
                 messageBytes: compiledMessageBytes(MOCK_ADDRESS),
                 signatures: { [MOCK_ADDRESS]: MOCK_SIGNATURE_BYTES },
@@ -884,8 +873,6 @@ describe('createFordefiSigner', () => {
             );
 
             expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
-            // The first transaction is broadcast and its signature survives; the
-            // third is never submitted, so auto mode cannot broadcast past a failure.
             expect(error.context?.failedIndex).toBe(1);
             expect(error.context?.completedSignatures).toStrictEqual([fixture.signature]);
             expect(vi.mocked(fetch).mock.calls).toHaveLength(3);
@@ -1041,8 +1028,6 @@ describe('createFordefiSigner', () => {
         it('reads the fee payer from the message, not from the signature map', async () => {
             const { config, fixture } = await setupNativeManual(0);
             const signer = await createFordefiSigner(config);
-            // The map's first key is the vault, but the message it came with is paid
-            // for by someone else, and the message is what Fordefi would rewrite.
             const mockTx = {
                 messageBytes: compiledMessageBytes(RENT_SYSVAR_ADDRESS),
                 signatures: { [fixture.feePayer]: null },
@@ -1055,8 +1040,6 @@ describe('createFordefiSigner', () => {
         });
 
         it('accepts an already-signed transaction and returns only what Fordefi signed', async () => {
-            // Manual signing never broadcasts, so submitting signed bytes is the
-            // caller's call; the rewrite voids those signatures either way.
             const { config, fixture } = await setupNativeManual(0);
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))

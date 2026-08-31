@@ -89,11 +89,7 @@ const FAILURE_STATES = new Set([
     'mined_reverted',
 ]);
 
-/**
- * Render a fee as `type|priority_level|unit_price|priority_fee`, with empty
- * segments for the fields the variant does not carry. The field order is fixed
- * so an idempotency key derived from it stays stable.
- */
+/** Renders the canonical fee input for native idempotency keys. */
 function canonicalFee(fee?: FordefiSolanaFee): string {
     if (!fee) {
         return '';
@@ -544,9 +540,6 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         transactions: readonly (Transaction | (Transaction & TransactionWithLifetime))[],
         config?: TransactionModifyingSignerConfig,
     ): Promise<readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[]> {
-        // Each submit is a Fordefi-side create, so the batch runs one at a time:
-        // a concurrent failure would abandon siblings Fordefi has already
-        // accepted and signed.
         return await signBatchSequential(
             transactions,
             async transaction => {
@@ -689,9 +682,6 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
             });
         }
 
-        // Auto mode broadcasts every accepted submit, so the batch runs one at a
-        // time: a concurrent failure would discard both a sibling's unconfirmed
-        // transaction id and the signature of one already on chain.
         return await signBatchSequential(
             transactions,
             async transaction => {

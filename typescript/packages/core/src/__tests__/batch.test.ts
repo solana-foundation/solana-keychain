@@ -154,7 +154,6 @@ describe('signBatchSequential', () => {
 
         expect(attempted).toEqual([1, 2]);
         expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
-        // The failing item's own context survives alongside the batch position.
         expect(error.context).toMatchObject({
             completedSignatures: ['signed-1'],
             failedIndex: 1,

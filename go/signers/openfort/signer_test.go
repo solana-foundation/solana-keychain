@@ -493,8 +493,6 @@ func TestDoPreservesTransportSignerError(t *testing.T) {
 	}
 }
 
-// A dot-segment account id must reach the wire as one percent-encoded path
-// segment, so a normalizing route cannot resolve it to a different account.
 func TestNewEscapesAccountIDAsOnePathSegment(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

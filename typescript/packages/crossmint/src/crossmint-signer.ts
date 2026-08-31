@@ -207,9 +207,6 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
         transactions: readonly (Transaction | (Transaction & TransactionWithLifetime))[],
         config?: TransactionSendingSignerConfig,
     ): Promise<readonly SignatureBytes[]> {
-        // Each transaction has irreversible server-side effects
-        // (createTransaction, and auto-approval when signerSecret is set), so
-        // the batch runs one at a time.
         return await signBatchSequential(
             transactions,
             async transaction => await this.signTransactionManaged(transaction, config?.abortSignal),
@@ -409,8 +406,6 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
         try {
             return parseTransactionResponse(response, 'create transaction');
         } catch (error) {
-            // The create may have been accepted even when the body is otherwise
-            // unusable, so an id present there is the caller's recovery handle.
             const providerTransactionId = providerTransactionIdOf(response);
             if (providerTransactionId === undefined) {
                 throw error;
@@ -462,13 +457,6 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
         });
     }
 
-    /**
-     * Binds the idempotency key to the signer locator as well as the message. The
-     * create body carries the locator, so two signers on one wallet submitting
-     * identical bytes are distinct operations and must not deduplicate onto each
-     * other. The locator is length-delimited because it contains colons itself.
-     * The wallet locator is left out: it is already the request path.
-     */
     private namespacedKeyInput(messageBytes: Transaction['messageBytes']): Uint8Array {
         const locator = new TextEncoder().encode(this.signer ?? '');
         const prefix = new TextEncoder().encode(`crossmint:solana:${locator.length}:`);

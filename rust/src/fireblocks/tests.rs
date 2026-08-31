@@ -501,9 +501,6 @@ async fn test_program_call_signs_only_and_takes_the_signature_from_signed_messag
     assert_eq!(transaction.signatures[0], signature);
 }
 
-/// The id has to be derived from the submitted bytes and the vault it goes to:
-/// it is both what stops a resend from signing twice and what makes an accepted
-/// create findable when its response was lost.
 #[tokio::test]
 async fn test_program_call_create_carries_a_message_derived_external_tx_id() {
     let mock_server = MockServer::start().await;
@@ -543,8 +540,6 @@ async fn test_program_call_create_carries_a_message_derived_external_tx_id() {
     signer.sign_transaction(&mut transaction).await.unwrap();
 }
 
-/// RAW signs nothing on its own, and the same message may legitimately be signed
-/// again, so it must not carry a uniqueness constraint.
 #[tokio::test]
 async fn test_raw_create_carries_no_external_tx_id() {
     let mock_server = MockServer::start().await;
@@ -743,9 +738,6 @@ async fn test_program_call_broadcast_despite_sign_only_is_reported_as_unconfirme
     }
 }
 
-/// A PROGRAM_CALL the poll never resolves, whether the attempt budget ran out or
-/// the poll itself failed, exists on Fireblocks under a known id, so that id is
-/// the caller's recovery handle rather than a bare polling error.
 #[tokio::test]
 async fn test_program_call_unresolved_poll_keeps_the_transaction_id() {
     for poll_response in [

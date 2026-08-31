@@ -217,8 +217,6 @@ func (s *Signer) createTransaction(ctx context.Context, request createTransactio
 	return created, nil
 }
 
-// transactionIDFromBody reads the transaction id out of a response body that
-// could not be used as a whole, so an accepted create still yields a handle.
 func transactionIDFromBody(body []byte) string {
 	var parsed struct {
 		ID string `json:"id"`
@@ -251,9 +249,6 @@ func (s *Signer) getTransaction(ctx context.Context, txID string) (transactionRe
 // sign-only PROGRAM_CALL); FAILED/CANCELLED/REJECTED/BLOCKED fail signing; a
 // PROGRAM_CALL that reached the network despite signOnly reports
 // CodeBroadcastUnconfirmed; anything else waits pollInterval and retries.
-// Cancellation of ctx aborts the wait. A PROGRAM_CALL left unresolved, whether by a
-// failed poll or an exhausted budget, also reports CodeBroadcastUnconfirmed with the
-// transaction id: the request exists on Fireblocks and only its outcome is unknown.
 func (s *Signer) pollForSignature(ctx context.Context, txID string, programCall bool) (transactionResponse, error) {
 	for attempt := 0; attempt < s.maxPollAttempts; attempt++ {
 		response, err := s.getTransaction(ctx, txID)

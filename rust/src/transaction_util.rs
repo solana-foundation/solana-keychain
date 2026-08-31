@@ -3,25 +3,7 @@ use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use base64::{engine::general_purpose::STANDARD, Engine};
 
-/// A slot a broadcast-managed signer writes the accepted provider transaction
-/// id into, so the id survives a cancelled call.
-///
-/// Dropping a future runs none of its code, so a signer cancelled after the
-/// provider accepted the transaction returns nothing at all, not even an error
-/// carrying the id. Register a clone of this slot on the signer, and read it
-/// after a cancellation to learn which provider transaction to reconcile before
-/// retrying. A call that returns normally clears the slot, since the id is then
-/// already in the result or the error.
-///
-/// ```no_run
-/// # use solana_keychain::transaction_util::PendingTransactionId;
-/// let pending = PendingTransactionId::new();
-/// // let signer = signer.with_pending_transaction_id(pending.clone());
-/// // ... cancel the signing future ...
-/// if let Some(provider_tx_id) = pending.get() {
-///     println!("check {provider_tx_id} with the provider before retrying");
-/// }
-/// ```
+/// Holds a provider transaction id when cancellation prevents returning it.
 #[cfg(any(feature = "crossmint", feature = "fordefi"))]
 #[derive(Clone, Debug, Default)]
 pub struct PendingTransactionId(std::sync::Arc<std::sync::Mutex<Option<String>>>);
@@ -71,16 +53,7 @@ pub(crate) fn idempotency_key_from_message(message_bytes: &[u8]) -> String {
     )
 }
 
-/// A 4xx other than 408 is the only create outcome that rules out a transaction;
-/// anything else (no response, timeout, 5xx, unusable success body) may already be
-/// executing. A 408 is a timeout reached while the request was being processed, so
-/// it does not rule the transaction out either.
-/// `status` is `None` when no response arrived, and is passed on only when the
-/// response was the failure. `provider_tx_id` is the id read out of the response
-/// body when one was readable there, and `None` when the failure came before any
-/// id was known. `idempotency_key` is the key the create was submitted under,
-/// which is the only recovery handle left when no id was returned: replaying the
-/// identical bytes under it cannot create a second transaction.
+/// Classifies ambiguous creates while preserving their provider id and idempotency key.
 #[cfg(any(feature = "crossmint", feature = "fireblocks", feature = "fordefi"))]
 pub(crate) fn unconfirmed_unless_rejected(
     status: Option<u16>,

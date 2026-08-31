@@ -452,12 +452,7 @@ function trimResourcePrefix(value: string, prefix: string): string {
     return value.startsWith(prefix) ? value.slice(prefix.length) : value;
 }
 
-/**
- * Reduces a full wallet resource name to its id. A resource that names a vault
- * other than the configured one is rejected rather than silently re-parented:
- * the id would otherwise be looked up under `vaultId`, resolving a different
- * wallet than the caller wrote down.
- */
+/** Extracts a wallet id and rejects resources from another vault. */
 function trimWalletId(value: string, vaultId: string): string {
     const marker = '/wallets/';
     const markerIndex = value.lastIndexOf(marker);

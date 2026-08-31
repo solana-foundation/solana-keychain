@@ -680,9 +680,6 @@ describe('createFireblocksSigner', () => {
             expect(result[0]).toHaveProperty(signer.address);
         });
 
-        // The id has to be derived from the submitted bytes and the vault they go
-        // to: it is both what stops a resend from signing twice and what makes an
-        // accepted create findable when its response was lost.
         it('carries a message-derived externalTxId on the create', async () => {
             const { signer, transaction } = await createProgramCallSigner();
             mockCreateAndPoll({
@@ -863,8 +860,6 @@ describe('createFireblocksSigner', () => {
             );
 
             expect(error.code).toBe('SIGNER_BROADCAST_UNCONFIRMED');
-            // The third transaction is never created, so no PROGRAM_CALL is left
-            // behind past the failure.
             expect(error.context?.failedIndex).toBe(1);
             expect(error.context?.completedSignatures).toHaveLength(1);
             expect(mockFetch.mock.calls).toHaveLength(4);

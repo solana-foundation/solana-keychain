@@ -75,11 +75,7 @@ type SignerError struct {
 	// ProviderStatus is the provider's HTTP status when its response was the
 	// failure, and 0 otherwise. Exported for the same reason as ProviderTxID.
 	ProviderStatus int
-	// IdempotencyKey is the key an ambiguous create was submitted under, when
-	// the backend sends one ("" otherwise). With no ProviderTxID to check,
-	// resending the identical bytes under this key is the only recovery that
-	// cannot land the transfer twice. Exported for the same reason as
-	// ProviderTxID: it is derived from the message and carries no secret.
+	// IdempotencyKey is the key used to submit an ambiguous create, when available.
 	IdempotencyKey string
 	detail         string
 	cause          error

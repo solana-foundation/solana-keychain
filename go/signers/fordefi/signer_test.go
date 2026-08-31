@@ -398,7 +398,6 @@ func TestSignMessagePollingTimeout(t *testing.T) {
 	if errors.As(err, &se) && !strings.Contains(se.Detail(), "polling timed out") {
 		t.Errorf("detail = %q, want polling timeout message", se.Detail())
 	}
-	// The request is still pending at Fordefi, so its id is the caller's handle.
 	if errors.As(err, &se) && se.ProviderTxID != "tx-123" {
 		t.Errorf("ProviderTxID = %q, want tx-123", se.ProviderTxID)
 	}
@@ -686,8 +685,6 @@ func TestSignTransactionNativeSubmitServerErrorIsUnconfirmedWithoutID(t *testing
 	assertBroadcastUnconfirmedWithoutID(t, err, http.StatusBadGateway)
 }
 
-// A failed submit whose body still names the transaction has been accepted as far
-// as the caller can tell, so that id is their handle for reconciling it.
 func TestSignTransactionNativeSubmitServerErrorKeepsIDFromBody(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
@@ -726,7 +723,6 @@ func TestSignTransactionNativeSubmitWithoutIDIsUnconfirmed(t *testing.T) {
 	assertBroadcastUnconfirmedWithoutID(t, err, 0)
 }
 
-// A 408 is a timeout reached while the create was being processed, not a rejection.
 func TestSignTransactionNativeSubmitProcessingTimeoutIsUnconfirmed(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	s := newNativeTestSigner(t, nativeConfig(t), pub.String(), func(mux *http.ServeMux) {
@@ -983,8 +979,6 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 	}
 }
 
-// Fordefi replaces the blockhash before broadcasting, so re-signing bytes the
-// vault already signed would land the same transfer a second time.
 func TestSignAndSendTransactionRejectsAnAlreadySignedTransaction(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	var requests atomic.Int64

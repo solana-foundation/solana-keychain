@@ -182,11 +182,6 @@ func (s *Signer) SignAndSendTransaction(ctx context.Context, tx *solana.Transact
 	return sig, nil
 }
 
-// namespacedKeyInput binds the idempotency key to the signer locator as well as
-// the message. The create body carries the locator, so two signers on one wallet
-// submitting identical bytes are distinct operations and must not deduplicate
-// onto each other. The locator is length-delimited because it contains colons
-// itself. The wallet locator is left out: it is already the request path.
 func (s *Signer) namespacedKeyInput(messageBytes []byte) []byte {
 	prefix := "crossmint:solana:" + strconv.Itoa(len(s.signerLocator)) + ":" + s.signerLocator + ":"
 	return append([]byte(prefix), messageBytes...)
@@ -374,10 +369,6 @@ func (s *Signer) extractSignatureFromResponse(response transactionResponse, expe
 		"unable to extract signature from Crossmint transaction response")
 }
 
-// extractSignatureFromSerializedTransaction decodes the base58 onChain.transaction
-// and returns its fee-payer signature, verified against that transaction's own
-// message bytes.
-//
 // Crossmint sponsors gas, so when it rewrites it becomes the fee payer and the
 // message it signs differs from the caller's. The decoded transaction is returned
 // with the signature so the caller is never handed it over its own message.

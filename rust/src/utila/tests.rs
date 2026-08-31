@@ -442,8 +442,6 @@ fn server_url() -> String {
     "http://127.0.0.1:1".to_string()
 }
 
-/// A wallet resource naming another vault must be rejected, not re-parented
-/// under the configured vault_id.
 #[test]
 fn test_wallet_resource_naming_a_foreign_vault_is_rejected() {
     let mut config = config();

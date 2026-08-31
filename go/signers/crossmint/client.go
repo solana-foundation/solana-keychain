@@ -215,8 +215,6 @@ func parseResponseWithRequiredField[T any](status int, body []byte, requiredFiel
 		return zero, core.NewSignerError(core.CodeRemoteAPIError, opContext+": "+core.SanitizeRemoteResponse(message))
 	}
 
-	// A blank string is as unusable as an absent field: it would be spliced
-	// into a request path or handed back as a recovery handle.
 	if !hasUsableField(value, requiredField) {
 		if message, ok := extractErrorMessage(value); ok {
 			return zero, core.NewSignerError(core.CodeRemoteAPIError, opContext+": "+core.SanitizeRemoteResponse(message))

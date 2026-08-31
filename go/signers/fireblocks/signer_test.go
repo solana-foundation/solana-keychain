@@ -261,9 +261,6 @@ func TestSignTransactionProgramCallSignOnly(t *testing.T) {
 	}
 }
 
-// The id has to be derived from the submitted bytes and the vault they go to: it
-// is both what stops a resend from signing twice and what makes an accepted
-// create findable when its response was lost.
 func TestSignTransactionProgramCallCarriesAMessageDerivedExternalTxID(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	pub := testutils.TestPublicKey()
@@ -301,8 +298,6 @@ func TestSignTransactionProgramCallCarriesAMessageDerivedExternalTxID(t *testing
 	}
 }
 
-// RAW signs nothing on its own, and the same message may legitimately be signed
-// again, so it must not carry a uniqueness constraint.
 func TestSignMessageRawCarriesNoExternalTxID(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	pub := testutils.TestPublicKey()
@@ -445,9 +440,6 @@ func TestSignTransactionProgramCallBroadcastIsUnconfirmed(t *testing.T) {
 	}
 }
 
-// A PROGRAM_CALL left unresolved by the poll, whether the budget ran out or the
-// poll itself failed, exists on Fireblocks under a known id, so that id is the
-// caller's recovery handle rather than a bare polling error.
 func TestSignTransactionProgramCallUnresolvedPollKeepsTransactionID(t *testing.T) {
 	pub := testutils.TestPublicKey()
 
@@ -486,10 +478,6 @@ func TestSignTransactionProgramCallUnresolvedPollKeepsTransactionID(t *testing.T
 	}
 }
 
-// A PROGRAM_CALL create that returns 200 with a body that cannot be used as a
-// whole may still have been accepted, so the id in that body is preserved as
-// the caller's recovery handle. A RAW create signs nothing on its own and keeps
-// the plain failure.
 func TestCreateWithUnusableBody(t *testing.T) {
 	for _, tc := range []struct {
 		name           string

@@ -139,12 +139,7 @@ impl CrossmintSigner {
         })
     }
 
-    /// Register a slot the signer writes the accepted Crossmint transaction id
-    /// into, so the id survives a cancelled `sign_and_send_transaction`.
-    ///
-    /// A call that returns normally clears the slot: its id is already in the
-    /// returned signature's transaction or in
-    /// [`SignerError::BroadcastUnconfirmed`].
+    /// Registers a slot for the provider id when cancellation prevents returning it.
     pub fn with_pending_transaction_id(mut self, pending: PendingTransactionId) -> Self {
         self.pending_transaction_id = Some(pending);
         self

@@ -326,8 +326,6 @@ async def test_create_server_error_is_unconfirmed_without_a_transaction_id() -> 
 
 @respx.mock
 async def test_create_server_error_keeps_a_transaction_id_from_the_body() -> None:
-    # A 5xx can still name a transaction Crossmint accepted; that id is the
-    # caller's only handle for reconciling it.
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(503, json={"id": "tx-accepted"}))
@@ -340,8 +338,6 @@ async def test_create_server_error_keeps_a_transaction_id_from_the_body() -> Non
 
 @respx.mock
 async def test_an_unconfirmed_create_carries_the_key_it_was_submitted_under() -> None:
-    # With no transaction id to check, the key the bytes went out under is the
-    # only handle on a resend that cannot land the transfer twice.
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     route = respx.post(TRANSACTIONS_URL).mock(
@@ -369,8 +365,6 @@ async def test_create_accepted_without_an_id_is_unconfirmed() -> None:
 
 @respx.mock
 async def test_create_accepted_with_a_blank_id_is_unconfirmed_without_one() -> None:
-    # A blank create id is no handle at all: taken at face value it would be
-    # spliced into the poll and approval URLs and reported as a recovery handle.
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     respx.post(TRANSACTIONS_URL).mock(
@@ -940,9 +934,6 @@ async def test_caller_exact_signature_is_returned_without_touching_the_transacti
 
 @respx.mock
 async def test_signature_not_covering_returned_transaction_is_rejected() -> None:
-    # A signature that does not cover the envelope it arrived in identifies no
-    # landed transaction, so returning it would send the caller to look up a
-    # transaction that does not exist and conclude nothing landed.
     keypair = Keypair()
     signer = await initialized_signer(keypair)
     transaction = create_test_transaction(keypair.pubkey())

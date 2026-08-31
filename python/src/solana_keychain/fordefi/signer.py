@@ -553,9 +553,6 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
         try:
             signed = await self._finish_native_broadcast(transaction_id)
         except asyncio.CancelledError as error:
-            # Awaiting a cancelled task strips the raised instance, so the id is
-            # also logged and left in the registered slot; the re-raise must stay
-            # a CancelledError for asyncio.
             _logger.warning(
                 "Fordefi may have executed cancelled transaction %s; check it before retrying",
                 transaction_id,

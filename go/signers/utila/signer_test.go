@@ -690,8 +690,6 @@ func TestStringDoesNotLeakSecrets(t *testing.T) {
 	}
 }
 
-// A wallet resource naming another vault must be rejected, not re-parented
-// under the configured vault id.
 func TestNewRejectsWalletResourceFromAnotherVault(t *testing.T) {
 	_, err := New(context.Background(), Config{
 		ServiceAccountEmail:         testEmail,

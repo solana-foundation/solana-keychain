@@ -70,8 +70,6 @@ await rpc.sendTransaction(getBase64EncodedWireTransaction(signedTransaction), { 
 
 Requirements and caveats:
 
-- The Fordefi vault must be the transaction fee payer, checked before anything is submitted.
-- Run manual signing before every other signer. A transaction that already carries signatures is accepted, but the rewrite voids them: what comes back carries only Fordefi's, so gather the remaining signatures over the returned message.
 - Fordefi may rewrite the message: at minimum the recent blockhash, and it manages the Compute Budget fee instructions, so a compute-unit limit or price you set yourself may not survive. What changed is **not** diffed, so inspect the result before broadcasting if its contents matter to you.
 - The returned signature is verified with ed25519 against the message Fordefi returned, at the vault's required-signer position. A mismatch fails and is never handed back.
 - Fordefi refreshes the blockhash but does not report its `lastValidBlockHeight`, so a refreshed lifetime carries Kit's `U64_MAX` placeholder; broadcast promptly rather than relying on local expiry detection.

@@ -314,11 +314,7 @@ class FireblocksSigner<TAddress extends string = string>
         return await this.pollForSignature(transactionId, 'PROGRAM_CALL', abortSignal);
     }
 
-    /**
-     * Create the PROGRAM_CALL signing request. A create that neither succeeds
-     * nor is rejected by a 4xx leaves a request Fireblocks may still act on, so
-     * it surfaces as BROADCAST_UNCONFIRMED; check Fireblocks before retrying.
-     */
+    /** Creates a PROGRAM_CALL signing request. */
     private async createProgramCallTransaction(
         request: CreateTransactionRequest,
         externalTxId: string,
@@ -360,12 +356,6 @@ class FireblocksSigner<TAddress extends string = string>
         return createResponse.id;
     }
 
-    /**
-     * The `externalTxId` a PROGRAM_CALL create carries, bound to the asset and
-     * vault account as well as the message: the same bytes submitted against a
-     * different vault are a different operation and must not deduplicate onto
-     * each other.
-     */
     private async externalTxId(messageBytes: ArrayLike<number>): Promise<string> {
         utf8Encoder ||= getUtf8Encoder();
         const namespace = utf8Encoder.encode(`fireblocks:solana:program_call:${this.assetId}:${this.vaultAccountId}:`);
@@ -532,10 +522,6 @@ class FireblocksSigner<TAddress extends string = string>
             });
         };
 
-        // A PROGRAM_CALL create is a Fireblocks-side request the caller may have
-        // to reconcile, so that mode runs one item at a time: a concurrent
-        // failure would discard sibling transaction ids. RAW signing has no
-        // server-side effect worth serializing.
         if (this.useProgramCall) {
             return await signBatchSequential(
                 transactions,

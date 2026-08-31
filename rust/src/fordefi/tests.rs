@@ -865,9 +865,6 @@ async fn test_fordefi_native_sign_transaction_missing_raw_transaction() {
     }
 }
 
-/// Dropping the signing future after Fordefi accepted the submit runs no
-/// further code, so the registered slot is the only carrier for the id the
-/// caller must reconcile.
 #[tokio::test]
 async fn test_a_cancelled_native_send_leaves_the_transaction_id_in_the_pending_slot() {
     let mock_server = MockServer::start().await;
@@ -932,8 +929,6 @@ async fn test_native_submit_server_error_is_unconfirmed_without_a_transaction_id
     }
 }
 
-/// A failed submit whose body still names the transaction has been accepted as
-/// far as the caller can tell, so that id is their handle for reconciling it.
 #[tokio::test]
 async fn test_native_submit_server_error_keeps_a_transaction_id_from_the_body() {
     let mock_server = MockServer::start().await;
@@ -1001,7 +996,6 @@ async fn test_native_submit_accepted_with_an_empty_id_is_unconfirmed() {
     }
 }
 
-/// 408 is a timeout reached while the create was being processed, not a rejection.
 #[tokio::test]
 async fn test_native_submit_timed_out_while_processing_is_unconfirmed() {
     let mock_server = MockServer::start().await;
@@ -1453,9 +1447,6 @@ async fn test_fordefi_manual_replaces_the_callers_transaction() {
     );
 }
 
-/// Fordefi rewrites the Compute Budget instructions from the fee the create
-/// carries, so two creates over identical bytes with different fees are
-/// different operations and must not deduplicate onto each other.
 #[test]
 fn test_canonical_fee_separates_every_fee_shape() {
     let rendered = [
@@ -1589,8 +1580,6 @@ async fn test_fordefi_manual_rejects_a_transaction_it_does_not_pay_for() {
     assert!(matches!(error, SignerError::SigningFailed(_)));
 }
 
-/// Fordefi replaces the blockhash before broadcasting, so re-signing bytes the
-/// vault already signed would land the same transfer a second time.
 #[tokio::test]
 async fn test_fordefi_auto_rejects_an_already_signed_transaction() {
     let keypair = create_test_keypair();
@@ -1607,9 +1596,6 @@ async fn test_fordefi_auto_rejects_an_already_signed_transaction() {
     assert!(matches!(error, SignerError::SigningFailed(_)));
 }
 
-/// Manual signing never broadcasts, so a caller may submit bytes that already
-/// carry signatures. The rewrite voids them, and the transaction the caller ends
-/// up holding carries only what Fordefi returned.
 #[tokio::test]
 async fn test_fordefi_manual_accepts_an_already_signed_transaction() {
     let mock_server = MockServer::start().await;
