@@ -534,12 +534,16 @@ async function fetchWallet(
 
 function providerTransactionIdOf(payload: unknown): string | undefined {
     const id = (payload as { id?: unknown } | null | undefined)?.id;
-    return typeof id === 'string' && id.length > 0 ? id : undefined;
+    return isUsableTransactionId(id) ? id : undefined;
+}
+
+function isUsableTransactionId(value: unknown): value is string {
+    return typeof value === 'string' && value.trim().length > 0;
 }
 
 function parseTransactionResponse(payload: unknown, context: string): CrossmintTransactionResponse {
     const transaction = payload as Partial<CrossmintTransactionResponse>;
-    if (!transaction.id || !transaction.status) {
+    if (!isUsableTransactionId(transaction.id) || !transaction.status) {
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `Failed to ${context}: missing transaction id/status`,
         });

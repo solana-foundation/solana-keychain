@@ -1019,6 +1019,29 @@ describe('CrossmintSigner', () => {
             expect(error.context?.providerTransactionId).toBeUndefined();
         });
 
+        it('reports an accepted create with a whitespace-only id as unconfirmed without polling', async () => {
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockWalletResponse())
+                .mockResolvedValueOnce(new Response(JSON.stringify({ id: '   ', status: 'pending' }), { status: 201 }));
+
+            const signer = await createCrossmintSigner({
+                ...mockConfig,
+                maxPollAttempts: 1,
+                pollIntervalMs: 1,
+            });
+
+            const error = await signer.signAndSendTransactions([createMockTransaction()]).then(
+                () => {
+                    throw new Error('expected the create failure to be reported');
+                },
+                (thrown: SignerError) => thrown,
+            );
+
+            expect(error.code).toBe(SignerErrorCode.BROADCAST_UNCONFIRMED);
+            expect(error.context?.providerTransactionId).toBeUndefined();
+            expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+        });
+
         it('keeps the transaction id when an accepted create returns an unusable body', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()
