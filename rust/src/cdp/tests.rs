@@ -435,6 +435,33 @@ fn test_der_to_pkcs8_pem() {
 }
 
 #[test]
+fn test_auth_jwt_lifetime() {
+    let token = jwt::create_auth_jwt(
+        "test-api-key",
+        &test_ed25519_key(),
+        "api.cdp.coinbase.com",
+        "GET",
+        "/platform/v2/solana/accounts/abc",
+    )
+    .expect("failed to create auth JWT");
+
+    let payload_bytes = URL_SAFE_NO_PAD
+        .decode(
+            token
+                .split('.')
+                .nth(1)
+                .expect("JWT payload should be present"),
+        )
+        .expect("failed to decode JWT payload");
+    let payload: Value =
+        serde_json::from_slice(&payload_bytes).expect("failed to parse JWT payload");
+
+    let iat = payload["iat"].as_i64().expect("iat missing from auth JWT");
+    let exp = payload["exp"].as_i64().expect("exp missing from auth JWT");
+    assert_eq!(exp - iat, 120);
+}
+
+#[test]
 fn test_wallet_jwt_includes_req_hash() {
     let request_body = serde_json::json!({
         "b": 2,
@@ -464,6 +491,14 @@ fn test_wallet_jwt_includes_req_hash() {
         .expect("failed to decode JWT payload");
     let payload: Value =
         serde_json::from_slice(&payload_bytes).expect("failed to parse JWT payload");
+
+    let iat = payload["iat"]
+        .as_i64()
+        .expect("iat missing from wallet JWT");
+    let exp = payload["exp"]
+        .as_i64()
+        .expect("exp missing from wallet JWT");
+    assert_eq!(exp - iat, 60);
 
     let req_hash = payload
         .get("reqHash")

@@ -17,8 +17,6 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 
-WALLET_JWT_TTL_SECONDS = 120
-
 
 def extract_host(base_url: str, provider_name: str) -> str:
     """Extract the request host (including port if present) from a base URL."""
@@ -53,6 +51,7 @@ def create_es256_wallet_jwt(
     path: str,
     request_body: Any | None,
     provider_name: str,
+    lifetime_seconds: int,
 ) -> str:
     """Build an ES256 wallet-auth JWT scoped to a single request URI, carrying
     ``reqHash`` over the sorted request body when one is present."""
@@ -61,7 +60,7 @@ def create_es256_wallet_jwt(
         "uris": [f"{method} {host}{path}"],
         "iat": now,
         "nbf": now,
-        "exp": now + WALLET_JWT_TTL_SECONDS,
+        "exp": now + lifetime_seconds,
         "jti": str(uuid.uuid4()),
     }
     req_hash = compute_req_hash(request_body)

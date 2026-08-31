@@ -8,8 +8,6 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-const WALLET_JWT_LIFETIME_SECS: i64 = 120;
-
 #[derive(Serialize)]
 struct WalletClaims {
     uris: Vec<String>,
@@ -93,6 +91,7 @@ pub(crate) fn create_wallet_jwt(
     method: &str,
     path: &str,
     request_body: Option<&Value>,
+    lifetime_secs: i64,
 ) -> Result<String, SignerError> {
     let now = chrono::Utc::now().timestamp();
 
@@ -100,7 +99,7 @@ pub(crate) fn create_wallet_jwt(
         uris: vec![jwt_uri(host, method, path)],
         iat: now,
         nbf: now,
-        exp: now + WALLET_JWT_LIFETIME_SECS,
+        exp: now + lifetime_secs,
         jti: Uuid::new_v4().to_string(),
         req_hash: compute_req_hash(request_body)?,
     };

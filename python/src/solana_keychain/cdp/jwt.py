@@ -23,6 +23,7 @@ from solders.keypair import Keypair
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 
 JWT_TTL_SECONDS = 120
+WALLET_JWT_TTL_SECONDS = 60
 
 ED25519_KEYPAIR_LENGTH = 64
 
@@ -111,4 +112,6 @@ def create_wallet_jwt(
             SignerErrorCode.INVALID_PRIVATE_KEY,
             "Failed to parse walletSecret as EC private key",
         )
-    return create_es256_wallet_jwt(signing_key, host, method, path, request_body, "CDP")
+    return create_es256_wallet_jwt(
+        signing_key, host, method, path, request_body, "CDP", WALLET_JWT_TTL_SECONDS
+    )

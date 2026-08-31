@@ -98,6 +98,7 @@ def test_create_wallet_jwt_shape() -> None:
     claims = pyjwt.decode(token, _WALLET_EC_KEY.public_key(), algorithms=["ES256"])
     assert claims["uris"] == [f"POST {API_HOST}/path"]
     assert claims["jti"]
+    assert claims["exp"] - claims["iat"] == 60
     assert claims["reqHash"] == compute_req_hash(body)
 
 

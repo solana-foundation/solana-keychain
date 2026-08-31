@@ -18,8 +18,10 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
-// jwtTTL is the JWT validity window in seconds.
-const jwtTTL = 120
+const (
+	authJWTTTL   = 120
+	walletJWTTTL = 60
+)
 
 // jwtURI builds the URI claim value for a CDP JWT: "<METHOD> <host><path>".
 func jwtURI(host, method, path string) string {
@@ -95,7 +97,7 @@ func createAuthJWT(apiKeyID, apiKeySecret, host, method, path string) (string, e
 		"iss":  "cdp",
 		"iat":  now,
 		"nbf":  now,
-		"exp":  now + jwtTTL,
+		"exp":  now + authJWTTTL,
 		"uris": []string{jwtURI(host, method, path)},
 	})
 	token.Header["kid"] = apiKeyID
@@ -144,7 +146,7 @@ func createWalletJWT(walletSecret, host, method, path string, requestBody map[st
 		"uris": []string{jwtURI(host, method, path)},
 		"iat":  now,
 		"nbf":  now,
-		"exp":  now + jwtTTL,
+		"exp":  now + walletJWTTTL,
 		"jti":  jti,
 	}
 	if hasReqHash {

@@ -46,7 +46,8 @@ export async function createCdpSigner<TAddress extends string = string>(
 
 const CDP_DEFAULT_BASE_URL = 'https://api.cdp.coinbase.com';
 const CDP_BASE_PATH = '/platform/v2/solana/accounts';
-const JWT_TTL_SECS = 120;
+const AUTH_JWT_TTL_SECS = 120;
+const WALLET_JWT_TTL_SECS = 60;
 
 let base16Decoder: ReturnType<typeof getBase16Decoder> | undefined;
 let base58Encoder: ReturnType<typeof getBase58Encoder> | undefined;
@@ -112,7 +113,7 @@ async function createAuthJwt(
         typ: 'JWT',
     };
     const payload = {
-        exp: now + JWT_TTL_SECS,
+        exp: now + AUTH_JWT_TTL_SECS,
         iat: now,
         iss: 'cdp',
         nbf: now,
@@ -131,7 +132,7 @@ async function createWalletJwt(
 ): Promise<string> {
     const now = Math.floor(Date.now() / 1000);
     const payload: Record<string, unknown> = {
-        exp: now + JWT_TTL_SECS,
+        exp: now + WALLET_JWT_TTL_SECS,
         iat: now,
         jti: globalThis.crypto.randomUUID(),
         nbf: now,

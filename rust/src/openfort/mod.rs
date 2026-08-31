@@ -44,6 +44,8 @@ use std::str::FromStr;
 
 use self::types::SignResponse;
 
+const WALLET_JWT_LIFETIME_SECS: i64 = 120;
+
 /// Normalize the wallet secret to a PEM string `jsonwebtoken` can parse.
 /// Accepts either a full PEM (passed through verbatim) or a bare base64
 /// PKCS#8 DER body (the convenient single-line form), in which case it
@@ -255,6 +257,7 @@ impl OpenfortSigner {
             "POST",
             path,
             Some(request_body),
+            WALLET_JWT_LIFETIME_SECS,
         )?;
 
         let mut headers = reqwest::header::HeaderMap::new();

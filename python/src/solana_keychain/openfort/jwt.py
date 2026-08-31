@@ -16,6 +16,8 @@ except ImportError as error:  # pragma: no cover
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
 
+WALLET_JWT_TTL_SECONDS = 120
+
 
 def _wallet_secret_to_pem(wallet_secret: str) -> str:
     """Accept either a full PEM (passed through) or a bare base64 PKCS8 DER body
@@ -46,4 +48,6 @@ def create_wallet_jwt(
             "Failed to parse Openfort wallet secret as EC P-256 private key "
             "(expected base64 PKCS#8 DER or PEM)",
         )
-    return create_es256_wallet_jwt(signing_key, host, method, path, request_body, "Openfort")
+    return create_es256_wallet_jwt(
+        signing_key, host, method, path, request_body, "Openfort", WALLET_JWT_TTL_SECONDS
+    )

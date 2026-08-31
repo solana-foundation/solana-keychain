@@ -12,6 +12,7 @@ use uuid::Uuid;
 const ED25519_PKCS8_PREFIX: &[u8] = &[
     0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
 ];
+const WALLET_JWT_LIFETIME_SECS: i64 = 60;
 
 #[derive(Serialize)]
 struct AuthClaims {
@@ -159,5 +160,13 @@ pub(super) fn create_wallet_jwt(
         SignerError::InvalidPrivateKey("Failed to parse walletSecret as EC private key".to_string())
     })?;
 
-    wallet_jwt::create_wallet_jwt("CDP", &key, host, method, path, request_body)
+    wallet_jwt::create_wallet_jwt(
+        "CDP",
+        &key,
+        host,
+        method,
+        path,
+        request_body,
+        WALLET_JWT_LIFETIME_SECS,
+    )
 }

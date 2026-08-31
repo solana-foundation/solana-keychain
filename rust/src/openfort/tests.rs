@@ -1,7 +1,11 @@
 use super::*;
 use crate::sdk_adapter::{keypair_pubkey, keypair_sign_message, Keypair};
 use crate::test_util::create_test_transaction;
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine,
+};
+use serde_json::Value;
 use wiremock::{
     matchers::{header_exists, method, path_regex},
     Mock, MockServer, ResponseTemplate,
@@ -70,6 +74,40 @@ fn test_new_valid() {
     );
     assert!(signer.is_ok());
     assert!(signer.unwrap().public_key.is_none());
+}
+
+#[test]
+fn test_wallet_jwt_lifetime() {
+    let signer = create_test_signer("https://api.openfort.io");
+    let headers = signer
+        .build_sign_headers(
+            "/v2/accounts/abc/sign",
+            &serde_json::json!({ "data": "abc" }),
+        )
+        .expect("failed to build sign headers");
+    let token = headers
+        .get("x-wallet-auth")
+        .expect("wallet auth header should be present")
+        .to_str()
+        .expect("wallet auth header should be valid text");
+    let payload_bytes = URL_SAFE_NO_PAD
+        .decode(
+            token
+                .split('.')
+                .nth(1)
+                .expect("JWT payload should be present"),
+        )
+        .expect("failed to decode JWT payload");
+    let payload: Value =
+        serde_json::from_slice(&payload_bytes).expect("failed to parse JWT payload");
+
+    let iat = payload["iat"]
+        .as_i64()
+        .expect("iat missing from wallet JWT");
+    let exp = payload["exp"]
+        .as_i64()
+        .expect("exp missing from wallet JWT");
+    assert_eq!(exp - iat, 120);
 }
 
 #[test]

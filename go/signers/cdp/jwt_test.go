@@ -114,8 +114,8 @@ func TestAuthJWTShape(t *testing.T) {
 	}
 	iat, iatOK := claims["iat"].(float64)
 	exp, expOK := claims["exp"].(float64)
-	if !iatOK || !expOK || exp-iat != jwtTTL {
-		t.Errorf("exp - iat = %v - %v, want %d", exp, iat, jwtTTL)
+	if !iatOK || !expOK || exp-iat != authJWTTTL {
+		t.Errorf("exp - iat = %v - %v, want %d", exp, iat, authJWTTTL)
 	}
 
 	// The token must verify against the public key derived from the test seed.
@@ -175,6 +175,11 @@ func TestWalletJWTIncludesReqHash(t *testing.T) {
 	}
 
 	payload := decodeJWTPart(t, parts[1])
+	iat, iatOK := payload["iat"].(float64)
+	exp, expOK := payload["exp"].(float64)
+	if !iatOK || !expOK || exp-iat != walletJWTTTL {
+		t.Errorf("exp - iat = %v - %v, want %d", exp, iat, walletJWTTTL)
+	}
 	reqHash, _ := payload["reqHash"].(string)
 	if reqHash == "" {
 		t.Fatal("reqHash missing in wallet JWT payload")

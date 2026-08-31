@@ -108,6 +108,12 @@ function makeConfig(overrides?: Partial<CdpSignerConfig>): CdpSignerConfig {
     };
 }
 
+function decodeJwtPayload(token: string): Record<string, unknown> {
+    const payload = token.split('.')[1];
+    if (!payload) throw new Error('JWT payload is missing');
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>;
+}
+
 describe('CdpSigner', () => {
     beforeEach(() => {
         vi.resetAllMocks();
@@ -217,6 +223,11 @@ describe('CdpSigner', () => {
             const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
             expect(url).toContain('/sign/message');
             expect(JSON.parse(init.body as string)).toMatchObject({ message: 'hello' });
+            const headers = init.headers as Headers;
+            const authClaims = decodeJwtPayload(headers.get('Authorization')!.slice('Bearer '.length));
+            const walletClaims = decodeJwtPayload(headers.get('X-Wallet-Auth')!);
+            expect((authClaims.exp as number) - (authClaims.iat as number)).toBe(120);
+            expect((walletClaims.exp as number) - (walletClaims.iat as number)).toBe(60);
         });
 
         it('handles multiple messages with requestDelayMs', async () => {
