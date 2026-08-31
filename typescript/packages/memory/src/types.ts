@@ -8,7 +8,6 @@
  * - {@link MemorySignerConfig.privateKeyPath} — path to a Solana CLI keypair JSON file (Node-only)
  */
 export interface MemorySignerConfig {
-    /** A pre-built CryptoKeyPair. */
     keyPair?: CryptoKeyPair;
     /** Raw private key bytes — 64 bytes (Solana CLI: seed‖pubkey, validated) or 32 bytes (raw Ed25519 seed, pubkey derived). */
     privateKey?: Uint8Array;

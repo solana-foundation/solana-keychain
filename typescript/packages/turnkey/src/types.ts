@@ -17,9 +17,6 @@ export interface SignParameters {
     signWith: string;
 }
 
-/**
- * Sign request for raw payload signing
- */
 export interface SignRequest {
     /** Organization ID */
     organizationId: string;
@@ -53,9 +50,6 @@ export interface SignTransactionParameters {
     unsignedTransaction: string;
 }
 
-/**
- * Sign transaction request
- */
 export interface SignTransactionRequest {
     /** Organization ID */
     organizationId: string;
@@ -75,9 +69,6 @@ export interface SignTransactionResult {
     signedTransaction: string;
 }
 
-/**
- * Activity result wrapper
- */
 export interface ActivityResult {
     /** Sign result containing signature components */
     signRawPayloadResult?: SignRawPayloadResult;
@@ -95,9 +86,6 @@ export interface Activity {
     status: string;
 }
 
-/**
- * Sign activity response
- */
 export interface ActivityResponse {
     /** Activity details */
     activity: Activity;
@@ -111,9 +99,6 @@ export interface WhoAmIRequest {
     organizationId: string;
 }
 
-/**
- * WhoAmI response
- */
 export interface WhoAmIResponse {
     /** Organization ID */
     organizationId: string;

@@ -74,5 +74,4 @@ class MemorySigner(TransactionSigner):
 
 
 async def create_memory_signer(config: MemorySignerConfig) -> MemorySigner:
-    """Create a ready-to-use memory signer."""
     return MemorySigner.from_config(config)

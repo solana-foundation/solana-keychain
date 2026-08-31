@@ -1,6 +1,3 @@
-/**
- * Configuration for creating a GcpKmsSigner
- */
 export interface GcpKmsSignerConfig {
     /** Full resource name of the crypto key version */
     keyName: string;

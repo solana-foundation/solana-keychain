@@ -28,8 +28,6 @@ export async function importFireblocksPrivateKey(privateKeyPem: string): Promise
 }
 
 /**
- * Create a JWT for Fireblocks API authentication
- *
  * @param apiKey - Fireblocks API key (used as subject)
  * @param privateKey - RSA signing key from {@link importFireblocksPrivateKey}
  * @param uri - API endpoint path (e.g., "/v1/transactions")

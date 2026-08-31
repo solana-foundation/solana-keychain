@@ -104,9 +104,6 @@ class AwsKmsSigner<TAddress extends string = string>
         this.client = new KMSClient(clientConfig);
     }
 
-    /**
-     * Sign message bytes using AWS KMS EdDSA signing
-     */
     private async signBytes(messageBytes: Uint8Array, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         try {
             const command = new SignCommand({
@@ -152,9 +149,6 @@ class AwsKmsSigner<TAddress extends string = string>
         }
     }
 
-    /**
-     * Sign multiple messages using AWS KMS
-     */
     async signMessages(
         messages: readonly SignableMessage[],
         config?: MessagePartialSignerConfig,
@@ -179,9 +173,6 @@ class AwsKmsSigner<TAddress extends string = string>
         );
     }
 
-    /**
-     * Sign multiple transactions using AWS KMS
-     */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
         config?: TransactionPartialSignerConfig,

@@ -1,16 +1,7 @@
-/**
- * Base64 encoded signature string from Vault
- */
 export type VaultSignatureBase64 = string & { readonly __brand: unique symbol };
 
-/**
- * Base64 encoded transaction payload for Vault
- */
 export type VaultPayloadBase64 = string & { readonly __brand: unique symbol };
 
-/**
- * Request to sign data using Vault transit engine
- */
 export interface VaultSignRequest {
     /**
      * Hash algorithm to use (optional, defaults to sha2-256)
@@ -36,9 +27,6 @@ export interface VaultSignRequest {
     signature_algorithm?: 'ed25519' | 'rsa-2048' | 'rsa-3072' | 'rsa-4096';
 }
 
-/**
- * Response from Vault transit sign endpoint
- */
 export interface VaultSignResponse {
     /**
      * Optional authentication information
@@ -69,9 +57,6 @@ export interface VaultSignResponse {
  */
 export type VaultKeyReadRequest = Record<string, never>;
 
-/**
- * Response from Vault transit key read endpoint
- */
 export interface VaultKeyReadResponse {
     data: {
         /**
@@ -121,9 +106,6 @@ export interface VaultKeyReadResponse {
     };
 }
 
-/**
- * Vault error response format
- */
 export interface VaultErrorResponse {
     errors: string[];
 }

@@ -134,5 +134,4 @@ class VaultSigner(TransactionSigner):
 
 
 async def create_vault_signer(config: VaultSignerConfig) -> VaultSigner:
-    """Create a ready-to-use Vault signer."""
     return VaultSigner(config)

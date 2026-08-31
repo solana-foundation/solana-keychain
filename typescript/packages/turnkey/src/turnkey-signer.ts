@@ -43,9 +43,6 @@ export function createTurnkeySigner<TAddress extends string = string>(
     return TurnkeySigner.create(config);
 }
 
-/**
- * Configuration for creating a TurnkeySigner
- */
 export interface TurnkeySignerConfig {
     /** Optional custom API base URL (defaults to https://api.turnkey.com) */
     apiBaseUrl?: string;
@@ -213,9 +210,6 @@ class TurnkeySigner<TAddress extends string = string>
         return signature as SignatureBytes;
     }
 
-    /**
-     * Sign multiple messages using Turnkey API
-     */
     async signMessages(
         messages: readonly SignableMessage[],
         config?: MessagePartialSignerConfig,
@@ -289,12 +283,6 @@ class TurnkeySigner<TAddress extends string = string>
         return signedTransaction;
     }
 
-    /**
-     * Sign multiple transactions using Turnkey API
-     *
-     * @param transactions
-     * @returns Promise of readonly SignatureDictionary[]
-     */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
         config?: TransactionPartialSignerConfig,
@@ -329,11 +317,6 @@ class TurnkeySigner<TAddress extends string = string>
         );
     }
 
-    /**
-     * Check if the Turnkey signer is available
-     *
-     * @returns Promise of boolean
-     */
     async isAvailable(): Promise<boolean> {
         try {
             const request: WhoAmIRequest = {

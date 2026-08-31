@@ -62,7 +62,6 @@ func setDefaultChainEnv(t *testing.T) {
 	t.Setenv("AWS_MAX_ATTEMPTS", "1")
 }
 
-// newStubSigner builds a signer around a fakeKMS with the standard test pubkey.
 func newStubSigner(t *testing.T, fake *fakeKMS) *Signer {
 	t.Helper()
 	s, err := New(context.Background(), Config{
@@ -88,8 +87,6 @@ func newHTTPTestClient(srv *httptest.Server) *kms.Client {
 	})
 }
 
-// An invalid public key fails before any AWS config is loaded, with or without
-// a pre-built client.
 func TestNewInvalidPublicKey(t *testing.T) {
 	cases := map[string]Config{
 		"invalid base58":                {KeyID: testKeyID, PublicKey: "not-a-valid-pubkey", Region: testRegion},
@@ -133,7 +130,6 @@ func TestNewValidPublicKey(t *testing.T) {
 	}
 }
 
-// ARN, bare key ID, and alias forms are all accepted verbatim.
 func TestNewKeyIDVariations(t *testing.T) {
 	keyIDs := []string{
 		"arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012",
@@ -155,9 +151,6 @@ func TestNewKeyIDVariations(t *testing.T) {
 	}
 }
 
-// Through the default (nil Client) path, New loads the AWS config chain without
-// error for any region. Static env credentials keep the chain deterministic and
-// offline.
 func TestNewDefaultClientDifferentRegions(t *testing.T) {
 	setDefaultChainEnv(t)
 
@@ -176,8 +169,6 @@ func TestNewDefaultClientDifferentRegions(t *testing.T) {
 	}
 }
 
-// Pins the exact wire values of the signing algorithm, message type, key spec,
-// and key usage constants.
 func TestKMSConstants(t *testing.T) {
 	if got := string(signingAlgorithm); got != "ED25519_SHA_512" {
 		t.Errorf("signing algorithm = %q, want ED25519_SHA_512", got)
@@ -193,8 +184,6 @@ func TestKMSConstants(t *testing.T) {
 	}
 }
 
-// A successful sign returns a verifiable signature; also asserts the exact Sign
-// request parameters (key ID, raw message, RAW message type, ED25519_SHA_512).
 func TestSignMessageSuccess(t *testing.T) {
 	message := []byte("test message")
 	sig := ed25519.Sign(testutils.TestPrivateKey(), message)
@@ -235,8 +224,6 @@ func TestSignMessageSuccess(t *testing.T) {
 	}
 }
 
-// A valid 64-byte signature from the wrong key must be rejected with
-// SIGNING_FAILED.
 func TestSignMessageVerificationFailure(t *testing.T) {
 	message := []byte("test message")
 	otherPriv, _ := testutils.KeyFromSeed(7)
@@ -253,7 +240,6 @@ func TestSignMessageVerificationFailure(t *testing.T) {
 	}
 }
 
-// Any non-64-byte signature (including a missing one) is SIGNING_FAILED.
 func TestSignMessageInvalidSignatureLength(t *testing.T) {
 	cases := map[string]int{
 		"too short":   63,
@@ -275,9 +261,6 @@ func TestSignMessageInvalidSignatureLength(t *testing.T) {
 	}
 }
 
-// Exercised through the real AWS SDK client against an httptest endpoint: KMS
-// API errors map to REMOTE_API_ERROR, and the hostile remote message never
-// reaches the error detail (the detail is a fixed message).
 func TestSignAPIError(t *testing.T) {
 	cases := map[string]struct {
 		status int
@@ -332,8 +315,6 @@ func TestSignAPIError(t *testing.T) {
 	}
 }
 
-// A successful sign through the real SDK client + httptest endpoint, with the
-// KMS JSON response body (base64 Signature).
 func TestSignMessageSuccessHTTPEndpoint(t *testing.T) {
 	message := []byte("test message")
 	sig := ed25519.Sign(testutils.TestPrivateKey(), message)
@@ -363,8 +344,6 @@ func TestSignMessageSuccessHTTPEndpoint(t *testing.T) {
 	}
 }
 
-// Covers the success, wrong-key-spec, wrong-key-usage, disabled-key,
-// missing-metadata, and transport-error availability branches.
 func TestIsAvailable(t *testing.T) {
 	metadata := func(spec kmstypes.KeySpec, usage kmstypes.KeyUsageType, enabled bool) *kms.DescribeKeyOutput {
 		return &kms.DescribeKeyOutput{KeyMetadata: &kmstypes.KeyMetadata{
@@ -399,8 +378,6 @@ func TestIsAvailable(t *testing.T) {
 	}
 }
 
-// KMS signs the transaction's message bytes; the result is complete, encodable,
-// and carries the signature at the payer's position.
 func TestSignTransactionSuccess(t *testing.T) {
 	tx, err := testutils.CreateTestTransaction(testutils.TestPublicKey())
 	if err != nil {

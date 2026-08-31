@@ -15,8 +15,6 @@ import (
 	"github.com/solana-foundation/solana-keychain/go/core/v2"
 )
 
-// Fordefi protocol constants (request discriminators and the transaction
-// states the polling loop reacts to).
 const (
 	transactionsPath = "/api/v1/transactions"
 
@@ -24,8 +22,6 @@ const (
 	stateCompleted = "completed"
 )
 
-// terminalFailureStates are the transaction states that abort polling with a
-// signing failure.
 var terminalFailureStates = map[string]bool{
 	"aborted":                     true,
 	"cancelled":                   true,

@@ -2,9 +2,6 @@ import { p256 } from '@noble/curves/nist.js';
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js';
 import { base64UrlDecoder, SignerErrorCode, throwSignerError } from '@solana/keychain-core';
 
-/**
- * Configuration for ApiKeyStamper
- */
 export interface ApiKeyStamperConfig {
     /** Turnkey API private key in hex format (32 bytes) */
     apiPrivateKey: string;
@@ -12,9 +9,6 @@ export interface ApiKeyStamperConfig {
     apiPublicKey: string;
 }
 
-/**
- * Result of stamping operation
- */
 export interface StampResult {
     /** Header name (always "X-Stamp") */
     stampHeaderName: string;
@@ -84,9 +78,7 @@ export class ApiKeyStamper {
     }
 
     /**
-     * Create an X-Stamp header for the given message
      * @param message - The message to sign (typically JSON stringified request body)
-     * @returns Stamp result with header name and value
      */
     stamp(message: string): StampResult {
         try {

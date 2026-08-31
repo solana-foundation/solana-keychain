@@ -213,9 +213,6 @@ class DfnsSigner<TAddress extends string = string>
         });
     }
 
-    /**
-     * Sign multiple messages using Dfns
-     */
     async signMessages(
         messages: readonly SignableMessage[],
         config?: MessagePartialSignerConfig,
@@ -246,9 +243,6 @@ class DfnsSigner<TAddress extends string = string>
         );
     }
 
-    /**
-     * Sign multiple transactions using Dfns
-     */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
         config?: TransactionPartialSignerConfig,

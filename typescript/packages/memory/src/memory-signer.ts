@@ -44,7 +44,6 @@ export async function createMemorySigner<TAddress extends string = string>(
     }) as SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>;
 }
 
-/** Create a memory signer from a pre-built `CryptoKeyPair`. */
 export async function createMemorySignerFromKeyPair<TAddress extends string = string>(
     keyPair: CryptoKeyPair,
 ): Promise<SolanaMessageSigner<TAddress> & SolanaTransactionSigner<TAddress>> {
@@ -52,8 +51,6 @@ export async function createMemorySignerFromKeyPair<TAddress extends string = st
 }
 
 /**
- * Create a memory signer from raw private key bytes.
- *
  * Accepts either:
  * - 64 bytes (Solana CLI format: Ed25519 seed concatenated with public key — validates seed↔pubkey match), or
  * - 32 bytes (raw Ed25519 seed — public key is derived).

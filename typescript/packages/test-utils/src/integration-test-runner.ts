@@ -110,9 +110,6 @@ async function runScenario<T extends TestSigner>(scenario: TestScenario, context
     }
 }
 
-/**
- * Test: Sign a transaction and verify it can be simulated successfully
- */
 async function testSignTransaction<T extends TestSigner>(context: TestContext<T>): Promise<void> {
     const { signer, litesvm, options, recipientAddress } = context;
 
@@ -157,9 +154,6 @@ async function testSignTransaction<T extends TestSigner>(context: TestContext<T>
     }
 }
 
-/**
- * Test: Sign a message and verify the signature is valid
- */
 async function testSignMessage<T extends TestSigner>(context: TestContext<T>): Promise<void> {
     const { signer, options } = context;
 
@@ -195,9 +189,6 @@ async function testSignMessage<T extends TestSigner>(context: TestContext<T>): P
     }
 }
 
-/**
- * Test: Simulate a transaction without actually sending it
- */
 async function testSimulateTransaction<T extends TestSigner>(context: TestContext<T>): Promise<void> {
     const { signer, litesvm, options, recipientAddress } = context;
 
@@ -237,9 +228,6 @@ async function testSimulateTransaction<T extends TestSigner>(context: TestContex
     }
 }
 
-/**
- * Test: Verify that a transaction with a bad signature fails validation
- */
 async function testBadSignature<T extends TestSigner>(context: TestContext<T>): Promise<void> {
     const { signer, litesvm, options, recipientAddress } = context;
 

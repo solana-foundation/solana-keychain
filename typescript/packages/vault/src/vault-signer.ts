@@ -179,9 +179,6 @@ class VaultSigner<TAddress extends string = string>
         return await this.signWithVault(base64EncodedMessage, abortSignal);
     }
 
-    /**
-     * Sign multiple messages using Vault
-     */
     async signMessages(
         messages: readonly SignableMessage[],
         config?: MessagePartialSignerConfig,
@@ -205,9 +202,6 @@ class VaultSigner<TAddress extends string = string>
         );
     }
 
-    /**
-     * Sign multiple transactions using Vault
-     */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
         config?: TransactionPartialSignerConfig,

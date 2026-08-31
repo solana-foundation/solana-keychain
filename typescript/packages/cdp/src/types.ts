@@ -1,6 +1,3 @@
-/**
- * Configuration for creating a CdpSigner
- */
 export interface CdpSignerConfig {
     /**
      * The Solana account address managed by CDP.

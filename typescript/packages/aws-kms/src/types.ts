@@ -1,6 +1,3 @@
-/**
- * Configuration for creating an AwsKmsSigner
- */
 export interface AwsKmsSignerConfig {
     /** Optional AWS credentials (defaults to default credential provider chain) */
     credentials?: AwsCredentials;
@@ -14,18 +11,12 @@ export interface AwsKmsSignerConfig {
     requestDelayMs?: number;
 }
 
-/**
- * AWS credentials configuration
- */
 export interface AwsCredentials {
     accessKeyId: string;
     secretAccessKey: string;
     sessionToken?: string;
 }
 
-/**
- * AWS KMS key metadata for validation
- */
 export interface KmsKeyMetadata {
     /** The AWS account ID that owns the key */
     AWSAccountId?: string;

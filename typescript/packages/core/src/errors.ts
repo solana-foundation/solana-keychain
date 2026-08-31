@@ -1,6 +1,3 @@
-/**
- * Custom error codes for solana-keychain, specific to this library
- */
 export const SignerErrorCode = {
     /**
      * The provider may have executed the transaction, but the outcome could not
@@ -51,10 +48,6 @@ function replaceDisallowedControlChars(input: string): string {
     return result;
 }
 
-/**
- * Custom error class for signer-specific errors
- * Extends Error with code and context properties
- */
 export class SignerError extends Error {
     readonly cause?: unknown;
     readonly code: SignerErrorCode;
@@ -73,9 +66,6 @@ export class SignerError extends Error {
     }
 }
 
-/**
- * Helper function to create signer-specific errors
- */
 export function createSignerError(
     code: SignerErrorCode,
     context?: Record<string, unknown>,
@@ -84,9 +74,6 @@ export function createSignerError(
     return new SignerError(code, context, cause);
 }
 
-/**
- * Helper function to throw signer-specific errors
- */
 export function throwSignerError(code: SignerErrorCode, context?: Record<string, unknown>): never {
     throw createSignerError(code, context);
 }

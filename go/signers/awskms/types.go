@@ -18,7 +18,6 @@ import (
 // and it bypasses the HTTPS-enforcing default client, so the caller owns that
 // security posture.
 type API interface {
-	// Sign performs the KMS Sign operation.
 	Sign(ctx context.Context, params *kms.SignInput, optFns ...func(*kms.Options)) (*kms.SignOutput, error)
 	// DescribeKey performs the KMS DescribeKey operation (used as a health check).
 	DescribeKey(ctx context.Context, params *kms.DescribeKeyInput, optFns ...func(*kms.Options)) (*kms.DescribeKeyOutput, error)

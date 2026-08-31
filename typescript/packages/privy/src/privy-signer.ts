@@ -58,9 +58,6 @@ const DEFAULT_API_BASE_URL = 'https://api.privy.io/v1';
 let base64Decoder: ReturnType<typeof getBase64Decoder> | undefined;
 let utf8Encoder: ReturnType<typeof getUtf8Encoder> | undefined;
 
-/**
- * Configuration for creating a PrivySigner
- */
 export interface PrivySignerConfig {
     /** Optional custom API base URL (defaults to https://api.privy.io/v1) */
     apiBaseUrl?: string;
@@ -157,22 +154,12 @@ class PrivySigner<TAddress extends string = string>
         );
     }
 
-    /**
-     * Get the signature bytes from a base64 encoded signature
-     * @param signature - The base64 encoded signature
-     * @returns The signature bytes
-     */
     private getSignatureBytes(signature: SignatureBytesBase64): SignatureBytes {
         const encoder = getBase64Encoder();
         const signatureBytes = encoder.encode(signature) as SignatureBytes;
         return signatureBytes;
     }
 
-    /**
-     * Sign a base64 encoded wire transaction using Privy API
-     * @param base64WireTransaction - The base64 encoded wire transaction to sign
-     * @returns The signed base64 encoded wire transaction
-     */
     private async signTransaction(
         base64WireTransaction: Base64EncodedWireTransaction,
         abortSignal?: AbortSignal,
@@ -221,11 +208,6 @@ class PrivySigner<TAddress extends string = string>
         return signResponse.data.signed_transaction;
     }
 
-    /**
-     * Sign a base64 encoded message using Privy API
-     * @param base64EncodedMessage - The base64 encoded message to sign
-     * @returns The signature bytes
-     */
     private async signMessage(
         base64EncodedMessage: TransactionMessageBytesBase64,
         abortSignal?: AbortSignal,
@@ -274,11 +256,6 @@ class PrivySigner<TAddress extends string = string>
         return this.getSignatureBytes(signResponse.data.signature);
     }
 
-    /**
-     * Sign multiple messages using Privy API
-     * @param messages - The messages to sign
-     * @returns The signature dictionaries
-     */
     async signMessages(
         messages: readonly SignableMessage[],
         config?: MessagePartialSignerConfig,
@@ -306,11 +283,6 @@ class PrivySigner<TAddress extends string = string>
         );
     }
 
-    /**
-     * Sign multiple transactions using Privy API
-     * @param transactions - The transactions to sign
-     * @returns The signature dictionaries
-     */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
         config?: TransactionPartialSignerConfig,
@@ -336,10 +308,6 @@ class PrivySigner<TAddress extends string = string>
         );
     }
 
-    /**
-     * Check if the Privy signer is available
-     * @returns True if the Privy signer is available, false otherwise
-     */
     async isAvailable(): Promise<boolean> {
         try {
             await fetchPublicKey({

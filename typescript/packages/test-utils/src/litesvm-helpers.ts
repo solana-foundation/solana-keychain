@@ -6,9 +6,6 @@ export { LiteSVM };
 type SimulateResult = ReturnType<LiteSVM['simulateTransaction']>;
 type SimError = ReturnType<FailedTransactionMetadata['err']>;
 
-/**
- * Airdrops lamports to an address in the test environment
- */
 export function airdropLamports(litesvm: LiteSVM, address: Address, amount: bigint): void {
     const result = litesvm.airdrop(address, lamports(amount));
     if (result == null) {
@@ -19,9 +16,6 @@ export function airdropLamports(litesvm: LiteSVM, address: Address, amount: bigi
     }
 }
 
-/**
- * Formats simulation result for display
- */
 export function formatSimulationResult(result: SimulateResult): {
     computeUnits?: bigint;
     error?: SimError;
@@ -42,9 +36,6 @@ export function formatSimulationResult(result: SimulateResult): {
     };
 }
 
-/**
- * Truncates an address for display
- */
 export function truncateAddress(address: string, prefixLen = 4, suffixLen = 4): string {
     return `${address.slice(0, prefixLen)}...${address.slice(-suffixLen)}`;
 }

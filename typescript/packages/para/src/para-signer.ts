@@ -42,9 +42,6 @@ const DEFAULT_BASE_URL = 'https://api.getpara.com';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const AVAILABILITY_TIMEOUT_MS = 5_000;
 
-/**
- * Configuration for creating a ParaSigner
- */
 export interface ParaSignerConfig {
     /** Para API base URL (default: https://api.getpara.com) */
     apiBaseUrl?: string;
@@ -143,9 +140,6 @@ class ParaSigner<TAddress extends string = string>
         return new ParaSigner<TAddress>({ ...config, apiBaseUrl }, wallet.address as Address<TAddress>);
     }
 
-    /**
-     * Check if the Para wallet is available and ready for signing
-     */
     async isAvailable(): Promise<boolean> {
         const url = `${this.apiBaseUrl}/v1/wallets/${this.walletId}`;
 
@@ -168,9 +162,6 @@ class ParaSigner<TAddress extends string = string>
         }
     }
 
-    /**
-     * Sign multiple messages using Para
-     */
     async signMessages(
         messages: readonly SignableMessage[],
         config?: MessagePartialSignerConfig,
@@ -194,9 +185,6 @@ class ParaSigner<TAddress extends string = string>
         );
     }
 
-    /**
-     * Sign multiple transactions using Para
-     */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
         config?: TransactionPartialSignerConfig,

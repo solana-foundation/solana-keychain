@@ -192,5 +192,4 @@ class CdpSigner(TransactionSigner):
 
 
 async def create_cdp_signer(config: CdpSignerConfig) -> CdpSigner:
-    """Create a ready-to-use CDP signer."""
     return CdpSigner(config)

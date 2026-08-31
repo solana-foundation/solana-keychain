@@ -153,7 +153,6 @@ class FireblocksSigner<TAddress extends string = string>
     }
 
     /**
-     * Get the public key address of this signer
      * @throws {SignerError} If the signer has not been initialized
      */
     get address(): Address<TAddress> {
@@ -469,9 +468,6 @@ class FireblocksSigner<TAddress extends string = string>
         return sigBytes as SignatureBytes;
     }
 
-    /**
-     * Sign multiple messages using Fireblocks
-     */
     async signMessages(
         messages: readonly SignableMessage[],
         config?: MessagePartialSignerConfig,
@@ -498,9 +494,6 @@ class FireblocksSigner<TAddress extends string = string>
         );
     }
 
-    /**
-     * Sign multiple transactions using Fireblocks
-     */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
         config?: TransactionPartialSignerConfig,
@@ -534,9 +527,6 @@ class FireblocksSigner<TAddress extends string = string>
         return await signBatchStaggered(transactions, signOne, this.requestDelayMs, config?.abortSignal);
     }
 
-    /**
-     * Check if Fireblocks API is available
-     */
     async isAvailable(): Promise<boolean> {
         try {
             await this.request<unknown>('GET', `/v1/vault/accounts/${encodeURIComponent(this.vaultAccountId)}`);

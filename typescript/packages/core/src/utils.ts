@@ -325,10 +325,6 @@ export type SignerCapabilities = Readonly<{
     canSignTransactions: boolean;
 }>;
 
-/**
- * Reports which signing methods the given signer exposes.
- * @param signer - The signer to inspect
- */
 export function signerCapabilities(signer: { address: Address }): SignerCapabilities {
     return Object.freeze({
         canModifyTransactions: isTransactionModifyingSigner(signer),
@@ -339,8 +335,6 @@ export function signerCapabilities(signer: { address: Address }): SignerCapabili
 }
 
 /**
- * Asserts that the given value is a SolanaSigner, throwing an error if it is not.
- * @param value - The value to check
  * @throws {SignerError} If the value is not a SolanaSigner
  */
 export function assertIsSolanaSigner<TAddress extends string>(value: {

@@ -17,7 +17,6 @@ const (
 	Complete
 )
 
-// String renders the completeness for logging.
 func (c Completeness) String() string {
 	if c == Complete {
 		return "Complete"

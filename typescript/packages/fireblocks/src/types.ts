@@ -1,6 +1,3 @@
-/**
- * Configuration for creating a FireblocksSigner
- */
 export interface FireblocksSignerConfig {
     /** API base URL (default: "https://api.fireblocks.io") */
     apiBaseUrl?: string;
@@ -42,9 +39,6 @@ export interface FireblocksSignerConfig {
     vaultAccountId: string;
 }
 
-/**
- * Request to create a signing transaction in Fireblocks
- */
 export type CreateTransactionRequest = CreateProgramCallTransactionRequest | CreateRawTransactionRequest;
 
 export interface CreateRawTransactionRequest {
@@ -80,9 +74,6 @@ export interface TransactionSource {
     type: string;
 }
 
-/**
- * Extra parameters for RAW signing operation
- */
 export interface RawExtraParameters {
     rawMessageData: RawMessageData;
 }
@@ -95,9 +86,6 @@ export interface RawMessage {
     content: string;
 }
 
-/**
- * Response from creating a transaction
- */
 export interface CreateTransactionResponse {
     id: string;
     status: string;
@@ -121,9 +109,6 @@ export interface SignatureData {
     fullSig: string;
 }
 
-/**
- * Response from getting vault account addresses
- */
 export interface VaultAddressesResponse {
     addresses: VaultAddress[];
 }
@@ -133,9 +118,6 @@ export interface VaultAddress {
     assetId?: string;
 }
 
-/**
- * Fireblocks transaction status values
- */
 export const FireblocksTransactionStatus = {
     BLOCKED: 'BLOCKED',
     BROADCASTING: 'BROADCASTING',

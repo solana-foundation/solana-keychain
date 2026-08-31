@@ -204,9 +204,6 @@ class GcpKmsSigner<TAddress extends string = string>
         }
     }
 
-    /**
-     * Sign multiple messages using GCP KMS
-     */
     async signMessages(
         messages: readonly SignableMessage[],
         config?: MessagePartialSignerConfig,
@@ -231,9 +228,6 @@ class GcpKmsSigner<TAddress extends string = string>
         );
     }
 
-    /**
-     * Sign multiple transactions using GCP KMS
-     */
     async signTransactions(
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
         config?: TransactionPartialSignerConfig,

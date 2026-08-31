@@ -7,7 +7,6 @@ import {
     throwSignerError,
 } from './errors.js';
 
-/** Default timeout applied to remote signer API requests. */
 export const DEFAULT_FETCH_TIMEOUT_MS = 60_000;
 
 /**
@@ -49,7 +48,6 @@ export interface FetchSignerJsonOptions {
      * Default: {@link DEFAULT_FETCH_TIMEOUT_MS}.
      */
     timeoutMs?: number;
-    /** Fully-qualified request URL. */
     url: string;
 }
 

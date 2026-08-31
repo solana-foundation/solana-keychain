@@ -1,6 +1,3 @@
-/**
- * Configuration for creating a DfnsSigner
- */
 export interface DfnsSignerConfig {
     /** API base URL (default: "https://api.dfns.io") */
     apiBaseUrl?: string;
@@ -21,9 +18,6 @@ export interface DfnsSignerConfig {
     walletId: string;
 }
 
-/**
- * Dfns wallet response
- */
 export interface GetWalletResponse {
     id: string;
     signingKey: {
@@ -35,17 +29,11 @@ export interface GetWalletResponse {
     status: string;
 }
 
-/**
- * Message signature request body for Dfns Keys API
- */
 export interface GenerateMessageSignatureRequest {
     kind: 'Message';
     message: string;
 }
 
-/**
- * Transaction signature request body for Dfns Keys API
- */
 export interface GenerateTransactionSignatureRequest {
     blockchainKind: string;
     kind: 'Transaction';
@@ -54,9 +42,6 @@ export interface GenerateTransactionSignatureRequest {
 
 export type GenerateSignatureRequest = GenerateMessageSignatureRequest | GenerateTransactionSignatureRequest;
 
-/**
- * Signature response from Dfns Keys API
- */
 export interface GenerateSignatureResponse {
     id: string;
     signature?: SignatureComponents;
@@ -69,9 +54,6 @@ export interface SignatureComponents {
     s: string;
 }
 
-/**
- * User action challenge init request
- */
 export interface UserActionInitRequest {
     userActionHttpMethod: string;
     userActionHttpPath: string;
@@ -79,9 +61,6 @@ export interface UserActionInitRequest {
     userActionServerKind: string;
 }
 
-/**
- * User action challenge init response
- */
 export interface UserActionInitResponse {
     allowCredentials: {
         key: Array<{ id: string }>;
@@ -90,9 +69,6 @@ export interface UserActionInitResponse {
     challengeIdentifier: string;
 }
 
-/**
- * User action sign request
- */
 export interface UserActionSignRequest {
     challengeIdentifier: string;
     firstFactor: {
@@ -105,9 +81,6 @@ export interface UserActionSignRequest {
     };
 }
 
-/**
- * User action sign response
- */
 export interface UserActionResponse {
     userAction: string;
 }

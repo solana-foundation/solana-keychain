@@ -1,6 +1,3 @@
-/**
- * Para API error response
- */
 export interface ParaErrorResponse {
     message: string;
 }
@@ -16,17 +13,11 @@ export interface ParaWalletResponse {
     type: string;
 }
 
-/**
- * Para sign-raw request body
- */
 export interface ParaSignRawRequest {
     data: string;
     encoding: 'hex';
 }
 
-/**
- * Para sign-raw response
- */
 export interface ParaSignRawResponse {
     signature: string;
 }

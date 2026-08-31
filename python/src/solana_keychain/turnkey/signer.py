@@ -260,5 +260,4 @@ class TurnkeySigner(TransactionSigner):
 
 
 async def create_turnkey_signer(config: TurnkeySignerConfig) -> TurnkeySigner:
-    """Create a ready-to-use Turnkey signer."""
     return TurnkeySigner(config)

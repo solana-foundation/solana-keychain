@@ -310,7 +310,6 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         }
     }
 
-    /** Create a FordefiSigner with the provided configuration. */
     static create<TAddress extends string = string>(
         config: FordefiSignerConfig & { chain: SolanaChainUniqueId; pushMode: 'manual' },
     ): FordefiNativeManualSigner<TAddress> & FordefiSigner<TAddress>;
