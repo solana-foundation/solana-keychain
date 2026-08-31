@@ -417,10 +417,7 @@ fn trim_resource_prefix<'a>(value: &'a str, prefix: &str) -> &'a str {
     value.strip_prefix(prefix).unwrap_or(value)
 }
 
-/// Reduce a full wallet resource name to its id. A resource that names a vault
-/// other than the configured one is rejected rather than silently re-parented:
-/// the id would otherwise be looked up under `vault_id`, resolving a different
-/// wallet than the caller wrote down.
+/// Reduce a full wallet resource name to its id.
 fn trim_wallet_id<'a>(value: &'a str, vault_id: &str) -> Result<&'a str, SignerError> {
     let Some((parent, wallet_id)) = value.rsplit_once("/wallets/") else {
         return Ok(value);

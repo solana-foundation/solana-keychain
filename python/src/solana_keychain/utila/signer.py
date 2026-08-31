@@ -72,11 +72,7 @@ def _trim_vault_id(value: str) -> str:
 
 
 def _trim_wallet_id(value: str, vault_id: str) -> str:
-    """Reduce a full wallet resource name to its id. A resource that names a vault
-    other than the configured one is rejected rather than silently re-parented: the
-    id would otherwise be looked up under ``vault_id``, resolving a different wallet
-    than the caller wrote down.
-    """
+    """Reduce a full wallet resource name to its id."""
     parent, separator, wallet_id = value.rpartition("/wallets/")
     if not separator:
         return value

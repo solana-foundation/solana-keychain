@@ -59,9 +59,7 @@ pub enum SignerError {
     ///
     /// `provider_tx_id` and `provider_status` are `None` when the create failed
     /// without a usable response: nothing to check, and the only safe recovery
-    /// is replaying the identical bytes. `idempotency_key` is the key those
-    /// bytes were submitted under, when the backend sends one, so a resend can
-    /// be recognised as the same request instead of a second transfer.
+    /// is replaying the identical bytes.
     #[error("Broadcast unconfirmed; the provider may have executed the transaction (provider transaction id: {})", provider_tx_id.as_deref().unwrap_or("unknown"))]
     BroadcastUnconfirmed {
         provider_tx_id: Option<String>,

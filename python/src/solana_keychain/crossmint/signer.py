@@ -454,13 +454,7 @@ class CrossmintSigner(SendingSigner):
         )
 
     def _namespaced_key_input(self, message_bytes: bytes) -> bytes:
-        """Bind the idempotency key to the signer locator as well as the message.
-
-        The create body carries the locator, so two signers on one wallet submitting
-        identical bytes are distinct operations and must not deduplicate onto each
-        other. The locator is length-delimited because it contains colons itself. The
-        wallet locator is left out: it is already the request path.
-        """
+        """Bind the idempotency key to the signer locator as well as the message."""
         locator = (self._signer or "").encode()
         return b"crossmint:solana:%d:%s:" % (len(locator), locator) + message_bytes
 

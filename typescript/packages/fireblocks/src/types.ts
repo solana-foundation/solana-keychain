@@ -56,7 +56,6 @@ export interface CreateRawTransactionRequest {
 
 export interface CreateProgramCallTransactionRequest {
     assetId: string;
-    /** Message-derived id Fireblocks uses to deduplicate PROGRAM_CALL creates. */
     externalTxId: string;
     extraParameters: ProgramCallExtraParameters;
     operation: 'PROGRAM_CALL';

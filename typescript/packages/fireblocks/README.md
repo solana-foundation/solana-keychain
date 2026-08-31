@@ -64,10 +64,6 @@ By default the signer uses Fireblocks **RAW signing**: it signs the message byte
 
 With `useProgramCall: true`, transactions are signed with the **PROGRAM_CALL** operation instead, sent with `signOnly: true` and `useDurableNonce: false` so Fireblocks signs the submitted transaction without broadcasting it and without rewriting the message. The returned signature is verified against the vault address over the local message bytes before it is used, and you still broadcast yourself. `signMessages()` always uses RAW, since PROGRAM_CALL only accepts serialized transactions.
 
-Each PROGRAM_CALL create carries an `externalTxId` derived from the message bytes, the asset and the vault account, so submitting the same transaction twice is rejected by Fireblocks instead of signed twice, and an accepted create stays findable when its response was lost. Rebuild the transaction (a new blockhash, a different fee) and you get a different id and a new request. RAW creates carry no such id: the same message may legitimately be signed again.
-
-PROGRAM_CALL accepts legacy and v0 messages only, requires a hot wallet, and must be enabled for your workspace by Fireblocks. If Fireblocks broadcasts anyway (a workspace that ignores `signOnly`), signing rejects with `BROADCAST_UNCONFIRMED` carrying the provider transaction id rather than reporting a plain failure. A PROGRAM_CALL whose outcome the poll never resolves, because the attempt budget ran out or the poll requests themselves failed, reports the same code and id: the request exists on Fireblocks and only its outcome is unknown, so check it there before retrying.
-
 ### With Devnet
 
 ```typescript

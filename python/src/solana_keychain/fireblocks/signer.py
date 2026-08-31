@@ -326,10 +326,6 @@ class FireblocksSigner(TransactionSigner):
     def _external_tx_id(self, message: bytes) -> str:
         """Derive the ``externalTxId`` a PROGRAM_CALL create carries.
 
-        Bound to the asset and vault account as well as the message: the same bytes
-        submitted against a different vault are a different operation and must not
-        deduplicate onto each other.
-
         Args:
             message: The message bytes being submitted for signing.
 

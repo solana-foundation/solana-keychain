@@ -44,8 +44,6 @@ const transactionSignature = await signAndSendTransactionMessageWithSigners(tran
 
 Native auto-broadcast currently supports transactions whose only required signer is the configured Fordefi vault. Transactions requiring additional signers are rejected before submission until the integration forwards their partial signatures through Fordefi's `details.signatures` field.
 
-A transaction that already carries a signature is rejected too. Fordefi replaces the blockhash before broadcasting, so re-signing bytes the vault has already signed would produce a second transaction carrying the same transfer, outside the network's own replay protection. To add the vault's signature to a transaction others have signed, use black box mode, which signs the caller's exact bytes.
-
 ### Native manual mode
 
 Add `pushMode: 'manual'` to the native config. Fordefi still parses the transaction, so its policy engine and approval UI apply, but it signs **without** broadcasting: you own submission, and additional required signers are supported, which native auto rejects.

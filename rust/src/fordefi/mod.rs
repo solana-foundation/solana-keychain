@@ -41,9 +41,6 @@ const DEFAULT_POLL_INTERVAL_MS: u64 = 2000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 50;
 const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Render a fee as `type|priority_level|unit_price|priority_fee`, with empty
-/// segments for the fields the variant does not carry. The field order is fixed
-/// so an idempotency key derived from it stays stable.
 fn canonical_fee(fee: Option<&FordefiSolanaFee>) -> String {
     match fee {
         None => String::new(),
@@ -763,10 +760,6 @@ impl FordefiNativeAutoSigner {
     /// with additional required signers would also need their partial signatures
     /// forwarded through Fordefi's `details.signatures` request field.
     ///
-    /// A signature already present can only be the vault's own over these bytes,
-    /// which means they may already be on chain. Fordefi replaces the blockhash
-    /// before broadcasting, so the result would be a second transaction carrying
-    /// the same transfer, outside the network's replay protection.
     fn validate_transaction(&self, transaction: &VersionedTransaction) -> Result<(), SignerError> {
         let required_signatures = transaction.message.header().num_required_signatures as usize;
         if required_signatures != 1

@@ -566,12 +566,6 @@ impl CrossmintSigner {
         Ok(signature)
     }
 
-    /// Bind the idempotency key to the signer locator as well as the message.
-    /// The create body carries the locator, so two signers on one wallet
-    /// submitting identical bytes are distinct operations and must not
-    /// deduplicate onto each other. The locator is length-delimited because it
-    /// contains colons itself. The wallet locator is left out: it is already the
-    /// request path.
     fn namespaced_key_input(&self, message_bytes: &[u8]) -> Vec<u8> {
         let locator = self.signer.as_deref().unwrap_or("");
         let mut input = format!("crossmint:solana:{}:{}:", locator.len(), locator).into_bytes();

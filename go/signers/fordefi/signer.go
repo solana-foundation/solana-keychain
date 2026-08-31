@@ -343,9 +343,7 @@ func (s *NativeAutoSigner) SignMessage(ctx context.Context, message []byte) (sol
 //
 // Each create carries an x-idempotence-id derived from the message bytes under
 // the push mode, chain, vault and fee it was submitted with, so replaying these
-// exact bytes on the same terms cannot create a second Fordefi transaction; a
-// rebuilt transaction, or a different fee, derives a different id and is
-// broadcast again.
+// exact bytes on the same terms reuses the Fordefi request.
 func (s *NativeAutoSigner) SignAndSendTransaction(ctx context.Context, tx *solana.Transaction) (solana.Signature, error) {
 	signed, err := s.signTransactionNative(ctx, tx)
 	if err != nil {

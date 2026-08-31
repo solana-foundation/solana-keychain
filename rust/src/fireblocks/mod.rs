@@ -249,10 +249,6 @@ impl FireblocksSigner {
         Ok(sig)
     }
 
-    /// The `externalTxId` a PROGRAM_CALL create carries, bound to the asset and
-    /// vault account as well as the message: the same bytes submitted against a
-    /// different vault are a different operation and must not deduplicate onto
-    /// each other.
     fn external_tx_id(&self, message_bytes: &[u8]) -> String {
         let mut namespaced = format!(
             "fireblocks:solana:program_call:{}:{}:",
