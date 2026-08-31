@@ -67,8 +67,10 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 	return &Signer{client: client, keyID: cfg.KeyID, pub: pub}, nil
 }
 
+// Pubkey returns the signer's Solana public key.
 func (s *Signer) Pubkey() solana.PublicKey { return s.pub }
 
+// KeyID returns the configured AWS KMS key ID/ARN/alias.
 func (s *Signer) KeyID() string { return s.keyID }
 
 // SignMessage signs arbitrary bytes via the KMS Sign operation and verifies the
