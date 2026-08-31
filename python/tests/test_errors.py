@@ -1,6 +1,7 @@
 import pickle
 
 import pytest
+from solders.signature import Signature
 
 from solana_keychain import SignerError, SignerErrorCode
 
@@ -49,6 +50,29 @@ def test_pickle_round_trip_preserves_code_and_redacts_detail() -> None:
     assert isinstance(restored, SignerError)
     assert restored.code == SignerErrorCode.CONFIG_ERROR
     assert str(restored) == str(error)
+
+
+def test_pickle_round_trip_preserves_recovery_metadata() -> None:
+    transaction_signature = Signature.from_bytes(bytes([7] * 64))
+    error = SignerError(
+        SignerErrorCode.BROADCAST_UNCONFIRMED,
+        SECRET,
+        provider_transaction_id="provider-tx-123",
+        status_code=503,
+        idempotency_key="idempotency-key-123",
+        transaction_signature=transaction_signature,
+    )
+
+    payload = pickle.dumps(error)
+    assert SECRET.encode() not in payload
+
+    restored = pickle.loads(payload)
+    assert restored.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert restored.provider_transaction_id == "provider-tx-123"
+    assert restored.status_code == 503
+    assert restored.idempotency_key == "idempotency-key-123"
+    assert restored.transaction_signature == transaction_signature
+    assert restored._detail == ""
 
 
 def test_code_values_are_frozen() -> None:
