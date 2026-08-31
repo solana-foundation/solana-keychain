@@ -346,7 +346,14 @@ impl FireblocksSigner {
             .await;
 
         if matches!(mode, SigningMode::Raw) {
-            return parse_json_response(response?, CONTEXT).await;
+            let created: CreateTransactionResponse =
+                parse_json_response(response?, CONTEXT).await?;
+            if created.id.trim().is_empty() {
+                return Err(SignerError::SerializationError(
+                    "Fireblocks create response did not include a transaction id".to_string(),
+                ));
+            }
+            return Ok(created);
         }
 
         let response = response.map_err(|error| {
@@ -369,7 +376,7 @@ impl FireblocksSigner {
         // The create may have been accepted even when the body is otherwise
         // unusable, so an id present there is the caller's recovery handle.
         let provider_tx_id = transaction_id_in_body(&body);
-        serde_json::from_slice(&body).map_err(|_e| {
+        let created: CreateTransactionResponse = serde_json::from_slice(&body).map_err(|_e| {
             #[cfg(feature = "unsafe-debug")]
             log::error!("Failed to parse {CONTEXT} response: {_e}");
             unconfirmed_unless_rejected(
@@ -378,7 +385,18 @@ impl FireblocksSigner {
                 external_tx_id.as_deref(),
                 SignerError::SerializationError(format!("Failed to parse {CONTEXT} response")),
             )
-        })
+        })?;
+        if created.id.trim().is_empty() {
+            return Err(unconfirmed_unless_rejected(
+                Some(status),
+                None,
+                external_tx_id.as_deref(),
+                SignerError::SerializationError(
+                    "Fireblocks create response did not include a transaction id".to_string(),
+                ),
+            ));
+        }
+        Ok(created)
     }
 
     async fn poll_for_completion(

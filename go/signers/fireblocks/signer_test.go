@@ -513,6 +513,67 @@ func TestCreateWithUnusableBody(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsBlankTransactionIDWithoutPolling(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		useProgramCall bool
+		wantCode       core.Code
+	}{
+		{"program call preserves its recovery key", true, core.CodeBroadcastUnconfirmed},
+		{"raw reports a serialization failure", false, core.CodeSerializationError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pub := testutils.TestPublicKey()
+			var polls atomic.Int64
+			s := newTestSignerWithProgramCall(t, pub.String(), tc.useProgramCall, func(mux *http.ServeMux) {
+				mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
+					testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": " \t", "status": "SUBMITTED"})
+				})
+				mux.HandleFunc("/v1/transactions/", func(w http.ResponseWriter, _ *http.Request) {
+					polls.Add(1)
+					testutils.WriteJSON(w, http.StatusOK, map[string]any{"status": "SUBMITTED"})
+				})
+			})
+
+			var err error
+			var wantIdempotencyKey string
+			if tc.useProgramCall {
+				tx, createErr := testutils.CreateTestTransaction(pub)
+				if createErr != nil {
+					t.Fatal(createErr)
+				}
+				message, marshalErr := tx.Message.MarshalBinary()
+				if marshalErr != nil {
+					t.Fatal(marshalErr)
+				}
+				wantIdempotencyKey = s.externalTxID(message)
+				_, err = s.SignTransaction(context.Background(), tx)
+			} else {
+				_, err = s.SignMessage(context.Background(), []byte("hello"))
+			}
+
+			if code, _ := core.CodeOf(err); code != tc.wantCode {
+				t.Fatalf("got %s, want %s", code, tc.wantCode)
+			}
+			if polls.Load() != 0 {
+				t.Fatalf("blank transaction id triggered %d polls", polls.Load())
+			}
+			if tc.useProgramCall {
+				var signerErr *core.SignerError
+				if !errors.As(err, &signerErr) {
+					t.Fatalf("expected SignerError, got %T", err)
+				}
+				if signerErr.ProviderTxID != "" {
+					t.Errorf("ProviderTxID = %q, want empty", signerErr.ProviderTxID)
+				}
+				if signerErr.IdempotencyKey != wantIdempotencyKey {
+					t.Errorf("IdempotencyKey = %q, want %q", signerErr.IdempotencyKey, wantIdempotencyKey)
+				}
+			}
+		})
+	}
+}
+
 // PROGRAM_CALL accepts legacy and v0 only, so a v1 message is rejected before
 // any transaction is created.
 func TestSignTransactionProgramCallRejectsV1(t *testing.T) {

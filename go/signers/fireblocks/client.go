@@ -210,6 +210,10 @@ func (s *Signer) createTransaction(ctx context.Context, request createTransactio
 		return createTransactionResponse{}, ambiguous(status, respBody,
 			core.WrapSignerError(core.CodeSerializationError, "failed to parse response", err))
 	}
+	if strings.TrimSpace(created.ID) == "" {
+		return createTransactionResponse{}, ambiguous(status, respBody,
+			core.NewSignerError(core.CodeSerializationError, "Fireblocks create response did not include a transaction id"))
+	}
 	return created, nil
 }
 
@@ -218,6 +222,9 @@ func transactionIDFromBody(body []byte) string {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
+		return ""
+	}
+	if strings.TrimSpace(parsed.ID) == "" {
 		return ""
 	}
 	return parsed.ID

@@ -640,6 +640,62 @@ async fn test_raw_create_with_an_unusable_body_stays_a_plain_failure() {
 }
 
 #[tokio::test]
+async fn test_program_call_create_rejects_blank_id_without_polling() {
+    let mock_server = MockServer::start().await;
+    let keypair = Keypair::new();
+    let mut transaction = create_test_transaction(&keypair_pubkey(&keypair));
+    let message_bytes = transaction.message.serialize();
+    let signer = create_test_signer_program_call(&mock_server.uri(), keypair_pubkey(&keypair));
+    let expected = signer.external_tx_id(&message_bytes);
+
+    Mock::given(method("POST"))
+        .and(path("/v1/transactions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": " \t",
+            "status": "SUBMITTED"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let error = signer.sign_transaction(&mut transaction).await.unwrap_err();
+
+    match error {
+        SignerError::BroadcastUnconfirmed {
+            provider_tx_id,
+            idempotency_key,
+            ..
+        } => {
+            assert_eq!(provider_tx_id, None);
+            assert_eq!(idempotency_key, Some(expected));
+        }
+        other => panic!("expected BroadcastUnconfirmed, got {other:?}"),
+    }
+    assert_eq!(mock_server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn test_raw_create_rejects_blank_id_without_polling() {
+    let mock_server = MockServer::start().await;
+    let signer = create_test_signer(&mock_server.uri());
+
+    Mock::given(method("POST"))
+        .and(path("/v1/transactions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": " \t",
+            "status": "SUBMITTED"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let error = signer.sign_message(b"hello").await.unwrap_err();
+
+    assert!(matches!(error, SignerError::SerializationError(_)));
+    assert_eq!(mock_server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn test_program_call_accepts_the_signature_carried_as_tx_hash() {
     let mock_server = MockServer::start().await;
     let keypair = Keypair::new();
