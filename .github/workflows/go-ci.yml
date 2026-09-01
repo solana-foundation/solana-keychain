@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Resolve enabled signers from repository variables
         id: resolve
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           CI_SIGNER_MEMORY_ENABLED: ${{ vars.CI_SIGNER_MEMORY_ENABLED || 'true' }}
           CI_SIGNER_VAULT_ENABLED: ${{ vars.CI_SIGNER_VAULT_ENABLED || 'true' }}
@@ -144,8 +144,8 @@ jobs:
       matrix:
         module: ${{ fromJSON(needs.resolve-signers.outputs.go_unit_modules_json) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/signers/gcpkms/go.mod
           cache-dependency-path: go/**/go.sum
@@ -169,12 +169,12 @@ jobs:
       matrix:
         module: ${{ fromJSON(needs.resolve-signers.outputs.go_integration_modules_json) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/signers/gcpkms/go.mod
           cache-dependency-path: go/**/go.sum
-      - uses: dopplerhq/secrets-fetch-action@v2.0.0
+      - uses: dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534 # v2.0.0
         id: doppler
         with:
           auth-method: oidc
@@ -184,12 +184,12 @@ jobs:
           inject-env-vars: true
       - name: Setup GCP credentials
         if: matrix.module == 'signers/gcpkms'
-        uses: google-github-actions/auth@v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           credentials_json: ${{ steps.doppler.outputs.GCP_SERVICE_ACCOUNT_KEY }}
       - name: Configure AWS credentials
         if: matrix.module == 'signers/awskms'
-        uses: aws-actions/configure-aws-credentials@v6.2.3
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
           role-to-assume: ${{ steps.doppler.outputs.AWS_ROLE_ARN }}
           aws-region: ${{ steps.doppler.outputs.AWS_KMS_REGION }}
@@ -206,8 +206,8 @@ jobs:
       run:
         working-directory: go
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/signers/gcpkms/go.mod
           cache-dependency-path: go/**/go.sum
@@ -227,8 +227,8 @@ jobs:
       run:
         working-directory: go
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/signers/gcpkms/go.mod
           cache-dependency-path: go/**/go.sum

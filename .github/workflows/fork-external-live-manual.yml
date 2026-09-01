@@ -25,7 +25,7 @@ jobs:
     steps:
       - name: Resolve enabled signers from repository variables
         id: resolve
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           CI_SIGNER_MEMORY_ENABLED: ${{ vars.CI_SIGNER_MEMORY_ENABLED }}
           CI_SIGNER_VAULT_ENABLED: ${{ vars.CI_SIGNER_VAULT_ENABLED }}
@@ -189,7 +189,7 @@ jobs:
     steps:
       - name: Validate PR and capture head SHA
         id: pr
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER_INPUT: ${{ inputs.pr_number }}
         with:
@@ -223,37 +223,37 @@ jobs:
 
       - name: Checkout PR head SHA
         if: ${{ needs.resolve-signers.outputs.rust_live_test_count != '0' || needs.resolve-signers.outputs.ts_live_package_count != '0' || needs.resolve-signers.outputs.python_live_backend_count != '0' || needs.resolve-signers.outputs.go_live_module_count != '0' }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.pr.outputs.head_sha }}
 
       - if: ${{ needs.resolve-signers.outputs.rust_live_test_count != '0' }}
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
 
       - if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: "22"
 
       - if: ${{ needs.resolve-signers.outputs.ts_live_package_count != '0' }}
-        uses: pnpm/action-setup@v6.0.10
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 11.22.0
 
       - if: ${{ needs.resolve-signers.outputs.python_live_backend_count != '0' }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.13'
           cache: pip
           cache-dependency-path: python/pyproject.toml
 
       - if: ${{ needs.resolve-signers.outputs.go_live_module_count != '0' }}
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/signers/gcpkms/go.mod
           cache-dependency-path: go/**/go.sum
 
-      - uses: dopplerhq/secrets-fetch-action@v2.0.0
+      - uses: dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534 # v2.0.0
         id: doppler
         with:
           auth-method: oidc
@@ -264,7 +264,7 @@ jobs:
 
       - name: Configure AWS credentials
         if: ${{ needs.resolve-signers.outputs.aws_kms_enabled == 'true' }}
-        uses: aws-actions/configure-aws-credentials@v6.2.3
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
           role-to-assume: ${{ steps.doppler.outputs.AWS_ROLE_ARN }}
           aws-region: ${{ steps.doppler.outputs.AWS_KMS_REGION }}
@@ -387,7 +387,7 @@ jobs:
 
       - name: Verify PR head SHA is unchanged
         id: verify-sha
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
           HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
@@ -422,7 +422,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Post marker and rerun gate
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ needs.fork-external-live-manual.outputs.pr_number }}
           HEAD_SHA: ${{ needs.fork-external-live-manual.outputs.head_sha }}
