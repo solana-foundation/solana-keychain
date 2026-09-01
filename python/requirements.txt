@@ -8,9 +8,9 @@ backports-asyncio-runner==1.2.0 ; python_full_version < '3.11'
     # via pytest-asyncio
 base58==2.1.1
     # via solana-keychain (pyproject.toml)
-boto3==1.43.72
+boto3==1.43.79
     # via solana-keychain (pyproject.toml)
-botocore==1.43.72
+botocore==1.43.79
     # via
     #   boto3
     #   s3transfer
@@ -82,7 +82,7 @@ jmespath==1.1.0
     # via
     #   boto3
     #   botocore
-jsonalias==0.1.1
+jsonalias==0.1.2
     # via solders
 librt==0.15.0 ; platform_python_implementation != 'PyPy'
     # via mypy
@@ -134,7 +134,7 @@ requests==2.34.2
     # via google-api-core
 respx==0.23.1
     # via solana-keychain (pyproject.toml)
-ruff==0.16.3
+ruff==0.16.4
     # via solana-keychain (pyproject.toml)
 s3transfer==0.19.2
     # via boto3

@@ -40,7 +40,7 @@
     },
     "dependencies": {
         "@solana/keychain-core": "workspace:*",
-        "jose": "^6.2.8"
+        "jose": "^6.2.10"
     },
     "peerDependencies": {
         "@solana/addresses": ">=8.0.0",

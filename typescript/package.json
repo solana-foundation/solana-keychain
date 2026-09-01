@@ -35,10 +35,10 @@
     "eslint-plugin-jest": "^29.15.5",
     "globals": "^17.7.0",
     "prettier": "^3.9.6",
-    "rollup": "^4.62.4",
+    "rollup": "^4.62.5",
     "typescript": "^5.9.3",
     "vite": "^7.3.6",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "prettier": "@solana/prettier-config-solana",
   "packageManager": "pnpm@11.22.0"
