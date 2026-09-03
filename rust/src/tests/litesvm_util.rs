@@ -6,18 +6,22 @@ use std::error::Error;
 use litesvm::LiteSVM;
 #[cfg(feature = "sdk-v3")]
 use litesvm_v3::LiteSVM;
+// No litesvm-v4: no released litesvm version is compatible with solana-sdk
+// >=4.1 yet (litesvm 0.13.0 needs solana-instruction =3.2.0, solana-sdk 4.1
+// needs ^3.5.0; litesvm 0.16.0 needs solana-signature ~3.4.1, solana-sdk 4.1
+// needs ^3.5.0 — see the agave-feature-set-pin comment in Cargo.toml). This
+// module, and every test that calls it under sdk-v4, is unavailable until
+// litesvm publishes a compatible release; re-add `litesvm_v4::LiteSVM` here
+// once it does. Production sdk-v4 usage is unaffected: dev-dependencies never
+// propagate to downstream consumers of this crate.
 #[cfg(feature = "sdk-v4")]
-use litesvm_v4::LiteSVM;
+compile_error!(
+    "litesvm-based tests are unavailable under sdk-v4 pending a compatible \
+     litesvm release (see src/tests/litesvm_util.rs); build without sdk-v4 \
+     to run this test suite, or without --tests to use the library"
+);
 
-// litesvm 0.13 (sdk-v4) exposes simulate_transaction in terms of
-// solana-transaction 3.x, while solana-sdk 4.x uses solana-transaction 4.x.
-// The bincode wire format is identical across both, so v4 transactions are
-// round-tripped through the litesvm-compatible 3.x type. For v2/v3 the
-// adapter's own transaction type already matches the bundled litesvm.
-#[cfg(not(feature = "sdk-v4"))]
 use crate::sdk_adapter::VersionedTransaction as LiteSvmTransaction;
-#[cfg(feature = "sdk-v4")]
-use solana_transaction_litesvm_v4::versioned::VersionedTransaction as LiteSvmTransaction;
 
 pub async fn start_litesvm(payer: &Pubkey) -> Result<LiteSVM, Box<dyn Error>> {
     let mut svm = LiteSVM::new()
