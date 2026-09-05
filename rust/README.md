@@ -30,6 +30,7 @@
 | **Openfort** | Openfort backend wallets with TEE-stored keys | `openfort` |
 | **Utila** | Utila MPC wallets and automated co-signer flow | `utila` |
 | **Fordefi** | Fordefi institutional MPC custody with black-box and native Solana signing | `fordefi` |
+| **Ledger** | Ledger hardware wallet over USB-HID; the key never leaves the device and every signature is confirmed on-screen | `ledger` |
 
 ## Installation
 
@@ -359,6 +360,7 @@ whether it can sign arbitrary bytes is fixed per backend:
 | fordefi black box (`FordefiBlackBoxSigner`) | `TransactionSigner` | yes |
 | fordefi native auto (`FordefiNativeAutoSigner`) | `SendingSigner` | yes |
 | fordefi native manual (`FordefiNativeManualSigner`) | `ModifyingSigner` | yes |
+| ledger | `TransactionSigner` | yes, but over the off-chain envelope (see below) |
 
 Crossmint executes every approved transaction server-side and exposes no
 sign-only API, so it is a `SendingSigner` only. It may rewrite the
@@ -371,6 +373,30 @@ transaction without broadcasting it: `modify_and_sign_transaction` replaces `tx`
 with the transaction Fordefi signed, so continue from `tx` and never from the
 value you built. What Fordefi changed is not diffed, so inspect the result before
 you broadcast it.
+
+Ledger is a `TransactionSigner`: the device signs the caller's transaction
+exactly as given and the caller broadcasts. Its `sign_message` is the one
+deviation from the raw-bytes contract the software backends share. A hardware
+wallet cannot raw-ed25519-sign arbitrary bytes; it signs a *structured*
+off-chain message, so the payload is wrapped in an envelope and the signature
+covers the **envelope**, not the bytes passed in. A plain
+`signature.verify(pubkey, message)` over the raw payload will fail. Transaction
+signatures have no such caveat and verify identically to any other backend's.
+
+To verify, rebuild the envelope with the public `ledger::ledger_offchain_envelope`:
+
+```rust
+let envelope = solana_keychain::ledger::ledger_offchain_envelope(&signer.pubkey(), message)?;
+assert!(signature.verify(&signer.pubkey().to_bytes(), &envelope));
+```
+
+Note this is **not** `solana_offchain_message`'s serialization. That crate and the
+Ledger Solana app implement different layouts, and the crate's envelope is
+rejected by the device — it omits the application domain, the signer count and
+the signer list (65 bytes for one signer), and the app requires the signing
+pubkey to appear in that list. `ledger_offchain_envelope` documents the full
+layout. The practical consequence for a verifier is that it must rebuild these
+bytes rather than reach for the crate; the payload cap is 1130 bytes.
 
 The unified `Signer` enum wraps all backends in one type and implements only
 the base `SolanaSigner` trait. Capability access goes through
@@ -572,6 +598,64 @@ let signer = FordefiBlackBoxSigner::from_config(FordefiSignerConfig {
 })
 .await?;
 ```
+
+### Ledger Signer
+
+[Ledger](https://www.ledger.com/) hardware-wallet signer over USB-HID, built on
+[`solana-remote-wallet`](https://docs.rs/solana-remote-wallet). The private key
+never leaves the device and every signature must be confirmed on the device
+screen. Requires the `ledger` feature, a connected and unlocked device running
+the Solana app (and, on Linux, Ledger's [`udev` rules](https://github.com/LedgerHQ/udev-rules)).
+
+**Do not enable trace logging for `solana_remote_wallet` in production.** It logs
+raw APDU bytes at `TRACE`, which includes transaction and message content, and
+prints approval prompts to stdout.
+
+See [docs/LEDGER.md](../docs/LEDGER.md) for timeouts, the auto-launch opt-out and
+troubleshooting.
+
+Supported devices are whatever `solana-remote-wallet` enumerates: Nano S,
+Nano S Plus, Nano X, Stax, Flex and Nano Gen5. Gen5 needs `solana-remote-wallet`
+>= 4.1, the first release carrying its USB product IDs; the dependency range is
+left wide at `4` so a consumer still on the solana 3.x-transaction line resolves
+to 4.0.3 and gets every other device without migrating first. That resolution is
+a property of *your* graph, not of this crate: check it with
+`cargo tree -i solana-remote-wallet`. A Gen5 on a 4.0.x build does not fail
+loudly, it simply never enumerates, so the backend detects an attached
+Ledger-vendor device it could not enumerate and names the product id and the
+version requirement rather than reporting "no Ledger device found".
+
+Works under any of `sdk-v2`/`sdk-v3`/`sdk-v4`. The backend exchanges pubkeys and
+signatures with the selected SDK as raw bytes, so `solana-remote-wallet`'s own
+solana-* crates resolve alongside the selected SDK's rather than having to match
+them.
+
+```rust
+use solana_keychain::{Signer, SolanaSigner};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // `None` -> default derivation path m/44'/501'/0', which matches Ledger
+    // Live's Solana accounts (the 4-component m/44'/501'/0'/0' is the older
+    // Solana-CLI style and derives a *different* address).
+    // `true` -> display the address on-device for the user to verify.
+    // Final `None` -> auto-select the sole connected Ledger; pass a host device
+    // path to disambiguate when several are attached.
+    let signer = Signer::from_ledger(None, true, None).await?;
+    println!("address: {}", signer.pubkey());
+    Ok(())
+}
+```
+
+If the Solana app is not open, the backend launches it for the user over the
+BOLOS dashboard APDUs and waits out the USB re-enumeration, rather than failing
+with "open the Solana app". Declining that prompt on-device, like declining a
+signature, surfaces as `SignerError::UserRejected`.
+
+Transactions the Solana app cannot clear-sign require **blind signing** to be
+enabled in the app's settings. The same applies to off-chain messages that are
+not printable ASCII: those go as format 1 (LimitedUtf8) and the app refuses them
+without blind signing. Keeping payloads to printable ASCII avoids it entirely.
 
 ## Security Audit
 

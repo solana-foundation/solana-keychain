@@ -50,6 +50,21 @@ openfort = [
 ]
 utila = ["dep:reqwest", "dep:jsonwebtoken", "dep:chrono", "dep:tokio", "_remote"]
 fordefi = ["dep:reqwest", "dep:p256", "dep:sha2", "dep:tokio", "_remote"]
+# Ledger hardware-wallet signing over USB-HID. The only backend that talks to
+# local hardware rather than an HTTP provider, hence no `_remote`. Works with
+# any of sdk-v2/v3/v4: the backend never shares a type with the selected SDK
+# (pubkeys and signatures cross as raw bytes), so solana-remote-wallet's own
+# solana-* crates resolve alongside the selected SDK's rather than matching
+# them. tokio is optional crate-wide and the device actor bridges through
+# tokio::task::spawn_blocking, so pull in tokio's `rt` feature explicitly.
+ledger = [
+    "dep:solana-remote-wallet",
+    "dep:solana-derivation-path",
+    "dep:solana-offchain-message",
+    "dep:hidapi",
+    "dep:tokio",
+    "tokio/rt",
+]
 all = [
     "memory",
     "vault",
@@ -66,6 +81,11 @@ all = [
     "utila",
     "fordefi",
 ]
+# NOTE: `ledger` is deliberately omitted from `all`. Unlike every other backend
+# it is not a pure-Rust HTTP client -- it pulls `hidapi`, which builds a native
+# HID library and needs platform HID headers, so folding it in would put a C
+# toolchain requirement on every `--features all` build. Enable it explicitly
+# with `--features ledger`.
 
 # Internal marker enabled by every remote (reqwest-based) backend; never
 # enable directly.
@@ -95,6 +115,36 @@ solana-shred-version-v3 = { package = "solana-shred-version", version = "=3.0.0"
 # Pin solana-signature to avoid v3.3.0 where DecodeError doesn't implement std::error::Error
 solana-signature = { version = ">=3.1, <3.5", optional = true }
 solana-sdk-v4 = { package = "solana-sdk", version = "=4.0.1", optional = true }
+
+# Ledger hardware wallet (USB-HID). The 4.x line is required at minimum: the 3.x
+# line is EOL, and Nano Gen5 specifically needs >=4.1.0, the first release
+# carrying its product IDs (LEDGER_NANO_GEN5_PIDS).
+#
+# The range is deliberately left wide at `4` rather than pinned, because the
+# 4.0/4.1 boundary is where solana's atomic crates change major: 4.0.x wants
+# solana-pubkey ~4.1 + solana-signature ~3.3, while 4.1+ wants solana-pubkey
+# ~4.2 + solana-signature ~3.4. A consumer still on the solana 3.x-transaction
+# line resolves to 4.0.3 and gets every device except Gen5; one on the 4.x line
+# resolves to 4.2.x and gets Gen5 too. The backend's own code is identical
+# across the whole range. None of these versions have to agree with the crates
+# the selected SDK pulls -- the backend bridges to it by raw bytes, so cargo
+# resolves both majors side by side and no type ever unifies.
+#
+# Default features pull a hidapi HID backend (linux-static-hidraw on Linux,
+# IOKit on macOS, native on Windows); agave-unstable-api is mandatory from 4.0.
+solana-remote-wallet = { version = "4", optional = true, features = ["agave-unstable-api"] }
+# DerivationPath type used by the ledger backend (same version remote-wallet pins).
+solana-derivation-path = { version = "3.0.0", optional = true }
+# Off-chain message envelope for sign_message: a hardware wallet signs the
+# serialized OffchainMessage (\xffsolana offchain ...), not raw bytes. Same
+# 3.0.0 solana-remote-wallet already pulls, so no extra resolution.
+solana-offchain-message = { version = "3.0.0", optional = true }
+# Direct HID access for the BOLOS dashboard (open-app / get-app) APDUs, which
+# solana-remote-wallet does not expose. Same version it pins, so no extra
+# resolution. Used only to auto-launch the Solana app before the signer
+# connects: the dashboard speaks different APDUs than the Solana app, and
+# device enumeration fails while the app is closed.
+hidapi = { version = "2.6.6", optional = true }
 
 # Core dependencies
 async-trait = "0.1.89"
@@ -127,7 +177,7 @@ rsa = { version = "0.9", optional = true }
 # Core dependencies (used by all signers for transaction serialization)
 bincode = "1.3"
 # serde cannot express the v1 envelope; wincode can.
-wincode = { version = "0.4.9", optional = true }
+wincode = { version = "0.5.5", optional = true }
 base64 = "0.22.1"
 zeroize = "1.8.2"
 
@@ -148,12 +198,13 @@ wiremock = "0.6"
 dotenvy = "0.15.7"
 litesvm = "0.7.0"
 litesvm-v3 = { package = "litesvm", version = "=0.8.1" }
-litesvm-v4 = { package = "litesvm", version = "=0.13.0" }
-# litesvm 0.13 (sdk-v4 tests) still exposes its simulate API in terms of
-# solana-transaction 3.x, while solana-sdk 4.x uses solana-transaction 4.x.
-# The bincode wire format is identical, so v4 transactions are round-tripped
-# into this type before calling simulate_transaction. Pinned to match litesvm.
-solana-transaction-litesvm-v4 = { package = "solana-transaction", version = "=3.1.0" }
+# litesvm 0.13 pulls solana-loader-v4-program, pinned to solana-pubkey ~4.1.
+# Because dev-dependencies constrain the lockfile whether or not their feature is
+# on, that pin held the entire graph below solana-pubkey 4.2 -- which any
+# consumer needing a 4.2-line crate cannot work around. 0.16 replaced
+# solana-loader-v4-program with solana-loader-v4-interface and moved off
+# solana-pubkey entirely, lifting the ceiling.
+litesvm-v4 = { package = "litesvm", version = "=0.16.0" }
 # Pins the agave-* / solana-*-program cluster to 3.0.11 (last known-good).
 # v3.0.14 is partially migrated to solana-hash v4 which causes type mismatches.
 # All packages in this cluster have exact cross-version pins, so a single

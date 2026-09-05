@@ -9,15 +9,14 @@ use litesvm_v3::LiteSVM;
 #[cfg(feature = "sdk-v4")]
 use litesvm_v4::LiteSVM;
 
-// litesvm 0.13 (sdk-v4) exposes simulate_transaction in terms of
-// solana-transaction 3.x, while solana-sdk 4.x uses solana-transaction 4.x.
-// The bincode wire format is identical across both, so v4 transactions are
-// round-tripped through the litesvm-compatible 3.x type. For v2/v3 the
-// adapter's own transaction type already matches the bundled litesvm.
-#[cfg(not(feature = "sdk-v4"))]
+// Each pinned litesvm exposes simulate_transaction in terms of the same
+// solana-transaction major as its paired solana-sdk, so the adapter's own type
+// is the right one to hand it for every SDK version. (litesvm 0.13 and earlier
+// were a major behind on sdk-v4 and needed a round-trip through a separately
+// pinned solana-transaction 3.x; 0.16 moved to 4.x, removing the mismatch.) The
+// bincode hop below is kept as the version boundary: it re-decodes the
+// transaction with litesvm's own crate graph.
 use crate::sdk_adapter::VersionedTransaction as LiteSvmTransaction;
-#[cfg(feature = "sdk-v4")]
-use solana_transaction_litesvm_v4::versioned::VersionedTransaction as LiteSvmTransaction;
 
 pub async fn start_litesvm(payer: &Pubkey) -> Result<LiteSVM, Box<dyn Error>> {
     let mut svm = LiteSVM::new()

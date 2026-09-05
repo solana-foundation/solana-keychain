@@ -15,6 +15,7 @@ fn test_display_is_redacted_for_all_variants() {
         SignerError::SerializationError(secret.to_string()),
         SignerError::ConfigError(secret.to_string()),
         SignerError::NotAvailable(secret.to_string()),
+        SignerError::UserRejected(secret.to_string()),
         SignerError::IoError(secret.to_string()),
         SignerError::Other(secret.to_string()),
         SignerError::BroadcastUnconfirmed {
@@ -68,6 +69,10 @@ fn test_display_messages_are_stable_and_generic() {
     assert_eq!(
         format!("{}", SignerError::NotAvailable("x".to_string())),
         "Signer not available"
+    );
+    assert_eq!(
+        format!("{}", SignerError::UserRejected("x".to_string())),
+        "Request rejected by user"
     );
     assert_eq!(
         format!("{}", SignerError::IoError("x".to_string())),

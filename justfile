@@ -49,6 +49,62 @@ rust-test:
     cargo test --no-default-features --features {{ sdkv3 }}
     cargo test --no-default-features --features {{ sdkv4 }}
 
+# Launch the Solana app on a connected Ledger over the BOLOS dashboard.
+# Requires a plugged-in, unlocked device; prints what it found and did.
+# Not part of `test`: it needs hardware, so it is a manual diagnostic.
+[working-directory: 'rust']
+rust-ledger-open-app:
+    cargo run --example ledger_open_app --no-default-features --features memory,ledger,sdk-v3
+
+# Ledger hardware integration tests. They self-skip when no device is
+# connected, so this is safe to run without one.
+# Uses the full sdkv3_int set rather than just `memory,ledger`: the shared
+# `tests::rpc_util` helper that `integration-tests` pulls in needs reqwest, so
+# the feature set has to include a remote backend.
+[working-directory: 'rust']
+rust-test-ledger:
+    cargo test --no-default-features --features {{ sdkv3_int }},ledger ledger -- --nocapture --test-threads=1
+
+# Which solana-remote-wallet did this graph resolve? Device support depends on
+# it, so the troubleshooting docs point here rather than at a raw cargo command.
+[working-directory: 'rust']
+rust-which-remote-wallet:
+    cargo tree -i solana-remote-wallet
+
+# Run one #[ignore]d Ledger hardware test by name. Used by the evidence runbook
+# so it does not hand-roll cargo flags that drift from this file.
+[working-directory: 'rust']
+rust-ledger-hw-test name:
+    cargo test --no-default-features --features {{ sdkv3_int }},ledger \
+        {{ name }} -- --ignored --nocapture --test-threads=1
+
+# One iteration of the reconnect regression. The runbook loops this and checks
+# for signal termination, which is why it is a recipe rather than inline cargo.
+[working-directory: 'rust']
+rust-ledger-hw-reconnect:
+    cargo test --no-default-features --features {{ sdkv3_int }},ledger \
+        test_ledger_reconnect_cycle_does_not_crash -- --nocapture --test-threads=1
+
+# What is attached and what does the device say about itself? Read-only
+# diagnostic for a failed connect; needs a device, changes nothing.
+[working-directory: 'rust']
+rust-ledger-diagnose:
+    cargo test --no-default-features --features {{ sdkv3_int }},ledger \
+        diagnose_attached_ledger -- --ignored --nocapture --test-threads=1
+
+# Ledger hardware evidence pack. Interactive: it walks the operator through the
+# device states unit tests cannot reach and writes a timestamped markdown
+# transcript for attaching to a PR. Run once per device in the matrix.
+rust-ledger-evidence model:
+    ./scripts/ledger-hardware-runbook.sh --model "{{ model }}"
+
+# Assert our off-chain envelope against LedgerHQ/app-solana's own source.
+# Reaches the network, so it is ignored by default; no device needed.
+[working-directory: 'rust']
+rust-test-ledger-conformance:
+    cargo test --no-default-features --features {{ sdkv3_int }},ledger \
+        test_ledger_envelope_conformance -- --ignored --nocapture
+
 [working-directory: 'rust']
 rust-test-integration:
     #!/usr/bin/env bash
