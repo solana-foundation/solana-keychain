@@ -61,6 +61,12 @@ impl GcpKmsSigner {
 
     /// Create a new GcpKmsSigner from a configuration object.
     pub async fn from_config(config: GcpKmsSignerConfig) -> Result<Self, SignerError> {
+        // google-cloud-kms is built without its default rustls provider (aws-lc-rs,
+        // a ~140 s C build) so it reads whichever provider the process installed.
+        // Nothing else in the tree installs one, and an already-installed provider
+        // wins.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
         let client = KeyManagementService::builder()
             .build()
             .await

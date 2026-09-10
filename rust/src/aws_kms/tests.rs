@@ -229,6 +229,7 @@ fn create_test_client(endpoint_url: &str) -> KmsClient {
         .behavior_version(BehaviorVersion::latest())
         .region(Region::new("us-east-1"))
         .endpoint_url(endpoint_url)
+        .http_client(super::rustls_https_client())
         .credentials_provider(credentials)
         .build();
     KmsClient::from_conf(config)

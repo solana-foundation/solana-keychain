@@ -13,6 +13,18 @@ use std::str::FromStr;
 
 use crate::signature_util::{signature_from_bytes, verify_or_reject};
 
+/// The SDK's own default HTTPS client is wired to the aws-lc-rs rustls
+/// provider, which costs a ~140 s C build on every cold compile. Building the
+/// connector here selects ring instead, the provider the rest of the tree
+/// already uses.
+pub(crate) fn rustls_https_client() -> aws_sdk_kms::config::SharedHttpClient {
+    aws_smithy_http_client::Builder::new()
+        .tls_provider(aws_smithy_http_client::tls::Provider::Rustls(
+            aws_smithy_http_client::tls::rustls_provider::CryptoMode::Ring,
+        ))
+        .build_https()
+}
+
 const AWS_KMS_SIGNING_ALGORITHM: &str = "ED25519_SHA_512";
 const AWS_KMS_KEY_SPEC: &str = "ECC_NIST_EDWARDS25519";
 const AWS_KMS_KEY_USAGE: &str = "SIGN_VERIFY";
@@ -85,7 +97,8 @@ impl AwsKmsSigner {
             .map_err(|e| SignerError::InvalidPublicKey(format!("Invalid public key: {e}")))?;
 
         // Build AWS config
-        let mut config_builder = aws_config::defaults(aws_config::BehaviorVersion::latest());
+        let mut config_builder = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .http_client(rustls_https_client());
 
         if let Some(region_str) = &config.region {
             config_builder = config_builder.region(Region::new(region_str.clone()));

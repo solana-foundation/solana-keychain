@@ -15,7 +15,7 @@ memory = []
 vault = ["dep:reqwest", "_remote"]
 privy = ["dep:reqwest", "dep:p256", "_remote"]
 turnkey = ["dep:reqwest", "dep:p256", "dep:hex", "dep:chrono", "_remote"]
-aws_kms = ["dep:aws-sdk-kms", "dep:aws-config", "dep:reqwest"]
+aws_kms = ["dep:aws-sdk-kms", "dep:aws-config", "dep:aws-smithy-http-client", "dep:reqwest"]
 fireblocks = [
     "dep:reqwest",
     "dep:jsonwebtoken",
@@ -28,7 +28,7 @@ fireblocks = [
 ]
 para = ["dep:reqwest", "dep:hex", "dep:tokio", "_remote"]
 crossmint = ["dep:reqwest", "dep:hkdf", "dep:sha2", "dep:ed25519-dalek", "dep:tokio", "_remote"]
-gcp_kms = ["dep:google-cloud-kms-v1", "dep:google-cloud-auth", "dep:reqwest"]
+gcp_kms = ["dep:google-cloud-kms-v1", "dep:google-cloud-auth", "dep:rustls", "dep:reqwest"]
 cdp = [
     "dep:reqwest",
     "dep:jsonwebtoken",
@@ -113,13 +113,24 @@ reqwest = { version = "0.12.23", optional = true, features = ["json", "rustls-tl
 p256 = { version = "0.13.2", optional = true, features = ["pem"] }
 hex = { version = "0.4.3", optional = true }
 chrono = { version = "0.4.42", optional = true }
-aws-sdk-kms = { version = "1.97.0", optional = true }
-aws-config = { version = "1.1.7", optional = true }
+# default-features off on both drops `default-https-client`, whose only rustls
+# provider is aws-lc-rs. The connector is built explicitly in src/aws_kms.
+aws-sdk-kms = { version = "1.97.0", optional = true, default-features = false, features = ["rt-tokio"] }
+aws-config = { version = "1.1.7", optional = true, default-features = false, features = [
+    "rt-tokio",
+    "credentials-process",
+    "sso",
+] }
+aws-smithy-http-client = { version = "1.1", optional = true, default-features = false, features = ["rustls-ring"] }
 jsonwebtoken = { version = "10.4", optional = true, features = ["rust_crypto"] }
 sha2 = { version = "0.10.9", optional = true, features = ["oid"] }
 uuid = { version = "1.23", optional = true, features = ["v4"] }
-google-cloud-kms-v1 = { version = "1.9.0", optional = true }
-google-cloud-auth = { version = "1.4.0", optional = true }
+# default-features off drops `default-rustls-provider` and, on google-cloud-auth,
+# `default-idtoken-backend`; both pull aws-lc-rs. src/gcp_kms installs ring as the
+# process provider instead.
+google-cloud-kms-v1 = { version = "1.9.0", optional = true, default-features = false }
+google-cloud-auth = { version = "1.4.0", optional = true, default-features = false }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring"] }
 ed25519-dalek = { version = "3", optional = true, features = ["pem"] }
 hkdf = { version = "0.12", optional = true }
 rsa = { version = "0.9", optional = true }
@@ -164,3 +175,16 @@ scoped-env = "2.1"
 
 [profile.dev]
 debug = "line-tables-only"
+
+# None of these are imported: they shape resolution or features instead. The two
+# solana-* entries pin the sdk-v3 companion crates, agave-feature-set-pin pins the
+# litesvm cluster, getrandom is a wasm-only target dependency enabling a backend,
+# and google-cloud-auth is the handle that turns its aws-lc-rs defaults off.
+[package.metadata.cargo-machete]
+ignored = [
+    "agave-feature-set-pin",
+    "getrandom",
+    "google-cloud-auth",
+    "solana-shred-version-v3",
+    "solana-signature",
+]
