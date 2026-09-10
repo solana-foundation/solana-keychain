@@ -72,7 +72,7 @@ Open an issue first. New backends need a maintainer-side CI preparation step, ha
 
 ## Pull requests
 
-Write a clear title and description explaining the problem, the approach, and how you tested it. Link related issues and call out behavior changes, compatibility concerns, or follow-up work. See the [AI use](#ai-use) section for how to disclose AI use in your PRs.
+Fill in every section of the pull request template: the problem, the approach, how you tested it, and the [AI disclosure](#disclosure). Link related issues and call out behavior changes, compatibility concerns, or follow-up work. CI fails the PR until the disclosure is declared.
 
 Use [Conventional Commits](https://www.conventionalcommits.org/) for commit and PR titles, scoped by backend or language where it helps (`fix(turnkey):`, `feat(python):`).
 
@@ -108,6 +108,10 @@ Two more that matter specifically here:
 - **Plausible-looking cryptography.** Assistants will happily produce signature handling, key derivation, or padding logic that compiles, passes a happy-path test, and is wrong. Anything touching signatures or key material needs you to have verified it against the provider's documentation yourself.
 - **Silently broken parity.** Applying a change to one language and letting the assistant "port" it to the other three without running each suite is how the implementations drift. Run `just test` and the per-language recipes for every language you touched.
 
+You must be able to explain every line of your diff without an LLM. Reviewers may ask you a pointed question about any part of the change; if the answer is pasted from a model or does not come, the PR is closed.
+
+Tool attribution left in a PR (a `Generated with Claude Code` footer, a `Co-Authored-By: Claude` trailer, a `cursor/` or `codex/` branch, and the like) tells us the submission was opened without being read. CI labels these `ai-unreviewed`, fails the check, and explains what to fix. PRs left in that state are closed.
+
 ### Repository context for assistants
 
 This repository ships configuration that makes AI-assisted work go better, and you are welcome to use it:
@@ -119,7 +123,7 @@ Keep these current. If you learn something during your change that the next cont
 
 ### Disclosure
 
-It can be helpful to note the extent to which AI was used in the change. For example, adding
+Disclosure is required. The pull request template has two boxes; check exactly one. If AI tooling was used, name the tool and the extent, for example:
 
 > I wrote all of the code for this feature, and had Claude update the documentation and create tests accordingly
 
@@ -127,7 +131,7 @@ or
 
 > I architected the change and handed all implementation over to Codex
 
-to the pull request description can be helpful context for reviewers.
+Editor autocomplete of single keywords or short phrases does not count as AI tooling.
 
 ### Communication
 
