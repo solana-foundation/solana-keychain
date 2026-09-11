@@ -8,6 +8,9 @@ sdkv3_int := "all,sdk-v3,unsafe-debug,integration-tests"
 sdkv4_int := "all,sdk-v4,unsafe-debug,integration-tests"
 integration_tests := "test_fireblocks_integration test_privy_integration test_turnkey_integration test_vault_integration test_aws_kms_integration test_fordefi_integration"
 
+# The Ledger backend's recipes live with its code. See the forwarders below.
+mod ledger 'rust/src/ledger/justfile'
+
 default:
     @just --list
 
@@ -48,6 +51,38 @@ rust-test:
     cargo test --no-default-features --features {{ sdkv2 }}
     cargo test --no-default-features --features {{ sdkv3 }}
     cargo test --no-default-features --features {{ sdkv4 }}
+
+# ── Ledger hardware-wallet backend ─────────────────────────────────────────
+#
+# The recipes live in rust/src/ledger/justfile, next to the code they drive.
+# Reach them directly as `just ledger::test`, `just ledger::diagnose` and so
+# on; `just --list ledger` shows them all.
+#
+# The forwarders below keep the original command names working.
+
+rust-test-ledger:
+    @just ledger::test
+
+rust-ledger-open-app:
+    @just ledger::open-app
+
+rust-which-remote-wallet:
+    @just ledger::which-remote-wallet
+
+rust-ledger-hw-test name:
+    @just ledger::hw-test "{{ name }}"
+
+rust-ledger-hw-reconnect:
+    @just ledger::hw-reconnect
+
+rust-ledger-diagnose:
+    @just ledger::diagnose
+
+rust-test-ledger-conformance:
+    @just ledger::test-conformance
+
+rust-ledger-evidence model:
+    @just ledger::evidence "{{ model }}"
 
 [working-directory: 'rust']
 rust-test-integration:

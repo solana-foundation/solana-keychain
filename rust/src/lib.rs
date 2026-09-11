@@ -75,6 +75,8 @@ pub mod crossmint;
 pub mod dfns;
 #[cfg(feature = "fordefi")]
 pub mod fordefi;
+#[cfg(feature = "ledger")]
+pub mod ledger;
 #[cfg(feature = "openfort")]
 pub mod openfort;
 #[cfg(feature = "para")]
@@ -122,6 +124,10 @@ pub use fordefi::{
     FordefiPriorityLevel, FordefiPushMode, FordefiRequestSigner, FordefiSignerConfig,
     FordefiSolanaFee, PemRequestSigner, SolanaChainUniqueId,
 };
+#[cfg(feature = "ledger")]
+pub use ledger::{
+    LedgerConfig, LedgerSigner, DEFAULT_DERIVATION_PATH, DEFAULT_SIGN_TIMEOUT, OPS_TIMEOUT,
+};
 #[cfg(feature = "openfort")]
 pub use openfort::{OpenfortSigner, OpenfortSignerConfig};
 #[cfg(feature = "para")]
@@ -146,10 +152,11 @@ pub use utila::{UtilaSigner, UtilaSignerConfig};
     feature = "crossmint",
     feature = "openfort",
     feature = "utila",
-    feature = "fordefi"
+    feature = "fordefi",
+    feature = "ledger"
 )))]
 compile_error!(
-    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, cdp, para, dfns, crossmint, openfort, utila, or fordefi"
+    "At least one signer backend feature must be enabled: memory, vault, privy, turnkey, aws_kms, fireblocks, gcp_kms, cdp, para, dfns, crossmint, openfort, utila, fordefi, or ledger"
 );
 
 /// Unified signer enum supporting multiple backends
@@ -193,6 +200,8 @@ pub enum Signer {
     FordefiNativeAuto(FordefiNativeAutoSigner),
     #[cfg(feature = "fordefi")]
     FordefiNativeManual(FordefiNativeManualSigner),
+    #[cfg(feature = "ledger")]
+    Ledger(LedgerSigner),
 }
 
 impl Signer {
@@ -401,6 +410,49 @@ impl Signer {
         Ok(Self::Utila(signer))
     }
 
+    /// Connect to a Ledger hardware wallet over USB-HID.
+    ///
+    /// Everything is on [`LedgerConfig`], and `Default` is the interactive
+    /// case: `m/44'/501'/0'` (Ledger Live's path, so the address matches the one
+    /// the user sees and funds there), no on-device address confirmation, the
+    /// sole attached device, [`DEFAULT_SIGN_TIMEOUT`], and the dashboard
+    /// auto-launch on.
+    ///
+    /// ```no_run
+    /// # use solana_keychain::{Signer, LedgerConfig};
+    /// # async fn f() -> Result<(), solana_keychain::SignerError> {
+    /// // The sole attached device, default path.
+    /// let signer = Signer::from_ledger(LedgerConfig::default()).await?;
+    ///
+    /// // Registering an account: show the address on the device to verify.
+    /// let signer = Signer::from_ledger(LedgerConfig {
+    ///     confirm_pubkey_on_device: true,
+    ///     ..LedgerConfig::default()
+    /// })
+    /// .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// The two knobs that matter for unattended use are
+    /// [`LedgerConfig::signing_timeout`] and [`LedgerConfig::auto_open_app`];
+    /// see that type for what each one costs.
+    ///
+    /// The device must be unlocked. If the Solana app is not open this will try
+    /// to launch it for the user via the BOLOS dashboard, unless
+    /// [`LedgerConfig::auto_open_app`] is off.
+    #[cfg(feature = "ledger")]
+    pub async fn from_ledger(config: LedgerConfig) -> Result<Self, SignerError> {
+        // `LedgerSigner::connect_with` blocks the calling thread on device I/O,
+        // including waiting for a physical button press when
+        // `confirm_pubkey_on_device` is set. Run it on the blocking pool so it
+        // never stalls the async runtime.
+        let signer = tokio::task::spawn_blocking(move || LedgerSigner::connect_with(config))
+            .await
+            .map_err(|e| SignerError::Other(format!("Ledger connect task failed: {e}")))??;
+        Ok(Self::Ledger(signer))
+    }
+
     /// Create a Fordefi signer.
     ///
     /// `config.public_key` is trusted as the vault's Solana address; construction
@@ -493,6 +545,8 @@ impl Signer {
             Signer::Utila(s) => Some(s),
             #[cfg(feature = "fordefi")]
             Signer::FordefiBlackBox(s) => Some(s),
+            #[cfg(feature = "ledger")]
+            Signer::Ledger(s) => Some(s),
             #[cfg(feature = "crossmint")]
             Signer::Crossmint(_) => None,
             #[cfg(feature = "fordefi")]
@@ -562,6 +616,8 @@ macro_rules! dispatch_signer {
             Signer::FordefiNativeAuto($signer) => $body,
             #[cfg(feature = "fordefi")]
             Signer::FordefiNativeManual($signer) => $body,
+            #[cfg(feature = "ledger")]
+            Signer::Ledger($signer) => $body,
         }
     };
 }

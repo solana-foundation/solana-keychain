@@ -39,6 +39,12 @@ pub trait SolanaSigner: Send + Sync {
 
     /// Sign an arbitrary message
     ///
+    /// Software and remote backends sign `message` as given, so the result
+    /// verifies against those bytes. Hardware backends cannot sign raw bytes and
+    /// sign a structured off-chain envelope wrapping `message` instead; the
+    /// signature then verifies only against that envelope. See the backend's
+    /// documentation for the layout.
+    ///
     /// # Arguments
     ///
     /// * `message` - The message bytes to sign

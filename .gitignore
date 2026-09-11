@@ -40,3 +40,6 @@ secret/*
 test-ledger/
 validator.log
 /node_modules/
+
+# Hardware evidence packs are per-run artefacts, attached to PRs not committed.
+ledger-evidence/

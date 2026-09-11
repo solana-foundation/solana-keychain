@@ -49,6 +49,11 @@ pub enum SignerError {
     #[error("Signer not available")]
     NotAvailable(String),
 
+    /// The signing request was rejected by the user (e.g. declined on a
+    /// hardware-wallet device screen).
+    #[error("Request rejected by user")]
+    UserRejected(String),
+
     /// IO error (file operations)
     #[error("IO error")]
     IoError(String),
@@ -91,6 +96,7 @@ impl SignerError {
             | Self::SerializationError(detail)
             | Self::ConfigError(detail)
             | Self::NotAvailable(detail)
+            | Self::UserRejected(detail)
             | Self::IoError(detail)
             | Self::Other(detail) => detail.clone(),
             Self::RemoteApiError { detail, .. } | Self::BroadcastUnconfirmed { detail, .. } => {
@@ -143,6 +149,7 @@ impl fmt::Debug for SignerError {
             }
             SignerError::ConfigError(_) => write!(f, "SignerError::ConfigError([REDACTED])"),
             SignerError::NotAvailable(_) => write!(f, "SignerError::NotAvailable([REDACTED])"),
+            SignerError::UserRejected(_) => write!(f, "SignerError::UserRejected([REDACTED])"),
             SignerError::IoError(_) => write!(f, "SignerError::IoError([REDACTED])"),
             SignerError::BroadcastUnconfirmed {
                 provider_tx_id,

@@ -1,0 +1,66 @@
+# Ledger hardware-wallet backend recipes, modularized alongside the code.
+# Reached as `just ledger::<recipe>` or via thin `rust-*-ledger*` forwarders.
+#
+# `[working-directory]` relative to this file: '../../..' is repo root,
+# '../..' is the Rust crate.
+
+# Every ledger recipe needs full integration features: `tests::rpc_util` needs
+# reqwest, so the set must include a remote backend.
+features := "all,sdk-v3,unsafe-debug,integration-tests,ledger"
+
+default:
+    @just --list ledger
+
+# Ledger hardware integration tests. Self-skip without device, safe to run anyway.
+# `--test-threads=1` is required: one device, one actor, one claim; parallel
+# tests contend and fail rather than skip.
+[working-directory: '../..']
+test:
+    cargo test --no-default-features --features {{ features }} ledger -- --nocapture --test-threads=1
+
+# Lint this backend: root `rust-fmt` omits ledger (hidapi/C toolchain),
+# but CI includes it. Run this before pushing.
+[working-directory: '../..']
+lint:
+    cargo clippy --all-targets --no-default-features --features all,sdk-v2,unsafe-debug,integration-tests,ledger -- -D warnings
+    cargo clippy --all-targets --no-default-features --features all,sdk-v3,unsafe-debug,integration-tests,ledger -- -D warnings
+    cargo clippy --all-targets --no-default-features --features all,sdk-v4,unsafe-debug,integration-tests,ledger -- -D warnings
+
+# What solana-remote-wallet version did the graph resolve? Device support depends
+# on it; backend errors point here rather than cargo commands.
+# `--features ledger` required: without it, cargo tree -i fails (optional dep).
+[working-directory: '../..']
+which-remote-wallet:
+    cargo tree -i solana-remote-wallet --no-default-features --features {{ features }}
+
+# Run one #[ignore]d Ledger hardware test by name via the recipe.
+[working-directory: '../..']
+hw-test name:
+    cargo test --no-default-features --features {{ features }} \
+        {{ name }} -- --ignored --nocapture --test-threads=1
+
+# Launch the Solana app on a connected Ledger over the BOLOS dashboard.
+# Requires a plugged-in, unlocked device sitting on the dashboard.
+open-app: (hw-test "test_ledger_integration_open_app")
+
+# One reconnect cycle iteration. Runbook loops this to check for signal termination.
+[working-directory: '../..']
+hw-reconnect:
+    cargo test --no-default-features --features {{ features }} \
+        test_ledger_reconnect_cycle_does_not_crash -- --nocapture --test-threads=1
+
+# Attached devices and device info. Read-only diagnostic for failed connect.
+diagnose: (hw-test "diagnose_attached_ledger")
+
+# Assert our off-chain envelope against LedgerHQ/app-solana's source.
+# Reaches network, ignored by default, no device needed.
+[working-directory: '../..']
+test-conformance:
+    cargo test --no-default-features --features {{ features }} \
+        test_ledger_envelope_conformance -- --ignored --nocapture
+
+# Ledger hardware evidence pack. Interactive: guides operator through device
+# states unit tests cannot reach, writes timestamped markdown for PR.
+[working-directory: '../../..']
+evidence model:
+    ./scripts/ledger-hardware-runbook.sh --model "{{ model }}"
