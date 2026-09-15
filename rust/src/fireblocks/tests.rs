@@ -888,3 +888,20 @@ fn test_use_program_call_config_carried_through_construction() {
     .unwrap();
     assert!(!signer_raw.use_program_call);
 }
+
+#[test]
+fn test_new_trims_trailing_slashes_from_api_base_url() {
+    let signer = FireblocksSigner::new(FireblocksSignerConfig {
+        api_key: "test-key".to_string(),
+        private_key_pem: TEST_RSA_KEY.to_string(),
+        vault_account_id: "test-vault".to_string(),
+        asset_id: None,
+        api_base_url: Some("https://api.fireblocks.io///".to_string()),
+        poll_interval_ms: None,
+        max_poll_attempts: None,
+        use_program_call: None,
+        http_client_config: None,
+    })
+    .unwrap();
+    assert_eq!(signer.api_base_url, "https://api.fireblocks.io");
+}

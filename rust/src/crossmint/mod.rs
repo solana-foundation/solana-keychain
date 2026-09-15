@@ -2,7 +2,9 @@
 
 mod types;
 
-use crate::remote_util::{encode_uri_component, read_body_capped, validate_https_url};
+use crate::remote_util::{
+    encode_uri_component, normalize_base_url, read_body_capped, validate_https_url,
+};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_base58, verify_or_reject};
 use crate::traits::SendingSigner;
@@ -83,11 +85,8 @@ impl CrossmintSigner {
             ));
         }
 
-        let api_base_url = config
-            .api_base_url
-            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string())
-            .trim_end_matches('/')
-            .to_string();
+        let api_base_url =
+            normalize_base_url(config.api_base_url.as_deref().unwrap_or(DEFAULT_BASE_URL));
 
         validate_https_url(&api_base_url)?;
 

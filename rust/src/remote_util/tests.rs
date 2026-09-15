@@ -61,3 +61,15 @@ async fn test_parse_json_response_parses_body_within_limit() {
     let value: serde_json::Value = parse_json_response(response, "test API").await.unwrap();
     assert_eq!(value["ok"], serde_json::Value::Bool(true));
 }
+
+#[test]
+fn test_normalize_base_url_trims_whitespace_and_trailing_slashes() {
+    assert_eq!(
+        normalize_base_url("  https://api.example.com///  "),
+        "https://api.example.com"
+    );
+    assert_eq!(
+        normalize_base_url("https://api.example.com/v1"),
+        "https://api.example.com/v1"
+    );
+}

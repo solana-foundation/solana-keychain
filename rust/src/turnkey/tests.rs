@@ -609,3 +609,21 @@ async fn test_turnkey_sign_oversized_component() {
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
 }
+
+#[test]
+fn test_from_config_trims_trailing_slashes_from_api_base_url() {
+    let keypair = create_test_keypair();
+    let (api_public_key, api_private_key) = create_test_api_keys();
+
+    let signer = TurnkeySigner::from_config(TurnkeySignerConfig {
+        api_public_key,
+        api_private_key,
+        organization_id: "test-org-id".to_string(),
+        private_key_id: "test-key-id".to_string(),
+        public_key: keypair.pubkey().to_string(),
+        api_base_url: Some("https://api.turnkey.com///".to_string()),
+        http_client_config: None,
+    })
+    .unwrap();
+    assert_eq!(signer.api_base_url, "https://api.turnkey.com");
+}

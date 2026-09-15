@@ -115,6 +115,18 @@ describe('createPrivySigner', () => {
             assertIsSolanaTransactionSigner(signer);
         });
 
+        it('removes trailing slashes from apiBaseUrl', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            setupMockWalletResponse(keyPair.address);
+
+            await createPrivySigner({ ...mockConfig, apiBaseUrl: 'https://api.privy.test///' });
+
+            const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+            const [url] = fetchMock.mock.calls[0] as [string];
+            expect(url).toContain('https://api.privy.test/wallets/');
+        });
+
         it('sets address field correctly from API response', async () => {
             const keyPair = await generateKeyPairSigner();
 

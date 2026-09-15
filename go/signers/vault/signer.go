@@ -57,7 +57,7 @@ func New(cfg Config) (*Signer, error) {
 	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 	return &Signer{
 		client:    client,
-		vaultAddr: cfg.VaultAddr,
+		vaultAddr: strings.TrimRight(strings.TrimSpace(cfg.VaultAddr), "/"),
 		token:     cfg.Token,
 		keyName:   cfg.KeyName,
 		pubkey:    pubkey,

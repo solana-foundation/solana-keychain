@@ -2,7 +2,7 @@
 
 mod types;
 
-use crate::remote_util::parse_json_response;
+use crate::remote_util::{normalize_base_url, parse_json_response};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{extract_and_verify_returned_signature, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
@@ -90,9 +90,12 @@ impl TurnkeySigner {
             organization_id: config.organization_id,
             private_key_id: config.private_key_id,
             public_key: pubkey,
-            api_base_url: config
-                .api_base_url
-                .unwrap_or_else(|| "https://api.turnkey.com".to_string()),
+            api_base_url: normalize_base_url(
+                config
+                    .api_base_url
+                    .as_deref()
+                    .unwrap_or("https://api.turnkey.com"),
+            ),
             client,
         })
     }

@@ -7,7 +7,7 @@
 /// directly in their own `Cargo.toml`.
 pub use reqwest;
 
-use crate::remote_util::parse_json_response;
+use crate::remote_util::{normalize_base_url, parse_json_response};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_base64, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
@@ -146,7 +146,7 @@ impl VaultSigner {
 
         Ok(Self {
             client: Arc::new(client),
-            api_base_url,
+            api_base_url: normalize_base_url(&api_base_url),
             token,
             key_name,
             public_key,

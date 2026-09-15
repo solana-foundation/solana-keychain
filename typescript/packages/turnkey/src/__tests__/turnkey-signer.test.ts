@@ -207,6 +207,17 @@ describe('createTurnkeySigner', () => {
                 expect(() => createTurnkeySigner(invalidConfig)).toThrow('apiBaseUrl is not a valid URL');
             });
 
+            it('removes trailing slashes from apiBaseUrl', async () => {
+                const keyPair = await generateKeyPairSigner();
+                const signer = createTurnkeySigner({
+                    ...mockConfig,
+                    apiBaseUrl: 'https://api.turnkey.test///',
+                    publicKey: keyPair.address,
+                });
+
+                expect((signer as unknown as { apiBaseUrl: string })['apiBaseUrl']).toBe('https://api.turnkey.test');
+            });
+
             it('throws CONFIG_ERROR when apiBaseUrl does not use HTTPS', async () => {
                 const keyPair = await generateKeyPairSigner();
                 const invalidConfig = {

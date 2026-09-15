@@ -15,8 +15,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::error::SignerError;
 use crate::http_client_config::HttpClientConfig;
 use crate::remote_util::{
-    extract_api_error_with_transaction_id, parse_json_response, poll_until, read_body_capped,
-    transaction_id_in_body, PollOutcome,
+    extract_api_error_with_transaction_id, normalize_base_url, parse_json_response, poll_until,
+    read_body_capped, transaction_id_in_body, PollOutcome,
 };
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{extract_and_verify_rewritten_transaction, signature_from_base64};
@@ -167,12 +167,8 @@ impl FordefiCore {
                 (None, Some(request_signer)) => Arc::clone(request_signer),
             };
 
-        let api_base_url = config
-            .api_base_url
-            .as_deref()
-            .unwrap_or(DEFAULT_BASE_URL)
-            .trim_end_matches('/')
-            .to_string();
+        let api_base_url =
+            normalize_base_url(config.api_base_url.as_deref().unwrap_or(DEFAULT_BASE_URL));
         let parsed_api_base_url = reqwest::Url::parse(&api_base_url).map_err(|_| {
             SignerError::ConfigError("api_base_url must be a valid URL".to_string())
         })?;

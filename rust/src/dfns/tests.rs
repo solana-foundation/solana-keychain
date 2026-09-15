@@ -494,3 +494,17 @@ async fn test_is_available_api_error() {
 
     assert!(!signer.is_available().await);
 }
+
+#[test]
+fn test_new_trims_trailing_slashes_from_api_base_url() {
+    let signer = DfnsSigner::new(DfnsSignerConfig {
+        auth_token: "token".to_string(),
+        cred_id: "cred".to_string(),
+        private_key_pem: TEST_ED25519_PEM.to_string(),
+        wallet_id: "wallet".to_string(),
+        api_base_url: Some("https://api.dfns.io///".to_string()),
+        http_client_config: None,
+    })
+    .unwrap();
+    assert_eq!(signer.api_base_url, "https://api.dfns.io");
+}
