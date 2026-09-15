@@ -98,6 +98,21 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestNewTrimsTrailingSlashesFromVaultAddr(t *testing.T) {
+	s, err := New(Config{
+		VaultAddr: testVaultAddr + "///",
+		Token:     testToken,
+		KeyName:   testKeyName,
+		Pubkey:    testPubkey,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if s.vaultAddr != testVaultAddr {
+		t.Errorf("vaultAddr = %s, want %s", s.vaultAddr, testVaultAddr)
+	}
+}
+
 func TestNewInvalidPubkey(t *testing.T) {
 	_, err := New(Config{
 		VaultAddr: testVaultAddr,

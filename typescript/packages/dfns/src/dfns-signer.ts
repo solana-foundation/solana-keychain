@@ -6,6 +6,7 @@ import {
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
+    normalizeBaseUrl,
     normalizeMessageBytes,
     signBatchStaggered,
     SignerErrorCode,
@@ -161,7 +162,7 @@ class DfnsSigner<TAddress extends string = string>
             });
         }
 
-        const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
+        const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl ?? DEFAULT_API_BASE_URL);
         assertHttpsUrl(apiBaseUrl, 'apiBaseUrl');
         const requestDelayMs = config.requestDelayMs ?? 0;
         validateRequestDelayMs(requestDelayMs);

@@ -662,3 +662,18 @@ async fn test_privy_is_available_remote_failure() {
 
     assert!(!signer.is_available().await);
 }
+
+#[test]
+fn test_from_config_trims_trailing_slashes_from_api_base_url() {
+    let signer = PrivySigner::from_config(PrivySignerConfig {
+        app_id: "test-app-id".to_string(),
+        app_secret: "test-app-secret".to_string(),
+        wallet_id: "test-wallet-id".to_string(),
+        api_base_url: Some("https://api.privy.io/v1///".to_string()),
+        http_client_config: None,
+        authorization_context: None,
+        authorization_request_expiry: PrivyAuthorizationRequestExpiry::Omit,
+    })
+    .unwrap();
+    assert_eq!(signer.api_base_url, "https://api.privy.io/v1");
+}

@@ -7,6 +7,7 @@ import {
     ED25519_SIGNATURE_LENGTH,
     extractAndVerifyReturnedSignature,
     fetchSignerJson,
+    normalizeBaseUrl,
     normalizeMessageBytes,
     signBatchStaggered,
     SignerErrorCode,
@@ -105,7 +106,7 @@ class TurnkeySigner<TAddress extends string = string>
 
         this.organizationId = config.organizationId;
         this.privateKeyId = config.privateKeyId;
-        const apiBaseUrl = config.apiBaseUrl || 'https://api.turnkey.com';
+        const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl || 'https://api.turnkey.com');
         assertHttpsUrl(apiBaseUrl, 'apiBaseUrl');
 
         this.apiBaseUrl = apiBaseUrl;

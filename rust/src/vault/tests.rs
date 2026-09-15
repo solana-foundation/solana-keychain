@@ -418,3 +418,15 @@ async fn test_is_available_failure() {
 
     assert!(!signer.is_available().await);
 }
+
+#[test]
+fn test_new_trims_trailing_slashes_from_api_base_url() {
+    let signer = VaultSigner::new(
+        format!("{TEST_VAULT_ADDR}///"),
+        TEST_VAULT_TOKEN.to_string(),
+        TEST_KEY_NAME.to_string(),
+        TEST_PUBKEY.to_string(),
+    )
+    .expect("Failed to create test signer");
+    assert_eq!(signer.api_base_url, TEST_VAULT_ADDR);
+}

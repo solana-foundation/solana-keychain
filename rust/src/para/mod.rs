@@ -2,7 +2,7 @@
 
 mod types;
 
-use crate::remote_util::{parse_json_response, validate_https_url};
+use crate::remote_util::{normalize_base_url, parse_json_response, validate_https_url};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_hex, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
@@ -97,11 +97,9 @@ impl ParaSigner {
         Ok(Self {
             api_key: config.api_key,
             wallet_id: config.wallet_id,
-            api_base_url: config
-                .api_base_url
-                .unwrap_or_else(|| DEFAULT_BASE_URL.to_string())
-                .trim_end_matches('/')
-                .to_string(),
+            api_base_url: normalize_base_url(
+                config.api_base_url.as_deref().unwrap_or(DEFAULT_BASE_URL),
+            ),
             client,
             public_key: None,
         })

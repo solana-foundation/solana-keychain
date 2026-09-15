@@ -60,6 +60,13 @@ describe('DfnsSigner', () => {
             expect(signer.address).toBeDefined();
         });
 
+        it('removes trailing slashes from apiBaseUrl', async () => {
+            mockWalletFetch();
+            await createDfnsSigner({ ...defaultConfig, apiBaseUrl: 'https://api.dfns.test///' });
+            const [url] = mockFetch.mock.calls[0] as [string];
+            expect(url).toContain('https://api.dfns.test/wallets/');
+        });
+
         it('throws error for missing authToken', async () => {
             await expect(createDfnsSigner({ ...defaultConfig, authToken: '' })).rejects.toThrow(
                 'Missing required authToken field',

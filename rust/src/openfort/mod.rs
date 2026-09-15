@@ -30,7 +30,7 @@
 
 mod types;
 
-use crate::remote_util::{encode_uri_component, parse_json_response};
+use crate::remote_util::{encode_uri_component, normalize_base_url, parse_json_response};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_hex, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
@@ -157,7 +157,7 @@ impl OpenfortSigner {
         let base_url = config
             .api_base_url
             .unwrap_or_else(|| format!("https://{OPENFORT_API_HOST}"));
-        let base_url = base_url.trim_end_matches('/').to_string();
+        let base_url = normalize_base_url(&base_url);
         let parsed_url = reqwest::Url::parse(&base_url).map_err(|_| {
             SignerError::ConfigError(format!("Invalid Openfort base URL: {base_url}"))
         })?;

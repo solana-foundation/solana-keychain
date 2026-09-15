@@ -6,6 +6,7 @@ import {
     createSignatureDictionary,
     extractAndVerifyReturnedSignature,
     fetchSignerJson,
+    normalizeBaseUrl,
     normalizeMessageBytes,
     signBatchStaggered,
     SignerErrorCode,
@@ -128,7 +129,7 @@ class PrivySigner<TAddress extends string = string>
                 message: 'Missing required configuration fields (appId, appSecret, or walletId)',
             });
         }
-        const apiBaseUrl = config.apiBaseUrl || DEFAULT_API_BASE_URL;
+        const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl || DEFAULT_API_BASE_URL);
         assertHttpsUrl(apiBaseUrl, 'apiBaseUrl');
         const requestDelayMs = config.requestDelayMs ?? 0;
         const authorizationRequestExpiryMs =
