@@ -75,6 +75,12 @@ export interface VaultKeyReadResponse {
         exportable: boolean;
 
         /**
+         * Public key material per version, keyed by version number. Present for
+         * asymmetric key types such as ed25519.
+         */
+        keys?: Record<string, { public_key?: string } | undefined>;
+
+        /**
          * Current version of the key
          */
         latest_version: number;

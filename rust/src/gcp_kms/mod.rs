@@ -2,7 +2,7 @@
 
 use crate::error::SignerError;
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
-use crate::signature_util::{signature_from_bytes, verify_or_reject};
+use crate::signature_util::{ed25519_key_from_spki_pem, signature_from_bytes, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction, SolanaSigner, TransactionSigner};
 use crate::transaction_util::TransactionUtil;
 use google_cloud_kms_v1::client::KeyManagementService;
@@ -144,7 +144,11 @@ impl GcpKmsSigner {
             .await;
 
         match result {
-            Ok(public_key) => public_key.algorithm == CryptoKeyVersionAlgorithm::EcSignEd25519,
+            Ok(public_key) => {
+                public_key.algorithm == CryptoKeyVersionAlgorithm::EcSignEd25519
+                    && ed25519_key_from_spki_pem(&public_key.pem)
+                        == Some(self.public_key.to_bytes())
+            }
             Err(_e) => {
                 #[cfg(feature = "unsafe-debug")]
                 log::error!("GCP KMS availability check failed: {_e:?}");

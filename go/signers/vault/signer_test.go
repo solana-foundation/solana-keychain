@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -314,7 +315,24 @@ func TestSignTransactionSuccess(t *testing.T) {
 	}
 }
 
+// keyVersionBase64 renders pubkey as Vault renders an ed25519 transit key version.
+func keyVersionBase64(t *testing.T, pubkey string) string {
+	t.Helper()
+	key, err := solana.PublicKeyFromBase58(pubkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(key[:])
+}
+
 func TestIsAvailable(t *testing.T) {
+	otherKey := keyVersionBase64(t, "11111111111111111111111111111112")
+	configuredKey := keyVersionBase64(t, testPubkey)
+	keyRead := func(latest int, versions string) string {
+		return fmt.Sprintf(
+			`{"data":{"name":"test-key","supports_signing":true,"type":"ed25519",`+
+				`"latest_version":%d,"keys":{%s}}}`, latest, versions)
+	}
 	cases := map[string]struct {
 		status int
 		body   string
@@ -322,8 +340,18 @@ func TestIsAvailable(t *testing.T) {
 	}{
 		"success": {
 			http.StatusOK,
-			`{"data":{"name":"test-key","supports_signing":true,"type":"ed25519"}}`,
+			keyRead(2, fmt.Sprintf(`"1":{"public_key":%q},"2":{"public_key":%q}`, otherKey, configuredKey)),
 			true,
+		},
+		"latest version is not the configured public key": {
+			http.StatusOK,
+			keyRead(2, fmt.Sprintf(`"1":{"public_key":%q},"2":{"public_key":%q}`, configuredKey, otherKey)),
+			false,
+		},
+		"no key material": {
+			http.StatusOK,
+			`{"data":{"name":"test-key","supports_signing":true,"type":"ed25519"}}`,
+			false,
 		},
 		"unsupported key type": {
 			http.StatusOK,

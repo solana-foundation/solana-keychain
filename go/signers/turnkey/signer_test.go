@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -494,13 +495,12 @@ func TestSignOversizedComponent(t *testing.T) {
 	}
 }
 
-func TestIsAvailable(t *testing.T) {
-	var calls int32
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&calls, 1)
-		if r.Method != http.MethodPost || r.URL.Path != whoAmIPath {
-			t.Errorf("got %s %s, want POST %s", r.Method, r.URL.Path, whoAmIPath)
-		}
+// availabilityServer answers the whoami probe and the get_private_key lookup,
+// reporting solanaAddress as the address the configured key derives.
+func availabilityServer(t *testing.T, solanaAddress string, calls *int32) *httptest.Server {
+	t.Helper()
+	return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(calls, 1)
 		if r.Header.Get("X-Stamp") == "" {
 			t.Error("missing X-Stamp header")
 		}
@@ -508,14 +508,31 @@ func TestIsAvailable(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		if string(body) != `{"organizationId":"test-org-id"}` {
-			t.Errorf("whoami body = %s", body)
+		switch r.URL.Path {
+		case whoAmIPath:
+			if string(body) != `{"organizationId":"test-org-id"}` {
+				t.Errorf("whoami body = %s", body)
+			}
+			_, err = io.WriteString(w, `{"organizationId":"test-org-id","organizationName":"Test Org"}`)
+		case getPrivateKeyPath:
+			if string(body) != `{"organizationId":"test-org-id","privateKeyId":"test-key-id"}` {
+				t.Errorf("get_private_key body = %s", body)
+			}
+			_, err = fmt.Fprintf(w,
+				`{"privateKey":{"privateKeyId":"test-key-id","addresses":[{"format":%q,"address":%q}]}}`,
+				solanaAddressFormat, solanaAddress)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		resp := `{"organizationId":"test-org-id","organizationName":"Test Org","userId":"test-user-id","username":"test@example.com"}`
-		if _, err := io.WriteString(w, resp); err != nil {
+		if err != nil {
 			t.Error(err)
 		}
 	}))
+}
+
+func TestIsAvailable(t *testing.T) {
+	var calls int32
+	srv := availabilityServer(t, testutils.TestPublicKey().String(), &calls)
 	defer srv.Close()
 
 	s, err := New(testConfig(t, testutils.TestPublicKey().String(), srv))
@@ -525,8 +542,43 @@ func TestIsAvailable(t *testing.T) {
 	if !s.IsAvailable(context.Background()) {
 		t.Error("IsAvailable should be true for a 200 whoami response")
 	}
+	if calls != 2 {
+		t.Errorf("turnkey called %d times, want 2", calls)
+	}
+}
+
+// A key whose Solana address is not the configured one cannot sign for it.
+func TestIsNotAvailableWhenKeyIsNotTheConfiguredPublicKey(t *testing.T) {
+	var calls int32
+	srv := availabilityServer(t, solana.PublicKey{1}.String(), &calls)
+	defer srv.Close()
+
+	s, err := New(testConfig(t, testutils.TestPublicKey().String(), srv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.IsAvailable(context.Background()) {
+		t.Error("IsAvailable should be false when Turnkey holds another key")
+	}
+}
+
+// signWith may already be the Solana address, which needs no key lookup.
+func TestIsAvailableSkipsLookupWhenSignWithIsTheAddress(t *testing.T) {
+	var calls int32
+	srv := availabilityServer(t, testutils.TestPublicKey().String(), &calls)
+	defer srv.Close()
+
+	cfg := testConfig(t, testutils.TestPublicKey().String(), srv)
+	cfg.PrivateKeyID = testutils.TestPublicKey().String()
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.IsAvailable(context.Background()) {
+		t.Error("IsAvailable should be true when signWith is the configured address")
+	}
 	if calls != 1 {
-		t.Errorf("whoami called %d times, want 1", calls)
+		t.Errorf("turnkey called %d times, want 1", calls)
 	}
 }
 

@@ -1,3 +1,4 @@
+import base64
 from types import SimpleNamespace
 from typing import Any
 
@@ -5,6 +6,7 @@ import pytest
 from google.api_core.exceptions import PermissionDenied
 from google.cloud import kms_v1
 from solders.keypair import Keypair
+from solders.pubkey import Pubkey
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.core import signed_message_bytes
@@ -19,6 +21,9 @@ EC_SIGN_ED25519 = kms_v1.CryptoKeyVersion.CryptoKeyVersionAlgorithm.EC_SIGN_ED25
 RSA_SIGN_PKCS1_2048_SHA256 = (
     kms_v1.CryptoKeyVersion.CryptoKeyVersionAlgorithm.RSA_SIGN_PKCS1_2048_SHA256
 )
+ED25519_SPKI_PREFIX = bytes(
+    (0x30, 0x2A, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x03, 0x21, 0x00)
+)
 
 
 class StubKmsClient:
@@ -28,11 +33,13 @@ class StubKmsClient:
         sign_error: Exception | None = None,
         algorithm: Any = EC_SIGN_ED25519,
         key_error: Exception | None = None,
+        pem: str = "",
     ) -> None:
         self.signature = signature
         self.sign_error = sign_error
         self.algorithm = algorithm
         self.key_error = key_error
+        self.pem = pem
         self.sign_requests: list[dict[str, Any]] = []
         self.key_requests: list[dict[str, Any]] = []
 
@@ -46,7 +53,14 @@ class StubKmsClient:
         self.key_requests.append(request)
         if self.key_error is not None:
             raise self.key_error
-        return SimpleNamespace(algorithm=self.algorithm)
+        return SimpleNamespace(algorithm=self.algorithm, pem=self.pem)
+
+
+def spki_pem(pubkey: str) -> str:
+    """PEM-encoded SubjectPublicKeyInfo, the shape GCP KMS returns."""
+    der = ED25519_SPKI_PREFIX + bytes(Pubkey.from_string(pubkey))
+    body = base64.b64encode(der).decode("ascii")
+    return f"-----BEGIN PUBLIC KEY-----\n{body}\n-----END PUBLIC KEY-----\n"
 
 
 def make_signer(pubkey: str, client: StubKmsClient) -> GcpKmsSigner:
@@ -149,11 +163,19 @@ async def test_sign_transaction_success() -> None:
 
 async def test_is_available_success() -> None:
     keypair = Keypair()
-    client = StubKmsClient()
+    client = StubKmsClient(pem=spki_pem(str(keypair.pubkey())))
     signer = make_signer(str(keypair.pubkey()), client)
 
     assert await signer.is_available()
     assert client.key_requests == [{"name": TEST_KEY_NAME}]
+
+
+async def test_is_available_false_when_kms_holds_another_key() -> None:
+    keypair = Keypair()
+    client = StubKmsClient(pem=spki_pem(str(Keypair().pubkey())))
+    signer = make_signer(str(keypair.pubkey()), client)
+
+    assert not await signer.is_available()
 
 
 async def test_is_available_false_for_non_ed25519_algorithm() -> None:

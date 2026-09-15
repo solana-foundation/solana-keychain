@@ -632,13 +632,55 @@ async fn test_fordefi_is_available_success() {
     Mock::given(method("GET"))
         .and(path_regex("/api/v1/vaults/.*"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": "test-vault-id"
+            "id": "test-vault-id",
+            "address": pubkey.to_string()
         })))
         .expect(1)
         .mount(&mock_server)
         .await;
 
     assert!(signer.is_available().await);
+}
+
+#[tokio::test]
+async fn test_fordefi_is_available_success_for_black_box_vault() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let pubkey = keypair_pubkey(&keypair);
+    let signer = create_test_signer(&mock_server.uri(), pubkey);
+
+    Mock::given(method("GET"))
+        .and(path_regex("/api/v1/vaults/.*"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "test-vault-id",
+            "type": "black_box",
+            "public_key_compressed": STANDARD.encode(pubkey.to_bytes())
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    assert!(signer.is_available().await);
+}
+
+#[tokio::test]
+async fn test_fordefi_is_not_available_when_vault_holds_another_key() {
+    let mock_server = MockServer::start().await;
+    let pubkey = keypair_pubkey(&create_test_keypair());
+    let other = keypair_pubkey(&create_test_keypair());
+    let signer = create_test_signer(&mock_server.uri(), pubkey);
+
+    Mock::given(method("GET"))
+        .and(path_regex("/api/v1/vaults/.*"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "test-vault-id",
+            "address": other.to_string()
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    assert!(!signer.is_available().await);
 }
 
 #[tokio::test]
@@ -649,9 +691,9 @@ async fn test_fordefi_is_available_checks_request_signer() {
 
     Mock::given(method("GET"))
         .and(path_regex("/api/v1/vaults/.*"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": "test-vault-id" })),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({ "id": "test-vault-id", "address": public_key.to_string() }),
+        ))
         .expect(1)
         .mount(&mock_server)
         .await;

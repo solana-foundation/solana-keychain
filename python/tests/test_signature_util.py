@@ -1,3 +1,5 @@
+import base64
+
 import pytest
 from solders.keypair import Keypair
 from solders.signature import Signature
@@ -7,6 +9,8 @@ from solana_keychain.core import (
     SignerError,
     SignerErrorCode,
     extract_and_verify_returned_signature,
+    public_key_from_spki_der,
+    public_key_from_spki_pem,
     signed_message_bytes,
     verify_returned_signature,
 )
@@ -99,3 +103,35 @@ def test_extract_and_verify_malformed_transaction_bytes() -> None:
             b"not a wire transaction", keypair.pubkey(), b"message", "Test"
         )
     assert excinfo.value.code == SignerErrorCode.SERIALIZATION_ERROR
+
+
+ED25519_SPKI_PREFIX = bytes(
+    (0x30, 0x2A, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x03, 0x21, 0x00)
+)
+
+
+def test_public_key_from_spki_der_extracts_the_key() -> None:
+    pubkey = Keypair().pubkey()
+    assert public_key_from_spki_der(ED25519_SPKI_PREFIX + bytes(pubkey)) == pubkey
+
+
+def test_public_key_from_spki_der_rejects_non_ed25519_der() -> None:
+    pubkey = Keypair().pubkey()
+    foreign_oid = bytearray(ED25519_SPKI_PREFIX + bytes(pubkey))
+    foreign_oid[8] = 0x71
+
+    assert public_key_from_spki_der(bytes(foreign_oid)) is None
+    assert public_key_from_spki_der(b"") is None
+    assert public_key_from_spki_der(ED25519_SPKI_PREFIX + bytes(pubkey)[:31]) is None
+
+
+def test_public_key_from_spki_pem_extracts_the_key() -> None:
+    pubkey = Keypair().pubkey()
+    body = base64.b64encode(ED25519_SPKI_PREFIX + bytes(pubkey)).decode("ascii")
+    pem = f"-----BEGIN PUBLIC KEY-----\n{body}\n-----END PUBLIC KEY-----\n"
+
+    assert public_key_from_spki_pem(pem) == pubkey
+
+
+def test_public_key_from_spki_pem_rejects_text_that_is_not_a_key() -> None:
+    assert public_key_from_spki_pem("not a pem") is None

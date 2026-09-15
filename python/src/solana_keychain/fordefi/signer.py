@@ -7,6 +7,7 @@ signature in the ``x-signature`` header.
 
 import asyncio
 import base64
+import binascii
 import json
 import logging
 import time
@@ -126,7 +127,8 @@ class _FordefiSignerBase(SolanaSigner):
     """Shared Fordefi API plumbing: request signing, submit, polling, vault lookup.
 
     The configured ``public_key`` is trusted as the vault's Solana address;
-    no remote lookup is performed at construction time.
+    no remote lookup is performed at construction time. ``is_available`` checks
+    it against the vault for callers that want the round trip.
     """
 
     def __init__(self, config: FordefiSignerConfig) -> None:
@@ -279,12 +281,35 @@ class _FordefiSignerBase(SolanaSigner):
             raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
         return response
 
+    def _vault_holds_configured_pubkey(self, vault: dict[str, Any]) -> bool:
+        """Confirm the configured public key is the one Fordefi holds for the
+        vault. Chain-specific vaults expose it as a base58 ``address``, black box
+        vaults as a base64 raw key."""
+        address = vault.get("address")
+        if isinstance(address, str):
+            try:
+                return Pubkey.from_string(address) == self._public_key
+            except ValueError:
+                return False
+
+        encoded = vault.get("public_key_compressed")
+        if isinstance(encoded, str):
+            try:
+                return Pubkey(base64.b64decode(encoded, validate=True)) == self._public_key
+            except (binascii.Error, ValueError):
+                return False
+
+        return False
+
     async def is_available(self) -> bool:
-        """Readiness probe: the vault is reachable with the bearer token and the
-        request signer can produce an ``x-signature`` value."""
+        """Readiness probe: the vault is reachable with the bearer token, holds
+        the configured public key, and the request signer can produce an
+        ``x-signature`` value."""
 
         async def probe() -> bool:
-            await self._fetch_vault(AVAILABILITY_TIMEOUT_SECONDS)
+            vault = await self._fetch_vault(AVAILABILITY_TIMEOUT_SECONDS)
+            if not self._vault_holds_configured_pubkey(vault):
+                return False
             await self._sign_request("/api/v1/vaults", _timestamp_ms(), "")
             return True
 
