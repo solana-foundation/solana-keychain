@@ -1,6 +1,14 @@
-import { DescribeKeyCommand, KMSClient, MessageType, SignCommand, SigningAlgorithmSpec } from '@aws-sdk/client-kms';
+import {
+    DescribeKeyCommand,
+    GetPublicKeyCommand,
+    KMSClient,
+    MessageType,
+    SignCommand,
+    SigningAlgorithmSpec,
+} from '@aws-sdk/client-kms';
 import { Address, assertIsAddress } from '@solana/addresses';
 import {
+    addressFromSpkiDer,
     assertSignatureValid,
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
@@ -216,7 +224,13 @@ class AwsKmsSigner<TAddress extends string = string>
             const keyUsage = response.KeyMetadata.KeyUsage;
             const keyState = response.KeyMetadata.KeyState;
 
-            return keySpec === 'ECC_NIST_EDWARDS25519' && keyUsage === 'SIGN_VERIFY' && keyState === 'Enabled';
+            if (keySpec !== 'ECC_NIST_EDWARDS25519' || keyUsage !== 'SIGN_VERIFY' || keyState !== 'Enabled') {
+                return false;
+            }
+
+            // Requires the kms:GetPublicKey permission on the key policy.
+            const publicKey = await this.client.send(new GetPublicKeyCommand({ KeyId: this.keyId }));
+            return publicKey.PublicKey !== undefined && addressFromSpkiDer(publicKey.PublicKey) === this.address;
         } catch {
             return false;
         }

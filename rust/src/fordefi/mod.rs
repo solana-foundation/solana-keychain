@@ -126,9 +126,10 @@ impl FordefiCore {
     /// Validate the mode-independent config, resolve the request-signing
     /// mechanism, and assemble the core.
     ///
-    /// `config.public_key` is trusted as the vault's Solana public key —
+    /// `config.public_key` is trusted as the vault's Solana public key:
     /// construction makes no network calls, and every signature Fordefi
-    /// returns is still verified against it.
+    /// returns is still verified against it. [`FordefiCore::is_available`]
+    /// confirms it really belongs to the vault.
     fn build(config: &FordefiSignerConfig) -> Result<Self, SignerError> {
         if config.access_token.is_empty() {
             return Err(SignerError::ConfigError(
@@ -523,9 +524,31 @@ impl FordefiCore {
         parse_json_response(response, "Fordefi API fetch_vault").await
     }
 
+    /// Confirm the configured Solana public key is the one Fordefi holds for
+    /// the vault. Chain-specific vaults expose it as a base58 `address`, black
+    /// box vaults as a base64 raw key.
+    fn vault_matches_public_key(&self, vault: &VaultResponse) -> bool {
+        if let Some(address) = &vault.address {
+            return bs58::decode(address)
+                .into_vec()
+                .is_ok_and(|key| key == self.public_key.to_bytes());
+        }
+        if let Some(encoded) = &vault.public_key_compressed {
+            return STANDARD
+                .decode(encoded)
+                .is_ok_and(|key| key == self.public_key.to_bytes());
+        }
+        false
+    }
+
     async fn is_available(&self) -> bool {
         let readiness_check = async {
-            self.fetch_vault().await?;
+            let vault = self.fetch_vault().await?;
+            if !self.vault_matches_public_key(&vault) {
+                return Err(SignerError::InvalidPublicKey(
+                    "Configured public key does not belong to the Fordefi vault".to_string(),
+                ));
+            }
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|e| SignerError::Other(format!("System time error: {e}")))?

@@ -113,3 +113,21 @@ type signResult struct {
 type whoAmIRequest struct {
 	OrganizationID string `json:"organizationId"`
 }
+
+// getPrivateKeyRequest is the get_private_key query body.
+type getPrivateKeyRequest struct {
+	OrganizationID string `json:"organizationId"`
+	PrivateKeyID   string `json:"privateKeyId"`
+}
+
+// getPrivateKeyResponse is the subset of the get_private_key response used to
+// confirm the configured public key is the key Turnkey signs with.
+type getPrivateKeyResponse struct {
+	PrivateKey struct {
+		Addresses []struct {
+			Address string `json:"address"`
+			Format  string `json:"format"`
+		} `json:"addresses"`
+		PublicKey string `json:"publicKey"`
+	} `json:"privateKey"`
+}

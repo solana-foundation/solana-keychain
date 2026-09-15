@@ -1,6 +1,13 @@
+import { address, getAddressEncoder } from '@solana/addresses';
+import { getBase64Decoder } from '@solana/codecs-strings';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createVaultSigner } from '../vault-signer.js';
+
+/** Base64 raw Ed25519 key, the shape Vault returns per transit key version. */
+function publicKeyBase64(value: string): string {
+    return getBase64Decoder().decode(new Uint8Array(getAddressEncoder().encode(address(value))));
+}
 
 vi.mock('@solana/keychain-core', async importOriginal => {
     const mod = await importOriginal<typeof import('@solana/keychain-core')>();
@@ -153,6 +160,11 @@ describe('createVaultSigner', () => {
         it('should return true when Vault key is accessible and supports signing', async () => {
             const mockResponse = {
                 data: {
+                    keys: {
+                        '1': { public_key: publicKeyBase64('SysvarC1ock11111111111111111111111111111111') },
+                        '2': { public_key: publicKeyBase64(mockConfig.publicKey) },
+                    },
+                    latest_version: 2,
                     supports_signing: true,
                     type: 'ed25519',
                 },
@@ -177,6 +189,30 @@ describe('createVaultSigner', () => {
                     method: 'GET',
                 }),
             );
+        });
+
+        it('should return false when the latest key version is not the configured address', async () => {
+            const mockResponse = {
+                data: {
+                    keys: {
+                        '1': { public_key: publicKeyBase64(mockConfig.publicKey) },
+                        '2': { public_key: publicKeyBase64('SysvarC1ock11111111111111111111111111111111') },
+                    },
+                    latest_version: 2,
+                    supports_signing: true,
+                    type: 'ed25519',
+                },
+            };
+
+            vi.mocked(fetch).mockResolvedValueOnce(
+                new Response(JSON.stringify(mockResponse), {
+                    status: 200,
+                }),
+            );
+
+            const signer = createVaultSigner(mockConfig);
+
+            expect(await signer.isAvailable()).toBe(false);
         });
 
         it('should return false when Vault key does not support signing', async () => {

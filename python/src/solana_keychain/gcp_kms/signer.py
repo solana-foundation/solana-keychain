@@ -17,7 +17,10 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.signature_util import verify_returned_signature
+from solana_keychain.core.signature_util import (
+    public_key_from_spki_pem,
+    verify_returned_signature,
+)
 from solana_keychain.core.signer import SignedTransaction, TransactionSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
@@ -108,7 +111,9 @@ class GcpKmsSigner(TransactionSigner):
             response = await self._client.get_public_key(request={"name": self._key_name})
         except (GoogleAPIError, GoogleAuthError):
             return False
-        return bool(response.algorithm == EC_SIGN_ED25519)
+        if response.algorithm != EC_SIGN_ED25519:
+            return False
+        return public_key_from_spki_pem(response.pem or "") == self._pubkey
 
 
 async def create_gcp_kms_signer(config: GcpKmsSignerConfig) -> GcpKmsSigner:

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"testing"
 
@@ -63,6 +64,13 @@ func signingStub(t *testing.T, priv ed25519.PrivateKey) *stubKMS {
 }
 
 // newTestSigner builds a signer over client with the deterministic test pubkey.
+// spkiPEM wraps key in a PEM SubjectPublicKeyInfo, the shape GCP KMS returns
+// from GetPublicKey.
+func spkiPEM(key solana.PublicKey) string {
+	der := append([]byte{0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00}, key[:]...)
+	return "-----BEGIN PUBLIC KEY-----\n" + base64.StdEncoding.EncodeToString(der) + "\n-----END PUBLIC KEY-----\n"
+}
+
 func newTestSigner(t *testing.T, client KMSClient) *Signer {
 	t.Helper()
 	s, err := New(context.Background(), Config{
@@ -257,12 +265,30 @@ func TestIsAvailableSuccess(t *testing.T) {
 			return &kmspb.PublicKey{
 				Name:      testKeyName,
 				Algorithm: kmspb.CryptoKeyVersion_EC_SIGN_ED25519,
+				Pem:       spkiPEM(testutils.TestPublicKey()),
 			}, nil
 		},
 	})
 
 	if !s.IsAvailable(context.Background()) {
 		t.Error("expected available for EC_SIGN_ED25519 key")
+	}
+}
+
+// A key version holding a different public key is not usable by this signer.
+func TestIsAvailableKeyIsNotTheConfiguredPublicKey(t *testing.T) {
+	s := newTestSigner(t, &stubKMS{
+		getPub: func(context.Context, *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
+			return &kmspb.PublicKey{
+				Name:      testKeyName,
+				Algorithm: kmspb.CryptoKeyVersion_EC_SIGN_ED25519,
+				Pem:       spkiPEM(solana.PublicKey{1}),
+			}, nil
+		},
+	})
+
+	if s.IsAvailable(context.Background()) {
+		t.Error("availability check should fail when KMS holds another key")
 	}
 }
 

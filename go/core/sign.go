@@ -1,7 +1,10 @@
 package core
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"strings"
 
 	"github.com/solana-foundation/solana-go/v2"
 )
@@ -159,4 +162,49 @@ func SignTransactionWith(
 		return SignedTransaction{}, err
 	}
 	return AttachSignature(tx, pubkey, sig)
+}
+
+// ed25519SPKIPrefix is the DER SubjectPublicKeyInfo header for an Ed25519 key:
+// SEQUENCE, AlgorithmIdentifier with OID 1.3.101.112, then a 33-byte BIT STRING
+// with zero unused bits.
+var ed25519SPKIPrefix = []byte{0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00}
+
+// PublicKeyFromSPKIDER extracts the Ed25519 public key carried by a DER-encoded
+// SubjectPublicKeyInfo. ok is false when der is not one.
+func PublicKeyFromSPKIDER(der []byte) (key solana.PublicKey, ok bool) {
+	if len(der) != len(ed25519SPKIPrefix)+len(key) {
+		return solana.PublicKey{}, false
+	}
+	if !bytes.Equal(der[:len(ed25519SPKIPrefix)], ed25519SPKIPrefix) {
+		return solana.PublicKey{}, false
+	}
+	copy(key[:], der[len(ed25519SPKIPrefix):])
+	return key, true
+}
+
+// PublicKeyFromSPKIPEM extracts the Ed25519 public key carried by a PEM-encoded
+// SubjectPublicKeyInfo. ok is false when pem is not one.
+func PublicKeyFromSPKIPEM(pemText string) (solana.PublicKey, bool) {
+	var body strings.Builder
+	for _, line := range strings.Split(pemText, "\n") {
+		if strings.HasPrefix(line, "-----") {
+			continue
+		}
+		body.WriteString(strings.TrimSpace(line))
+	}
+	der, err := base64.StdEncoding.DecodeString(body.String())
+	if err != nil {
+		return solana.PublicKey{}, false
+	}
+	return PublicKeyFromSPKIDER(der)
+}
+
+// PublicKeyFromRawEd25519 renders a raw 32-byte Ed25519 key as a public key.
+// ok is false for any other length.
+func PublicKeyFromRawEd25519(raw []byte) (key solana.PublicKey, ok bool) {
+	if len(raw) != len(key) {
+		return solana.PublicKey{}, false
+	}
+	copy(key[:], raw)
+	return key, true
 }

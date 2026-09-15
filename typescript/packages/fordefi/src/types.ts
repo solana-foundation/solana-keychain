@@ -101,6 +101,7 @@ export interface FordefiTransactionStatusResponse {
  *
  * Used both for availability checks and for authoritative verification
  * that a configured Solana `publicKey` actually belongs to the vault.
+ * @see FordefiSigner.isAvailable
  */
 export interface FordefiVaultResponse {
     /** Solana base58 address bound to the vault (present on chain-specific vaults). */

@@ -96,7 +96,17 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 		return false
 	}
 	md := out.KeyMetadata
-	return md.KeySpec == requiredKeySpec && md.Enabled && md.KeyUsage == requiredKeyUsage
+	if md.KeySpec != requiredKeySpec || !md.Enabled || md.KeyUsage != requiredKeyUsage {
+		return false
+	}
+
+	// Requires the kms:GetPublicKey permission on the key policy.
+	pub, err := s.client.GetPublicKey(ctx, &kms.GetPublicKeyInput{KeyId: aws.String(s.keyID)})
+	if err != nil {
+		return false
+	}
+	key, ok := core.PublicKeyFromSPKIDER(pub.PublicKey)
+	return ok && key == s.pub
 }
 
 // signBytes performs the KMS Sign call with MessageType RAW and the

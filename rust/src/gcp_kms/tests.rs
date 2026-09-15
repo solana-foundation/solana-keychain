@@ -15,6 +15,19 @@ fn create_test_keypair() -> Keypair {
     Keypair::new()
 }
 
+/// PEM-encoded SubjectPublicKeyInfo for an Ed25519 key, the shape GCP KMS
+/// returns from GetPublicKey.
+fn spki_pem(public_key: &crate::sdk_adapter::Pubkey) -> String {
+    let mut der = vec![
+        0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+    ];
+    der.extend_from_slice(&public_key.to_bytes());
+    format!(
+        "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
+        STANDARD.encode(der)
+    )
+}
+
 /// Helper to create a KMS client configured for testing with wiremock
 async fn create_test_client(endpoint: &str) -> KeyManagementService {
     KeyManagementService::builder()
@@ -144,7 +157,8 @@ async fn test_gcp_kms_is_available_success() {
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
             {
                 "name": TEST_KEY_NAME,
-                "algorithm": "EC_SIGN_ED25519"
+                "algorithm": "EC_SIGN_ED25519",
+                "pem": spki_pem(&keypair.pubkey())
             }
         )))
         .expect(1)
@@ -152,6 +166,54 @@ async fn test_gcp_kms_is_available_success() {
         .await;
 
     assert!(signer.is_available().await);
+}
+
+#[tokio::test]
+#[serial]
+async fn test_gcp_kms_is_not_available_when_key_is_not_the_configured_public_key() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let other = create_test_keypair();
+
+    Mock::given(method("GET"))
+        .and(path(
+            "/computeMetadata/v1/instance/service-accounts/default/token",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
+            {
+                "access_token": "mock-token",
+                "expires_in": 3600,
+                "token_type": "Bearer"
+            }
+        )))
+        .mount(&mock_server)
+        .await;
+
+    let metadata_host = mock_server.address().to_string();
+    let _env = ScopedEnv::set("GCE_METADATA_HOST", &metadata_host);
+
+    let client = create_test_client(&mock_server.uri()).await;
+    let signer = GcpKmsSigner::with_client(
+        client,
+        TEST_KEY_NAME.to_string(),
+        keypair.pubkey().to_string(),
+    )
+    .expect("Failed to create signer");
+
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/{TEST_KEY_NAME}/publicKey")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
+            {
+                "name": TEST_KEY_NAME,
+                "algorithm": "EC_SIGN_ED25519",
+                "pem": spki_pem(&other.pubkey())
+            }
+        )))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    assert!(!signer.is_available().await);
 }
 
 #[tokio::test]

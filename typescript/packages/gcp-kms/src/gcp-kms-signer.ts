@@ -1,6 +1,7 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
+    addressFromSpkiPem,
     assertSignatureValid,
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
@@ -44,6 +45,8 @@ type AsymmetricSignResponse = {
 
 type PublicKeyResponse = {
     algorithm?: string;
+    /** PEM-encoded SubjectPublicKeyInfo for the key version. */
+    pem?: string;
 };
 export function createGcpKmsSigner<TAddress extends string = string>(
     config: GcpKmsSignerConfig,
@@ -265,7 +268,9 @@ class GcpKmsSigner<TAddress extends string = string>
                 return false;
             }
 
-            return publicKey.algorithm === 'EC_SIGN_ED25519';
+            return (
+                publicKey.algorithm === 'EC_SIGN_ED25519' && addressFromSpkiPem(publicKey.pem ?? '') === this.address
+            );
         } catch {
             return false;
         }

@@ -4,6 +4,7 @@ import boto3
 import pytest
 from botocore.stub import Stubber
 from solders.keypair import Keypair
+from solders.pubkey import Pubkey
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.aws_kms import AwsKmsSigner, AwsKmsSignerConfig, create_aws_kms_signer
@@ -49,6 +50,19 @@ def key_metadata_response(
             "Enabled": enabled,
             "KeyUsage": key_usage,
         }
+    }
+
+
+ED25519_SPKI_PREFIX = bytes(
+    (0x30, 0x2A, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x03, 0x21, 0x00)
+)
+
+
+def public_key_response(pubkey: str) -> dict[str, Any]:
+    """DER SubjectPublicKeyInfo, the shape AWS KMS returns from GetPublicKey."""
+    return {
+        "KeyId": TEST_KEY_ID,
+        "PublicKey": ED25519_SPKI_PREFIX + bytes(Pubkey.from_string(pubkey)),
     }
 
 
@@ -140,9 +154,24 @@ async def test_is_available_success() -> None:
     keypair = Keypair()
     signer, stubber = make_stubbed_signer(str(keypair.pubkey()))
     stubber.add_response("describe_key", key_metadata_response(), {"KeyId": TEST_KEY_ID})
+    stubber.add_response(
+        "get_public_key", public_key_response(str(keypair.pubkey())), {"KeyId": TEST_KEY_ID}
+    )
 
     with stubber:
         assert await signer.is_available()
+
+
+async def test_is_available_false_when_kms_holds_another_key() -> None:
+    keypair = Keypair()
+    signer, stubber = make_stubbed_signer(str(keypair.pubkey()))
+    stubber.add_response("describe_key", key_metadata_response(), {"KeyId": TEST_KEY_ID})
+    stubber.add_response(
+        "get_public_key", public_key_response(str(Keypair().pubkey())), {"KeyId": TEST_KEY_ID}
+    )
+
+    with stubber:
+        assert not await signer.is_available()
 
 
 @pytest.mark.parametrize(
