@@ -8,9 +8,9 @@ backports-asyncio-runner==1.2.0 ; python_full_version < '3.11'
     # via pytest-asyncio
 base58==2.1.1
     # via solana-keychain (pyproject.toml)
-boto3==1.43.79
+boto3==1.43.89
     # via solana-keychain (pyproject.toml)
-botocore==1.43.79
+botocore==1.43.89
     # via
     #   boto3
     #   s3transfer
@@ -29,7 +29,7 @@ colorama==0.4.6 ; os_name == 'nt' or sys_platform == 'win32'
     # via
     #   build
     #   pytest
-cryptography==50.0.0
+cryptography==50.0.1
     # via
     #   solana-keychain (pyproject.toml)
     #   google-auth
@@ -45,21 +45,21 @@ google-auth==2.56.3
     #   google-cloud-kms
 google-cloud-kms==3.16.0
     # via solana-keychain (pyproject.toml)
-googleapis-common-protos==1.75.1
+googleapis-common-protos==1.75.3
     # via
     #   google-api-core
     #   grpc-google-iam-v1
     #   grpcio-status
 grpc-google-iam-v1==0.14.5
     # via google-cloud-kms
-grpcio==1.83.0
+grpcio==1.83.1
     # via
     #   google-api-core
     #   google-cloud-kms
     #   googleapis-common-protos
     #   grpc-google-iam-v1
     #   grpcio-status
-grpcio-status==1.83.0
+grpcio-status==1.83.1
     # via google-api-core
 h11==0.16.0
     # via httpcore
@@ -98,7 +98,7 @@ pathspec==1.1.1
     # via mypy
 pluggy==1.6.0
     # via pytest
-proto-plus==1.28.3
+proto-plus==1.28.4
     # via
     #   google-api-core
     #   google-cloud-kms
@@ -134,7 +134,7 @@ requests==2.34.2
     # via google-api-core
 respx==0.23.1
     # via solana-keychain (pyproject.toml)
-ruff==0.16.4
+ruff==0.16.6
     # via solana-keychain (pyproject.toml)
 s3transfer==0.19.2
     # via boto3
