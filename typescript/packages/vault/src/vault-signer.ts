@@ -1,6 +1,7 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase64Decoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
+    addressFromEd25519Key,
     assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
@@ -242,7 +243,17 @@ class VaultSigner<TAddress extends string = string>
                 providerName: 'Vault',
                 url,
             });
-            return keyData.data?.supports_signing === true && keyData.data?.type === 'ed25519';
+            if (keyData.data?.supports_signing !== true || keyData.data?.type !== 'ed25519') {
+                return false;
+            }
+            // Signing uses the latest key version, so that is the one that has
+            // to be the configured address.
+            const latestKey = keyData.data.keys?.[String(keyData.data.latest_version)]?.public_key;
+            if (latestKey === undefined) {
+                return false;
+            }
+            base64Encoder ||= getBase64Encoder();
+            return addressFromEd25519Key(new Uint8Array(base64Encoder.encode(latestKey))) === this.address;
         } catch {
             return false;
         }

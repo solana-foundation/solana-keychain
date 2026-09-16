@@ -86,9 +86,9 @@ func buildCore(cfg Config) (signerCore, error) {
 	}, nil
 }
 
-// isAvailable reports whether the vault is reachable with the bearer token and
-// the request signer can produce an x-signature value. All errors are swallowed
-// and reported as false.
+// isAvailable reports whether the vault is reachable with the bearer token,
+// holds the configured public key, and the request signer can produce an
+// x-signature value. All errors are swallowed and reported as false.
 func (s *signerCore) isAvailable(ctx context.Context) bool {
 	actx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
 	defer cancel()

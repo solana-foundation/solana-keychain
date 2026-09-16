@@ -4,6 +4,7 @@ import httpx
 import pytest
 import respx
 from solders.keypair import Keypair
+from solders.pubkey import Pubkey
 
 from solana_keychain import (
     SignerError,
@@ -166,15 +167,52 @@ async def test_sign_transaction_success() -> None:
     assert list(transaction.signatures) == [signature]
 
 
+def _key_version(public_key: str) -> dict[str, str]:
+    return {"public_key": base64.b64encode(bytes(Pubkey.from_string(public_key))).decode("ascii")}
+
+
 @respx.mock
 async def test_is_available_success() -> None:
     respx.get(KEYS_URL).mock(
         return_value=httpx.Response(
             200,
-            json={"data": {"name": KEY_NAME, "supports_signing": True, "type": "ed25519"}},
+            json={
+                "data": {
+                    "keys": {
+                        "1": _key_version(str(Keypair().pubkey())),
+                        "2": _key_version(TEST_PUBKEY),
+                    },
+                    "latest_version": 2,
+                    "name": KEY_NAME,
+                    "supports_signing": True,
+                    "type": "ed25519",
+                }
+            },
         )
     )
     assert await make_signer().is_available()
+
+
+@respx.mock
+async def test_is_available_false_when_latest_key_is_not_the_configured_public_key() -> None:
+    respx.get(KEYS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": {
+                    "keys": {
+                        "1": _key_version(TEST_PUBKEY),
+                        "2": _key_version(str(Keypair().pubkey())),
+                    },
+                    "latest_version": 2,
+                    "name": KEY_NAME,
+                    "supports_signing": True,
+                    "type": "ed25519",
+                }
+            },
+        )
+    )
+    assert not await make_signer().is_available()
 
 
 @respx.mock

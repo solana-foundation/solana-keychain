@@ -78,3 +78,31 @@ pub struct SignResult {
 pub struct WhoAmIRequest {
     pub organization_id: String,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPrivateKeyRequest {
+    pub organization_id: String,
+    pub private_key_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPrivateKeyResponse {
+    pub private_key: PrivateKeyInfo,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivateKeyInfo {
+    pub public_key: Option<String>,
+    #[serde(default)]
+    pub addresses: Vec<PrivateKeyAddress>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivateKeyAddress {
+    pub format: Option<String>,
+    pub address: Option<String>,
+}

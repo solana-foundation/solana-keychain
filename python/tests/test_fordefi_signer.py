@@ -1067,8 +1067,28 @@ async def test_manual_mode_signs_messages_through_solana_message() -> None:
 
 @respx.mock
 async def test_is_available_success() -> None:
-    mock_vault({"id": VAULT_ID})
-    assert await make_black_box_signer(Keypair()).is_available()
+    keypair = Keypair()
+    mock_vault({"address": str(keypair.pubkey()), "id": VAULT_ID})
+    assert await make_black_box_signer(keypair).is_available()
+
+
+@respx.mock
+async def test_is_available_success_for_black_box_vault() -> None:
+    keypair = Keypair()
+    mock_vault(
+        {
+            "id": VAULT_ID,
+            "public_key_compressed": base64.b64encode(bytes(keypair.pubkey())).decode("ascii"),
+            "type": "black_box",
+        }
+    )
+    assert await make_black_box_signer(keypair).is_available()
+
+
+@respx.mock
+async def test_is_available_false_when_vault_holds_another_key() -> None:
+    mock_vault({"address": str(Keypair().pubkey()), "id": VAULT_ID})
+    assert not await make_black_box_signer(Keypair()).is_available()
 
 
 @respx.mock
@@ -1083,9 +1103,10 @@ async def test_is_available_false_on_failing_request_signer() -> None:
         async def sign_request(self, payload: bytes) -> str:
             raise RuntimeError("kms unavailable")
 
-    mock_vault({"id": VAULT_ID})
+    keypair = Keypair()
+    mock_vault({"address": str(keypair.pubkey()), "id": VAULT_ID})
     signer = make_black_box_signer(
-        Keypair(), private_key_pem=None, request_signer=FailingRequestSigner()
+        keypair, private_key_pem=None, request_signer=FailingRequestSigner()
     )
     assert not await signer.is_available()
 

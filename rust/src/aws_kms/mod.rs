@@ -11,7 +11,7 @@ use aws_sdk_kms::{
 };
 use std::str::FromStr;
 
-use crate::signature_util::{signature_from_bytes, verify_or_reject};
+use crate::signature_util::{ed25519_key_from_spki_der, signature_from_bytes, verify_or_reject};
 
 /// The SDK's own default HTTPS client is wired to the aws-lc-rs rustls
 /// provider, which costs a ~140 s C build on every cold compile. Building the
@@ -217,10 +217,34 @@ impl AwsKmsSigner {
                     return false;
                 };
 
-                key_usage.as_str() == AWS_KMS_KEY_USAGE
+                if key_usage.as_str() != AWS_KMS_KEY_USAGE {
+                    return false;
+                }
+
+                self.key_matches_configured_public_key().await
             }
             Err(_) => false,
         }
+    }
+
+    /// Confirm the configured Solana public key is the one AWS KMS holds for
+    /// `key_id`. Requires the `kms:GetPublicKey` permission on the key policy.
+    async fn key_matches_configured_public_key(&self) -> bool {
+        let Ok(response) = self
+            .client
+            .get_public_key()
+            .key_id(&self.key_id)
+            .send()
+            .await
+        else {
+            return false;
+        };
+
+        let Some(der) = response.public_key() else {
+            return false;
+        };
+
+        ed25519_key_from_spki_der(der.as_ref()) == Some(self.public_key.to_bytes())
     }
 }
 

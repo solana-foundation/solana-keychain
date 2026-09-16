@@ -40,6 +40,8 @@ from solana_keychain.core.transaction_util import (
 
 DEFAULT_API_BASE_URL = "https://api.turnkey.com"
 
+TURNKEY_SOLANA_ADDRESS_FORMAT = "ADDRESS_FORMAT_SOLANA"
+
 SIGNATURE_COMPONENT_LENGTH = 32
 P256_PRIVATE_KEY_LENGTH = 32
 P256_COMPRESSED_PUBLIC_KEY_LENGTH = 33
@@ -249,12 +251,47 @@ class TurnkeySigner(TransactionSigner):
     async def sign_message(self, message: bytes) -> Signature:
         return await self._sign_bytes(message)
 
+    async def _sign_with_is_configured_pubkey(self) -> bool:
+        """Confirm the configured public key is the key Turnkey signs with."""
+        # ``private_key_id`` may itself be the Solana address Turnkey signs with,
+        # in which case it already is the public key and needs no lookup.
+        if self._private_key_id == str(self._pubkey):
+            return True
+
+        response = await self._post_stamped(
+            "/public/v1/query/get_private_key",
+            {
+                "organizationId": self._organization_id,
+                "privateKeyId": self._private_key_id,
+            },
+        )
+        private_key = response.get("privateKey") if isinstance(response, dict) else None
+        if not isinstance(private_key, dict):
+            return False
+
+        addresses = private_key.get("addresses")
+        if isinstance(addresses, list) and any(
+            isinstance(entry, dict)
+            and entry.get("format") == TURNKEY_SOLANA_ADDRESS_FORMAT
+            and entry.get("address") == str(self._pubkey)
+            for entry in addresses
+        ):
+            return True
+
+        encoded = private_key.get("publicKey")
+        if not isinstance(encoded, str):
+            return False
+        try:
+            return Pubkey(bytes.fromhex(encoded)) == self._pubkey
+        except ValueError:
+            return False
+
     async def is_available(self) -> bool:
         async def probe() -> bool:
             await self._post_stamped(
                 "/public/v1/query/whoami", {"organizationId": self._organization_id}
             )
-            return True
+            return await self._sign_with_is_configured_pubkey()
 
         return await probe_availability(probe)
 

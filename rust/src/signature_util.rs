@@ -134,6 +134,38 @@ pub fn verify_or_reject(
     ))
 }
 
+/// DER SubjectPublicKeyInfo header for an Ed25519 key: SEQUENCE, AlgorithmIdentifier
+/// with OID 1.3.101.112, then a 33-byte BIT STRING with zero unused bits.
+#[cfg(any(feature = "aws_kms", feature = "gcp_kms"))]
+const ED25519_SPKI_PREFIX: [u8; 12] = [
+    0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+];
+
+/// Extract the raw 32-byte Ed25519 key from a DER-encoded SubjectPublicKeyInfo.
+#[cfg(any(feature = "aws_kms", feature = "gcp_kms"))]
+pub(crate) fn ed25519_key_from_spki_der(der: &[u8]) -> Option<[u8; 32]> {
+    if der.len() != ED25519_SPKI_PREFIX.len() + 32
+        || der[..ED25519_SPKI_PREFIX.len()] != ED25519_SPKI_PREFIX
+    {
+        return None;
+    }
+    der[ED25519_SPKI_PREFIX.len()..].try_into().ok()
+}
+
+/// Extract the raw 32-byte Ed25519 key from a PEM-encoded SubjectPublicKeyInfo.
+#[cfg(feature = "gcp_kms")]
+pub(crate) fn ed25519_key_from_spki_pem(pem: &str) -> Option<[u8; 32]> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    let body: String = pem
+        .lines()
+        .filter(|line| !line.starts_with("-----"))
+        .flat_map(|line| line.chars().filter(|c| !c.is_whitespace()))
+        .collect();
+    let der = STANDARD.decode(body).ok()?;
+    ed25519_key_from_spki_der(&der)
+}
+
 #[cfg(all(
     test,
     any(
@@ -217,5 +249,48 @@ mod tests {
             .expect_err("malformed bytes must be rejected");
 
         assert!(matches!(error, SignerError::SerializationError(_)));
+    }
+}
+
+#[cfg(all(test, any(feature = "aws_kms", feature = "gcp_kms")))]
+mod spki_tests {
+    use super::*;
+
+    fn spki_der(key: [u8; 32]) -> Vec<u8> {
+        let mut der = ED25519_SPKI_PREFIX.to_vec();
+        der.extend_from_slice(&key);
+        der
+    }
+
+    #[test]
+    fn extracts_key_from_spki_der() {
+        assert_eq!(
+            ed25519_key_from_spki_der(&spki_der([9u8; 32])),
+            Some([9u8; 32])
+        );
+    }
+
+    #[test]
+    fn rejects_der_that_is_not_an_ed25519_spki() {
+        let mut foreign_oid = spki_der([9u8; 32]);
+        foreign_oid[8] = 0x71;
+        assert_eq!(ed25519_key_from_spki_der(&foreign_oid), None);
+
+        assert_eq!(ed25519_key_from_spki_der(&spki_der([9u8; 32])[..40]), None);
+        assert_eq!(ed25519_key_from_spki_der(&[]), None);
+    }
+
+    #[cfg(feature = "gcp_kms")]
+    #[test]
+    fn extracts_key_from_spki_pem() {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+
+        let pem = format!(
+            "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
+            STANDARD.encode(spki_der([3u8; 32]))
+        );
+
+        assert_eq!(ed25519_key_from_spki_pem(&pem), Some([3u8; 32]));
+        assert_eq!(ed25519_key_from_spki_pem("not a pem"), None);
     }
 }

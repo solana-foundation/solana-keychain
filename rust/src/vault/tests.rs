@@ -11,6 +11,16 @@ const TEST_VAULT_TOKEN: &str = "test-token";
 const TEST_KEY_NAME: &str = "test-key";
 const TEST_PUBKEY: &str = "2vfDxWYbhRt7GXiRYKf1Dr5Z8y7zVQCSERbDTKyBaAqQ";
 
+/// Base64 of the raw 32 bytes behind [`TEST_PUBKEY`], the shape Vault returns
+/// for an ed25519 transit key version.
+fn test_pubkey_base64() -> String {
+    STANDARD.encode(
+        bs58::decode(TEST_PUBKEY)
+            .into_vec()
+            .expect("decode test pubkey"),
+    )
+}
+
 fn create_test_http_client() -> Arc<Client> {
     Arc::new(Client::new())
 }
@@ -347,7 +357,12 @@ async fn test_is_available_success() {
             "data": {
                 "name": "test-key",
                 "supports_signing": true,
-                "type": "ed25519"
+                "type": "ed25519",
+                "latest_version": 2,
+                "keys": {
+                    "1": { "public_key": STANDARD.encode([0u8; 32]) },
+                    "2": { "public_key": test_pubkey_base64() }
+                }
             }
         })))
         .expect(1)
@@ -355,6 +370,34 @@ async fn test_is_available_success() {
         .await;
 
     assert!(signer.is_available().await);
+}
+
+#[tokio::test]
+async fn test_is_available_false_when_latest_key_is_not_the_configured_public_key() {
+    let mock_server = MockServer::start().await;
+    let signer = create_test_signer_with_pubkey(&mock_server.uri(), TEST_PUBKEY.to_string());
+
+    // The configured key is an older version; signing would use version 2.
+    Mock::given(method("GET"))
+        .and(path("/v1/transit/keys/test-key"))
+        .and(header("X-Vault-Token", TEST_VAULT_TOKEN))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {
+                "name": "test-key",
+                "supports_signing": true,
+                "type": "ed25519",
+                "latest_version": 2,
+                "keys": {
+                    "1": { "public_key": test_pubkey_base64() },
+                    "2": { "public_key": STANDARD.encode([7u8; 32]) }
+                }
+            }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    assert!(!signer.is_available().await);
 }
 
 #[tokio::test]

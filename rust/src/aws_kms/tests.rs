@@ -4,11 +4,21 @@ use crate::test_util::create_test_transaction;
 use aws_config::Region;
 use aws_sdk_kms::config::{BehaviorVersion, Credentials};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use wiremock::matchers::any;
+use wiremock::matchers::{any, header};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn create_test_keypair() -> Keypair {
     Keypair::new()
+}
+
+/// Base64 DER SubjectPublicKeyInfo for an Ed25519 key, the shape AWS KMS
+/// returns from GetPublicKey.
+fn spki_der_base64(public_key: &crate::sdk_adapter::Pubkey) -> String {
+    let mut der = vec![
+        0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+    ];
+    der.extend_from_slice(&public_key.to_bytes());
+    STANDARD.encode(der)
 }
 
 const TEST_KEY_ID: &str =
@@ -397,7 +407,7 @@ async fn test_kms_is_available_success() {
     let keypair = create_test_keypair();
 
     // Mock DescribeKey response for availability check
-    Mock::given(any())
+    Mock::given(header("x-amz-target", "TrentService.DescribeKey"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "KeyMetadata": {
                 "KeyId": TEST_KEY_ID,
@@ -405,6 +415,15 @@ async fn test_kms_is_available_success() {
                 "KeyUsage": "SIGN_VERIFY",
                 "Enabled": true
             }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(header("x-amz-target", "TrentService.GetPublicKey"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "KeyId": TEST_KEY_ID,
+            "PublicKey": spki_der_base64(&keypair.pubkey())
         })))
         .expect(1)
         .mount(&mock_server)
@@ -419,6 +438,45 @@ async fn test_kms_is_available_success() {
     .expect("Failed to create AwsKmsSigner");
 
     assert!(signer.is_available().await);
+}
+
+#[tokio::test]
+async fn test_kms_is_not_available_when_key_is_not_the_configured_public_key() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let other = create_test_keypair();
+
+    Mock::given(header("x-amz-target", "TrentService.DescribeKey"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "KeyMetadata": {
+                "KeyId": TEST_KEY_ID,
+                "KeySpec": "ECC_NIST_EDWARDS25519",
+                "KeyUsage": "SIGN_VERIFY",
+                "Enabled": true
+            }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(header("x-amz-target", "TrentService.GetPublicKey"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "KeyId": TEST_KEY_ID,
+            "PublicKey": spki_der_base64(&other.pubkey())
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let client = create_test_client(&mock_server.uri());
+    let signer = AwsKmsSigner::with_client(
+        client,
+        TEST_KEY_ID.to_string(),
+        keypair.pubkey().to_string(),
+    )
+    .expect("Failed to create AwsKmsSigner");
+
+    assert!(!signer.is_available().await);
 }
 
 #[tokio::test]
