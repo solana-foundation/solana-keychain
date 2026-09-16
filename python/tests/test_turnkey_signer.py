@@ -375,9 +375,7 @@ def mock_get_private_key(solana_address: str) -> None:
             json={
                 "privateKey": {
                     "privateKeyId": PRIVATE_KEY_ID,
-                    "addresses": [
-                        {"format": "ADDRESS_FORMAT_SOLANA", "address": solana_address}
-                    ],
+                    "addresses": [{"format": "ADDRESS_FORMAT_SOLANA", "address": solana_address}],
                 }
             },
         )

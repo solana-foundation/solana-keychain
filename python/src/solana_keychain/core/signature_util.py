@@ -108,9 +108,7 @@ def public_key_from_spki_der(der: bytes) -> Pubkey | None:
 def public_key_from_spki_pem(pem: str) -> Pubkey | None:
     """Extract the Ed25519 public key carried by a PEM-encoded
     SubjectPublicKeyInfo, or ``None`` when the text is not one."""
-    body = "".join(
-        line.strip() for line in pem.splitlines() if not line.startswith("-----")
-    )
+    body = "".join(line.strip() for line in pem.splitlines() if not line.startswith("-----"))
     try:
         der = base64.b64decode(body, validate=True)
     except (binascii.Error, ValueError):
