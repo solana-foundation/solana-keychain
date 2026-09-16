@@ -1,7 +1,9 @@
 """HashiCorp Vault signer integration."""
 
 import base64
+import binascii
 from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import quote
 
 import httpx
@@ -114,6 +116,17 @@ class VaultSigner(TransactionSigner):
     async def sign_message(self, message: bytes) -> Signature:
         return await self._sign_bytes(message)
 
+    def _latest_key_is_configured_pubkey(self, data: dict[str, Any]) -> bool:
+        """Signing uses the latest transit key version, so that is the one that
+        has to be the configured public key."""
+        keys = data.get("keys")
+        version = keys.get(str(data.get("latest_version"))) if isinstance(keys, dict) else None
+        encoded = version.get("public_key", "") if isinstance(version, dict) else ""
+        try:
+            return Pubkey(base64.b64decode(str(encoded), validate=True)) == self._pubkey
+        except (binascii.Error, ValueError):
+            return False
+
     async def is_available(self) -> bool:
         url = f"{self._api_base_url}/v1/transit/keys/{quote(self._key_name, safe='')}"
 
@@ -128,7 +141,9 @@ class VaultSigner(TransactionSigner):
             data = result.get("data") if isinstance(result, dict) else None
             if not isinstance(data, dict):
                 return False
-            return data.get("supports_signing") is True and data.get("type") == "ed25519"
+            if data.get("supports_signing") is not True or data.get("type") != "ed25519":
+                return False
+            return self._latest_key_is_configured_pubkey(data)
 
         return await probe_availability(probe)
 

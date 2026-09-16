@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/solana-foundation/solana-go/v2"
@@ -29,9 +30,18 @@ type signResponse struct {
 // IsAvailable health check.
 type keyReadResponse struct {
 	Data struct {
-		SupportsSigning bool   `json:"supports_signing"`
-		Type            string `json:"type"`
+		// Keys carries the public key material per version, keyed by version
+		// number. Present for asymmetric key types such as ed25519.
+		Keys            map[string]keyVersion `json:"keys"`
+		LatestVersion   int                   `json:"latest_version"`
+		SupportsSigning bool                  `json:"supports_signing"`
+		Type            string                `json:"type"`
 	} `json:"data"`
+}
+
+// keyVersion is one transit key version's public key, base64-encoded.
+type keyVersion struct {
+	PublicKey string `json:"public_key"`
 }
 
 // Signer signs with an Ed25519 key held in HashiCorp Vault's transit engine.
@@ -109,7 +119,22 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return false
 	}
-	return parsed.Data.SupportsSigning && parsed.Data.Type == "ed25519"
+	if !parsed.Data.SupportsSigning || parsed.Data.Type != "ed25519" {
+		return false
+	}
+
+	// Signing uses the latest transit key version, so that is the one that has
+	// to be the configured public key.
+	version, ok := parsed.Data.Keys[strconv.Itoa(parsed.Data.LatestVersion)]
+	if !ok {
+		return false
+	}
+	raw, err := base64.StdEncoding.DecodeString(version.PublicKey)
+	if err != nil {
+		return false
+	}
+	key, ok := core.PublicKeyFromRawEd25519(raw)
+	return ok && key == s.pubkey
 }
 
 // signBytes posts the payload to the transit sign endpoint, decodes the returned

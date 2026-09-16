@@ -10,6 +10,8 @@ from solana_keychain.core.send import SendTransactionFn, sign_and_send_transacti
 from solana_keychain.core.signature_util import (
     extract_and_verify_returned_signature,
     extract_and_verify_rewritten_transaction,
+    public_key_from_spki_der,
+    public_key_from_spki_pem,
     verify_returned_signature,
 )
 from solana_keychain.core.signer import (
@@ -52,6 +54,8 @@ __all__ = [
     "get_signing_keypair_position",
     "has_all_required_signatures",
     "normalize_base_url",
+    "public_key_from_spki_der",
+    "public_key_from_spki_pem",
     "require_initialized",
     "sanitize_remote_error_response",
     "serialize_transaction",

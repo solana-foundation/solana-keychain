@@ -12,9 +12,12 @@ use base64::Engine;
 use p256::ecdsa::signature::Signer as P256Signer;
 use std::str::FromStr;
 use types::{
-    ActivityResponse, SignParameters, SignRequest, SignTransactionParameters,
-    SignTransactionRequest, WhoAmIRequest,
+    ActivityResponse, GetPrivateKeyRequest, GetPrivateKeyResponse, SignParameters, SignRequest,
+    SignTransactionParameters, SignTransactionRequest, WhoAmIRequest,
 };
+
+/// Turnkey's address-format discriminator for Solana addresses.
+const TURNKEY_SOLANA_ADDRESS_FORMAT: &str = "ADDRESS_FORMAT_SOLANA";
 
 /// Turnkey-based signer using Turnkey's API
 #[derive(Clone)]
@@ -261,6 +264,25 @@ impl TurnkeySigner {
         Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_stamp.as_bytes()))
     }
 
+    /// POST a stamped query and return the response, or `None` if the request
+    /// could not be built, sent, or came back non-2xx.
+    async fn post_query(&self, path: &str, body: String) -> Option<reqwest::Response> {
+        let stamp = self.create_stamp(&body).ok()?;
+
+        let url = format!("{}{}", self.api_base_url, path);
+        let response = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("X-Stamp", stamp)
+            .body(body)
+            .send()
+            .await
+            .ok()?;
+
+        response.status().is_success().then_some(response)
+    }
+
     async fn check_availability(&self) -> bool {
         let request = WhoAmIRequest {
             organization_id: self.organization_id.clone(),
@@ -271,25 +293,66 @@ impl TurnkeySigner {
             Err(_) => return false,
         };
 
-        let stamp = match self.create_stamp(&body) {
-            Ok(s) => s,
-            Err(_) => return false,
+        if self
+            .post_query("/public/v1/query/whoami", body)
+            .await
+            .is_none()
+        {
+            return false;
+        }
+
+        self.sign_with_matches_public_key().await
+    }
+
+    /// Confirm the configured Solana public key is the key Turnkey signs with.
+    ///
+    /// `get_private_key` returns the private key's *metadata* (public key,
+    /// curve, derived addresses), never key material: export is a separate
+    /// activity that targets an enclave key. It is a read, so an API key the
+    /// policy engine scopes to signing alone may be denied it.
+    async fn sign_with_matches_public_key(&self) -> bool {
+        let expected = self.public_key.to_string();
+        // `private_key_id` may itself be the Solana address Turnkey signs with,
+        // in which case it already is the public key and needs no lookup.
+        if self.private_key_id == expected {
+            return true;
+        }
+
+        let request = GetPrivateKeyRequest {
+            organization_id: self.organization_id.clone(),
+            private_key_id: self.private_key_id.clone(),
         };
 
-        let url = format!("{}/public/v1/query/whoami", self.api_base_url);
-        let response = self
-            .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .header("X-Stamp", stamp)
-            .body(body)
-            .send()
-            .await;
+        let Ok(body) = serde_json::to_string(&request) else {
+            return false;
+        };
 
-        match response {
-            Ok(resp) => resp.status().is_success(),
-            Err(_) => false,
+        let Some(response) = self
+            .post_query("/public/v1/query/get_private_key", body)
+            .await
+        else {
+            return false;
+        };
+
+        let Ok(response) =
+            parse_json_response::<GetPrivateKeyResponse>(response, "Turnkey API").await
+        else {
+            return false;
+        };
+
+        if response.private_key.addresses.iter().any(|entry| {
+            entry.format.as_deref() == Some(TURNKEY_SOLANA_ADDRESS_FORMAT)
+                && entry.address.as_deref() == Some(expected.as_str())
+        }) {
+            return true;
         }
+
+        response
+            .private_key
+            .public_key
+            .as_deref()
+            .and_then(|encoded| hex::decode(encoded).ok())
+            .is_some_and(|key| key == self.public_key.to_bytes())
     }
 }
 

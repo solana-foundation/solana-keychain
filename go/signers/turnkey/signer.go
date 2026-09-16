@@ -19,6 +19,10 @@ const (
 	signRawPayloadPath  = "/public/v1/submit/sign_raw_payload"
 	signTransactionPath = "/public/v1/submit/sign_transaction"
 	whoAmIPath          = "/public/v1/query/whoami"
+	getPrivateKeyPath   = "/public/v1/query/get_private_key"
+
+	// solanaAddressFormat is Turnkey's address-format discriminator for Solana.
+	solanaAddressFormat = "ADDRESS_FORMAT_SOLANA"
 )
 
 // Signer signs with an Ed25519 private key held by Turnkey, authenticating each
@@ -164,8 +168,54 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	_, err = s.post(ctx, whoAmIPath, body)
-	return err == nil
+	if _, err = s.post(ctx, whoAmIPath, body); err != nil {
+		return false
+	}
+	return s.signWithIsConfiguredKey(ctx)
+}
+
+// signWithIsConfiguredKey reports whether the configured public key is the key
+// Turnkey signs with.
+//
+// get_private_key returns the private key's metadata (public key, curve,
+// derived addresses), never key material: export is a separate activity that
+// targets an enclave key. It is a read, so an API key the policy engine scopes
+// to signing alone may be denied it.
+func (s *Signer) signWithIsConfiguredKey(ctx context.Context) bool {
+	// privateKeyID may itself be the Solana address Turnkey signs with, in which
+	// case it already is the public key and needs no lookup.
+	if s.privateKeyID == s.publicKey.String() {
+		return true
+	}
+
+	body, err := json.Marshal(getPrivateKeyRequest{
+		OrganizationID: s.organizationID,
+		PrivateKeyID:   s.privateKeyID,
+	})
+	if err != nil {
+		return false
+	}
+	respBody, err := s.post(ctx, getPrivateKeyPath, body)
+	if err != nil {
+		return false
+	}
+
+	var resp getPrivateKeyResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return false
+	}
+	for _, entry := range resp.PrivateKey.Addresses {
+		if entry.Format == solanaAddressFormat && entry.Address == s.publicKey.String() {
+			return true
+		}
+	}
+
+	raw, err := hex.DecodeString(resp.PrivateKey.PublicKey)
+	if err != nil {
+		return false
+	}
+	key, ok := core.PublicKeyFromRawEd25519(raw)
+	return ok && key == s.publicKey
 }
 
 // signBytes signs message via the Turnkey API, assembles the left-padded r/s

@@ -4,6 +4,7 @@ import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase58Encoder, getBase64Decoder, getBase64Encoder, getUtf8Encoder } from '@solana/codecs-strings';
 import {
     abortableDelay,
+    addressFromEd25519Key,
     assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
@@ -398,7 +399,8 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         }
 
         // Trusted provider: the configured publicKey is authoritative, so no
-        // init-time vault fetch is needed to confirm it.
+        // init-time vault fetch is needed to confirm it. isAvailable() checks it
+        // against the vault for callers that want the round trip.
         return new FordefiSigner<TAddress>(config, config.publicKey as Address<TAddress>);
     }
 
@@ -414,7 +416,15 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
      */
     async isAvailable(): Promise<boolean> {
         try {
-            await this.request<FordefiVaultResponse>('GET', `/api/v1/vaults/${this.vaultId}`, undefined, 5_000);
+            const vault = await this.request<FordefiVaultResponse>(
+                'GET',
+                `/api/v1/vaults/${this.vaultId}`,
+                undefined,
+                5_000,
+            );
+            if (!this.vaultHoldsConfiguredAddress(vault)) {
+                return false;
+            }
         } catch {
             return false;
         }
@@ -426,6 +436,25 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         }
 
         return true;
+    }
+
+    /**
+     * Confirm the configured address is the key Fordefi holds for the vault.
+     * Chain-specific vaults expose it as a base58 `address`, black box vaults
+     * as a base64 raw key.
+     */
+    private vaultHoldsConfiguredAddress(vault: FordefiVaultResponse): boolean {
+        if (vault.address !== undefined) {
+            return vault.address === this.address;
+        }
+        if (vault.public_key_compressed !== undefined) {
+            base64Encoder ||= getBase64Encoder();
+            return (
+                addressFromEd25519Key(new Uint8Array(base64Encoder.encode(vault.public_key_compressed))) ===
+                this.address
+            );
+        }
+        return false;
     }
 
     async signMessages(

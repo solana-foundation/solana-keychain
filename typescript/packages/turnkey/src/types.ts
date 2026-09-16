@@ -109,3 +109,22 @@ export interface WhoAmIResponse {
     /** User Name */
     username?: string;
 }
+
+/**
+ * Request for the get_private_key query.
+ */
+export interface GetPrivateKeyRequest {
+    /** Organization ID */
+    organizationId: string;
+    /** Turnkey private key ID */
+    privateKeyId: string;
+}
+
+export interface GetPrivateKeyResponse {
+    privateKey?: {
+        /** Addresses derived from the key, one per requested format. */
+        addresses?: { address?: string; format?: string }[];
+        /** Hex-encoded raw public key. */
+        publicKey?: string;
+    };
+}

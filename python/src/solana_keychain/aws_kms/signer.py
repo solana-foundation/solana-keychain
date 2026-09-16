@@ -17,7 +17,10 @@ from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
 from solana_keychain.core.errors import SignerError, SignerErrorCode
-from solana_keychain.core.signature_util import verify_returned_signature
+from solana_keychain.core.signature_util import (
+    public_key_from_spki_der,
+    verify_returned_signature,
+)
 from solana_keychain.core.signer import SignedTransaction, TransactionSigner
 from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
@@ -124,11 +127,25 @@ class AwsKmsSigner(TransactionSigner):
         metadata = response.get("KeyMetadata")
         if not isinstance(metadata, dict):
             return False
-        return (
+        if not (
             metadata.get("KeySpec") == AWS_KMS_KEY_SPEC
             and metadata.get("Enabled") is True
             and metadata.get("KeyUsage") == AWS_KMS_KEY_USAGE
-        )
+        ):
+            return False
+
+        # Requires the kms:GetPublicKey permission on the key policy.
+        def get_public_key_call() -> Any:
+            return self._client.get_public_key(KeyId=self._key_id)
+
+        try:
+            public_key = await asyncio.to_thread(get_public_key_call)
+        except (BotoCoreError, ClientError):
+            return False
+        der = public_key.get("PublicKey")
+        if not isinstance(der, bytes):
+            return False
+        return public_key_from_spki_der(der) == self._pubkey
 
 
 async def create_aws_kms_signer(config: AwsKmsSignerConfig) -> AwsKmsSigner:

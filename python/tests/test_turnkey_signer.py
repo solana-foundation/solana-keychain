@@ -20,6 +20,7 @@ API_BASE_URL = "https://turnkey.example.com"
 SIGN_URL = f"{API_BASE_URL}/public/v1/submit/sign_raw_payload"
 SIGN_TRANSACTION_URL = f"{API_BASE_URL}/public/v1/submit/sign_transaction"
 WHOAMI_URL = f"{API_BASE_URL}/public/v1/query/whoami"
+GET_PRIVATE_KEY_URL = f"{API_BASE_URL}/public/v1/query/get_private_key"
 ORGANIZATION_ID = "test-org-id"
 PRIVATE_KEY_ID = "test-key-id"
 
@@ -36,6 +37,7 @@ def make_signer(
     pubkey: str,
     api_public_key: str | None = None,
     api_private_key: str | None = None,
+    private_key_id: str = PRIVATE_KEY_ID,
 ) -> TurnkeySigner:
     if api_public_key is None or api_private_key is None:
         api_public_key, api_private_key, _ = make_api_keys()
@@ -44,7 +46,7 @@ def make_signer(
             api_public_key=api_public_key,
             api_private_key=api_private_key,
             organization_id=ORGANIZATION_ID,
-            private_key_id=PRIVATE_KEY_ID,
+            private_key_id=private_key_id,
             public_key=pubkey,
             api_base_url=API_BASE_URL,
         )
@@ -360,17 +362,55 @@ async def test_sign_transaction_rejects_non_completed_activity() -> None:
     assert "ACTIVITY_STATUS_CONSENSUS_NEEDED" in excinfo.value._detail
 
 
-@respx.mock
-async def test_is_available_success() -> None:
-    keypair = Keypair()
+def mock_whoami() -> None:
     respx.post(WHOAMI_URL).mock(
         return_value=httpx.Response(200, json={"organizationId": ORGANIZATION_ID})
     )
+
+
+def mock_get_private_key(solana_address: str) -> None:
+    respx.post(GET_PRIVATE_KEY_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "privateKey": {
+                    "privateKeyId": PRIVATE_KEY_ID,
+                    "addresses": [{"format": "ADDRESS_FORMAT_SOLANA", "address": solana_address}],
+                }
+            },
+        )
+    )
+
+
+@respx.mock
+async def test_is_available_success() -> None:
+    keypair = Keypair()
+    mock_whoami()
+    mock_get_private_key(str(keypair.pubkey()))
     signer = make_signer(str(keypair.pubkey()))
 
     assert await signer.is_available()
     parsed: dict[str, Any] = json.loads(respx.calls.last.request.content)
-    assert parsed == {"organizationId": ORGANIZATION_ID}
+    assert parsed == {"organizationId": ORGANIZATION_ID, "privateKeyId": PRIVATE_KEY_ID}
+
+
+@respx.mock
+async def test_is_available_false_when_turnkey_holds_another_key() -> None:
+    keypair = Keypair()
+    mock_whoami()
+    mock_get_private_key(str(Keypair().pubkey()))
+
+    assert not await make_signer(str(keypair.pubkey())).is_available()
+
+
+@respx.mock
+async def test_is_available_skips_key_lookup_when_sign_with_is_the_address() -> None:
+    keypair = Keypair()
+    mock_whoami()
+    signer = make_signer(str(keypair.pubkey()), private_key_id=str(keypair.pubkey()))
+
+    assert await signer.is_available()
+    assert len(respx.calls) == 1
 
 
 @respx.mock
