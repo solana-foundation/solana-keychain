@@ -11,6 +11,11 @@ describe('normalizeBaseUrl', () => {
         expect(normalizeBaseUrl('  https://x.com/base/ ')).toBe('https://x.com/base');
         expect(normalizeBaseUrl('https://x.com')).toBe('https://x.com');
     });
+
+    it('handles inputs that are only slashes', () => {
+        expect(normalizeBaseUrl('/'.repeat(50_000))).toBe('');
+        expect(normalizeBaseUrl('  ' + '/'.repeat(10) + ' ')).toBe('');
+    });
 });
 
 describe('assertHttpsUrl', () => {

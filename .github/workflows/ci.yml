@@ -9,6 +9,9 @@ on:
       - 'rust/**'
       - '.github/workflows/ci.yml'
 
+permissions:
+  contents: read
+
 env:
   CARGO_NET_RETRY: 10
 

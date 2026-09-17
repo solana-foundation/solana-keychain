@@ -9,6 +9,9 @@ on:
       - 'typescript/**'
       - '.github/workflows/typescript-ci.yml'
 
+permissions:
+  contents: read
+
 jobs:
   resolve-signers:
     runs-on: ubuntu-latest
