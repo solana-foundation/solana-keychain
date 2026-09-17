@@ -1,0 +1,8 @@
+name: solana-keychain-codeql
+
+paths-ignore:
+  - rust/src/tests
+  - rust/src/test_util.rs
+  - python/tests
+  - "**/node_modules"
+  - "**/target"
