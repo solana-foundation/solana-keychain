@@ -18,8 +18,8 @@ use types::{
 };
 
 use crate::remote_util::{
-    extract_api_error, parse_json_response, poll_until, read_body_capped, transaction_id_in_body,
-    PollOutcome,
+    extract_api_error, normalize_base_url, parse_json_response, poll_until, read_body_capped,
+    transaction_id_in_body, PollOutcome,
 };
 use crate::signature_util::{signature_from_base58, signature_from_hex, verify_or_reject};
 
@@ -127,9 +127,12 @@ impl FireblocksSigner {
             vault_account_id: config.vault_account_id,
             asset_id: config.asset_id.unwrap_or_else(|| "SOL".to_string()),
             public_key: None,
-            api_base_url: config
-                .api_base_url
-                .unwrap_or_else(|| "https://api.fireblocks.io".to_string()),
+            api_base_url: normalize_base_url(
+                config
+                    .api_base_url
+                    .as_deref()
+                    .unwrap_or("https://api.fireblocks.io"),
+            ),
             client,
             poll_interval_ms,
             max_poll_attempts,

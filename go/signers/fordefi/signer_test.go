@@ -935,6 +935,40 @@ func TestIsAvailable(t *testing.T) {
 	}
 }
 
+// A vault holding a different address cannot sign for the configured key.
+func TestIsAvailableVaultHoldsAnotherAddress(t *testing.T) {
+	s := newTestSigner(t, baseConfig(t), solana.PublicKey{1}.String(), nil)
+	if s.IsAvailable(context.Background()) {
+		t.Error("IsAvailable should be false when the vault holds another address")
+	}
+}
+
+// Black box vaults carry no address, only a base64 raw public key.
+func TestIsAvailableBlackBoxVault(t *testing.T) {
+	mux := http.NewServeMux()
+	key := testutils.TestPublicKey()
+	mux.HandleFunc(vaultPath, func(w http.ResponseWriter, _ *http.Request) {
+		testutils.WriteJSON(w, http.StatusOK, map[string]any{
+			"id":                    testVaultID,
+			"type":                  "black_box",
+			"public_key_compressed": base64.StdEncoding.EncodeToString(key[:]),
+		})
+	})
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+
+	cfg := baseConfig(t)
+	cfg.APIBaseURL = srv.URL
+	cfg.HTTPClient = srv.Client()
+	s, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	if !s.IsAvailable(context.Background()) {
+		t.Error("IsAvailable should be true for a black box vault holding the configured key")
+	}
+}
+
 func TestIsAvailableFailure(t *testing.T) {
 	var healthy atomic.Bool
 	healthy.Store(true)

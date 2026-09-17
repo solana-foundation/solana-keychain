@@ -1332,5 +1332,11 @@ describe('createFordefiSigner', () => {
             vi.mocked(fetch).mockRejectedValueOnce(new Error('Network error'));
             expect(await signer.isAvailable()).toBe(false);
         });
+
+        it('should return false when the vault holds another address', async () => {
+            const signer = await createFordefiSigner(mockConfig);
+            vi.mocked(fetch).mockResolvedValueOnce(mockVaultResponse('SysvarC1ock11111111111111111111111111111111'));
+            expect(await signer.isAvailable()).toBe(false);
+        });
     });
 });

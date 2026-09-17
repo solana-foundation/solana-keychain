@@ -2,7 +2,7 @@
 
 mod types;
 
-use crate::remote_util::{encode_uri_component, parse_json_response};
+use crate::remote_util::{encode_uri_component, normalize_base_url, parse_json_response};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::extract_and_verify_returned_signature;
 use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
@@ -385,10 +385,7 @@ fn validate_required(field: &str, value: &str) -> Result<(), SignerError> {
 }
 
 fn normalize_api_base_url(value: Option<&str>) -> Result<String, SignerError> {
-    let api_base_url = value
-        .unwrap_or(DEFAULT_API_BASE_URL)
-        .trim_end_matches('/')
-        .to_string();
+    let api_base_url = normalize_base_url(value.unwrap_or(DEFAULT_API_BASE_URL));
 
     let parsed = reqwest::Url::parse(&api_base_url)
         .map_err(|e| SignerError::ConfigError(format!("Invalid api_base_url: {e}")))?;

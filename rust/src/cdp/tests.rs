@@ -507,3 +507,17 @@ fn test_wallet_jwt_includes_req_hash() {
 
     assert_eq!(Some(req_hash.to_string()), expected_hash);
 }
+
+#[test]
+fn test_from_config_trims_trailing_slashes_from_api_base_url() {
+    let signer = CdpSigner::from_config(CdpSignerConfig {
+        api_key_id: "test-key".to_string(),
+        api_key_secret: test_ed25519_key(),
+        wallet_secret: test_wallet_secret(),
+        address: TEST_PUBKEY.to_string(),
+        api_base_url: Some(format!("https://{CDP_API_HOST}///")),
+        http_client_config: None,
+    })
+    .unwrap();
+    assert_eq!(signer.api_base_url, format!("https://{CDP_API_HOST}"));
+}

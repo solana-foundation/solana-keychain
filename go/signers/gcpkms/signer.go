@@ -111,5 +111,9 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	return resp.GetAlgorithm() == kmspb.CryptoKeyVersion_EC_SIGN_ED25519
+	if resp.GetAlgorithm() != kmspb.CryptoKeyVersion_EC_SIGN_ED25519 {
+		return false
+	}
+	key, ok := core.PublicKeyFromSPKIPEM(resp.GetPem())
+	return ok && key == s.pubkey
 }

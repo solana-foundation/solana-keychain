@@ -104,6 +104,20 @@ describe('createTurnkeySigner', () => {
         });
     };
 
+    const setupMockGetPrivateKeyResponse = (solanaAddress: string) => {
+        (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+            json: () =>
+                Promise.resolve({
+                    privateKey: {
+                        addresses: [{ address: solanaAddress, format: 'ADDRESS_FORMAT_SOLANA' }],
+                        privateKeyId: mockConfig.privateKeyId,
+                    },
+                }),
+            ok: true,
+            status: 200,
+        });
+    };
+
     describe('basic construction', () => {
         it('creates a TurnkeySigner with valid config', async () => {
             const keyPair = await generateKeyPairSigner();
@@ -205,6 +219,17 @@ describe('createTurnkeySigner', () => {
                 const invalidConfig = { ...mockConfig, apiBaseUrl: 'not-a-url', publicKey: keyPair.address };
 
                 expect(() => createTurnkeySigner(invalidConfig)).toThrow('apiBaseUrl is not a valid URL');
+            });
+
+            it('removes trailing slashes from apiBaseUrl', async () => {
+                const keyPair = await generateKeyPairSigner();
+                const signer = createTurnkeySigner({
+                    ...mockConfig,
+                    apiBaseUrl: 'https://api.turnkey.test///',
+                    publicKey: keyPair.address,
+                });
+
+                expect((signer as unknown as { apiBaseUrl: string })['apiBaseUrl']).toBe('https://api.turnkey.test');
             });
 
             it('throws CONFIG_ERROR when apiBaseUrl does not use HTTPS', async () => {
@@ -731,9 +756,37 @@ describe('createTurnkeySigner', () => {
             const signer = createTurnkeySigner(config);
 
             setupMockWhoAmIResponse(mockConfig.organizationId);
+            setupMockGetPrivateKeyResponse(keyPair.address);
 
             const available = await signer.isAvailable();
             expect(available).toBe(true);
+        });
+
+        it('returns false when the Turnkey key is not the configured address', async () => {
+            const keyPair = await generateKeyPairSigner();
+            const other = await generateKeyPairSigner();
+
+            const signer = createTurnkeySigner({ ...mockConfig, publicKey: keyPair.address });
+
+            setupMockWhoAmIResponse(mockConfig.organizationId);
+            setupMockGetPrivateKeyResponse(other.address);
+
+            expect(await signer.isAvailable()).toBe(false);
+        });
+
+        it('skips the key lookup when signWith is already the address', async () => {
+            const keyPair = await generateKeyPairSigner();
+
+            const signer = createTurnkeySigner({
+                ...mockConfig,
+                privateKeyId: keyPair.address,
+                publicKey: keyPair.address,
+            });
+
+            setupMockWhoAmIResponse(mockConfig.organizationId);
+
+            expect(await signer.isAvailable()).toBe(true);
+            expect(global.fetch).toHaveBeenCalledTimes(1);
         });
 
         it('returns false when API returns 401', async () => {

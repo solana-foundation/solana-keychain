@@ -2,6 +2,12 @@
 
 use crate::error::SignerError;
 
+/// Trim surrounding whitespace and strip trailing slashes from a configured
+/// base URL, so paths can be appended with a single `/`.
+pub(crate) fn normalize_base_url(base_url: &str) -> String {
+    base_url.trim().trim_end_matches('/').to_string()
+}
+
 /// Reject an API base URL that is not valid HTTPS, parsing it rather than
 /// string-matching so `HTTPS://`, whitespace, and malformed URLs are all
 /// caught.

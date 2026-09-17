@@ -8,6 +8,7 @@ import {
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
     idempotencyKeyFromMessage,
+    normalizeBaseUrl,
     normalizeMessageBytes,
     providerMayHaveAccepted,
     providerStatus,
@@ -141,7 +142,7 @@ class FireblocksSigner<TAddress extends string = string>
         this.privateKeyPem = config.privateKeyPem;
         this.vaultAccountId = config.vaultAccountId;
         this.assetId = config.assetId ?? DEFAULT_ASSET_ID;
-        const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
+        const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl ?? DEFAULT_API_BASE_URL);
         assertHttpsUrl(apiBaseUrl, 'apiBaseUrl');
 
         this.apiBaseUrl = apiBaseUrl;

@@ -2,6 +2,7 @@ package fordefi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -231,9 +232,16 @@ func extractSignature(response transactionStatusResponse) (solana.Signature, err
 	return core.DecodeSignatureBase64(response.Signatures[0].Data, "fordefi")
 }
 
+// vaultResponse is the subset of GET /api/v1/vaults/{id} used to confirm the
+// configured public key belongs to the vault. Chain-specific vaults carry a
+// base58 Address, black box vaults a base64 PublicKeyCompressed.
+type vaultResponse struct {
+	Address             string `json:"address"`
+	PublicKeyCompressed string `json:"public_key_compressed"`
+}
+
 // probeVault fetches the configured vault as a reachability and authentication
-// check. The body is not interpreted: the configured public key is the source
-// of truth for the signer's identity.
+// check, and confirms the configured public key is the one Fordefi holds for it.
 func (s *signerCore) probeVault(ctx context.Context) error {
 	status, body, err := s.doGet(ctx, "/api/v1/vaults/"+url.PathEscape(s.vaultID))
 	if err != nil {
@@ -242,5 +250,31 @@ func (s *signerCore) probeVault(ctx context.Context) error {
 	if !core.IsSuccess(status) {
 		return core.NewRemoteAPIError("API error", status, body)
 	}
+
+	var parsed vaultResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return core.WrapSignerError(core.CodeSerializationError, "failed to parse fordefi vault response", err)
+	}
+	if !s.vaultHoldsConfiguredKey(parsed) {
+		return core.NewSignerError(core.CodeInvalidPublicKey,
+			"configured public key does not belong to the fordefi vault")
+	}
 	return nil
+}
+
+// vaultHoldsConfiguredKey reports whether vault carries the configured public key.
+func (s *signerCore) vaultHoldsConfiguredKey(vault vaultResponse) bool {
+	if vault.Address != "" {
+		key, err := solana.PublicKeyFromBase58(vault.Address)
+		return err == nil && key == s.pubkey
+	}
+	if vault.PublicKeyCompressed != "" {
+		raw, err := base64.StdEncoding.DecodeString(vault.PublicKeyCompressed)
+		if err != nil {
+			return false
+		}
+		key, ok := core.PublicKeyFromRawEd25519(raw)
+		return ok && key == s.pubkey
+	}
+	return false
 }

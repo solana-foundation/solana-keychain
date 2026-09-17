@@ -1,3 +1,4 @@
+import { Address, getAddressEncoder } from '@solana/addresses';
 import { generateKeyPairSigner } from '@solana/signers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertIsSolanaTransactionSigner } from '@solana/keychain-core';
@@ -31,10 +32,18 @@ vi.mock('@aws-sdk/client-kms', () => {
         }
     }
 
+    class MockGetPublicKeyCommand {
+        input: unknown;
+        constructor(params: unknown) {
+            this.input = params;
+        }
+    }
+
     return {
         KMSClient: MockKMSClient,
         SignCommand: MockSignCommand,
         DescribeKeyCommand: MockDescribeKeyCommand,
+        GetPublicKeyCommand: MockGetPublicKeyCommand,
         MessageType: {
             RAW: 'RAW',
             DIGEST: 'DIGEST',
@@ -45,6 +54,21 @@ vi.mock('@aws-sdk/client-kms', () => {
         },
     };
 });
+
+/** Base64 DER SubjectPublicKeyInfo, the shape AWS KMS returns from GetPublicKey. */
+function spkiDer(address: string): Uint8Array {
+    const key = new Uint8Array(getAddressEncoder().encode(address as Address));
+    return new Uint8Array([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, ...key]);
+}
+
+const ENABLED_ED25519_KEY = {
+    KeyMetadata: {
+        KeyId: 'arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012',
+        KeySpec: 'ECC_NIST_EDWARDS25519',
+        KeyState: 'Enabled',
+        KeyUsage: 'SIGN_VERIFY',
+    },
+};
 
 describe('createAwsKmsSigner', () => {
     const TEST_KEY_ID = 'arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012';
@@ -333,14 +357,9 @@ describe('createAwsKmsSigner', () => {
         it('should return true for valid Ed25519 key', async () => {
             const keyPair = await generateKeyPairSigner();
 
-            mockSend.mockResolvedValue({
-                KeyMetadata: {
-                    KeyId: TEST_KEY_ID,
-                    KeySpec: 'ECC_NIST_EDWARDS25519',
-                    KeyUsage: 'SIGN_VERIFY',
-                    KeyState: 'Enabled',
-                },
-            });
+            mockSend
+                .mockResolvedValueOnce(ENABLED_ED25519_KEY)
+                .mockResolvedValueOnce({ PublicKey: spkiDer(keyPair.address) });
 
             const signer = createAwsKmsSigner({
                 keyId: TEST_KEY_ID,
@@ -350,6 +369,22 @@ describe('createAwsKmsSigner', () => {
             const available = await signer.isAvailable();
 
             expect(available).toBe(true);
+        });
+
+        it('should return false when KMS holds a different key', async () => {
+            const keyPair = await generateKeyPairSigner();
+            const other = await generateKeyPairSigner();
+
+            mockSend
+                .mockResolvedValueOnce(ENABLED_ED25519_KEY)
+                .mockResolvedValueOnce({ PublicKey: spkiDer(other.address) });
+
+            const signer = createAwsKmsSigner({
+                keyId: TEST_KEY_ID,
+                publicKey: keyPair.address,
+            });
+
+            expect(await signer.isAvailable()).toBe(false);
         });
 
         it('should return false for wrong key spec', async () => {

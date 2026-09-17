@@ -7,7 +7,7 @@
 /// directly in their own `Cargo.toml`.
 pub use reqwest;
 
-use crate::remote_util::parse_json_response;
+use crate::remote_util::{normalize_base_url, parse_json_response};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_base64, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
@@ -146,7 +146,7 @@ impl VaultSigner {
 
         Ok(Self {
             client: Arc::new(client),
-            api_base_url,
+            api_base_url: normalize_base_url(&api_base_url),
             token,
             key_name,
             public_key,
@@ -199,6 +199,22 @@ impl VaultSigner {
             signature,
         ))
     }
+
+    /// Confirm the configured Solana public key is the transit key version that
+    /// signing will actually use, which is the key's latest version.
+    fn latest_key_matches_public_key(&self, body: &serde_json::Value) -> bool {
+        let Some(latest_version) = body["data"]["latest_version"].as_u64() else {
+            return false;
+        };
+        let Some(encoded) = body["data"]["keys"][latest_version.to_string()]["public_key"].as_str()
+        else {
+            return false;
+        };
+
+        STANDARD
+            .decode(encoded)
+            .is_ok_and(|key| key == self.public_key.to_bytes())
+    }
 }
 
 #[async_trait::async_trait]
@@ -242,7 +258,7 @@ impl SolanaSigner for VaultSigner {
         let supports_signing = body["data"]["supports_signing"].as_bool() == Some(true);
         let key_type_is_ed25519 = body["data"]["type"].as_str() == Some("ed25519");
 
-        supports_signing && key_type_is_ed25519
+        supports_signing && key_type_is_ed25519 && self.latest_key_matches_public_key(&body)
     }
 }
 

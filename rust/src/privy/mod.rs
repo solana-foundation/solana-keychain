@@ -4,7 +4,8 @@ mod authorization;
 mod types;
 
 use crate::remote_util::{
-    encode_uri_component, extract_api_error, parse_json_response, read_body_capped,
+    encode_uri_component, extract_api_error, normalize_base_url, parse_json_response,
+    read_body_capped,
 };
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{
@@ -99,9 +100,12 @@ impl PrivySigner {
             app_id: config.app_id,
             app_secret: config.app_secret,
             wallet_id: config.wallet_id,
-            api_base_url: config
-                .api_base_url
-                .unwrap_or_else(|| "https://api.privy.io/v1".to_string()),
+            api_base_url: normalize_base_url(
+                config
+                    .api_base_url
+                    .as_deref()
+                    .unwrap_or("https://api.privy.io/v1"),
+            ),
             client,
             // Public key is resolved during init().
             public_key: None,

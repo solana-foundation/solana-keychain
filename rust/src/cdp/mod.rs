@@ -16,7 +16,7 @@ use self::jwt::{create_auth_jwt, create_wallet_jwt};
 use self::types::{SignMessageResponse, SignTransactionResponse};
 use crate::wallet_jwt::extract_host;
 
-use crate::remote_util::parse_json_response;
+use crate::remote_util::{normalize_base_url, parse_json_response};
 use crate::signature_util::{
     extract_and_verify_returned_signature, signature_from_base58, verify_or_reject,
 };
@@ -134,9 +134,11 @@ impl CdpSigner {
             SignerError::InvalidPublicKey(format!("Invalid Solana address: {}", config.address))
         })?;
 
-        let base_url = config
-            .api_base_url
-            .unwrap_or_else(|| format!("https://{CDP_API_HOST}"));
+        let base_url = normalize_base_url(
+            &config
+                .api_base_url
+                .unwrap_or_else(|| format!("https://{CDP_API_HOST}")),
+        );
         let api_host = extract_host(&base_url, "CDP")?;
         let http_client_config = config.http_client_config.unwrap_or_default();
         let client = http_client_config.build_client()?;

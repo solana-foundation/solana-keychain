@@ -112,6 +112,24 @@ describe('createFireblocksSigner', () => {
             ).rejects.toThrow('requestDelayMs must not be negative');
         });
 
+        it('should remove trailing slashes from apiBaseUrl', async () => {
+            const keyPair = await generateKeyPairSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ addresses: [{ address: keyPair.address }] }),
+            });
+
+            await createFireblocksSigner({
+                apiBaseUrl: 'https://api.fireblocks.test///',
+                apiKey: TEST_API_KEY,
+                privateKeyPem: TEST_RSA_PRIVATE_KEY,
+                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
+            });
+
+            const [url] = mockFetch.mock.calls[0] as [string];
+            expect(url).toContain('https://api.fireblocks.test/v1/');
+        });
+
         it('should warn for high requestDelayMs', async () => {
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
             const keyPair = await generateKeyPairSigner();
