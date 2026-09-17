@@ -8,6 +8,9 @@ on:
         required: true
         type: number
 
+permissions:
+  contents: read
+
 jobs:
   resolve-signers:
     runs-on: ubuntu-latest

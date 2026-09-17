@@ -7,7 +7,12 @@ const LOOPBACK_HOSTNAMES = ['localhost', '127.0.0.1', '[::1]'];
  * all trailing slashes, so paths can be appended with a single `/`.
  */
 export function normalizeBaseUrl(baseUrl: string): string {
-    return baseUrl.trim().replace(/\/+$/, '');
+    const trimmed = baseUrl.trim();
+    let end = trimmed.length;
+    while (end > 0 && trimmed[end - 1] === '/') {
+        end -= 1;
+    }
+    return trimmed.slice(0, end);
 }
 
 export interface AssertHttpsUrlOptions {
