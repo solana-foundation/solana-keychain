@@ -411,9 +411,10 @@ class CdpSigner<TAddress extends string = string>
     ): Promise<Base64EncodedWireTransaction> {
         const path = `${CDP_BASE_PATH}/${this.address}/sign/transaction`;
         const url = `${this.baseUrl}${path}`;
-        const body = this.network === undefined
-            ? { transaction: wireTransaction }
-            : { network: this.network, transaction: wireTransaction };
+        const body =
+            this.network === undefined
+                ? { transaction: wireTransaction }
+                : { network: this.network, transaction: wireTransaction };
         const headers = await this.buildPostHeaders(path, body);
 
         const data = await fetchSignerJson<SignTransactionResponse>({

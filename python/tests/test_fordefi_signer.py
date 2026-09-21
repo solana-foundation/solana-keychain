@@ -422,6 +422,26 @@ async def test_sign_transaction_native_polling_timeout_is_broadcast_unconfirmed(
 
 
 @respx.mock
+async def test_native_submit_request_signing_failure_is_not_unconfirmed() -> None:
+    """Request signing happens before the submit leaves the process, so its
+    failure cannot have reached Fordefi."""
+
+    class FailingRequestSigner(FordefiRequestSigner):
+        async def sign_request(self, payload: bytes) -> str:
+            raise SignerError(SignerErrorCode.SIGNING_FAILED, "kms unavailable")
+
+    keypair = Keypair()
+    signer = make_native_signer(
+        keypair, chain="solana_devnet", private_key_pem=None, request_signer=FailingRequestSigner()
+    )
+    route = respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"id": "tx-1"}))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert not route.called
+
+
+@respx.mock
 async def test_native_submit_server_error_keeps_a_transaction_id_from_the_body() -> None:
     keypair = Keypair()
     signer = make_native_signer(keypair, chain="solana_devnet")

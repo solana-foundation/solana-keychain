@@ -98,13 +98,14 @@ type vaultAddress struct {
 	AssetID string `json:"assetId"`
 }
 
-// doRequest sends an authenticated request to the Fireblocks API and returns the
-// status code and body. The per-request JWT is computed over uri and body (empty
-// body for GET requests).
-func (s *Signer) doRequest(ctx context.Context, method, uri, body string) (int, []byte, error) {
+// newRequest builds an authenticated request. The per-request JWT is computed
+// over uri and body (empty body for GET requests). It is kept separate from
+// send so a caller classifying an ambiguous create covers only the hop that
+// could reach Fireblocks.
+func (s *Signer) newRequest(ctx context.Context, method, uri, body string) (*http.Request, error) {
 	token, err := createJWT(s.apiKey, s.signingKey, uri, body)
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
 
 	var reader io.Reader
@@ -113,15 +114,28 @@ func (s *Signer) doRequest(ctx context.Context, method, uri, body string) (int, 
 	}
 	req, err := http.NewRequestWithContext(ctx, method, s.apiBaseURL+uri, reader)
 	if err != nil {
-		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "failed to build fireblocks request", err)
+		return nil, core.WrapSignerError(core.CodeHTTPError, "failed to build fireblocks request", err)
 	}
 	if method == http.MethodPost {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("X-API-Key", s.apiKey)
 	req.Header.Set("Authorization", "Bearer "+token)
+	return req, nil
+}
 
+func (s *Signer) send(req *http.Request) (int, []byte, error) {
 	return core.SendRequest(s.client, req, "fireblocks")
+}
+
+// doRequest sends an authenticated request to the Fireblocks API and returns the
+// status code and body.
+func (s *Signer) doRequest(ctx context.Context, method, uri, body string) (int, []byte, error) {
+	req, err := s.newRequest(ctx, method, uri, body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return s.send(req)
 }
 
 // fetchPublicKey retrieves the vault account's Solana address.
@@ -197,7 +211,12 @@ func (s *Signer) createTransaction(ctx context.Context, request createTransactio
 		return createTransactionResponse{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize fireblocks request", err)
 	}
 
-	status, respBody, err := s.doRequest(ctx, http.MethodPost, "/v1/transactions", string(body))
+	req, err := s.newRequest(ctx, http.MethodPost, "/v1/transactions", string(body))
+	if err != nil {
+		return createTransactionResponse{}, err
+	}
+
+	status, respBody, err := s.send(req)
 	if err != nil {
 		return createTransactionResponse{}, ambiguous(status, nil, err)
 	}

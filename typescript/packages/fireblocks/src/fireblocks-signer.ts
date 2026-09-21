@@ -229,12 +229,21 @@ class FireblocksSigner<TAddress extends string = string>
         });
     }
 
-    private async request<T>(method: string, uri: string, body?: unknown, abortSignal?: AbortSignal): Promise<T> {
+    /**
+     * Serialize a body and mint its per-request JWT, without sending anything.
+     * Kept separate from the send so a caller classifying an ambiguous create
+     * covers only the hop that could reach Fireblocks: a malformed API private
+     * key fails here, having submitted nothing.
+     */
+    private async prepareRequest(
+        method: string,
+        uri: string,
+        body?: unknown,
+    ): Promise<{ init: RequestInit; url: string }> {
         const bodyStr = body ? JSON.stringify(body) : '';
         const token = await createJwt(this.apiKey, await this.getPrivateKey(), uri, bodyStr);
 
-        return await fetchSignerJson<T>({
-            abortSignal,
+        return {
             init: {
                 body: body ? bodyStr : undefined,
                 headers: {
@@ -244,9 +253,21 @@ class FireblocksSigner<TAddress extends string = string>
                 },
                 method,
             },
-            providerName: 'Fireblocks',
             url: `${this.apiBaseUrl}${uri}`,
+        };
+    }
+
+    private async send<T>(prepared: { init: RequestInit; url: string }, abortSignal?: AbortSignal): Promise<T> {
+        return await fetchSignerJson<T>({
+            abortSignal,
+            init: prepared.init,
+            providerName: 'Fireblocks',
+            url: prepared.url,
         });
+    }
+
+    private async request<T>(method: string, uri: string, body?: unknown, abortSignal?: AbortSignal): Promise<T> {
+        return await this.send<T>(await this.prepareRequest(method, uri, body), abortSignal);
     }
 
     private async signRawBytes(messageBytes: Uint8Array, abortSignal?: AbortSignal): Promise<SignatureBytes> {
@@ -320,14 +341,10 @@ class FireblocksSigner<TAddress extends string = string>
         externalTxId: string,
         abortSignal?: AbortSignal,
     ): Promise<string> {
+        const prepared = await this.prepareRequest('POST', '/v1/transactions', request);
         let createResponse: CreateTransactionResponse;
         try {
-            createResponse = await this.request<CreateTransactionResponse>(
-                'POST',
-                '/v1/transactions',
-                request,
-                abortSignal,
-            );
+            createResponse = await this.send<CreateTransactionResponse>(prepared, abortSignal);
         } catch (error) {
             if (!providerMayHaveAccepted(error)) {
                 throw error;

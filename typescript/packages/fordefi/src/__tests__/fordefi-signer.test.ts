@@ -506,6 +506,27 @@ describe('createFordefiSigner', () => {
     });
 
     describe('signAndSendTransactions (native solana mode)', () => {
+        it('does not report a request-signing failure as an unconfirmed broadcast', async () => {
+            const { config, fixture } = await setupNativeBroadcast(0);
+            const signer = await createFordefiSigner({
+                ...config,
+                privateKeyPem: undefined,
+                requestSigner: {
+                    signRequest: () => {
+                        throw new Error('kms unavailable');
+                    },
+                },
+            });
+
+            const mockTx = {
+                messageBytes: fixture.messageBytes,
+                signatures: { [fixture.feePayer]: null },
+            } as never;
+            const thrown: unknown = await signer.signAndSendTransactions([mockTx]).catch((error: unknown) => error);
+            expect((thrown as SignerError).code).not.toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            expect(fetch).not.toHaveBeenCalled();
+        });
+
         it.each([0, 1] as const)(
             'should expose a TransactionSendingSigner and return the broadcast signature from a v%i envelope',
             async version => {

@@ -231,9 +231,10 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
      */
     private async signTransactionManaged(transaction: Transaction, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         const idempotencyKey = await idempotencyKeyFromMessage(this.namespacedKeyInput(transaction.messageBytes));
+        const transactionBase58 = this.encodeTransaction(transaction);
         let created: CrossmintTransactionResponse;
         try {
-            created = await this.createTransaction(transaction, idempotencyKey, abortSignal);
+            created = await this.createTransaction(transactionBase58, idempotencyKey, abortSignal);
         } catch (error) {
             if (!providerMayHaveAccepted(error)) {
                 throw error;
@@ -383,17 +384,24 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
         return parseTransactionResponse(result, 'submit approval');
     }
 
-    private async createTransaction(
-        transaction: Transaction,
-        idempotencyKey: string,
-        abortSignal?: AbortSignal,
-    ): Promise<CrossmintTransactionResponse> {
+    /**
+     * Encode a transaction for the create body. Kept out of the create itself so
+     * a serialization failure, which sends nothing, is not classified as a
+     * create Crossmint may have accepted.
+     */
+    private encodeTransaction(transaction: Transaction): string {
         const wireTransaction = getBase64EncodedWireTransaction(transaction);
         base64Encoder ||= getBase64Encoder();
         const transactionBytes = base64Encoder.encode(wireTransaction);
         base58Decoder ||= getBase58Decoder();
-        const transactionBase58 = base58Decoder.decode(transactionBytes);
+        return base58Decoder.decode(transactionBytes);
+    }
 
+    private async createTransaction(
+        transactionBase58: string,
+        idempotencyKey: string,
+        abortSignal?: AbortSignal,
+    ): Promise<CrossmintTransactionResponse> {
         const body: CrossmintCreateTransactionRequest = {
             params: {
                 transaction: transactionBase58,

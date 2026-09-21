@@ -27,7 +27,7 @@ import {
     SignerErrorCode,
 } from '@solana/keychain-core';
 import { isMessagePartialSigner, isTransactionPartialSigner, isTransactionSendingSigner } from '@solana/signers';
-import { getTransactionDecoder } from '@solana/transactions';
+import { getBase64EncodedWireTransaction, getTransactionDecoder } from '@solana/transactions';
 import { createCrossmintSigner } from '../crossmint-signer.js';
 
 global.fetch = vi.fn();
@@ -250,6 +250,20 @@ describe('CrossmintSigner', () => {
     });
 
     describe('signAndSendTransactions', () => {
+        it('does not report a serialization failure as an unconfirmed create', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
+            const signer = await createCrossmintSigner(mockConfig);
+            vi.mocked(getBase64EncodedWireTransaction).mockImplementationOnce(() => {
+                throw new Error('transaction too large');
+            });
+
+            const thrown: unknown = await signer
+                .signAndSendTransactions([createMockTransaction()])
+                .catch((error: unknown) => error);
+            expect((thrown as SignerError).code).not.toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            expect(fetch).toHaveBeenCalledTimes(1);
+        });
+
         it('signs via managed flow and extracts signature from txId', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()

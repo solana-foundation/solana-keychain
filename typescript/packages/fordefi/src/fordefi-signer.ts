@@ -71,6 +71,7 @@ let base64Encoder: ReturnType<typeof getBase64Encoder> | undefined;
 let utf8Encoder: ReturnType<typeof getUtf8Encoder> | undefined;
 const DEFAULT_MAX_POLL_ATTEMPTS = 50;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const TRANSACTIONS_PATH = '/api/v1/transactions';
 
 // An unrecognized value would otherwise fall through to auto and broadcast.
 const PUSH_MODES = new Set<string>(['auto', 'manual']);
@@ -720,9 +721,13 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
                     'auto',
                     normalizeMessageBytes(transaction.messageBytes),
                 );
+                const prepared = await this.prepareTransactionSubmit(
+                    this.solanaTransactionRequestBody(base64Data, 'auto'),
+                    idempotencyKey,
+                );
                 let txId: string;
                 try {
-                    txId = await this.submitSolanaTransaction(base64Data, 'auto', idempotencyKey, config?.abortSignal);
+                    txId = await this.sendTransactionSubmit(prepared, config?.abortSignal);
                 } catch (error) {
                     if (!providerMayHaveAccepted(error)) {
                         throw error;
@@ -879,15 +884,38 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         idempotenceId?: string,
         abortSignal?: AbortSignal,
     ): Promise<string> {
-        const apiPath = '/api/v1/transactions';
-        const createResponse = await this.request<FordefiCreateTransactionResponse>(
-            'POST',
-            apiPath,
-            JSON.stringify(requestBody),
-            this.requestTimeoutMs,
-            idempotenceId,
+        return await this.sendTransactionSubmit(
+            await this.prepareTransactionSubmit(requestBody, idempotenceId),
             abortSignal,
         );
+    }
+
+    /**
+     * Serialize and request-sign a create, without sending it. Kept separate
+     * from the send so a caller classifying an ambiguous create covers only the
+     * hop that could reach Fordefi: request signing runs through a
+     * caller-supplied `requestSigner` that may fail for its own reasons, none of
+     * which submit anything.
+     */
+    private async prepareTransactionSubmit(
+        requestBody: FordefiBlackBoxSignatureRequest | FordefiSolanaMessageRequest | FordefiSolanaTransactionRequest,
+        idempotenceId?: string,
+    ): Promise<{ body: string; headers: Record<string, string> }> {
+        const body = JSON.stringify(requestBody);
+        return { body, headers: await this.requestHeaders(TRANSACTIONS_PATH, body, idempotenceId) };
+    }
+
+    private async sendTransactionSubmit(
+        prepared: { body: string; headers: Record<string, string> },
+        abortSignal?: AbortSignal,
+    ): Promise<string> {
+        const createResponse = await fetchSignerJson<FordefiCreateTransactionResponse>({
+            abortSignal,
+            init: { body: prepared.body, headers: prepared.headers, method: 'POST' },
+            providerName: 'Fordefi',
+            timeoutMs: this.requestTimeoutMs,
+            url: `${this.apiBaseUrl}${TRANSACTIONS_PATH}`,
+        });
         if (!createResponse.id?.trim()) {
             return throwSignerError(SignerErrorCode.SERIALIZATION_ERROR, {
                 message: 'Fordefi returned no transaction id',
@@ -914,13 +942,11 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
      * Submit a native Solana serialized transaction message for signing, and for
      * broadcasting when `pushMode` is `'auto'`.
      */
-    private async submitSolanaTransaction(
+    private solanaTransactionRequestBody(
         base64Data: string,
         pushMode: FordefiPushMode,
-        idempotencyKey: string,
-        abortSignal?: AbortSignal,
-    ): Promise<string> {
-        const requestBody: FordefiSolanaTransactionRequest = {
+    ): FordefiSolanaTransactionRequest {
+        return {
             details: {
                 chain: this.chain!,
                 data: base64Data,
@@ -933,7 +959,19 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
             type: 'solana_transaction',
             vault_id: this.vaultId,
         };
-        return await this.submitTransaction(requestBody, idempotencyKey, abortSignal);
+    }
+
+    private async submitSolanaTransaction(
+        base64Data: string,
+        pushMode: FordefiPushMode,
+        idempotencyKey: string,
+        abortSignal?: AbortSignal,
+    ): Promise<string> {
+        return await this.submitTransaction(
+            this.solanaTransactionRequestBody(base64Data, pushMode),
+            idempotencyKey,
+            abortSignal,
+        );
     }
 
     private async nativeIdempotencyKey(pushMode: FordefiPushMode, messageBytes: Uint8Array): Promise<string> {
@@ -1068,14 +1106,11 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         return await this.requestSigner.signRequest(payload);
     }
 
-    private async request<T>(
-        method: 'GET' | 'POST',
+    private async requestHeaders(
         apiPath: string,
         body?: string,
-        timeoutMs = this.requestTimeoutMs,
         idempotenceId?: string,
-        abortSignal?: AbortSignal,
-    ): Promise<T> {
+    ): Promise<Record<string, string>> {
         const headers: Record<string, string> = {
             Authorization: `Bearer ${this.accessToken}`,
         };
@@ -1088,6 +1123,18 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         if (idempotenceId !== undefined) {
             headers['x-idempotence-id'] = idempotenceId;
         }
+        return headers;
+    }
+
+    private async request<T>(
+        method: 'GET' | 'POST',
+        apiPath: string,
+        body?: string,
+        timeoutMs = this.requestTimeoutMs,
+        idempotenceId?: string,
+        abortSignal?: AbortSignal,
+    ): Promise<T> {
+        const headers = await this.requestHeaders(apiPath, body, idempotenceId);
 
         return await fetchSignerJson<T>({
             abortSignal,

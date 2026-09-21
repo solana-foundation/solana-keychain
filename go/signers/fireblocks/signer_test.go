@@ -3,6 +3,7 @@ package fireblocks
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -989,5 +990,28 @@ func TestSignMessageNoSignedMessages(t *testing.T) {
 	}
 	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
 		t.Errorf("got %s, want SIGNING_FAILED", code)
+	}
+}
+
+// A failure that happens before the create leaves the process must not be
+// reported as a create Fireblocks may still act on.
+func TestSignTransactionProgramCallPreSendFailureIsNotUnconfirmed(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := newTestSignerWithProgramCall(t, pub.String(), true, func(mux *http.ServeMux) {
+		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("create request reached Fireblocks")
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-789"})
+		})
+	})
+	s.signingKey = &rsa.PrivateKey{}
+
+	_, err = s.SignTransaction(context.Background(), tx)
+	if code, _ := core.CodeOf(err); code == core.CodeBroadcastUnconfirmed {
+		t.Fatalf("got %s, want a plain failure", code)
 	}
 }

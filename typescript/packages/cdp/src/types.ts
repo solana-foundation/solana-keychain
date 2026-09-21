@@ -1,5 +1,5 @@
 /** Solana network values accepted by the CDP sign endpoint. */
-export type CdpNetwork = 'solana' | 'solana-devnet';
+export type CdpNetwork = 'solana-devnet' | 'solana';
 
 export interface CdpSignerConfig {
     /**

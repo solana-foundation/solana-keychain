@@ -63,6 +63,7 @@ SUPPORTED_CHAINS = ("solana_devnet", "solana_mainnet")
 
 FordefiPushMode = Literal["auto", "manual"]
 
+_TRANSACTIONS_PATH = "/api/v1/transactions"
 _PUSHABLE_SUCCESS_STATES = frozenset({"completed"})
 _NON_PUSHABLE_SUCCESS_STATES = frozenset({"signed", "completed"})
 _TERMINAL_FAILURE_STATES = frozenset(
@@ -199,13 +200,19 @@ class _FordefiSignerBase(SolanaSigner):
             client=self._http_client,
         )
 
-    async def _post_transaction(
+    async def _prepare_transaction_post(
         self, request: dict[str, Any], idempotence_id: str | None = None
-    ) -> str:
-        path = "/api/v1/transactions"
+    ) -> tuple[str, dict[str, str]]:
+        """Serialize and sign a create, without sending it.
+
+        Kept separate from the send so a caller classifying an ambiguous create
+        covers only the hop that could reach Fordefi: request signing runs
+        through a caller-supplied ``FordefiRequestSigner`` that may fail for its
+        own reasons, none of which submit anything.
+        """
         body = json.dumps(request, separators=(",", ":"))
         timestamp = _timestamp_ms()
-        signature = await self._sign_request(path, timestamp, body)
+        signature = await self._sign_request(_TRANSACTIONS_PATH, timestamp, body)
         headers = {
             "Authorization": f"Bearer {self._access_token}",
             "Content-Type": "application/json",
@@ -214,8 +221,11 @@ class _FordefiSignerBase(SolanaSigner):
         }
         if idempotence_id is not None:
             headers["x-idempotence-id"] = idempotence_id
+        return body, headers
+
+    async def _send_transaction_post(self, body: str, headers: dict[str, str]) -> str:
         response = await fetch_signer_json(
-            url=f"{self._api_base_url}{path}",
+            url=f"{self._api_base_url}{_TRANSACTIONS_PATH}",
             provider_name="Fordefi",
             method="POST",
             headers=headers,
@@ -226,6 +236,12 @@ class _FordefiSignerBase(SolanaSigner):
         if not isinstance(transaction_id, str) or not transaction_id.strip():
             raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
         return transaction_id
+
+    async def _post_transaction(
+        self, request: dict[str, Any], idempotence_id: str | None = None
+    ) -> str:
+        body, headers = await self._prepare_transaction_post(request, idempotence_id)
+        return await self._send_transaction_post(body, headers)
 
     async def _poll_for_result(self, transaction_id: str, *, pushable: bool) -> dict[str, Any]:
         success_states = _PUSHABLE_SUCCESS_STATES if pushable else _NON_PUSHABLE_SUCCESS_STATES
@@ -547,11 +563,11 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
         self._require_sole_required_signer(transaction)
         message_data = signed_message_bytes(transaction.message)
         idempotency_key = self._native_idempotence_id(message_data)
+        body, headers = await self._prepare_transaction_post(
+            self._solana_transaction_request(message_data), idempotence_id=idempotency_key
+        )
         try:
-            transaction_id = await self._post_transaction(
-                self._solana_transaction_request(message_data),
-                idempotence_id=idempotency_key,
-            )
+            transaction_id = await self._send_transaction_post(body, headers)
         except asyncio.CancelledError as error:
             # The re-raise must stay a CancelledError for asyncio, so the warning
             # goes to the log.
