@@ -7,9 +7,9 @@ This library holds signing keys and talks to production key-management services,
 ## Before you start
 
 - Search existing issues and pull requests before opening a new one.
-- For substantial changes, open an issue or start a discussion first so maintainers can confirm the approach. Small PRs are preferred.
+- Open an issue first and wait for a maintainer to label it `accepted`. Every pull request has to reference such an issue with `Fixes #<issue>`; CI labels the ones that don't `needs-issue` and closes them, with the exception of typos, broken links, and comment-only fixes, which declare `Linked issue: trivial` in the description instead. Agreeing on the approach before anyone writes code is what keeps a finished change from being rejected on scope. Small PRs are preferred.
 - Do not include secrets, private keys, seed phrases, API keys, or production credentials in issues, pull requests, commits, logs, or screenshots. Integration tests read credentials from a local `.env` that is gitignored: keep it that way, and never paste its contents into a PR or an issue.
-- All commits into a Solana Foundation repository require [commit signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification) to be enabled. Your PRs will not be merged without this.
+- All commits into a Solana Foundation repository require [commit signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification) to be enabled. CI requests changes on a PR carrying an unverified commit and dismisses that review once every commit verifies.
 
 ## Security vulnerabilities
 
