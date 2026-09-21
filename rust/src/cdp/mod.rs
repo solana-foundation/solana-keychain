@@ -23,6 +23,10 @@ use crate::signature_util::{
 
 const CDP_API_HOST: &str = "api.cdp.coinbase.com";
 const CDP_BASE_PATH: &str = "/platform/v2/solana/accounts";
+/// Network value targeting Solana mainnet-beta.
+pub const CDP_NETWORK_MAINNET: &str = "solana";
+/// Network value targeting Solana devnet.
+pub const CDP_NETWORK_DEVNET: &str = "solana-devnet";
 
 /// CDP (Coinbase Developer Platform) Solana signer.
 ///
@@ -56,6 +60,7 @@ pub struct CdpSigner {
     api_key_id: String,
     api_key_secret: String,
     wallet_secret: String,
+    network: Option<String>,
     public_key: Pubkey,
     api_base_url: String,
     api_host: String,
@@ -69,6 +74,11 @@ pub struct CdpSignerConfig {
     pub api_key_secret: String,
     pub wallet_secret: String,
     pub address: String,
+    /// Solana network the signed transaction targets, either
+    /// [`CDP_NETWORK_MAINNET`] or [`CDP_NETWORK_DEVNET`]. CDP requires it to
+    /// resolve address lookup tables, so it is mandatory for versioned
+    /// transactions that carry any, and optional otherwise.
+    pub network: Option<String>,
     pub api_base_url: Option<String>,
     pub http_client_config: Option<HttpClientConfig>,
 }
@@ -102,6 +112,7 @@ impl CdpSigner {
             api_key_secret,
             wallet_secret,
             address,
+            network: None,
             api_base_url: None,
             http_client_config: None,
         })
@@ -130,6 +141,14 @@ impl CdpSigner {
             ));
         }
 
+        if let Some(network) = &config.network {
+            if network != CDP_NETWORK_MAINNET && network != CDP_NETWORK_DEVNET {
+                return Err(SignerError::ConfigError(format!(
+                    "network must be \"{CDP_NETWORK_MAINNET}\" or \"{CDP_NETWORK_DEVNET}\""
+                )));
+            }
+        }
+
         let public_key = Pubkey::from_str(&config.address).map_err(|_| {
             SignerError::InvalidPublicKey(format!("Invalid Solana address: {}", config.address))
         })?;
@@ -147,6 +166,7 @@ impl CdpSigner {
             api_key_id: config.api_key_id,
             api_key_secret: config.api_key_secret,
             wallet_secret: config.wallet_secret,
+            network: config.network,
             public_key,
             api_base_url: base_url,
             api_host,
@@ -226,7 +246,10 @@ impl CdpSigner {
         let path = format!("{}/{}/sign/transaction", CDP_BASE_PATH, self.public_key);
         let url = format!("{}{}", self.api_base_url, path);
 
-        let body = serde_json::json!({ "transaction": base64_tx });
+        let mut body = serde_json::json!({ "transaction": base64_tx });
+        if let Some(network) = &self.network {
+            body["network"] = Value::String(network.clone());
+        }
         let headers = self.build_auth_headers("POST", &path, Some(&body))?;
 
         let response = self
@@ -283,6 +306,18 @@ impl CdpSigner {
         &self,
         transaction: &mut VersionedTransaction,
     ) -> Result<SignedTransaction, SignerError> {
+        if transaction
+            .message
+            .address_table_lookups()
+            .is_some_and(|lookups| !lookups.is_empty())
+            && self.network.is_none()
+        {
+            return Err(SignerError::ConfigError(
+                "network must be configured to sign a transaction with address lookup tables"
+                    .to_string(),
+            ));
+        }
+
         let message_data = transaction.message.serialize();
 
         // Serialize the full transaction to bytes (Solana wire format)

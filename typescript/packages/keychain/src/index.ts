@@ -5,7 +5,7 @@ export { resolveAddress } from './resolve-address.js';
 export type { BackendName, KeychainSignerConfig } from './types.js';
 
 export type { AwsKmsSignerConfig } from '@solana/keychain-aws-kms';
-export type { CdpSignerConfig } from '@solana/keychain-cdp';
+export type { CdpNetwork, CdpSignerConfig } from '@solana/keychain-cdp';
 export type { CrossmintSignerConfig } from '@solana/keychain-crossmint';
 export type { DfnsSignerConfig } from '@solana/keychain-dfns';
 export type { FireblocksSignerConfig } from '@solana/keychain-fireblocks';

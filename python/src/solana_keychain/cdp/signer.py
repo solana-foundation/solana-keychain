@@ -40,6 +40,8 @@ from solana_keychain.core.wallet_jwt import extract_host
 
 DEFAULT_API_BASE_URL = "https://api.cdp.coinbase.com"
 BASE_PATH = "/platform/v2/solana/accounts"
+NETWORK_MAINNET = "solana"
+NETWORK_DEVNET = "solana-devnet"
 
 
 @dataclass
@@ -56,6 +58,7 @@ class CdpSignerConfig:
     api_key_secret: str = field(repr=False)
     wallet_secret: str = field(repr=False)
     address: str
+    network: str | None = None
     api_base_url: str = DEFAULT_API_BASE_URL
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
 
@@ -76,6 +79,11 @@ class CdpSigner(TransactionSigner):
         ):
             if not value:
                 raise SignerError(SignerErrorCode.CONFIG_ERROR, f"{name} must not be empty")
+        if config.network is not None and config.network not in (NETWORK_MAINNET, NETWORK_DEVNET):
+            raise SignerError(
+                SignerErrorCode.CONFIG_ERROR,
+                f'network must be "{NETWORK_MAINNET}" or "{NETWORK_DEVNET}"',
+            )
         try:
             self._pubkey = Pubkey.from_string(config.address)
         except Exception:
@@ -89,6 +97,7 @@ class CdpSigner(TransactionSigner):
         self._api_key_id = config.api_key_id
         self._api_key_secret = config.api_key_secret
         self._wallet_secret = config.wallet_secret
+        self._network = config.network
         self._http_client = config.http_client
 
     def __repr__(self) -> str:
@@ -147,10 +156,18 @@ class CdpSigner(TransactionSigner):
         return verify_returned_signature(signature, self._pubkey, message)
 
     async def sign_transaction(self, transaction: VersionedTransaction) -> SignedTransaction:
+        if getattr(transaction.message, "address_table_lookups", None) and self._network is None:
+            raise SignerError(
+                SignerErrorCode.CONFIG_ERROR,
+                "network must be configured to sign a transaction with address lookup tables",
+            )
         message_data = signed_message_bytes(transaction.message)
         path = f"{BASE_PATH}/{self._pubkey}/sign/transaction"
         encoded_tx = base64.b64encode(bytes(transaction)).decode("ascii")
-        response = await self._post_signed(path, {"transaction": encoded_tx})
+        body: dict[str, Any] = {"transaction": encoded_tx}
+        if self._network is not None:
+            body["network"] = self._network
+        response = await self._post_signed(path, body)
 
         signed_b64 = response.get("signedTransaction") if isinstance(response, dict) else None
         if not isinstance(signed_b64, str):

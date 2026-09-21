@@ -470,3 +470,69 @@ func TestHTTPSEnforcementDefaultClient(t *testing.T) {
 		})
 	}
 }
+
+func TestNewRejectsUnknownNetwork(t *testing.T) {
+	cfg := testConfig("", nil)
+	cfg.Network = "mainnet-beta"
+	_, err := New(cfg)
+	testutils.AssertCode(t, err, core.CodeConfigError)
+}
+
+func TestSignTransactionSendsConfiguredNetwork(t *testing.T) {
+	pub := solana.MustPublicKeyFromBase58(testPubkeyStr)
+	var gotNetwork any
+	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotNetwork = body["network"]
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+
+	cfg := testConfig(srv.URL, srv.Client())
+	cfg.Network = NetworkDevnet
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	_, _ = s.SignTransaction(context.Background(), transferTx(t, pub, pub))
+	if gotNetwork != NetworkDevnet {
+		t.Errorf("network = %v, want %q", gotNetwork, NetworkDevnet)
+	}
+}
+
+func TestSignTransactionOmitsNetworkWhenUnset(t *testing.T) {
+	pub := solana.MustPublicKeyFromBase58(testPubkeyStr)
+	var hasNetwork bool
+	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_, hasNetwork = body["network"]
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+
+	s := newTestSigner(t, srv, testPubkeyStr)
+	_, _ = s.SignTransaction(context.Background(), transferTx(t, pub, pub))
+	if hasNetwork {
+		t.Error("request body carries a network field when none is configured")
+	}
+}
+
+// CDP resolves lookup tables against a network, so signing without one configured
+// must fail locally rather than send a request the API will reject.
+func TestSignTransactionRejectsAddressLookupsWithoutNetwork(t *testing.T) {
+	pub := solana.MustPublicKeyFromBase58(testPubkeyStr)
+	srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("SignTransaction issued an HTTP request")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+
+	tx := transferTx(t, pub, pub)
+	tx.Message.SetAddressTableLookups([]solana.MessageAddressTableLookup{{
+		AccountKey:      pub,
+		WritableIndexes: []uint8{0},
+	}})
+
+	s := newTestSigner(t, srv, testPubkeyStr)
+	_, err := s.SignTransaction(context.Background(), tx)
+	testutils.AssertCode(t, err, core.CodeConfigError)
+}

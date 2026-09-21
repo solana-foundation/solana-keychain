@@ -92,8 +92,25 @@ vi.mock('@solana/transactions', async () => {
     };
 });
 
-const createMockTransaction = (): Transaction & TransactionWithinSizeLimit & TransactionWithLifetime => {
-    return {} as Transaction & TransactionWithinSizeLimit & TransactionWithLifetime;
+// The compiled message of MOCK_B64_WIRE_TX: the wire format is a 1-signature
+// shortvec, one 64-byte signature, then the message.
+const MOCK_MESSAGE_BYTES = new Uint8Array(Buffer.from(MOCK_B64_WIRE_TX, 'base64').subarray(65));
+
+// The same message with its empty lookup-table shortvec replaced by one entry:
+// count 1, a 32-byte table address, one writable index, no readonly indexes.
+const MOCK_MESSAGE_BYTES_WITH_LOOKUPS = new Uint8Array([
+    ...MOCK_MESSAGE_BYTES.subarray(0, MOCK_MESSAGE_BYTES.length - 1),
+    1,
+    ...new Uint8Array(32).fill(7),
+    1,
+    0,
+    0,
+]);
+
+const createMockTransaction = (
+    messageBytes: Uint8Array = MOCK_MESSAGE_BYTES,
+): Transaction & TransactionWithinSizeLimit & TransactionWithLifetime => {
+    return { messageBytes } as unknown as Transaction & TransactionWithinSizeLimit & TransactionWithLifetime;
 };
 
 const TEST_ADDRESS = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV';
@@ -158,6 +175,12 @@ describe('CdpSigner', () => {
             await expect(createCdpSigner(makeConfig({ address: 'not-a-valid-address' }))).rejects.toThrow(
                 'Invalid Solana address format',
             );
+        });
+
+        it('throws CONFIG_ERROR for an unknown network', async () => {
+            await expect(createCdpSigner(makeConfig({ network: 'mainnet-beta' as never }))).rejects.toMatchObject({
+                code: 'SIGNER_CONFIG_ERROR',
+            });
         });
 
         it('throws CONFIG_ERROR for negative requestDelayMs', async () => {
@@ -304,6 +327,41 @@ describe('CdpSigner', () => {
     });
 
     describe('signTransactions', () => {
+        it('sends the configured network', async () => {
+            mockFetch.mockResolvedValue(
+                new Response(JSON.stringify({ signedTransaction: MOCK_B64_WIRE_TX }), { status: 200 }),
+            );
+
+            const signer = await createCdpSigner(makeConfig({ network: 'solana-devnet' }));
+            await expect(signer.signTransactions([createMockTransaction()])).rejects.toThrow();
+
+            const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+            expect(JSON.parse(init.body as string)).toMatchObject({ network: 'solana-devnet' });
+        });
+
+        it('omits the network field when none is configured', async () => {
+            mockFetch.mockResolvedValue(
+                new Response(JSON.stringify({ signedTransaction: MOCK_B64_WIRE_TX }), { status: 200 }),
+            );
+
+            const signer = await createCdpSigner(makeConfig());
+            await expect(signer.signTransactions([createMockTransaction()])).rejects.toThrow();
+
+            const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+            expect(JSON.parse(init.body as string)).not.toHaveProperty('network');
+        });
+
+        // CDP resolves lookup tables against a network, so signing without one
+        // configured must fail locally rather than send a request CDP will reject.
+        it('rejects a transaction with address lookup tables when no network is configured', async () => {
+            const signer = await createCdpSigner(makeConfig());
+
+            await expect(
+                signer.signTransactions([createMockTransaction(MOCK_MESSAGE_BYTES_WITH_LOOKUPS)]),
+            ).rejects.toMatchObject({ code: 'SIGNER_CONFIG_ERROR' });
+            expect(mockFetch).not.toHaveBeenCalled();
+        });
+
         it('accepts a key pair address as the signer address', async () => {
             const keyPair = await generateKeyPairSigner();
             const signer = await createCdpSigner(makeConfig({ address: keyPair.address }));
@@ -326,6 +384,18 @@ describe('CdpSigner', () => {
             const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
             expect(url).toContain('/sign/transaction');
             expect(JSON.parse(init.body as string)).toMatchObject({ transaction: MOCK_B64_WIRE_TX });
+        });
+
+        it('rejects a mixed batch before signing any of it', async () => {
+            const signer = await createCdpSigner(makeConfig());
+
+            await expect(
+                signer.signTransactions([
+                    createMockTransaction(),
+                    createMockTransaction(MOCK_MESSAGE_BYTES_WITH_LOOKUPS),
+                ]),
+            ).rejects.toMatchObject({ code: 'SIGNER_CONFIG_ERROR' });
+            expect(mockFetch).not.toHaveBeenCalled();
         });
 
         it('throws HTTP_ERROR on network failure', async () => {
