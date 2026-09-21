@@ -1,4 +1,5 @@
 import base64
+import json
 from typing import Any
 
 import httpx
@@ -20,7 +21,11 @@ from solana_keychain.cdp import CdpSigner, CdpSignerConfig, create_cdp_signer
 from solana_keychain.cdp.jwt import create_auth_jwt, create_wallet_jwt
 from solana_keychain.core import signed_message_bytes
 from solana_keychain.core.wallet_jwt import compute_req_hash
-from tests.util import create_test_transaction, create_test_v1_transaction
+from tests.util import (
+    create_test_transaction,
+    create_test_transaction_with_lookups,
+    create_test_v1_transaction,
+)
 
 API_BASE_URL = "https://cdp.example.com"
 API_HOST = "cdp.example.com"
@@ -363,3 +368,68 @@ async def test_create_cdp_signer_factory() -> None:
         )
     )
     assert str(signer.pubkey) == ADDRESS
+
+
+def test_init_rejects_unknown_network() -> None:
+    with pytest.raises(SignerError) as excinfo:
+        CdpSigner(
+            CdpSignerConfig(
+                api_key_id=API_KEY_ID,
+                api_key_secret=API_KEY_SECRET,
+                wallet_secret=WALLET_SECRET,
+                address=ADDRESS,
+                network="mainnet-beta",
+            )
+        )
+    assert excinfo.value.code is SignerErrorCode.CONFIG_ERROR
+
+
+@respx.mock
+async def test_sign_transaction_sends_configured_network() -> None:
+    transaction = create_test_transaction(_ACCOUNT_KEYPAIR.pubkey())
+    respx.post(f"{API_BASE_URL}{BASE_PATH}/sign/transaction").mock(
+        return_value=httpx.Response(
+            200, json={"signedTransaction": signed_transaction_b64(transaction)}
+        )
+    )
+    signer = CdpSigner(
+        CdpSignerConfig(
+            api_key_id=API_KEY_ID,
+            api_key_secret=API_KEY_SECRET,
+            wallet_secret=WALLET_SECRET,
+            address=ADDRESS,
+            api_base_url=API_BASE_URL,
+            network="solana-devnet",
+        )
+    )
+
+    await signer.sign_transaction(transaction)
+
+    assert json.loads(respx.calls.last.request.content)["network"] == "solana-devnet"
+
+
+@respx.mock
+async def test_sign_transaction_omits_network_when_unset() -> None:
+    transaction = create_test_transaction(_ACCOUNT_KEYPAIR.pubkey())
+    respx.post(f"{API_BASE_URL}{BASE_PATH}/sign/transaction").mock(
+        return_value=httpx.Response(
+            200, json={"signedTransaction": signed_transaction_b64(transaction)}
+        )
+    )
+
+    await make_signer().sign_transaction(transaction)
+
+    assert "network" not in json.loads(respx.calls.last.request.content)
+
+
+@respx.mock
+async def test_sign_transaction_rejects_address_lookups_without_network() -> None:
+    """CDP resolves lookup tables against a network, so it must be configured first."""
+    route = respx.post(f"{API_BASE_URL}{BASE_PATH}/sign/transaction")
+    transaction = create_test_transaction_with_lookups(_ACCOUNT_KEYPAIR.pubkey())
+
+    with pytest.raises(SignerError) as excinfo:
+        await make_signer().sign_transaction(transaction)
+
+    assert excinfo.value.code is SignerErrorCode.CONFIG_ERROR
+    assert not route.called

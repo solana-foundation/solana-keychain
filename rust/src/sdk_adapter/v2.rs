@@ -6,6 +6,8 @@ pub use solana_sdk::hash::Hash;
 pub use solana_sdk::instruction::{AccountMeta, Instruction};
 #[allow(unused_imports)]
 pub use solana_sdk::message::{Message, VersionedMessage};
+#[allow(unused_imports)]
+pub use solana_sdk::message::v0::{self, MessageAddressTableLookup};
 pub use solana_sdk::pubkey::Pubkey;
 pub use solana_sdk::signature::{Keypair, Signature};
 pub use solana_sdk::signer::Signer;

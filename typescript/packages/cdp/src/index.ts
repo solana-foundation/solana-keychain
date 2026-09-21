@@ -1,2 +1,2 @@
 export { createCdpSigner } from './cdp-signer.js';
-export type { CdpSignerConfig } from './types.js';
+export type { CdpNetwork, CdpSignerConfig } from './types.js';

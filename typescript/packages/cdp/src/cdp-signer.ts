@@ -23,6 +23,7 @@ import type {
     SignatureDictionary,
     TransactionPartialSignerConfig,
 } from '@solana/signers';
+import { getCompiledTransactionMessageDecoder } from '@solana/transaction-messages';
 import {
     type Base64EncodedWireTransaction,
     getBase64EncodedWireTransaction,
@@ -31,7 +32,7 @@ import {
     type TransactionWithLifetime,
 } from '@solana/transactions';
 
-import type { CdpSignerConfig, SignMessageResponse, SignTransactionResponse } from './types.js';
+import type { CdpNetwork, CdpSignerConfig, SignMessageResponse, SignTransactionResponse } from './types.js';
 
 /**
  * Create and initialize a CDP-backed signer.
@@ -46,6 +47,7 @@ export async function createCdpSigner<TAddress extends string = string>(
 
 const CDP_DEFAULT_BASE_URL = 'https://api.cdp.coinbase.com';
 const CDP_BASE_PATH = '/platform/v2/solana/accounts';
+const CDP_NETWORKS: readonly CdpNetwork[] = ['solana', 'solana-devnet'];
 const AUTH_JWT_TTL_SECS = 120;
 const WALLET_JWT_TTL_SECS = 60;
 
@@ -217,6 +219,7 @@ class CdpSigner<TAddress extends string = string>
     private readonly walletKey: CryptoKey;
     private readonly apiHost: string;
     private readonly baseUrl: string;
+    private readonly network: CdpNetwork | undefined;
     private readonly requestDelayMs: number;
 
     private constructor(config: {
@@ -225,6 +228,7 @@ class CdpSigner<TAddress extends string = string>
         apiKey: CryptoKey;
         apiKeyId: string;
         baseUrl: string;
+        network: CdpNetwork | undefined;
         requestDelayMs: number;
         walletKey: CryptoKey;
     }) {
@@ -233,6 +237,7 @@ class CdpSigner<TAddress extends string = string>
         this.apiKey = config.apiKey;
         this.walletKey = config.walletKey;
         this.baseUrl = config.baseUrl;
+        this.network = config.network;
         this.apiHost = config.apiHost;
         this.requestDelayMs = config.requestDelayMs;
     }
@@ -279,6 +284,12 @@ class CdpSigner<TAddress extends string = string>
             });
         }
 
+        if (config.network !== undefined && !CDP_NETWORKS.includes(config.network)) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: `network must be one of: ${CDP_NETWORKS.join(', ')}`,
+            });
+        }
+
         const baseUrl = normalizePlatformBaseUrl(config.baseUrl ?? CDP_DEFAULT_BASE_URL);
         const parsedBaseUrl = assertHttpsUrl(baseUrl, 'baseUrl');
         const apiHost = parsedBaseUrl.host;
@@ -297,6 +308,7 @@ class CdpSigner<TAddress extends string = string>
             apiKey,
             apiKeyId: config.cdpApiKeyId,
             baseUrl,
+            network: config.network,
             requestDelayMs,
             walletKey,
         });
@@ -374,6 +386,22 @@ class CdpSigner<TAddress extends string = string>
     }
 
     /**
+     * CDP resolves address lookup tables against a specific network, so a transaction
+     * carrying any cannot be signed without one configured.
+     */
+    private assertNetworkForAddressLookups(transaction: Transaction): void {
+        if (this.network !== undefined) {
+            return;
+        }
+        const compiledMessage = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+        if (compiledMessage.version === 0 && compiledMessage.addressTableLookups?.length) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'network must be configured to sign a transaction with address lookup tables',
+            });
+        }
+    }
+
+    /**
      * Sign a base64-encoded wire transaction using the CDP API.
      * @returns The fully-signed wire transaction (base64-encoded).
      */
@@ -383,7 +411,9 @@ class CdpSigner<TAddress extends string = string>
     ): Promise<Base64EncodedWireTransaction> {
         const path = `${CDP_BASE_PATH}/${this.address}/sign/transaction`;
         const url = `${this.baseUrl}${path}`;
-        const body = { transaction: wireTransaction };
+        const body = this.network === undefined
+            ? { transaction: wireTransaction }
+            : { network: this.network, transaction: wireTransaction };
         const headers = await this.buildPostHeaders(path, body);
 
         const data = await fetchSignerJson<SignTransactionResponse>({
@@ -442,6 +472,10 @@ class CdpSigner<TAddress extends string = string>
         transactions: readonly (Transaction & TransactionWithinSizeLimit & TransactionWithLifetime)[],
         config?: TransactionPartialSignerConfig,
     ): Promise<readonly SignatureDictionary[]> {
+        for (const transaction of transactions) {
+            this.assertNetworkForAddressLookups(transaction);
+        }
+
         return await signBatchStaggered(
             transactions,
             async transaction => {

@@ -102,6 +102,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 **Note:** CDP's `sign_message` API only accepts UTF-8 messages. Non-UTF-8 byte payloads will return an error.
 
+**Note:** CDP resolves address lookup tables against a specific network, so `CdpSignerConfig::network` (`"solana"` or `"solana-devnet"`) is required to sign a transaction that references one.
+
 ### AWS KMS Signer
 
 ```rust
@@ -156,6 +158,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 **Note:** CDP's `sign_message` API only accepts UTF-8 messages. Non-UTF-8 byte payloads will return an error.
+
+**Note:** CDP resolves address lookup tables against a specific network, so `CdpSignerConfig::network` (`"solana"` or `"solana-devnet"`) is required to sign a transaction that references one.
 
 #### AWS Credentials
 
