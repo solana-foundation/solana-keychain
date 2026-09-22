@@ -19,13 +19,22 @@ describe('normalizeMessageBytes', () => {
         expect(normalized).toStrictEqual(PAYLOAD);
     });
 
-    it('makes a shared, offset view encode as the bytes it holds', () => {
-        // The codec mis-slices this shape and encodes only its tail, so bytes
-        // that reach a codec from outside this library must be copied first.
+    it('copies a shared, offset view into an owned zero-offset buffer', () => {
         const view = sharedOffsetView(PAYLOAD);
-        const decoder = getBase64Decoder();
-        expect(decoder.decode(view)).not.toBe(decoder.decode(PAYLOAD));
-        expect(decoder.decode(normalizeMessageBytes(view))).toBe(decoder.decode(PAYLOAD));
+        const normalized = normalizeMessageBytes(view);
+        expect(normalized).toStrictEqual(PAYLOAD);
+        expect(normalized.byteOffset).toBe(0);
+        expect(normalized.buffer).toBeInstanceOf(ArrayBuffer);
+        expect(getBase64Decoder().decode(normalized)).toBe(getBase64Decoder().decode(PAYLOAD));
+    });
+
+    it('copies a Node.js Buffer instead of returning a view over its memory', () => {
+        const source = Buffer.from(PAYLOAD);
+        const normalized = normalizeMessageBytes(source);
+        expect(normalized).not.toBeInstanceOf(Buffer);
+        expect(normalized.buffer).not.toBe(source.buffer);
+        source[0] = 99;
+        expect(normalized).toStrictEqual(PAYLOAD);
     });
 
     it('materializes an ArrayLike that is not a typed array', () => {

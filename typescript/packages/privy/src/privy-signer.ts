@@ -265,12 +265,11 @@ class PrivySigner<TAddress extends string = string>
             messages,
             async message => {
                 base64Decoder ||= getBase64Decoder();
-                const base64EncodedMessage = base64Decoder.decode(
-                    normalizeMessageBytes(message.content),
-                ) as TransactionMessageBytesBase64;
+                const messageBytes = normalizeMessageBytes(message.content);
+                const base64EncodedMessage = base64Decoder.decode(messageBytes) as TransactionMessageBytesBase64;
                 const signatureBytes = await this.signMessage(base64EncodedMessage, config?.abortSignal);
                 await assertSignatureValid({
-                    data: message.content,
+                    data: messageBytes,
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });

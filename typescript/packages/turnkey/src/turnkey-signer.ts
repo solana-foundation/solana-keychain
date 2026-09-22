@@ -231,10 +231,11 @@ class TurnkeySigner<TAddress extends string = string>
             messages,
             async message => {
                 const bytesToHex = getBase16Decoder().decode;
-                const hexMessage = bytesToHex(normalizeMessageBytes(message.content));
+                const messageBytes = normalizeMessageBytes(message.content);
+                const hexMessage = bytesToHex(messageBytes);
                 const signatureBytes = await this.sign(hexMessage, config?.abortSignal);
                 await assertSignatureValid({
-                    data: message.content,
+                    data: messageBytes,
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });

@@ -21,9 +21,13 @@ import {
     SolanaTransactionSigner,
 } from './types.js';
 
-/** Copies caller-supplied bytes into a fresh, zero-offset `Uint8Array`. */
+/**
+ * Copies caller-supplied bytes into a fresh, zero-offset `Uint8Array`.
+ */
 export function normalizeMessageBytes(bytes: ArrayLike<number>): Uint8Array {
-    return bytes instanceof Uint8Array ? bytes.slice() : new Uint8Array(Array.from(bytes));
+    const copy = new Uint8Array(bytes.length);
+    copy.set(bytes);
+    return copy;
 }
 
 /**
@@ -61,11 +65,12 @@ export async function assertSignatureValid({
     signerAddress,
 }: AssertSignatureValidOptions): Promise<void> {
     const addressBytes = getAddressEncoder().encode(signerAddress);
+    const message = normalizeMessageBytes(data);
 
     let valid: boolean;
     try {
         // ZIP-215 by default, matching the runtime; WebCrypto is stricter.
-        valid = ed25519.verify(signature, data as Uint8Array, addressBytes as Uint8Array);
+        valid = ed25519.verify(signature, message, addressBytes as Uint8Array);
     } catch (error) {
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
             address: signerAddress,
@@ -102,7 +107,7 @@ export function extractSignatureFromTransactionBytes({
     transactionBytes,
 }: ExtractSignatureFromTransactionBytesOptions): SignatureDictionary {
     assertIsAddress(signerAddress);
-    const { signatures } = getTransactionDecoder().decode(transactionBytes);
+    const { signatures } = getTransactionDecoder().decode(normalizeMessageBytes(transactionBytes));
 
     const signature = signatures[signerAddress];
     if (!signature) {

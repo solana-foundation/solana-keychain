@@ -23,6 +23,18 @@ describe('assertSignatureValid', () => {
         await expect(assertSignatureValid({ data, signature, signerAddress: kp.address })).resolves.toBeUndefined();
     });
 
+    it('verifies over the bytes a shared, offset view holds', async () => {
+        const kp = await createTestKeypair();
+        const data = new Uint8Array([1, 2, 3, 4]);
+        const signature = await kp.sign(data);
+        const shared = new Uint8Array(new SharedArrayBuffer(data.length + 8));
+        shared.set(data, 8);
+
+        await expect(
+            assertSignatureValid({ data: shared.subarray(8), signature, signerAddress: kp.address }),
+        ).resolves.toBeUndefined();
+    });
+
     it('throws SIGNING_FAILED for a corrupted signature', async () => {
         const kp = await createTestKeypair();
         const data = new Uint8Array([1, 2, 3, 4]);

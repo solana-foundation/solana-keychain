@@ -465,9 +465,10 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
         return await signBatchStaggered(
             messages,
             async message => {
-                const signatureBytes = await this.signMessage(message.content, config?.abortSignal);
+                const messageBytes = normalizeMessageBytes(message.content);
+                const signatureBytes = await this.signMessage(messageBytes, config?.abortSignal);
                 await assertSignatureValid({
-                    data: message.content,
+                    data: messageBytes,
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });

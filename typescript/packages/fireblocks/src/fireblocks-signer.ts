@@ -530,11 +530,12 @@ class FireblocksSigner<TAddress extends string = string>
         this.ensureInitialized();
 
         const signOne = async (transaction: (typeof transactions)[number]): Promise<SignatureDictionary> => {
+            const messageBytes = normalizeMessageBytes(transaction.messageBytes);
             const signatureBytes = this.useProgramCall
                 ? await this.signProgramCall(transaction, config?.abortSignal)
-                : await this.signRawBytes(normalizeMessageBytes(transaction.messageBytes), config?.abortSignal);
+                : await this.signRawBytes(messageBytes, config?.abortSignal);
             await assertSignatureValid({
-                data: transaction.messageBytes,
+                data: messageBytes,
                 signature: signatureBytes,
                 signerAddress: this.address,
             });

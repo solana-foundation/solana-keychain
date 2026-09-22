@@ -169,9 +169,10 @@ class ParaSigner<TAddress extends string = string>
         return await signBatchStaggered(
             messages,
             async message => {
-                const signatureBytes = await this.signBytes(message.content, config?.abortSignal);
+                const messageBytes = normalizeMessageBytes(message.content);
+                const signatureBytes = await this.signBytes(messageBytes, config?.abortSignal);
                 await assertSignatureValid({
-                    data: message.content,
+                    data: messageBytes,
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
@@ -192,9 +193,10 @@ class ParaSigner<TAddress extends string = string>
         return await signBatchStaggered(
             transactions,
             async transaction => {
-                const signatureBytes = await this.signBytes(transaction.messageBytes, config?.abortSignal);
+                const messageBytes = normalizeMessageBytes(transaction.messageBytes);
+                const signatureBytes = await this.signBytes(messageBytes, config?.abortSignal);
                 await assertSignatureValid({
-                    data: transaction.messageBytes,
+                    data: messageBytes,
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });

@@ -9,6 +9,7 @@ import {
     extractAndVerifyReturnedSignature,
     fetchSignerJson,
     normalizeBaseUrl,
+    normalizeMessageBytes,
     signBatchStaggered,
     SignerErrorCode,
     SolanaMessageSigner,
@@ -448,10 +449,11 @@ class CdpSigner<TAddress extends string = string>
         return await signBatchStaggered(
             messages,
             async message => {
-                const utf8Message = this.decodeMessageBytes(message.content);
+                const messageBytes = normalizeMessageBytes(message.content);
+                const utf8Message = this.decodeMessageBytes(messageBytes);
                 const signatureBytes = await this.callSignMessage(utf8Message, config?.abortSignal);
                 await assertSignatureValid({
-                    data: message.content,
+                    data: messageBytes,
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
