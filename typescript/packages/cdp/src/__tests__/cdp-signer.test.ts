@@ -304,6 +304,18 @@ describe('CdpSigner', () => {
             await expect(signer.signMessages([message])).rejects.toThrow('Invalid signature length');
         });
 
+        it('preserves a leading UTF-8 byte-order mark in the message sent to CDP', async () => {
+            const base58Sig = '5LfnqEfGPFBaHHeQBiNkgQ2EPy4FkVLKE7cjMYc7gv6EjE8Vs5gqaXcZHjpxr3yj5TMt7j3JdJPkXfnwXxXiNAh';
+            mockFetch.mockResolvedValue(new Response(JSON.stringify({ signature: base58Sig }), { status: 200 }));
+
+            const signer = await createCdpSigner(makeConfig());
+            const content = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode('hello')]);
+            await signer.signMessages([{ content, signatures: {} }]);
+
+            const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+            expect(JSON.parse(init.body as string)).toMatchObject({ message: '\ufeffhello' });
+        });
+
         it('throws SERIALIZATION_ERROR for invalid UTF-8 message', async () => {
             const signer = await createCdpSigner(makeConfig());
             const message = { content: new Uint8Array([0xff]), signatures: {} };

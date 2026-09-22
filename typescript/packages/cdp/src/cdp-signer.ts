@@ -315,7 +315,7 @@ class CdpSigner<TAddress extends string = string>
 
     private decodeMessageBytes(messageBytes: Uint8Array): string {
         try {
-            utf8Decoder ||= new TextDecoder('utf-8', { fatal: true });
+            utf8Decoder ||= new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
             return utf8Decoder.decode(messageBytes);
         } catch (error) {
             throwSignerError(SignerErrorCode.SERIALIZATION_ERROR, {
