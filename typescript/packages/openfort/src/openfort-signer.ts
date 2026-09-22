@@ -332,9 +332,8 @@ async function loadWalletKey(walletSecret: string): Promise<CryptoKey> {
         return await globalThis.crypto.subtle.importKey('pkcs8', der, { name: 'ECDSA', namedCurve: 'P-256' }, false, [
             'sign',
         ]);
-    } catch (error) {
+    } catch {
         throwSignerError(SignerErrorCode.CONFIG_ERROR, {
-            cause: error,
             message: 'Failed to load P-256 PKCS#8 key from walletSecret (expected PEM PKCS#8 ECDSA P-256 private key)',
         });
     }

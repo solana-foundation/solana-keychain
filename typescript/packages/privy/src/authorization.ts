@@ -146,8 +146,16 @@ async function generatePrivyAuthorizationSignature(
 ): Promise<string> {
     const nodeCrypto = await importNodeCryptoForAuthorizationPrivateKeys();
 
+    let privateKey: import('node:crypto').KeyObject;
     try {
-        const privateKey = parseP256PrivateKey(nodeCrypto, authorizationPrivateKey);
+        privateKey = parseP256PrivateKey(nodeCrypto, authorizationPrivateKey);
+    } catch {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'Invalid Privy authorization private key (expected PEM or base64 PKCS#8 P-256 private key)',
+        });
+    }
+
+    try {
         const signature = nodeCrypto.sign('sha256', payload, {
             dsaEncoding: 'der',
             key: privateKey,

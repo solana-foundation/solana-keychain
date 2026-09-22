@@ -75,9 +75,8 @@ function parseBase58PrivateKey(privateKey: string): Uint8Array {
     let decoded: Uint8Array;
     try {
         decoded = new Uint8Array(base58Encoder.encode(privateKey));
-    } catch (error) {
+    } catch {
         throwSignerError(SignerErrorCode.INVALID_PRIVATE_KEY, {
-            cause: error,
             message: 'Invalid private key format',
         });
     }
