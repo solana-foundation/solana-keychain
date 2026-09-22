@@ -36,7 +36,7 @@ from solana_keychain.core.transaction_util import (
     serialize_transaction,
     signed_message_bytes,
 )
-from solana_keychain.core.wallet_jwt import extract_host
+from solana_keychain.core.wallet_jwt import canonical_request_body, extract_host
 
 DEFAULT_API_BASE_URL = "https://api.cdp.coinbase.com"
 BASE_PATH = "/platform/v2/solana/accounts"
@@ -121,7 +121,7 @@ class CdpSigner(TransactionSigner):
                 "Content-Type": "application/json",
                 "X-Wallet-Auth": wallet_token,
             },
-            json_body=body,
+            content=canonical_request_body(body),
             client=self._http_client,
         )
 

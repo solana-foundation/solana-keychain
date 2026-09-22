@@ -30,7 +30,7 @@ from solana_keychain.core.transaction_util import (
     serialize_transaction,
     signed_message_bytes,
 )
-from solana_keychain.core.wallet_jwt import extract_host
+from solana_keychain.core.wallet_jwt import canonical_request_body, extract_host
 from solana_keychain.openfort.jwt import create_wallet_jwt
 
 DEFAULT_API_BASE_URL = "https://api.openfort.io"
@@ -138,7 +138,7 @@ class OpenfortSigner(TransactionSigner):
                 "Content-Type": "application/json",
                 "x-wallet-auth": wallet_token,
             },
-            json_body=body,
+            content=canonical_request_body(body),
             client=self._http_client,
         )
         signature_hex = response.get("signature") if isinstance(response, dict) else None
