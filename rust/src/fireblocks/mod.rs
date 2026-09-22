@@ -311,7 +311,7 @@ impl FireblocksSigner {
             },
         };
 
-        if !sig.verify(&public_key.to_bytes(), message_bytes) {
+        if !crate::signature_util::verifies(&sig, &public_key, message_bytes) {
             return Err(SignerError::SigningFailed(
                 "Signature verification failed — the signature returned for the PROGRAM_CALL does not match the vault public key over the submitted message".to_string(),
             ));

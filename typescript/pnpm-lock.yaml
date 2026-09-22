@@ -143,6 +143,10 @@ importers:
         version: 17.4.2
 
   packages/core:
+    dependencies:
+      '@noble/curves':
+        specifier: ^2.2.0
+        version: 2.2.0
     devDependencies:
       '@solana/addresses':
         specifier: 8.0.0

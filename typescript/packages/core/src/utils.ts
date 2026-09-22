@@ -1,7 +1,8 @@
+import { ed25519 } from '@noble/curves/ed25519.js';
 import { Address, assertIsAddress, getAddressEncoder } from '@solana/addresses';
 import { ReadonlyUint8Array } from '@solana/codecs-core';
 import { getBase64Encoder } from '@solana/codecs-strings';
-import { SignatureBytes, verifySignature } from '@solana/keys';
+import { SignatureBytes } from '@solana/keys';
 import {
     isMessagePartialSigner,
     isTransactionModifyingSigner,
@@ -53,6 +54,7 @@ interface AssertSignatureValidOptions {
  * @param data - The original data that was signed
  * @throws {SignerError} If the signature verification fails
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- verification is synchronous now, but the exported signature stays promise-returning
 export async function assertSignatureValid({
     data,
     signature,
@@ -60,20 +62,10 @@ export async function assertSignatureValid({
 }: AssertSignatureValidOptions): Promise<void> {
     const addressBytes = getAddressEncoder().encode(signerAddress);
 
-    let publicKey: CryptoKey;
-    try {
-        publicKey = await crypto.subtle.importKey('raw', addressBytes, { name: 'Ed25519' }, false, ['verify']);
-    } catch (error) {
-        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-            address: signerAddress,
-            cause: error,
-            message: `Failed to import public key for signature verification: ${error instanceof Error ? error.message : String(error)}`,
-        });
-    }
-
     let valid: boolean;
     try {
-        valid = await verifySignature(publicKey, signature, data);
+        // ZIP-215 by default, matching the runtime; WebCrypto is stricter.
+        valid = ed25519.verify(signature, data as Uint8Array, addressBytes as Uint8Array);
     } catch (error) {
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
             address: signerAddress,

@@ -120,6 +120,18 @@ pub(crate) fn extract_and_verify_rewritten_transaction(
     Ok((returned, signature))
 }
 
+/// Verify under the runtime's ZIP-215 rules, which the `verify_strict` behind
+/// [`Signature::verify`] is stricter than.
+pub fn verifies(signature: &Signature, public_key: &Pubkey, message: &[u8]) -> bool {
+    let Ok(signature) = <[u8; EXPECTED_SIGNATURE_LENGTH]>::try_from(signature.as_ref()) else {
+        return false;
+    };
+    ed25519_zebra::VerificationKey::try_from(public_key.to_bytes()).is_ok_and(|key| {
+        key.verify(&ed25519_zebra::Signature::from(signature), message)
+            .is_ok()
+    })
+}
+
 /// Reject a backend-returned signature that does not verify against the
 /// signer's public key over the signed bytes.
 pub fn verify_or_reject(
@@ -127,7 +139,7 @@ pub fn verify_or_reject(
     public_key: &Pubkey,
     message: &[u8],
 ) -> Result<(), SignerError> {
-    if signature.verify(&public_key.to_bytes(), message) {
+    if verifies(signature, public_key, message) {
         return Ok(());
     }
     Err(SignerError::SigningFailed(
@@ -226,6 +238,41 @@ mod tests {
             .expect_err("default signature must be rejected");
 
         assert!(matches!(error, SignerError::SigningFailed(_)));
+    }
+
+    /// Zcash ZIP-215 vectors the runtime accepts and `Signature::verify` rejects.
+    #[test]
+    fn accepts_zip215_signatures_the_strict_path_rejects() {
+        const VECTORS: [(&str, &str); 3] = [
+            (
+                "0100000000000000000000000000000000000000000000000000000000000000",
+                "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+            (
+                "0100000000000000000000000000000000000000000000000000000000000000",
+                "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+            (
+                "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+                "01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            ),
+        ];
+
+        for (pubkey_hex, signature_hex) in VECTORS {
+            let pubkey = Pubkey::new_from_array(unhex::<32>(pubkey_hex));
+            let signature = Signature::from(unhex::<64>(signature_hex));
+
+            assert!(verifies(&signature, &pubkey, b"Zcash"));
+            assert!(!signature.verify(&pubkey.to_bytes(), b"Zcash"));
+        }
+    }
+
+    fn unhex<const N: usize>(hex: &str) -> [u8; N] {
+        let mut out = [0u8; N];
+        for (index, byte) in out.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16).expect("hex");
+        }
+        out
     }
 
     #[test]

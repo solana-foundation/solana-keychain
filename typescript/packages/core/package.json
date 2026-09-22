@@ -36,6 +36,9 @@
         "typecheck": "tsc --noEmit",
         "test:treeshakability": "agadoo dist/index.js"
     },
+    "dependencies": {
+        "@noble/curves": "^2.2.0"
+    },
     "peerDependencies": {
         "@solana/addresses": ">=8.0.0",
         "@solana/codecs-core": ">=8.0.0",

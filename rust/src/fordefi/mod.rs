@@ -499,7 +499,7 @@ impl FordefiCore {
 
     /// Verify `signature` against `message` with the vault's public key.
     fn verify_signature(&self, signature: &Signature, message: &[u8]) -> Result<(), SignerError> {
-        if !signature.verify(&self.public_key.to_bytes(), message) {
+        if !crate::signature_util::verifies(signature, &self.public_key, message) {
             return Err(SignerError::SigningFailed(
                 "Signature verification failed".to_string(),
             ));
