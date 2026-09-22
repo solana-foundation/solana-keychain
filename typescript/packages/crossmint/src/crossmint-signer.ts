@@ -595,6 +595,11 @@ async function deriveSignerSeed(secret: string, apiKey: string): Promise<Uint8Ar
     // Parse API key: {ck|sk}_{environment}_{base58data}
     // base58-decoded data is UTF-8: "projectId:nacl_signature"
     const parts = apiKey.split('_');
+    if (parts.length < 3) {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'apiKey must be of the form {ck|sk}_{environment}_{base58data}',
+        });
+    }
     const environment = parts[1];
     const base58Data = parts.slice(2).join('_');
     base58Encoder ||= getBase58Encoder();

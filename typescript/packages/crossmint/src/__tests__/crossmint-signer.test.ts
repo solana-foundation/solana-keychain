@@ -214,6 +214,15 @@ describe('CrossmintSigner', () => {
             });
         });
 
+        it('throws config error for a malformed apiKey when deriving the signer seed', async () => {
+            await expect(
+                createCrossmintSigner({ ...mockConfig, apiKey: 'sk_staging', signerSecret: 'a'.repeat(64) }),
+            ).rejects.toMatchObject({
+                code: 'SIGNER_CONFIG_ERROR',
+                message: expect.stringContaining('{ck|sk}_{environment}_{base58data}'),
+            });
+        });
+
         it('throws config error for pollIntervalMs <= 0', async () => {
             await expect(createCrossmintSigner({ ...mockConfig, pollIntervalMs: 0 })).rejects.toMatchObject({
                 code: 'SIGNER_CONFIG_ERROR',
