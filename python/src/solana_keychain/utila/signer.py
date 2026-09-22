@@ -158,7 +158,7 @@ class UtilaSigner(TransactionSigner):
         self._poll_interval_ms = config.poll_interval_ms
         self._max_poll_attempts = config.max_poll_attempts
         self._designated_signers = (
-            config.designated_signers
+            list(config.designated_signers)
             if config.designated_signers is not None
             else [f"users/{config.service_account_email}"]
         )

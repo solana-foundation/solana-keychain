@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -69,7 +70,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 
 	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 
-	designatedSigners := cfg.DesignatedSigners
+	designatedSigners := slices.Clone(cfg.DesignatedSigners)
 	if designatedSigners == nil {
 		designatedSigners = []string{"users/" + cfg.ServiceAccountEmail}
 	}

@@ -149,7 +149,7 @@ class UtilaSigner<TAddress extends string = string> implements SolanaTransaction
 
         const vaultId = trimResourcePrefix(config.vaultId, 'vaults/');
         const walletId = trimWalletId(config.walletId, vaultId);
-        const designatedSigners = config.designatedSigners ?? [`users/${config.serviceAccountEmail}`];
+        const designatedSigners = [...(config.designatedSigners ?? [`users/${config.serviceAccountEmail}`])];
         const wallet = await fetchWallet({
             apiBaseUrl,
             privateKey,
