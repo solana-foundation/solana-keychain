@@ -1163,7 +1163,12 @@ describe('createFordefiSigner', () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
                 .mockResolvedValueOnce(mockPollResponse('signed', undefined, fixture.wireTransaction));
-            vi.mocked(assertSignatureValid).mockRejectedValueOnce(new Error('signature does not match'));
+            vi.mocked(assertSignatureValid).mockRejectedValueOnce(
+                new SignerError(SignerErrorCode.SIGNING_FAILED, {
+                    message:
+                        'Signature verification failed: returned signature does not match public key and signed data',
+                }),
+            );
 
             const signer = await createFordefiSigner(config);
             const callerTransaction = unsignedManualTransaction(fixture.feePayer);
