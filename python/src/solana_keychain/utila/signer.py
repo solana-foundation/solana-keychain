@@ -194,7 +194,9 @@ class UtilaSigner(TransactionSigner):
             client=self._http_client,
         )
 
-    async def _fetch_wallet(self) -> dict[str, Any]:
+    async def _fetch_wallet_address(self) -> str:
+        """Fetch the wallet's Solana address. A wallet carrying no
+        ``solanaDetails.address`` is not a Solana wallet this signer can use."""
         path = (
             f"/v2/vaults/{_encode_uri_component(self._vault_id)}"
             f"/wallets/{_encode_uri_component(self._wallet_id)}"
@@ -205,11 +207,6 @@ class UtilaSigner(TransactionSigner):
             raise SignerError(
                 SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse Utila fetch_wallet response"
             )
-        return wallet
-
-    async def init(self) -> None:
-        """Resolve the wallet's Solana address. Must be awaited before signing."""
-        wallet = await self._fetch_wallet()
         solana_details = wallet.get("solanaDetails")
         address = solana_details.get("address") if isinstance(solana_details, dict) else None
         if not isinstance(address, str):
@@ -217,6 +214,11 @@ class UtilaSigner(TransactionSigner):
                 SignerErrorCode.INVALID_PUBLIC_KEY,
                 "Utila wallet response did not include solanaDetails",
             )
+        return address
+
+    async def init(self) -> None:
+        """Resolve the wallet's Solana address. Must be awaited before signing."""
+        address = await self._fetch_wallet_address()
         try:
             self._public_key = Pubkey.from_string(address)
         except Exception:
@@ -344,8 +346,8 @@ class UtilaSigner(TransactionSigner):
 
     async def is_available(self) -> bool:
         async def probe() -> bool:
-            await self._fetch_wallet()
-            return True
+            address = await self._fetch_wallet_address()
+            return Pubkey.from_string(address) == self._initialized_pubkey()
 
         return await probe_availability(probe)
 

@@ -144,16 +144,7 @@ impl UtilaSigner {
 
     /// Initialize signer by fetching the Solana wallet address from Utila.
     pub async fn init(&mut self) -> Result<(), SignerError> {
-        let wallet = self.fetch_wallet().await?;
-        let address = wallet
-            .wallet
-            .solana_details
-            .ok_or_else(|| {
-                SignerError::InvalidPublicKey(
-                    "Utila wallet response did not include solanaDetails".to_string(),
-                )
-            })?
-            .address;
+        let address = self.fetch_wallet_address().await?;
 
         let pubkey = Pubkey::from_str(&address).map_err(|_| {
             SignerError::InvalidPublicKey(
@@ -185,13 +176,24 @@ impl UtilaSigner {
         })
     }
 
-    async fn fetch_wallet(&self) -> Result<WalletResponse, SignerError> {
+    /// Fetch the wallet's Solana address. A wallet carrying no solanaDetails is
+    /// not a Solana wallet this signer can use, so it fails.
+    async fn fetch_wallet_address(&self) -> Result<String, SignerError> {
         let path = format!(
             "/v2/vaults/{}/wallets/{}",
             encode_uri_component(&self.vault_id),
             encode_uri_component(&self.wallet_id)
         );
-        self.get_json(&path, "fetch_wallet").await
+        let wallet: WalletResponse = self.get_json(&path, "fetch_wallet").await?;
+        wallet
+            .wallet
+            .solana_details
+            .map(|details| details.address)
+            .ok_or_else(|| {
+                SignerError::InvalidPublicKey(
+                    "Utila wallet response did not include solanaDetails".to_string(),
+                )
+            })
     }
 
     async fn initiate_transaction(
@@ -339,8 +341,11 @@ impl UtilaSigner {
     }
 
     async fn check_availability(&self) -> bool {
-        let result = tokio::time::timeout(AVAILABILITY_TIMEOUT, self.fetch_wallet()).await;
-        matches!(result, Ok(Ok(_)))
+        let Ok(public_key) = self.initialized_pubkey() else {
+            return false;
+        };
+        let result = tokio::time::timeout(AVAILABILITY_TIMEOUT, self.fetch_wallet_address()).await;
+        matches!(result, Ok(Ok(address)) if Pubkey::from_str(&address).is_ok_and(|fetched| fetched == public_key))
     }
 }
 

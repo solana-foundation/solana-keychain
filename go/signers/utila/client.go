@@ -46,24 +46,28 @@ func createAccessToken(serviceAccountEmail string, signingKey *rsa.PrivateKey) (
 	return token, nil
 }
 
-// fetchWallet retrieves the wallet object holding the Solana address. The
-// "wallet" envelope (and, when solanaDetails is present, its address) is
-// required.
-func (s *Signer) fetchWallet(ctx context.Context) (walletResponse, error) {
+// fetchWalletAddress retrieves the wallet's Solana address. A wallet that
+// carries no solanaDetails.address is not a Solana wallet this signer can use,
+// so it fails rather than being reported as usable.
+func (s *Signer) fetchWalletAddress(ctx context.Context) (string, error) {
 	path := "/v2/vaults/" + core.EncodeURIComponent(s.vaultID) + "/wallets/" + core.EncodeURIComponent(s.walletID)
 	status, body, err := s.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return walletResponse{}, err
+		return "", err
 	}
 	wallet, err := parseResponse[walletResponse](status, body, "fetch_wallet")
 	if err != nil {
-		return walletResponse{}, err
+		return "", err
 	}
-	if wallet.Wallet == nil || (wallet.Wallet.SolanaDetails != nil && wallet.Wallet.SolanaDetails.Address == nil) {
-		return walletResponse{}, core.NewSignerError(core.CodeSerializationError,
+	if wallet.Wallet == nil {
+		return "", core.NewSignerError(core.CodeSerializationError,
 			"Failed to parse Utila fetch_wallet response")
 	}
-	return wallet, nil
+	if wallet.Wallet.SolanaDetails == nil || wallet.Wallet.SolanaDetails.Address == nil {
+		return "", core.NewSignerError(core.CodeInvalidPublicKey,
+			"Utila wallet response did not include solanaDetails.address")
+	}
+	return *wallet.Wallet.SolanaDetails.Address, nil
 }
 
 // initiateTransaction submits the base64 wire transaction for signing (publish
