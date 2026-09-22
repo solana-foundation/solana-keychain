@@ -1327,3 +1327,17 @@ async fn test_sign_and_send_transaction_success_on_last_polled_response() {
     let signature = signer.sign_and_send_transaction(&tx).await.unwrap();
     assert_eq!(signature, expected_signature);
 }
+
+#[test]
+fn test_derive_signing_key_rejects_a_non_ascii_secret_without_panicking() {
+    let api_key = format!(
+        "sk_staging_{}",
+        bs58::encode(b"project-id:nacl_signature").into_string()
+    );
+    let secret = "\u{20ac}".repeat(21) + "0";
+    assert_eq!(secret.len(), 64);
+
+    let err = CrossmintSigner::derive_signing_key(&secret, &api_key).unwrap_err();
+    assert_eq!(format!("{err}"), "Configuration error");
+    assert_eq!(err.detail_string(), "signer_secret is not valid hex");
+}

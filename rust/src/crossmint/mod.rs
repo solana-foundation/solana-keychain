@@ -490,13 +490,17 @@ impl CrossmintSigner {
                 raw_secret.len()
             )));
         }
-        let ikm = (0..raw_secret.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&raw_secret[i..i + 2], 16))
+        let ikm = raw_secret
+            .as_bytes()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| {
+                let hex = std::str::from_utf8(pair).map_err(|_| ())?;
+                u8::from_str_radix(hex, 16).map_err(|_| ())
+            })
             .collect::<Result<Vec<u8>, _>>()
-            .map_err(|e| {
-                SignerError::ConfigError(format!("signer_secret is not valid hex: {e}"))
-            })?;
+            .map_err(|()| SignerError::ConfigError("signer_secret is not valid hex".to_string()))?;
 
         let info = format!("{project_id}:{environment}:solana-ed25519");
         let hkdf = Hkdf::<Sha256>::new(Some(b"crossmint"), &ikm);
