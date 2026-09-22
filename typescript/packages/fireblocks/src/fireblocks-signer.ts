@@ -147,7 +147,18 @@ class FireblocksSigner<TAddress extends string = string>
 
         this.apiBaseUrl = apiBaseUrl;
         this.pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+        if (this.pollIntervalMs <= 0) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'pollIntervalMs must be greater than 0',
+            });
+        }
+
         this.maxPollAttempts = config.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS;
+        if (this.maxPollAttempts <= 0) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'maxPollAttempts must be greater than 0',
+            });
+        }
         this.requestDelayMs = config.requestDelayMs ?? 0;
 
         validateRequestDelayMs(this.requestDelayMs);

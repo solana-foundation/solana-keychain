@@ -96,6 +96,14 @@ class FireblocksSigner(TransactionSigner):
             pass
         self._vault_account_id = config.vault_account_id
         self._asset_id = config.asset_id
+        if config.poll_interval_ms <= 0:
+            raise SignerError(
+                SignerErrorCode.CONFIG_ERROR, "poll_interval_ms must be greater than 0"
+            )
+        if config.max_poll_attempts <= 0:
+            raise SignerError(
+                SignerErrorCode.CONFIG_ERROR, "max_poll_attempts must be greater than 0"
+            )
         self._poll_interval_ms = config.poll_interval_ms
         self._max_poll_attempts = config.max_poll_attempts
         self._use_program_call = config.use_program_call

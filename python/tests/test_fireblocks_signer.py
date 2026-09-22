@@ -49,7 +49,7 @@ def make_signer(**overrides: Any) -> FireblocksSigner:
         private_key_pem=overrides.pop("private_key_pem", RSA_PRIVATE_PEM),
         vault_account_id=VAULT_ACCOUNT_ID,
         api_base_url=API_BASE_URL,
-        poll_interval_ms=0,
+        poll_interval_ms=overrides.pop("poll_interval_ms", 1),
         **overrides,
     )
     return FireblocksSigner(config)
