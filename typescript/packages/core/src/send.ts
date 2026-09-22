@@ -77,6 +77,7 @@ export async function signAndSendTransaction<TAddress extends string>(
     config?: SignAndSendTransactionConfig,
 ): Promise<SignatureBytes> {
     const abortSignal = config?.abortSignal;
+    abortSignal?.throwIfAborted();
 
     if (isSolanaSendingSigner(signer)) {
         const [signature] = await signer.signAndSendTransactions([transaction], { abortSignal });
@@ -139,6 +140,8 @@ export async function signAndSendTransaction<TAddress extends string>(
             message: 'Broadcast transaction has no fee payer signature to identify it by',
         });
     }
+
+    abortSignal?.throwIfAborted();
 
     let signature: SignatureBytes | void;
     try {

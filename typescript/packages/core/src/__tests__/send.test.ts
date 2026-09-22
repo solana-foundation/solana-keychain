@@ -212,4 +212,32 @@ describe('signAndSendTransaction', () => {
         expect(partialSigner.signTransactions).toHaveBeenCalledWith(expect.anything(), { abortSignal });
         expect(sendTransaction).toHaveBeenCalledWith(expect.anything(), { abortSignal });
     });
+
+    it('rejects an already aborted signal before signing', async () => {
+        const controller = new AbortController();
+        controller.abort();
+        const signer = createPartialSigner();
+        const sendTransaction = vi.fn<SendTransactionFn>(async () => SENT_SIGNATURE);
+
+        await expect(
+            signAndSendTransaction(signer, createTransaction(), { abortSignal: controller.signal, sendTransaction }),
+        ).rejects.toMatchObject({ name: 'AbortError' });
+        expect(signer.signTransactions).not.toHaveBeenCalled();
+        expect(sendTransaction).not.toHaveBeenCalled();
+    });
+
+    it('does not broadcast when the signal aborts during signing', async () => {
+        const controller = new AbortController();
+        const signer = createPartialSigner();
+        signer.signTransactions.mockImplementation(async () => {
+            controller.abort();
+            return [{ [SIGNER_ADDRESS]: SIGNER_SIGNATURE } as SignatureDictionary];
+        });
+        const sendTransaction = vi.fn<SendTransactionFn>(async () => SENT_SIGNATURE);
+
+        await expect(
+            signAndSendTransaction(signer, createTransaction(), { abortSignal: controller.signal, sendTransaction }),
+        ).rejects.toMatchObject({ name: 'AbortError' });
+        expect(sendTransaction).not.toHaveBeenCalled();
+    });
 });
