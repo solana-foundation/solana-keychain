@@ -427,16 +427,33 @@ func (s *NativeAutoSigner) signTransactionNative(ctx context.Context, tx *solana
 
 // finishNativeBroadcast polls a submitted native transaction to completion and
 // extracts and verifies the vault's signature from the returned wire bytes.
+//
+// The broadcast is identified by the fee payer's signature, which the rewrite
+// need not leave to the vault, so it is read from slot 0 rather than from the
+// vault's own slot and verified in its own right.
 func (s *NativeAutoSigner) finishNativeBroadcast(ctx context.Context, txID string) (core.SignedTransaction, error) {
 	result, err := s.core.pollForResult(ctx, txID, true)
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}
-	returned, signature, err := extractAndVerifyRewritten(result, s.core.pubkey)
+	returned, _, err := extractAndVerifyRewritten(result, s.core.pubkey)
 	if err != nil {
 		return core.SignedTransaction{}, err
 	}
-	return core.Classify(returned, "", signature), nil
+	if len(returned.Signatures) == 0 || returned.Signatures[0].IsZero() ||
+		len(returned.Message.AccountKeys) == 0 {
+		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
+			"Fordefi wire transaction carries no fee-payer signature to identify the broadcast by")
+	}
+	returnedMessage, err := core.MessageBytes(returned)
+	if err != nil {
+		return core.SignedTransaction{}, err
+	}
+	if !core.VerifyEd25519(returned.Message.AccountKeys[0], returnedMessage, returned.Signatures[0]) {
+		return core.SignedTransaction{}, core.NewSignerError(core.CodeSigningFailed,
+			"Fordefi fee-payer signature does not verify against the returned message")
+	}
+	return core.Classify(returned, "", returned.Signatures[0]), nil
 }
 
 // NativeManualSigner submits solana_transaction requests with push_mode

@@ -723,6 +723,49 @@ async def test_sign_transaction_native_success() -> None:
 
 
 @respx.mock
+async def test_sign_transaction_native_returns_the_fee_payer_signature() -> None:
+    """A rewrite can hand the fee payer slot to another key, and the broadcast is
+    identified by that slot's signature, not by the vault's."""
+    keypair = Keypair()
+    sponsor = Keypair()
+    signer = make_native_signer(keypair, chain="solana_devnet")
+
+    returned = create_two_signer_transaction(sponsor.pubkey(), keypair.pubkey())
+    message = signed_message_bytes(returned.message)
+    sponsor_signature = sponsor.sign_message(message)
+    vault_signature = keypair.sign_message(message)
+    returned.signatures = [sponsor_signature, vault_signature]
+    raw_transaction = base64.b64encode(bytes(returned)).decode("ascii")
+    mock_sign_flow(status_response("completed", raw_transaction=raw_transaction))
+
+    result = await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
+
+    assert result == sponsor_signature
+    assert result != vault_signature
+
+
+@respx.mock
+async def test_sign_transaction_native_rejects_an_unverifiable_fee_payer_signature() -> None:
+    """The fee payer's signature is the broadcast id, so a returned transaction
+    whose slot 0 does not verify identifies nothing."""
+    keypair = Keypair()
+    sponsor = Keypair()
+    signer = make_native_signer(keypair, chain="solana_devnet")
+
+    returned = create_two_signer_transaction(sponsor.pubkey(), keypair.pubkey())
+    message = signed_message_bytes(returned.message)
+    returned.signatures = [
+        sponsor.sign_message(b"bytes the returned transaction does not carry"),
+        keypair.sign_message(message),
+    ]
+    raw_transaction = base64.b64encode(bytes(returned)).decode("ascii")
+    mock_sign_flow(status_response("completed", raw_transaction=raw_transaction))
+
+    with pytest.raises(SignerError):
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
+
+
+@respx.mock
 async def test_a_completed_native_send_leaves_no_id_in_the_pending_slot() -> None:
     """A stale id would send a caller reconciling a transaction they already hold
     the signature for."""

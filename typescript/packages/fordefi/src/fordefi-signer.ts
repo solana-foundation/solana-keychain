@@ -817,6 +817,14 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
             signature: signerSignature,
             signerAddress: this.address,
         });
+        const [feePayer] = this.compiledMessageOf(decodedTransaction).staticAccounts;
+        if (feePayer && feePayer !== this.address) {
+            await assertSignatureValid({
+                data: decodedTransaction.messageBytes,
+                signature: transactionSignature,
+                signerAddress: feePayer,
+            });
+        }
         config?.abortSignal?.throwIfAborted();
         return transactionSignature;
     }

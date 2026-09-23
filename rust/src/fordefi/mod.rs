@@ -768,11 +768,37 @@ impl FordefiNativeAutoSigner {
         result
     }
 
+    /// The broadcast is identified by the fee payer's signature, which the rewrite
+    /// need not leave to the vault, so it is read from slot 0 rather than from the
+    /// vault's own slot and verified in its own right.
     async fn finish_broadcast(&self, tx_id: &str) -> Result<Signature, SignerError> {
         let result = self.core.poll_for_result(tx_id, true).await?;
         let wire_bytes = FordefiCore::decode_raw_transaction(&result)?;
-        let (_, signature) =
+        let (returned, _) =
             extract_and_verify_rewritten_transaction(&wire_bytes, &self.core.public_key)?;
+        let missing_fee_payer_signature = || {
+            SignerError::SigningFailed(
+                "Fordefi wire transaction carries no fee-payer signature to identify the broadcast by"
+                    .to_string(),
+            )
+        };
+        let signature = returned
+            .signatures
+            .first()
+            .copied()
+            .filter(|signature| *signature != Signature::default())
+            .ok_or_else(missing_fee_payer_signature)?;
+        let fee_payer = returned
+            .message
+            .static_account_keys()
+            .first()
+            .copied()
+            .ok_or_else(missing_fee_payer_signature)?;
+        crate::signature_util::verify_or_reject(
+            &signature,
+            &fee_payer,
+            &returned.message.serialize(),
+        )?;
         Ok(signature)
     }
 

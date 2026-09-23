@@ -588,6 +588,47 @@ describe('createFordefiSigner', () => {
             expect(new Uint8Array(Buffer.from(body.details.data as string, 'base64'))).toStrictEqual(messageBytes);
         });
 
+        // A rewrite can move the fee payer slot off the vault, and that slot's
+        // signature is the broadcast id, so it is verified in its own right.
+        it('verifies the fee payer signature it returns as the broadcast id', async () => {
+            const sponsor = await generateKeyPairSigner();
+            const vault = await generateKeyPairSigner();
+            const rewritten = await partiallySignTransaction(
+                [sponsor.keyPair, vault.keyPair],
+                compileTransaction(
+                    pipe(
+                        createTransactionMessage({ version: 0 }),
+                        tx => setTransactionMessageFeePayer(sponsor.address, tx),
+                        tx =>
+                            setTransactionMessageLifetimeUsingBlockhash(
+                                { blockhash: blockhash(MOCK_ADDRESS), lastValidBlockHeight: 100n },
+                                tx,
+                            ),
+                        tx =>
+                            appendTransactionMessageInstruction(
+                                {
+                                    accounts: [{ address: vault.address, role: AccountRole.READONLY_SIGNER }],
+                                    programAddress: COMPUTE_BUDGET_PROGRAM_ADDRESS,
+                                },
+                                tx,
+                            ),
+                    ),
+                ),
+            );
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-native'))
+                .mockResolvedValueOnce(
+                    mockPollResponse('completed', MOCK_SIGNATURE_BASE64, getBase64EncodedWireTransaction(rewritten)),
+                );
+
+            const signer = await createFordefiSigner({ ...nativeConfig, publicKey: vault.address });
+            await signer.signAndSendTransactions([unsignedManualTransaction(vault.address)]);
+
+            expect(assertSignatureValid).toHaveBeenCalledWith(
+                expect.objectContaining({ signerAddress: sponsor.address }),
+            );
+        });
+
         it('sends a deterministic x-idempotence-id on the native create', async () => {
             const { config, fixture } = await setupNativeBroadcast(1);
             const messageBytes = new Uint8Array(fixture.messageBytes);

@@ -618,6 +618,13 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
             self._pending_transaction_id.clear()
 
     async def _finish_native_broadcast(self, transaction_id: str) -> SignedTransaction:
+        """Poll to completion and verify the vault's signature over the returned
+        message.
+
+        The broadcast is identified by the fee payer's signature, which the
+        rewrite need not leave to the vault, so it is read from slot 0 rather
+        than from the vault's own slot and verified in its own right.
+        """
         result = await self._poll_for_result(transaction_id, pushable=True)
         raw_transaction = result.get("raw_transaction")
         if not isinstance(raw_transaction, str):
@@ -649,7 +656,17 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
         verify_returned_signature(
             signature, self._public_key, signed_message_bytes(returned.message)
         )
-        return classify_signed_transaction(returned, "", signature)
+        account_keys = list(returned.message.account_keys)
+        if signatures[0] == Signature.default() or not account_keys:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi wire transaction carries no fee-payer signature to identify "
+                "the broadcast by",
+            )
+        verify_returned_signature(
+            signatures[0], account_keys[0], signed_message_bytes(returned.message)
+        )
+        return classify_signed_transaction(returned, "", signatures[0])
 
 
 class FordefiNativeManualSigner(_FordefiNativeSignerBase, ModifyingSigner):
