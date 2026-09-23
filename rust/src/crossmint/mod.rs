@@ -678,14 +678,14 @@ impl CrossmintSigner {
             .finish_managed_transaction(create_response)
             .await
             .map_err(|error| SignerError::BroadcastUnconfirmed {
-                provider_tx_id: Some(provider_tx_id),
+                provider_tx_id: Some(provider_tx_id.clone()),
                 provider_status: None,
                 idempotency_key: Some(idempotency_key),
                 transaction_signature: None,
                 detail: error.detail_string(),
             });
         if let Some(pending) = &self.pending_transaction_id {
-            pending.clear();
+            pending.clear(&provider_tx_id);
         }
         result
     }

@@ -603,19 +603,19 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
                 f"not be confirmed (provider transaction id: {transaction_id})"
             ) from error
         except SignerError as error:
-            self._clear_pending_transaction_id()
+            self._clear_pending_transaction_id(transaction_id)
             raise SignerError(
                 SignerErrorCode.BROADCAST_UNCONFIRMED,
                 error._detail,
                 provider_transaction_id=transaction_id,
                 idempotency_key=idempotency_key,
             ) from None
-        self._clear_pending_transaction_id()
+        self._clear_pending_transaction_id(transaction_id)
         return signed
 
-    def _clear_pending_transaction_id(self) -> None:
+    def _clear_pending_transaction_id(self, provider_transaction_id: str) -> None:
         if self._pending_transaction_id is not None:
-            self._pending_transaction_id.clear()
+            self._pending_transaction_id.clear(provider_transaction_id)
 
     async def _finish_native_broadcast(self, transaction_id: str) -> SignedTransaction:
         """Poll to completion and verify the vault's signature over the returned

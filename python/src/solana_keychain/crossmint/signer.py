@@ -458,19 +458,19 @@ class CrossmintSigner(SendingSigner):
                 f"not be confirmed (provider transaction id: {provider_transaction_id})"
             ) from error
         except SignerError as error:
-            self._clear_pending_transaction_id()
+            self._clear_pending_transaction_id(provider_transaction_id)
             raise SignerError(
                 SignerErrorCode.BROADCAST_UNCONFIRMED,
                 error._detail,
                 provider_transaction_id=provider_transaction_id,
                 idempotency_key=idempotency_key,
             ) from None
-        self._clear_pending_transaction_id()
+        self._clear_pending_transaction_id(provider_transaction_id)
         return signature
 
-    def _clear_pending_transaction_id(self) -> None:
+    def _clear_pending_transaction_id(self, provider_transaction_id: str) -> None:
         if self._pending_transaction_id is not None:
-            self._pending_transaction_id.clear()
+            self._pending_transaction_id.clear(provider_transaction_id)
 
     async def _finish_managed_transaction(self, create_response: dict[str, Any]) -> Signature:
         final_response = await self._poll_transaction(create_response)

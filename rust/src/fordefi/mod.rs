@@ -755,7 +755,7 @@ impl FordefiNativeAutoSigner {
         }
         let result = self.finish_broadcast(&tx_id).await.map_err(|error| {
             SignerError::BroadcastUnconfirmed {
-                provider_tx_id: Some(tx_id),
+                provider_tx_id: Some(tx_id.clone()),
                 provider_status: None,
                 idempotency_key: None,
                 transaction_signature: None,
@@ -763,7 +763,7 @@ impl FordefiNativeAutoSigner {
             }
         });
         if let Some(pending) = &self.pending_transaction_id {
-            pending.clear();
+            pending.clear(&tx_id);
         }
         result
     }
