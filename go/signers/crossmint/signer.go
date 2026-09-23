@@ -336,22 +336,19 @@ func broadcastTransactionID(tx *solana.Transaction) (solana.Signature, error) {
 func (s *Signer) extractSignatureFromResponse(response transactionResponse, expectedMessage []byte) (solana.Signature, error) {
 	if response.OnChain != nil {
 		if response.OnChain.Transaction != nil {
-			sig, returned, err := s.extractSignatureFromSerializedTransaction(*response.OnChain.Transaction)
-			switch {
-			case err == nil:
-				returnedMessage, marshalErr := returned.Message.MarshalBinary()
-				if marshalErr != nil {
-					return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError,
-						"failed to serialize Crossmint transaction message", marshalErr)
+			sig, returned, returnedMessage, err := s.extractSignatureFromSerializedTransaction(*response.OnChain.Transaction)
+			if err == nil {
+				if !core.VerifyEd25519(returned.Message.AccountKeys[0], returnedMessage, sig) {
+					return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
+						"Crossmint fee-payer signature does not verify against the returned message")
 				}
 				if bytes.Equal(returnedMessage, expectedMessage) {
 					return sig, nil
 				}
 				return broadcastTransactionID(returned)
-			case true:
-				if response.OnChain.TxID == nil {
-					return solana.Signature{}, err
-				}
+			}
+			if response.OnChain.TxID == nil {
+				return solana.Signature{}, err
 			}
 		}
 
@@ -370,46 +367,42 @@ func (s *Signer) extractSignatureFromResponse(response transactionResponse, expe
 }
 
 // Crossmint sponsors gas, so when it rewrites it becomes the fee payer and the
-// message it signs differs from the caller's. The decoded transaction is returned
-// with the signature so the caller is never handed it over its own message.
-func (s *Signer) extractSignatureFromSerializedTransaction(serializedTransaction string) (solana.Signature, *solana.Transaction, error) {
+// message it signs differs from the caller's. The decoded transaction and its
+// message bytes are returned with the signature so the caller is never handed it
+// over its own message, and can verify it before trusting it.
+func (s *Signer) extractSignatureFromSerializedTransaction(serializedTransaction string) (solana.Signature, *solana.Transaction, []byte, error) {
 	raw, err := base58.Decode(serializedTransaction)
 	if err != nil {
-		return solana.Signature{}, nil, core.WrapSignerError(core.CodeSerializationError,
+		return solana.Signature{}, nil, nil, core.WrapSignerError(core.CodeSerializationError,
 			"failed to decode Crossmint onChain.transaction as base58", err)
 	}
 	tx, err := solana.TransactionFromBytes(raw)
 	if err != nil {
-		return solana.Signature{}, nil, core.WrapSignerError(core.CodeSerializationError,
+		return solana.Signature{}, nil, nil, core.WrapSignerError(core.CodeSerializationError,
 			"failed to deserialize Crossmint onChain.transaction", err)
 	}
 
 	requiredSigners := int(tx.Message.Header.NumRequiredSignatures)
 	signerKeys := tx.Message.AccountKeys
 	if len(signerKeys) < requiredSigners {
-		return solana.Signature{}, nil, core.NewSignerError(core.CodeSigningFailed,
+		return solana.Signature{}, nil, nil, core.NewSignerError(core.CodeSigningFailed,
 			"invalid account index: not enough account keys")
 	}
 
 	if len(signerKeys) == 0 {
-		return solana.Signature{}, nil, core.NewSignerError(core.CodeSigningFailed,
+		return solana.Signature{}, nil, nil, core.NewSignerError(core.CodeSigningFailed,
 			"Crossmint transaction carries no account keys")
 	}
 	if len(tx.Signatures) == 0 || tx.Signatures[0].IsZero() {
-		return solana.Signature{}, nil, core.NewSignerError(core.CodeSigningFailed,
+		return solana.Signature{}, nil, nil, core.NewSignerError(core.CodeSigningFailed,
 			"Crossmint transaction carries no signer signature")
 	}
 
-	returnedMessage, err := tx.Message.MarshalBinary()
+	returnedMessage, err := core.MessageBytes(tx)
 	if err != nil {
-		return solana.Signature{}, nil, core.WrapSignerError(core.CodeSerializationError,
-			"failed to serialize Crossmint returned message", err)
+		return solana.Signature{}, nil, nil, err
 	}
-	if !core.VerifyEd25519(signerKeys[0], returnedMessage, tx.Signatures[0]) {
-		return solana.Signature{}, nil, core.NewSignerError(core.CodeSigningFailed,
-			"Crossmint fee-payer signature does not verify against the returned message")
-	}
-	return tx.Signatures[0], tx, nil
+	return tx.Signatures[0], tx, returnedMessage, nil
 }
 
 // decodeBase58Signature decodes a base58 string into a 64-byte signature.

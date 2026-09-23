@@ -548,10 +548,12 @@ impl CrossmintSigner {
         input
     }
 
-    fn extract_signature_from_serialized_transaction(
+    /// The fee payer's signature out of a serialized `onChain.transaction`,
+    /// with the key and bytes it has to be verified against.
+    fn fee_payer_signature_from_serialized_transaction(
         &self,
         serialized_transaction: &str,
-    ) -> Result<Signature, SignerError> {
+    ) -> Result<(Signature, Pubkey, Vec<u8>), SignerError> {
         let bytes = bs58::decode(serialized_transaction)
             .into_vec()
             .map_err(|e| {
@@ -588,8 +590,7 @@ impl CrossmintSigner {
                     "Crossmint transaction carries no signer signature".to_string(),
                 )
             })?;
-        verify_or_reject(&signature, &fee_payer, &transaction.message.serialize())?;
-        Ok(signature)
+        Ok((signature, fee_payer, transaction.message.serialize()))
     }
 
     /// The signature identifying the transaction Crossmint landed.
@@ -603,8 +604,11 @@ impl CrossmintSigner {
     ) -> Result<Signature, SignerError> {
         if let Some(on_chain) = &response.on_chain {
             if let Some(serialized_transaction) = &on_chain.transaction {
-                match self.extract_signature_from_serialized_transaction(serialized_transaction) {
-                    Ok(signature) => return Ok(signature),
+                match self.fee_payer_signature_from_serialized_transaction(serialized_transaction) {
+                    Ok((signature, fee_payer, message)) => {
+                        verify_or_reject(&signature, &fee_payer, &message)?;
+                        return Ok(signature);
+                    }
                     Err(error) => {
                         if on_chain.tx_id.is_none() {
                             return Err(error);

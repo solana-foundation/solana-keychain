@@ -352,9 +352,11 @@ class CrossmintSigner(SendingSigner):
             json_body={"approvals": [{"signer": self._signer, "signature": str(signature)}]},
         )
 
-    def _extract_signature_from_serialized_transaction(
+    def _fee_payer_signature_from_serialized_transaction(
         self, serialized_transaction: str
-    ) -> Signature:
+    ) -> tuple[Signature, Pubkey, bytes]:
+        """The fee payer's signature out of a serialized ``onChain.transaction``,
+        with the key and bytes it has to be verified against."""
         try:
             transaction_bytes = base58.b58decode(serialized_transaction)
         except ValueError:
@@ -388,8 +390,7 @@ class CrossmintSigner(SendingSigner):
                 SignerErrorCode.SIGNING_FAILED,
                 "Crossmint transaction carries no signer signature",
             )
-        verify_returned_signature(signatures[0], account_keys[0], signed_message_bytes(message))
-        return signatures[0]
+        return signatures[0], account_keys[0], signed_message_bytes(message)
 
     def _extract_signature_from_response(self, response: dict[str, Any]) -> Signature:
         """The signature identifying the transaction Crossmint landed.
@@ -403,12 +404,17 @@ class CrossmintSigner(SendingSigner):
             serialized_transaction = on_chain.get("transaction")
             if isinstance(serialized_transaction, str):
                 try:
-                    return self._extract_signature_from_serialized_transaction(
-                        serialized_transaction
+                    signature, fee_payer, message = (
+                        self._fee_payer_signature_from_serialized_transaction(
+                            serialized_transaction
+                        )
                     )
                 except SignerError:
                     if not isinstance(on_chain.get("txId"), str):
                         raise
+                else:
+                    verify_returned_signature(signature, fee_payer, message)
+                    return signature
 
             tx_id = on_chain.get("txId")
             if isinstance(tx_id, str):

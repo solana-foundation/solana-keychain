@@ -758,6 +758,63 @@ async fn test_sign_and_send_transaction_skips_submitted_approvals_without_an_add
     assert_caller_transaction_untouched(&local_tx);
 }
 
+/// A returned transaction whose fee-payer signature does not verify is a
+/// tampered response, so the unverified txId must not stand in for it.
+#[tokio::test]
+async fn test_sign_and_send_transaction_rejects_an_unverifiable_transaction_carrying_a_tx_id() {
+    let server = MockServer::start().await;
+    let wallet_keypair = Keypair::new();
+    let wallet_pubkey = keypair_pubkey(&wallet_keypair);
+    let sponsor_keypair = Keypair::new();
+    let sponsor_pubkey = keypair_pubkey(&sponsor_keypair);
+
+    Mock::given(method("GET"))
+        .and(path("/2025-06-09/wallets/test-wallet"))
+        .respond_with(wallet_response(&wallet_pubkey.to_string()))
+        .mount(&server)
+        .await;
+
+    let mut executed_tx = create_test_transaction(&sponsor_pubkey);
+    let forged_signature =
+        keypair_sign_message(&sponsor_keypair, b"bytes the response does not carry");
+    TransactionUtil::add_signature_to_transaction(
+        &mut executed_tx,
+        &sponsor_pubkey,
+        forged_signature,
+    )
+    .unwrap();
+
+    Mock::given(method("POST"))
+        .and(path("/2025-06-09/wallets/test-wallet/transactions"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "id": "tx-unverifiable",
+            "status": "success",
+            "onChain": {
+                "transaction": bs58::encode(bincode::serialize(&executed_tx).unwrap())
+                    .into_string(),
+                "txId": bs58::encode(forged_signature.as_ref()).into_string()
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let mut signer = create_test_signer(&server.uri(), 1, 1);
+    signer.init().await.unwrap();
+
+    let local_tx = create_test_transaction(&wallet_pubkey);
+    let result = signer.sign_and_send_transaction(&local_tx).await;
+
+    match result.unwrap_err() {
+        SignerError::BroadcastUnconfirmed { detail, .. } => {
+            assert!(
+                detail.contains("Signature verification failed"),
+                "Unexpected error detail: {detail}"
+            );
+        }
+        other => panic!("Expected BroadcastUnconfirmed error, got: {:?}", other),
+    }
+}
+
 #[tokio::test]
 async fn test_sign_and_send_transaction_rejects_approval_signatures_for_local_transaction_bytes() {
     let server = MockServer::start().await;
