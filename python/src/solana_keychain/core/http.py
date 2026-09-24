@@ -203,6 +203,7 @@ async def _request_json(
             f"{provider_name} API error: {response.status_code}: "
             f"{sanitize_remote_error_response(error_text)}",
             provider_transaction_id=_transaction_id_in_body(body),
+            provider_error_code=_error_code_in_body(body),
             status_code=response.status_code,
         )
     try:
@@ -227,6 +228,22 @@ def _transaction_id_in_body(body: bytes) -> str | None:
         transaction_id = parsed.get("id")
         if isinstance(transaction_id, str) and transaction_id.strip():
             return transaction_id
+    return None
+
+
+def _error_code_in_body(body: bytes) -> int | None:
+    """The provider's own numeric ``code`` in a failed response body, when there is
+    one. Providers reuse a single HTTP status for rejections that mean different
+    things, and that code is what tells them apart.
+    """
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        return None
+    if isinstance(parsed, dict):
+        error_code = parsed.get("code")
+        if isinstance(error_code, int) and not isinstance(error_code, bool):
+            return error_code
     return None
 
 

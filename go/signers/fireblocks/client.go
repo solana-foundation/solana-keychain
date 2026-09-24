@@ -28,6 +28,9 @@ const (
 	statusCancelled    = "CANCELLED"
 	statusRejected     = "REJECTED"
 	statusBlocked      = "BLOCKED"
+
+	duplicateExternalTxIDCode   = 1438
+	duplicateExternalTxIDDetail = "Fireblocks rejected the PROGRAM_CALL create as a duplicate externalTxId, so an earlier create carrying the same message bytes already exists there"
 )
 
 // Wire types for the Fireblocks REST API.
@@ -197,11 +200,18 @@ func (s *Signer) selectVaultAddress(addresses []vaultAddress) (string, error) {
 // create that neither succeeds nor is rejected by a 4xx leaves a request
 // Fireblocks may still act on, so it reports CodeBroadcastUnconfirmed with any
 // transaction id the response carried; a RAW create signs nothing on its own
-// and keeps the plain failure.
+// and keeps the plain failure. A duplicate externalTxId is reported the same
+// way, since it says Fireblocks already holds a create for these bytes.
 func (s *Signer) createTransaction(ctx context.Context, request createTransactionRequest, programCall bool) (createTransactionResponse, error) {
 	ambiguous := func(status int, respBody []byte, err error) error {
 		if !programCall {
 			return err
+		}
+		if isDuplicateExternalTxID(respBody) {
+			unconfirmed := core.NewBroadcastUnconfirmedError("", duplicateExternalTxIDDetail)
+			unconfirmed.IdempotencyKey = request.ExternalTxID
+			unconfirmed.ProviderStatus = status
+			return unconfirmed
 		}
 		return core.UnconfirmedUnlessRejected(status, transactionIDFromBody(respBody), request.ExternalTxID, err)
 	}
@@ -234,6 +244,19 @@ func (s *Signer) createTransaction(ctx context.Context, request createTransactio
 			core.NewSignerError(core.CodeSerializationError, "Fireblocks create response did not include a transaction id"))
 	}
 	return created, nil
+}
+
+// isDuplicateExternalTxID reports whether a failed create was rejected for
+// reusing an externalTxId, which means Fireblocks already holds a create for
+// these message bytes.
+func isDuplicateExternalTxID(body []byte) bool {
+	var parsed struct {
+		Code int `json:"code"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return false
+	}
+	return parsed.Code == duplicateExternalTxIDCode
 }
 
 func transactionIDFromBody(body []byte) string {

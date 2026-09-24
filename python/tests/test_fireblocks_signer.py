@@ -312,6 +312,48 @@ async def test_program_call_create_4xx_stays_a_rejection() -> None:
 
 
 @respx.mock
+async def test_program_call_duplicate_external_tx_id_is_unconfirmed() -> None:
+    """A duplicate externalTxId means Fireblocks already holds a create for these
+    message bytes, so reporting it as a clean rejection invites a resend."""
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True)
+    transaction = create_test_transaction(keypair.pubkey())
+    message = signed_message_bytes(transaction.message)
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(
+            400,
+            json={
+                "message": "The external tx id that was provided in the request, already exists",
+                "code": 1438,
+            },
+        )
+    )
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+
+    namespace = f"fireblocks:solana:program_call:SOL:{VAULT_ACCOUNT_ID}:".encode()
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.idempotency_key == idempotency_key_from_message(namespace + message)
+
+
+@respx.mock
+async def test_program_call_other_4xx_code_stays_a_rejection() -> None:
+    keypair = Keypair()
+    signer = await initialized_signer(keypair, use_program_call=True)
+    transaction = create_test_transaction(keypair.pubkey())
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(400, json={"message": "Invalid asset", "code": 1026})
+    )
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_transaction(transaction)
+
+    assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
+
+
+@respx.mock
 async def test_program_call_accepted_create_without_an_id_is_unconfirmed() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair, use_program_call=True)

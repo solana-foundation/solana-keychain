@@ -141,6 +141,23 @@ function transactionIdInBody(body: string): string | undefined {
 }
 
 /**
+ * The provider's own numeric `code` in a failed response body, when there is
+ * one. Providers reuse a single HTTP status for rejections that mean different
+ * things, and that code is what tells them apart.
+ */
+function errorCodeInBody(body: string): number | undefined {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(body);
+    } catch {
+        return undefined;
+    }
+    if (typeof parsed !== 'object' || parsed === null) return undefined;
+    const errorCode = (parsed as { code?: unknown }).code;
+    return typeof errorCode === 'number' ? errorCode : undefined;
+}
+
+/**
  * Perform a remote signer API request and parse the JSON response, mapping
  * failures to the standard signer error pipeline:
  * - network failure or timeout → `HTTP_ERROR`
@@ -194,8 +211,10 @@ export async function fetchSignerJson<TResponse>(options: FetchSignerJsonOptions
             errorText = 'Failed to read error response';
         }
         const providerTransactionId = transactionIdInBody(errorText);
+        const providerErrorCode = errorCodeInBody(errorText);
         throwProviderResponseError(SignerErrorCode.REMOTE_API_ERROR, {
             message: `${providerName} API error: ${response.status}`,
+            ...(providerErrorCode === undefined ? {} : { providerErrorCode }),
             ...(providerTransactionId === undefined ? {} : { providerTransactionId }),
             response: sanitizeRemoteErrorResponse(errorText),
             status: response.status,

@@ -74,6 +74,17 @@ const DEFAULT_API_BASE_URL = 'https://api.fireblocks.io';
 const DEFAULT_ASSET_ID = 'SOL';
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 60;
+const DUPLICATE_EXTERNAL_TX_ID_CODE = 1438;
+const DUPLICATE_EXTERNAL_TX_ID_MESSAGE =
+    'Fireblocks rejected the PROGRAM_CALL create as a duplicate externalTxId, so an earlier create carrying the same message bytes already exists there';
+
+/**
+ * Whether a failed create was rejected for reusing an `externalTxId`, which
+ * means Fireblocks already holds a create for these message bytes.
+ */
+function isDuplicateExternalTxId(error: unknown): boolean {
+    return error instanceof SignerError && error.context?.providerErrorCode === DUPLICATE_EXTERNAL_TX_ID_CODE;
+}
 
 /**
  * Fireblocks-based signer for Solana transactions
@@ -357,6 +368,15 @@ class FireblocksSigner<TAddress extends string = string>
         try {
             createResponse = await this.send<CreateTransactionResponse>(prepared, abortSignal);
         } catch (error) {
+            if (isDuplicateExternalTxId(error)) {
+                const status = providerStatus(error);
+                return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
+                    cause: error,
+                    idempotencyKey: externalTxId,
+                    message: DUPLICATE_EXTERNAL_TX_ID_MESSAGE,
+                    ...(status === undefined ? {} : { status }),
+                });
+            }
             if (!providerMayHaveAccepted(error)) {
                 throw error;
             }

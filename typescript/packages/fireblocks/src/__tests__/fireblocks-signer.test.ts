@@ -870,6 +870,44 @@ describe('createFireblocksSigner', () => {
             });
         });
 
+        it('reports a duplicate externalTxId create as BROADCAST_UNCONFIRMED', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: false,
+                status: 400,
+                text: async () =>
+                    JSON.stringify({
+                        code: 1438,
+                        message: 'The external tx id that was provided in the request, already exists',
+                    }),
+            });
+
+            const error = await signer.signTransactions([transaction]).then(
+                () => {
+                    throw new Error('expected the duplicate create to reject');
+                },
+                (thrown: SignerError) => thrown,
+            );
+
+            const createBody = JSON.parse(mockFetch.mock.calls[1]![1].body as string);
+            expect(error.code).toBe(SignerErrorCode.BROADCAST_UNCONFIRMED);
+            expect(error.context?.status).toBe(400);
+            expect(error.context?.idempotencyKey).toBe(createBody.externalTxId);
+        });
+
+        it('keeps a 4xx create carrying another provider code a plain rejection', async () => {
+            const { signer, transaction } = await createProgramCallSigner();
+            mockFetch.mockResolvedValueOnce({
+                ok: false,
+                status: 400,
+                text: async () => JSON.stringify({ code: 1026, message: 'Invalid asset' }),
+            });
+
+            await expect(signer.signTransactions([transaction])).rejects.toMatchObject({
+                code: 'SIGNER_REMOTE_API_ERROR',
+            });
+        });
+
         it('reports an accepted create with no transaction id as BROADCAST_UNCONFIRMED', async () => {
             const { signer, transaction } = await createProgramCallSigner();
             mockFetch.mockResolvedValueOnce({
