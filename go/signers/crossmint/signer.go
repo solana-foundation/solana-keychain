@@ -152,7 +152,7 @@ func (s *Signer) SignAndSendTransaction(ctx context.Context, tx *solana.Transact
 		return solana.Signature{}, core.NewNotInitializedError("crossmint")
 	}
 
-	expectedMessage, err := tx.Message.MarshalBinary()
+	messageBytes, err := tx.Message.MarshalBinary()
 	if err != nil {
 		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction message", err)
 	}
@@ -161,14 +161,14 @@ func (s *Signer) SignAndSendTransaction(ctx context.Context, tx *solana.Transact
 		return solana.Signature{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize transaction", err)
 	}
 
-	idempotencyKey := core.IdempotencyKeyFromMessage(s.namespacedKeyInput(expectedMessage))
+	idempotencyKey := core.IdempotencyKeyFromMessage(s.namespacedKeyInput(messageBytes))
 	createResponse, err := s.createTransaction(ctx, base58.Encode(serialized), idempotencyKey)
 	if err != nil {
 		return solana.Signature{}, err
 	}
 	// Post-create failures leave an outcome Crossmint may still execute, so
 	// they surface as CodeBroadcastUnconfirmed with the transaction id.
-	sig, err := s.finishManagedTransaction(ctx, createResponse, expectedMessage)
+	sig, err := s.finishManagedTransaction(ctx, createResponse)
 	if err != nil {
 		detail := err.Error()
 		var se *core.SignerError
@@ -189,12 +189,12 @@ func (s *Signer) namespacedKeyInput(messageBytes []byte) []byte {
 
 // finishManagedTransaction polls a created transaction to a terminal status and
 // extracts the signature identifying it.
-func (s *Signer) finishManagedTransaction(ctx context.Context, createResponse transactionResponse, expectedMessage []byte) (solana.Signature, error) {
+func (s *Signer) finishManagedTransaction(ctx context.Context, createResponse transactionResponse) (solana.Signature, error) {
 	finalResponse, err := s.pollTransaction(ctx, createResponse)
 	if err != nil {
 		return solana.Signature{}, err
 	}
-	return s.extractSignatureFromResponse(finalResponse, expectedMessage)
+	return s.extractSignatureFromResponse(finalResponse)
 }
 
 // IsAvailable reports whether the Crossmint wallet can be fetched within the
@@ -311,29 +311,11 @@ func (s *Signer) handleAwaitingApproval(ctx context.Context, response transactio
 	})
 }
 
-// broadcastTransactionID returns the landed transaction's fee-payer (slot 0)
-// signature, the value RPC transaction lookups accept.
-func broadcastTransactionID(tx *solana.Transaction) (solana.Signature, error) {
-	if len(tx.Message.AccountKeys) == 0 {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"Crossmint transaction has no fee payer to identify it by")
-	}
-	if len(tx.Signatures) == 0 || tx.Signatures[0].IsZero() {
-		return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
-			"Crossmint transaction carries no fee-payer signature to identify it by")
-	}
-	return tx.Signatures[0], nil
-}
-
 // extractSignatureFromResponse pulls the signature identifying the transaction
 // Crossmint landed out of a terminal transaction response: the serialized
 // onChain.transaction is tried first, with onChain.txId as a fallback when
 // Crossmint does not return a decodable transaction.
-//
-// When Crossmint landed different bytes than the caller's, the signature is the
-// landed transaction's fee-payer identifier rather than a signature over the
-// caller's message.
-func (s *Signer) extractSignatureFromResponse(response transactionResponse, expectedMessage []byte) (solana.Signature, error) {
+func (s *Signer) extractSignatureFromResponse(response transactionResponse) (solana.Signature, error) {
 	if response.OnChain != nil {
 		if response.OnChain.Transaction != nil {
 			sig, returned, returnedMessage, err := s.extractSignatureFromSerializedTransaction(*response.OnChain.Transaction)
@@ -342,10 +324,7 @@ func (s *Signer) extractSignatureFromResponse(response transactionResponse, expe
 					return solana.Signature{}, core.NewSignerError(core.CodeSigningFailed,
 						"Crossmint fee-payer signature does not verify against the returned message")
 				}
-				if bytes.Equal(returnedMessage, expectedMessage) {
-					return sig, nil
-				}
-				return broadcastTransactionID(returned)
+				return sig, nil
 			}
 			if response.OnChain.TxID == nil {
 				return solana.Signature{}, err
