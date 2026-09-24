@@ -149,20 +149,14 @@ class UtilaSigner<TAddress extends string = string> implements SolanaTransaction
 
         const vaultId = trimResourcePrefix(config.vaultId, 'vaults/');
         const walletId = trimWalletId(config.walletId, vaultId);
-        const designatedSigners = config.designatedSigners ?? [`users/${config.serviceAccountEmail}`];
-        const wallet = await fetchWallet({
+        const designatedSigners = [...(config.designatedSigners ?? [`users/${config.serviceAccountEmail}`])];
+        const address = await fetchWalletAddress({
             apiBaseUrl,
             privateKey,
             serviceAccountEmail: config.serviceAccountEmail,
             vaultId,
             walletId,
         });
-        const address = wallet?.wallet?.solanaDetails?.address;
-        if (!address) {
-            throwSignerError(SignerErrorCode.INVALID_PUBLIC_KEY, {
-                message: 'Utila wallet response missing solanaDetails.address',
-            });
-        }
 
         try {
             assertIsAddress(address);
@@ -228,14 +222,14 @@ class UtilaSigner<TAddress extends string = string> implements SolanaTransaction
 
     async isAvailable(): Promise<boolean> {
         try {
-            await fetchWallet({
+            const address = await fetchWalletAddress({
                 apiBaseUrl: this.apiBaseUrl,
                 privateKey: this.serviceAccountPrivateKey,
                 serviceAccountEmail: this.serviceAccountEmail,
                 vaultId: this.vaultId,
                 walletId: this.walletId,
             });
-            return true;
+            return address === this.address;
         } catch {
             return false;
         }
@@ -391,7 +385,7 @@ class UtilaSigner<TAddress extends string = string> implements SolanaTransaction
     }
 }
 
-async function fetchWallet({
+async function fetchWalletAddress({
     apiBaseUrl,
     privateKey,
     serviceAccountEmail,
@@ -403,11 +397,11 @@ async function fetchWallet({
     serviceAccountEmail: string;
     vaultId: string;
     walletId: string;
-}): Promise<UtilaWalletResponse> {
+}): Promise<string> {
     const url = `${apiBaseUrl}/v2/vaults/${encodeURIComponent(vaultId)}/wallets/${encodeURIComponent(walletId)}`;
     const token = await createUtilaAccessToken(serviceAccountEmail, privateKey);
 
-    return await fetchSignerJson<UtilaWalletResponse>({
+    const wallet = await fetchSignerJson<UtilaWalletResponse>({
         init: {
             headers: {
                 Authorization: `Bearer ${token}`,
@@ -417,6 +411,13 @@ async function fetchWallet({
         providerName: 'Utila',
         url,
     });
+    const address = wallet?.wallet?.solanaDetails?.address;
+    if (!address) {
+        throwSignerError(SignerErrorCode.INVALID_PUBLIC_KEY, {
+            message: 'Utila wallet response missing solanaDetails.address',
+        });
+    }
+    return address;
 }
 
 function parseTransactionEnvelope(payload: UtilaTransactionEnvelope, context: string): UtilaTransaction {

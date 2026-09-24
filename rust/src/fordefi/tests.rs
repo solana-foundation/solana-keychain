@@ -632,13 +632,55 @@ async fn test_fordefi_is_available_success() {
     Mock::given(method("GET"))
         .and(path_regex("/api/v1/vaults/.*"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": "test-vault-id"
+            "id": "test-vault-id",
+            "address": pubkey.to_string()
         })))
         .expect(1)
         .mount(&mock_server)
         .await;
 
     assert!(signer.is_available().await);
+}
+
+#[tokio::test]
+async fn test_fordefi_is_available_success_for_black_box_vault() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let pubkey = keypair_pubkey(&keypair);
+    let signer = create_test_signer(&mock_server.uri(), pubkey);
+
+    Mock::given(method("GET"))
+        .and(path_regex("/api/v1/vaults/.*"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "test-vault-id",
+            "type": "black_box",
+            "public_key_compressed": STANDARD.encode(pubkey.to_bytes())
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    assert!(signer.is_available().await);
+}
+
+#[tokio::test]
+async fn test_fordefi_is_not_available_when_vault_holds_another_key() {
+    let mock_server = MockServer::start().await;
+    let pubkey = keypair_pubkey(&create_test_keypair());
+    let other = keypair_pubkey(&create_test_keypair());
+    let signer = create_test_signer(&mock_server.uri(), pubkey);
+
+    Mock::given(method("GET"))
+        .and(path_regex("/api/v1/vaults/.*"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "test-vault-id",
+            "address": other.to_string()
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    assert!(!signer.is_available().await);
 }
 
 #[tokio::test]
@@ -649,9 +691,9 @@ async fn test_fordefi_is_available_checks_request_signer() {
 
     Mock::given(method("GET"))
         .and(path_regex("/api/v1/vaults/.*"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": "test-vault-id" })),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({ "id": "test-vault-id", "address": public_key.to_string() }),
+        ))
         .expect(1)
         .mount(&mock_server)
         .await;
@@ -828,6 +870,95 @@ async fn test_fordefi_native_sign_transaction_success() {
         tx.signatures.iter().all(|s| *s == Signature::default()),
         "the caller's transaction must be left untouched by provider-chosen bytes"
     );
+}
+
+/// A rewrite can hand the fee payer slot to another key, and the broadcast is
+/// identified by that slot's signature, not by the vault's.
+#[tokio::test]
+async fn test_fordefi_native_returns_the_fee_payer_signature() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let pubkey = keypair_pubkey(&keypair);
+    let sponsor = create_test_keypair();
+    let signer = create_native_test_signer(&mock_server.uri(), pubkey);
+
+    let tx = create_test_transaction(&pubkey);
+
+    let mut returned_tx = create_test_transaction(&keypair_pubkey(&sponsor));
+    add_required_signer(&mut returned_tx, pubkey);
+    let returned_message = returned_tx.message.serialize();
+    let sponsor_signature = sponsor.sign_message(&returned_message);
+    let vault_signature = keypair.sign_message(&returned_message);
+    returned_tx.signatures = vec![sponsor_signature, vault_signature];
+    let wire_b64 =
+        STANDARD.encode(crate::transaction_util::serialize_wire_transaction(&returned_tx).unwrap());
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "native-tx-1"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/transactions/native-tx-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "state": "completed",
+            "raw_transaction": wire_b64
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let sig = signer.sign_and_send_transaction(&tx).await.unwrap();
+    assert_eq!(sig, sponsor_signature);
+    assert_ne!(sig, vault_signature);
+}
+
+/// The fee payer's signature is the broadcast id, so a returned transaction
+/// whose slot 0 does not verify identifies nothing.
+#[tokio::test]
+async fn test_fordefi_native_rejects_an_unverifiable_fee_payer_signature() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let pubkey = keypair_pubkey(&keypair);
+    let sponsor = create_test_keypair();
+    let signer = create_native_test_signer(&mock_server.uri(), pubkey);
+
+    let tx = create_test_transaction(&pubkey);
+
+    let mut returned_tx = create_test_transaction(&keypair_pubkey(&sponsor));
+    add_required_signer(&mut returned_tx, pubkey);
+    let returned_message = returned_tx.message.serialize();
+    returned_tx.signatures = vec![
+        sponsor.sign_message(b"bytes the returned transaction does not carry"),
+        keypair.sign_message(&returned_message),
+    ];
+    let wire_b64 =
+        STANDARD.encode(crate::transaction_util::serialize_wire_transaction(&returned_tx).unwrap());
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "native-tx-1"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/transactions/native-tx-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "state": "completed",
+            "raw_transaction": wire_b64
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    assert!(signer.sign_and_send_transaction(&tx).await.is_err());
 }
 
 #[tokio::test]

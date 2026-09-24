@@ -35,6 +35,7 @@ import { TEST_EMAIL, TEST_RSA_PRIVATE_KEY } from './setup.js';
 global.fetch = vi.fn();
 
 const MOCK_ADDRESS = '11111111111111111111111111111111';
+const OTHER_ADDRESS = 'SysvarC1ock11111111111111111111111111111111';
 const MOCK_MESSAGE_BYTES = new Uint8Array([1, 2, 3]);
 const MOCK_SIGNATURE_BYTES = new Uint8Array(64).fill(7);
 const MOCK_RAW_TRANSACTION = 'AQIDBA==';
@@ -484,6 +485,17 @@ describe('UtilaSigner', () => {
             await expect(signer.isAvailable()).resolves.toBe(true);
 
             vi.mocked(fetch).mockRejectedValueOnce(new Error('network'));
+            await expect(signer.isAvailable()).resolves.toBe(false);
+        });
+
+        it('returns false when the wallet no longer resolves to the initialized address', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
+            const signer = await createUtilaSigner(mockConfig);
+
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse({ solanaDetails: undefined }));
+            await expect(signer.isAvailable()).resolves.toBe(false);
+
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse({ solanaDetails: { address: OTHER_ADDRESS } }));
             await expect(signer.isAvailable()).resolves.toBe(false);
         });
     });

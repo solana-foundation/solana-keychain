@@ -93,7 +93,12 @@ func (s *Signer) createTransaction(ctx context.Context, transaction, idempotency
 		Transaction: transaction,
 		Signer:      s.signerLocator,
 	}}
-	status, body, err := s.doRequest(ctx, http.MethodPost, u, req, idempotencyKey)
+	httpReq, err := s.newRequest(ctx, http.MethodPost, u, req, idempotencyKey)
+	if err != nil {
+		return transactionResponse{}, err
+	}
+
+	status, body, err := s.send(httpReq)
 	if err != nil {
 		return transactionResponse{}, core.UnconfirmedUnlessRejected(status, "", idempotencyKey, err)
 	}
@@ -156,23 +161,22 @@ func (s *Signer) buildWalletsAPIURL(segments ...string) (string, error) {
 	return b.String(), nil
 }
 
-// doRequest issues an authenticated request and returns the status code and
-// (size-capped) body. Transport failures map to CodeHTTPError, except that a
-// *core.SignerError raised inside the client (e.g. the HTTPS-only transport's
-// CodeConfigError) is surfaced as-is.
-func (s *Signer) doRequest(ctx context.Context, method, u string, body any, idempotencyKey string) (int, []byte, error) {
+// newRequest builds an authenticated request. It is kept separate from send so
+// a caller classifying an ambiguous create covers only the hop that could reach
+// Crossmint.
+func (s *Signer) newRequest(ctx context.Context, method, u string, body any, idempotencyKey string) (*http.Request, error) {
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return 0, nil, core.WrapSignerError(core.CodeSerializationError, "failed to encode request body", err)
+			return nil, core.WrapSignerError(core.CodeSerializationError, "failed to encode request body", err)
 		}
 		reader = bytes.NewReader(encoded)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, u, reader)
 	if err != nil {
-		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "failed to build request", err)
+		return nil, core.WrapSignerError(core.CodeHTTPError, "failed to build request", err)
 	}
 	req.Header.Set("X-API-KEY", s.apiKey)
 	if body != nil {
@@ -181,8 +185,23 @@ func (s *Signer) doRequest(ctx context.Context, method, u string, body any, idem
 	if idempotencyKey != "" {
 		req.Header.Set("x-idempotency-key", idempotencyKey)
 	}
+	return req, nil
+}
 
+func (s *Signer) send(req *http.Request) (int, []byte, error) {
 	return core.SendRequest(s.client, req, "crossmint")
+}
+
+// doRequest issues an authenticated request and returns the status code and
+// (size-capped) body. Transport failures map to CodeHTTPError, except that a
+// *core.SignerError raised inside the client (e.g. the HTTPS-only transport's
+// CodeConfigError) is surfaced as-is.
+func (s *Signer) doRequest(ctx context.Context, method, u string, body any, idempotencyKey string) (int, []byte, error) {
+	req, err := s.newRequest(ctx, method, u, body, idempotencyKey)
+	if err != nil {
+		return 0, nil, err
+	}
+	return s.send(req)
 }
 
 func hasUsableField(value map[string]json.RawMessage, requiredField string) bool {

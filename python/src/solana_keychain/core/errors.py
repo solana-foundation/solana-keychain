@@ -48,6 +48,7 @@ _GENERIC_MESSAGES: dict[SignerErrorCode, str] = {
 
 class _SignerErrorPickleState(TypedDict):
     provider_transaction_id: str | None
+    provider_error_code: int | None
     status_code: int | None
     idempotency_key: str | None
     transaction_signature: Signature | None
@@ -61,7 +62,9 @@ class SignerError(Exception):
     raw remote-API responses cannot leak through formatted output or logs.
 
     ``status_code`` is the remote HTTP status when the failure came from a response,
-    and ``None`` otherwise.
+    and ``None`` otherwise. ``provider_error_code`` is the provider's own numeric error
+    code when the failed body named one, which is what distinguishes rejections a
+    status alone cannot tell apart.
 
     ``idempotency_key`` is the key an ambiguous create was submitted under, when the
     backend sends one. With no ``provider_transaction_id`` to check, resending the
@@ -77,6 +80,7 @@ class SignerError(Exception):
         detail: str = "",
         *,
         provider_transaction_id: str | None = None,
+        provider_error_code: int | None = None,
         status_code: int | None = None,
         idempotency_key: str | None = None,
         transaction_signature: Signature | None = None,
@@ -88,6 +92,7 @@ class SignerError(Exception):
         self.code = code
         self._detail = detail
         self.provider_transaction_id = provider_transaction_id
+        self.provider_error_code = provider_error_code
         self.status_code = status_code
         self.idempotency_key = idempotency_key
         self.transaction_signature = transaction_signature
@@ -100,6 +105,7 @@ class SignerError(Exception):
     ) -> tuple[type["SignerError"], tuple[SignerErrorCode], _SignerErrorPickleState]:
         state = _SignerErrorPickleState(
             provider_transaction_id=self.provider_transaction_id,
+            provider_error_code=self.provider_error_code,
             status_code=self.status_code,
             idempotency_key=self.idempotency_key,
             transaction_signature=self.transaction_signature,
@@ -110,6 +116,7 @@ class SignerError(Exception):
         if state is None:
             return
         self.provider_transaction_id = cast(str | None, state["provider_transaction_id"])
+        self.provider_error_code = cast(int | None, state.get("provider_error_code"))
         self.status_code = cast(int | None, state["status_code"])
         self.idempotency_key = cast(str | None, state["idempotency_key"])
         self.transaction_signature = cast(Signature | None, state["transaction_signature"])

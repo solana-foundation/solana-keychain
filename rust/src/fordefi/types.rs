@@ -165,12 +165,17 @@ pub struct TransactionStatusResponse {
     pub raw_transaction: Option<String>,
 }
 
-/// Response from GET /api/v1/vaults/{id}. Only used as a readiness probe
-/// (`is_available`); no key material is read from it.
+/// Response from GET /api/v1/vaults/{id}. Used as a readiness probe
+/// (`is_available`) and to confirm the configured Solana public key really
+/// belongs to the vault.
 #[derive(Deserialize)]
 pub struct VaultResponse {
     #[allow(dead_code)]
     pub id: String,
+    /// Base58 Solana address, present on chain-specific vaults.
+    pub address: Option<String>,
+    /// Base64-encoded raw public key, present on black box vaults.
+    pub public_key_compressed: Option<String>,
 }
 
 #[cfg(test)]

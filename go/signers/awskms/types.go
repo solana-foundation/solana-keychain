@@ -21,6 +21,9 @@ type API interface {
 	Sign(ctx context.Context, params *kms.SignInput, optFns ...func(*kms.Options)) (*kms.SignOutput, error)
 	// DescribeKey performs the KMS DescribeKey operation (used as a health check).
 	DescribeKey(ctx context.Context, params *kms.DescribeKeyInput, optFns ...func(*kms.Options)) (*kms.DescribeKeyOutput, error)
+	// GetPublicKey performs the KMS GetPublicKey operation, used to confirm the
+	// configured public key is the one KMS holds for the key.
+	GetPublicKey(ctx context.Context, params *kms.GetPublicKeyInput, optFns ...func(*kms.Options)) (*kms.GetPublicKeyOutput, error)
 }
 
 // Config configures an AWS KMS signer.

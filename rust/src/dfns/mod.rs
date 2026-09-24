@@ -7,7 +7,7 @@ use crate::transaction_util::{serialize_wire_transaction, TransactionUtil};
 use crate::{
     error::SignerError,
     http_client_config::HttpClientConfig,
-    remote_util::{encode_uri_component, parse_json_response},
+    remote_util::{encode_uri_component, normalize_base_url, parse_json_response},
     signature_util::{signature_from_bytes, verify_or_reject},
     traits::SolanaSigner,
 };
@@ -77,9 +77,12 @@ impl DfnsSigner {
             wallet_id: config.wallet_id,
             key_id: String::new(),
             public_key: None,
-            api_base_url: config
-                .api_base_url
-                .unwrap_or_else(|| "https://api.dfns.io".to_string()),
+            api_base_url: normalize_base_url(
+                config
+                    .api_base_url
+                    .as_deref()
+                    .unwrap_or("https://api.dfns.io"),
+            ),
             client,
         })
     }

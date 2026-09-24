@@ -1,7 +1,8 @@
+import { ed25519 } from '@noble/curves/ed25519.js';
 import { Address, assertIsAddress, getAddressEncoder } from '@solana/addresses';
 import { ReadonlyUint8Array } from '@solana/codecs-core';
 import { getBase64Encoder } from '@solana/codecs-strings';
-import { SignatureBytes, verifySignature } from '@solana/keys';
+import { SignatureBytes } from '@solana/keys';
 import {
     isMessagePartialSigner,
     isTransactionModifyingSigner,
@@ -20,9 +21,13 @@ import {
     SolanaTransactionSigner,
 } from './types.js';
 
-/** Copies caller-supplied bytes into a fresh, zero-offset `Uint8Array`. */
+/**
+ * Copies caller-supplied bytes into a fresh, zero-offset `Uint8Array`.
+ */
 export function normalizeMessageBytes(bytes: ArrayLike<number>): Uint8Array {
-    return bytes instanceof Uint8Array ? bytes.slice() : new Uint8Array(Array.from(bytes));
+    const copy = new Uint8Array(bytes.length);
+    copy.set(bytes);
+    return copy;
 }
 
 /**
@@ -53,27 +58,19 @@ interface AssertSignatureValidOptions {
  * @param data - The original data that was signed
  * @throws {SignerError} If the signature verification fails
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- verification is synchronous now, but the exported signature stays promise-returning
 export async function assertSignatureValid({
     data,
     signature,
     signerAddress,
 }: AssertSignatureValidOptions): Promise<void> {
     const addressBytes = getAddressEncoder().encode(signerAddress);
-
-    let publicKey: CryptoKey;
-    try {
-        publicKey = await crypto.subtle.importKey('raw', addressBytes, { name: 'Ed25519' }, false, ['verify']);
-    } catch (error) {
-        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-            address: signerAddress,
-            cause: error,
-            message: `Failed to import public key for signature verification: ${error instanceof Error ? error.message : String(error)}`,
-        });
-    }
+    const message = normalizeMessageBytes(data);
 
     let valid: boolean;
     try {
-        valid = await verifySignature(publicKey, signature, data);
+        // ZIP-215 by default, matching the runtime; WebCrypto is stricter.
+        valid = ed25519.verify(signature, message, addressBytes as Uint8Array);
     } catch (error) {
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
             address: signerAddress,
@@ -110,7 +107,7 @@ export function extractSignatureFromTransactionBytes({
     transactionBytes,
 }: ExtractSignatureFromTransactionBytesOptions): SignatureDictionary {
     assertIsAddress(signerAddress);
-    const { signatures } = getTransactionDecoder().decode(transactionBytes);
+    const { signatures } = getTransactionDecoder().decode(normalizeMessageBytes(transactionBytes));
 
     const signature = signatures[signerAddress];
     if (!signature) {

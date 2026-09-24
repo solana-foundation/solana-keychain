@@ -30,6 +30,8 @@ type fakeKMS struct {
 	signErr error
 	descOut *kms.DescribeKeyOutput
 	descErr error
+	pubOut  *kms.GetPublicKeyOutput
+	pubErr  error
 
 	lastSignInput *kms.SignInput
 }
@@ -47,6 +49,20 @@ func (f *fakeKMS) DescribeKey(_ context.Context, _ *kms.DescribeKeyInput, _ ...f
 		return nil, f.descErr
 	}
 	return f.descOut, nil
+}
+
+func (f *fakeKMS) GetPublicKey(_ context.Context, _ *kms.GetPublicKeyInput, _ ...func(*kms.Options)) (*kms.GetPublicKeyOutput, error) {
+	if f.pubErr != nil {
+		return nil, f.pubErr
+	}
+	return f.pubOut, nil
+}
+
+// spkiDER wraps key in a DER SubjectPublicKeyInfo, the shape KMS returns from
+// GetPublicKey.
+func spkiDER(key solana.PublicKey) []byte {
+	der := []byte{0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00}
+	return append(der, key[:]...)
 }
 
 // setDefaultChainEnv pins the AWS default configuration chain to deterministic,
@@ -353,11 +369,26 @@ func TestIsAvailable(t *testing.T) {
 			Enabled:  enabled,
 		}}
 	}
+	configuredKey := &kms.GetPublicKeyOutput{PublicKey: spkiDER(testutils.TestPublicKey())}
 	cases := map[string]struct {
 		fake *fakeKMS
 		want bool
 	}{
-		"success":        {&fakeKMS{descOut: metadata(requiredKeySpec, requiredKeyUsage, true)}, true},
+		"success": {
+			&fakeKMS{descOut: metadata(requiredKeySpec, requiredKeyUsage, true), pubOut: configuredKey}, true,
+		},
+		"kms holds another key": {
+			&fakeKMS{
+				descOut: metadata(requiredKeySpec, requiredKeyUsage, true),
+				pubOut:  &kms.GetPublicKeyOutput{PublicKey: spkiDER(solana.PublicKey{1})},
+			}, false,
+		},
+		"get public key error": {
+			&fakeKMS{
+				descOut: metadata(requiredKeySpec, requiredKeyUsage, true),
+				pubErr:  core.NewSignerError(core.CodeRemoteAPIError, "boom"),
+			}, false,
+		},
 		"wrong key spec": {&fakeKMS{descOut: metadata(kmstypes.KeySpecRsa2048, requiredKeyUsage, true)}, false},
 		"wrong key usage": {
 			&fakeKMS{descOut: metadata(requiredKeySpec, kmstypes.KeyUsageTypeEncryptDecrypt, true)}, false,

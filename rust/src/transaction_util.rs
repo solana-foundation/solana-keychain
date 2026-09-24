@@ -3,10 +3,11 @@ use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction};
 use base64::{engine::general_purpose::STANDARD, Engine};
 
-/// Holds a provider transaction id when cancellation prevents returning it.
+/// Holds the provider transaction ids cancellation prevents returning, one per
+/// in-flight call.
 #[cfg(any(feature = "crossmint", feature = "fordefi"))]
 #[derive(Clone, Debug, Default)]
-pub struct PendingTransactionId(std::sync::Arc<std::sync::Mutex<Option<String>>>);
+pub struct PendingTransactionId(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
 
 #[cfg(any(feature = "crossmint", feature = "fordefi"))]
 impl PendingTransactionId {
@@ -14,20 +15,30 @@ impl PendingTransactionId {
         Self::default()
     }
 
-    /// The provider transaction id left behind by a cancelled call, if any.
+    /// The most recent id left behind by a cancelled call.
     pub fn get(&self) -> Option<String> {
-        self.0.lock().ok().and_then(|slot| slot.clone())
+        self.ids().pop()
+    }
+
+    /// Every id still in flight, oldest first.
+    pub fn ids(&self) -> Vec<String> {
+        self.0
+            .lock()
+            .map(|slot| slot.clone())
+            .unwrap_or_else(|_| Vec::new())
     }
 
     pub(crate) fn set(&self, provider_tx_id: &str) {
         if let Ok(mut slot) = self.0.lock() {
-            *slot = Some(provider_tx_id.to_string());
+            slot.push(provider_tx_id.to_string());
         }
     }
 
-    pub(crate) fn clear(&self) {
+    pub(crate) fn clear(&self, provider_tx_id: &str) {
         if let Ok(mut slot) = self.0.lock() {
-            *slot = None;
+            if let Some(index) = slot.iter().position(|id| id == provider_tx_id) {
+                slot.remove(index);
+            }
         }
     }
 }

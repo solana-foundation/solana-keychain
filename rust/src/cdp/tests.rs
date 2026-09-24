@@ -3,7 +3,10 @@ use super::*;
 use crate::sdk_adapter::{
     keypair_from_seed, keypair_pubkey, keypair_sign_message, Keypair, Pubkey,
 };
-use crate::test_util::{create_test_transaction, create_test_transaction_with_recipient};
+use crate::test_util::{
+    create_test_transaction, create_test_transaction_with_lookups,
+    create_test_transaction_with_recipient,
+};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::Value;
 use wiremock::{
@@ -65,6 +68,7 @@ fn create_test_signer(base_url: &str) -> CdpSigner {
         api_key_id: "test-api-key".to_string(),
         api_key_secret: test_ed25519_key(),
         wallet_secret: test_wallet_secret(),
+        network: None,
         public_key: Pubkey::from_str(TEST_PUBKEY).unwrap(),
         api_base_url: base_url.to_string(),
         api_host,
@@ -506,4 +510,75 @@ fn test_wallet_jwt_includes_req_hash() {
         .expect("reqHash missing in wallet JWT payload");
 
     assert_eq!(Some(req_hash.to_string()), expected_hash);
+}
+
+#[test]
+fn test_from_config_trims_trailing_slashes_from_api_base_url() {
+    let signer = CdpSigner::from_config(CdpSignerConfig {
+        api_key_id: "test-key".to_string(),
+        api_key_secret: test_ed25519_key(),
+        wallet_secret: test_wallet_secret(),
+        address: TEST_PUBKEY.to_string(),
+        network: None,
+        api_base_url: Some(format!("https://{CDP_API_HOST}///")),
+        http_client_config: None,
+    })
+    .unwrap();
+    assert_eq!(signer.api_base_url, format!("https://{CDP_API_HOST}"));
+}
+
+#[test]
+fn test_from_config_rejects_unknown_network() {
+    let result = CdpSigner::from_config(CdpSignerConfig {
+        api_key_id: "test-key".to_string(),
+        api_key_secret: test_ed25519_key(),
+        wallet_secret: test_wallet_secret(),
+        address: TEST_PUBKEY.to_string(),
+        network: Some("mainnet-beta".to_string()),
+        api_base_url: None,
+        http_client_config: None,
+    });
+    assert!(matches!(result, Err(SignerError::ConfigError(_))));
+}
+
+#[tokio::test]
+async fn test_sign_transaction_sends_configured_network() {
+    let mock_server = MockServer::start().await;
+    let keypair = Keypair::new();
+    let pubkey = keypair_pubkey(&keypair);
+
+    let mut signer = create_test_signer(&mock_server.uri());
+    signer.public_key = pubkey;
+    signer.network = Some(CDP_NETWORK_DEVNET.to_string());
+
+    Mock::given(method("POST"))
+        .and(path_regex(r".*/sign/transaction$"))
+        .and(wiremock::matchers::body_partial_json(
+            serde_json::json!({ "network": CDP_NETWORK_DEVNET }),
+        ))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut tx = create_test_transaction(&pubkey);
+    let _ = signer.sign_transaction(&mut tx).await;
+}
+
+/// CDP resolves lookup tables against a network, so signing without one configured
+/// must fail locally rather than send a request the API will reject.
+#[tokio::test]
+async fn test_sign_transaction_rejects_address_lookups_without_network() {
+    let mock_server = MockServer::start().await;
+    let keypair = Keypair::new();
+    let pubkey = keypair_pubkey(&keypair);
+
+    let mut signer = create_test_signer(&mock_server.uri());
+    signer.public_key = pubkey;
+
+    let mut tx = create_test_transaction_with_lookups(&pubkey);
+    let result = signer.sign_transaction(&mut tx).await;
+
+    assert!(matches!(result, Err(SignerError::ConfigError(_))));
+    assert!(mock_server.received_requests().await.unwrap().is_empty());
 }

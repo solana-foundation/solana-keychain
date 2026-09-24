@@ -1,5 +1,5 @@
 import { abortableDelay } from './abort.js';
-import { SignerError, SignerErrorCode, throwSignerError } from './errors.js';
+import { createSignerError, SignerError, SignerErrorCode, throwSignerError } from './errors.js';
 
 const MAX_RECOMMENDED_REQUEST_DELAY_MS = 3000;
 
@@ -51,7 +51,15 @@ export async function signBatchStaggered<TItem, TResult>(
     );
 }
 
-/** Signs items sequentially so completed provider-side work is retained on failure. */
+/**
+ * Signs items sequentially so completed provider-side work is retained on failure.
+ *
+ * Any failure, including an abort, is reported as a `SignerError` whose context
+ * carries the results completed so far under `completedKey` and the index that
+ * failed under `failedIndex`, so the caller knows what does not need retrying.
+ * A non-`SignerError` failure is reported as `SIGNING_FAILED` with the original
+ * error as `cause`.
+ */
 export async function signBatchSequential<TItem, TResult>(
     items: readonly TItem[],
     fn: (item: TItem, index: number) => Promise<TResult>,
@@ -62,21 +70,23 @@ export async function signBatchSequential<TItem, TResult>(
     abortSignal?.throwIfAborted();
     const results: TResult[] = [];
     for (const [index, item] of items.entries()) {
-        if (delayMs > 0 && index > 0) {
-            await abortableDelay(delayMs, abortSignal);
-        }
-        abortSignal?.throwIfAborted();
         try {
+            if (delayMs > 0 && index > 0) {
+                await abortableDelay(delayMs, abortSignal);
+            }
+            abortSignal?.throwIfAborted();
             results.push(await fn(item, index));
         } catch (error) {
-            if (!(error instanceof SignerError)) {
-                throw error;
-            }
-            throwSignerError(error.code, {
-                ...error.context,
-                [completedKey]: [...results],
-                failedIndex: index,
-            });
+            const isSignerError = error instanceof SignerError;
+            throw createSignerError(
+                isSignerError ? error.code : SignerErrorCode.SIGNING_FAILED,
+                {
+                    ...(isSignerError ? error.context : { message: `Batch signing failed at index ${index}` }),
+                    [completedKey]: [...results],
+                    failedIndex: index,
+                },
+                isSignerError ? error.cause : error,
+            );
         }
     }
     return results;

@@ -52,6 +52,8 @@ def derive_signing_key(secret: str, api_key: str) -> Keypair:
         ikm = bytes.fromhex(raw_secret)
     except ValueError:
         raise SignerError(SignerErrorCode.CONFIG_ERROR, "signer_secret is not valid hex") from None
+    if len(ikm) != SIGNER_SECRET_HEX_LENGTH // 2:
+        raise SignerError(SignerErrorCode.CONFIG_ERROR, "signer_secret is not valid hex")
 
     hkdf = HKDF(
         algorithm=hashes.SHA256(),

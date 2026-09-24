@@ -35,13 +35,20 @@ def extract_host(base_url: str, provider_name: str) -> str:
     return f"{hostname}:{port}" if port is not None else hostname
 
 
+def canonical_request_body(body: Any) -> bytes:
+    """Serialize the request body to the exact bytes ``compute_req_hash`` hashes:
+    recursively sorted keys and compact separators. Send these bytes rather than
+    letting the HTTP client re-serialize, or the stamped hash covers bytes the
+    provider never receives."""
+    return json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+
 def compute_req_hash(body: Any | None) -> str | None:
-    """SHA-256 hex of the request body serialized with recursively sorted keys and
-    compact separators; ``None`` for absent, null, or empty-object bodies."""
+    """SHA-256 hex of the canonical request body; ``None`` for absent, null, or
+    empty-object bodies."""
     if body is None or body == {}:
         return None
-    serialized = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(serialized.encode()).hexdigest()
+    return hashlib.sha256(canonical_request_body(body)).hexdigest()
 
 
 def create_es256_wallet_jwt(

@@ -404,11 +404,35 @@ async fn test_is_available() {
         .mount(&server)
         .await;
 
-    let signer = create_test_signer(&server.uri(), None);
+    let public_key = keypair_pubkey(&keypair);
+    let signer = create_test_signer(&server.uri(), Some(public_key));
     assert!(signer.is_available().await);
 
-    let unavailable = create_test_signer("http://127.0.0.1:1", None);
+    let unavailable = create_test_signer("http://127.0.0.1:1", Some(public_key));
     assert!(!unavailable.is_available().await);
+
+    let uninitialized = create_test_signer(&server.uri(), None);
+    assert!(!uninitialized.is_available().await);
+
+    let without_address = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/vaults/vault-test/wallets/wallet-test"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "wallet": {} })))
+        .mount(&without_address)
+        .await;
+    let signer = create_test_signer(&without_address.uri(), Some(public_key));
+    assert!(!signer.is_available().await);
+
+    let other_wallet = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/vaults/vault-test/wallets/wallet-test"))
+        .respond_with(wallet_response(
+            &keypair_pubkey(&Keypair::new()).to_string(),
+        ))
+        .mount(&other_wallet)
+        .await;
+    let signer = create_test_signer(&other_wallet.uri(), Some(public_key));
+    assert!(!signer.is_available().await);
 }
 
 fn signed_transaction_payload_for_keypair(

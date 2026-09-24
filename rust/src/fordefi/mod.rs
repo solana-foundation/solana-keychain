@@ -15,8 +15,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::error::SignerError;
 use crate::http_client_config::HttpClientConfig;
 use crate::remote_util::{
-    extract_api_error_with_transaction_id, parse_json_response, poll_until, read_body_capped,
-    transaction_id_in_body, PollOutcome,
+    extract_api_error_with_transaction_id, normalize_base_url, parse_json_response, poll_until,
+    read_body_capped, transaction_id_in_body, PollOutcome,
 };
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{extract_and_verify_rewritten_transaction, signature_from_base64};
@@ -126,9 +126,10 @@ impl FordefiCore {
     /// Validate the mode-independent config, resolve the request-signing
     /// mechanism, and assemble the core.
     ///
-    /// `config.public_key` is trusted as the vault's Solana public key —
+    /// `config.public_key` is trusted as the vault's Solana public key:
     /// construction makes no network calls, and every signature Fordefi
-    /// returns is still verified against it.
+    /// returns is still verified against it. [`FordefiCore::is_available`]
+    /// confirms it really belongs to the vault.
     fn build(config: &FordefiSignerConfig) -> Result<Self, SignerError> {
         if config.access_token.is_empty() {
             return Err(SignerError::ConfigError(
@@ -167,12 +168,8 @@ impl FordefiCore {
                 (None, Some(request_signer)) => Arc::clone(request_signer),
             };
 
-        let api_base_url = config
-            .api_base_url
-            .as_deref()
-            .unwrap_or(DEFAULT_BASE_URL)
-            .trim_end_matches('/')
-            .to_string();
+        let api_base_url =
+            normalize_base_url(config.api_base_url.as_deref().unwrap_or(DEFAULT_BASE_URL));
         let parsed_api_base_url = reqwest::Url::parse(&api_base_url).map_err(|_| {
             SignerError::ConfigError("api_base_url must be a valid URL".to_string())
         })?;
@@ -502,7 +499,7 @@ impl FordefiCore {
 
     /// Verify `signature` against `message` with the vault's public key.
     fn verify_signature(&self, signature: &Signature, message: &[u8]) -> Result<(), SignerError> {
-        if !signature.verify(&self.public_key.to_bytes(), message) {
+        if !crate::signature_util::verifies(signature, &self.public_key, message) {
             return Err(SignerError::SigningFailed(
                 "Signature verification failed".to_string(),
             ));
@@ -523,9 +520,31 @@ impl FordefiCore {
         parse_json_response(response, "Fordefi API fetch_vault").await
     }
 
+    /// Confirm the configured Solana public key is the one Fordefi holds for
+    /// the vault. Chain-specific vaults expose it as a base58 `address`, black
+    /// box vaults as a base64 raw key.
+    fn vault_matches_public_key(&self, vault: &VaultResponse) -> bool {
+        if let Some(address) = &vault.address {
+            return bs58::decode(address)
+                .into_vec()
+                .is_ok_and(|key| key == self.public_key.to_bytes());
+        }
+        if let Some(encoded) = &vault.public_key_compressed {
+            return STANDARD
+                .decode(encoded)
+                .is_ok_and(|key| key == self.public_key.to_bytes());
+        }
+        false
+    }
+
     async fn is_available(&self) -> bool {
         let readiness_check = async {
-            self.fetch_vault().await?;
+            let vault = self.fetch_vault().await?;
+            if !self.vault_matches_public_key(&vault) {
+                return Err(SignerError::InvalidPublicKey(
+                    "Configured public key does not belong to the Fordefi vault".to_string(),
+                ));
+            }
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|e| SignerError::Other(format!("System time error: {e}")))?
@@ -736,7 +755,7 @@ impl FordefiNativeAutoSigner {
         }
         let result = self.finish_broadcast(&tx_id).await.map_err(|error| {
             SignerError::BroadcastUnconfirmed {
-                provider_tx_id: Some(tx_id),
+                provider_tx_id: Some(tx_id.clone()),
                 provider_status: None,
                 idempotency_key: None,
                 transaction_signature: None,
@@ -744,16 +763,42 @@ impl FordefiNativeAutoSigner {
             }
         });
         if let Some(pending) = &self.pending_transaction_id {
-            pending.clear();
+            pending.clear(&tx_id);
         }
         result
     }
 
+    /// The broadcast is identified by the fee payer's signature, which the rewrite
+    /// need not leave to the vault, so it is read from slot 0 rather than from the
+    /// vault's own slot and verified in its own right.
     async fn finish_broadcast(&self, tx_id: &str) -> Result<Signature, SignerError> {
         let result = self.core.poll_for_result(tx_id, true).await?;
         let wire_bytes = FordefiCore::decode_raw_transaction(&result)?;
-        let (_, signature) =
+        let (returned, _) =
             extract_and_verify_rewritten_transaction(&wire_bytes, &self.core.public_key)?;
+        let missing_fee_payer_signature = || {
+            SignerError::SigningFailed(
+                "Fordefi wire transaction carries no fee-payer signature to identify the broadcast by"
+                    .to_string(),
+            )
+        };
+        let signature = returned
+            .signatures
+            .first()
+            .copied()
+            .filter(|signature| *signature != Signature::default())
+            .ok_or_else(missing_fee_payer_signature)?;
+        let fee_payer = returned
+            .message
+            .static_account_keys()
+            .first()
+            .copied()
+            .ok_or_else(missing_fee_payer_signature)?;
+        crate::signature_util::verify_or_reject(
+            &signature,
+            &fee_payer,
+            &returned.message.serialize(),
+        )?;
         Ok(signature)
     }
 

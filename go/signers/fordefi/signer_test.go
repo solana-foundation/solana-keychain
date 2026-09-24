@@ -819,6 +819,129 @@ func assertBroadcastUnconfirmedWithoutID(t *testing.T, err error, wantStatus int
 	}
 }
 
+// A rewrite can hand the fee payer slot to another key, and the broadcast is
+// identified by that slot's signature, not by the vault's.
+func TestSignTransactionNativeReturnsTheFeePayerSignature(t *testing.T) {
+	vaultPriv := testutils.TestPrivateKey()
+	vaultPub := testutils.TestPublicKey()
+	sponsorPub, sponsorPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sponsor := solana.PublicKeyFromBytes(sponsorPub)
+
+	returned, err := solana.NewTransaction(
+		[]solana.Instruction{solana.NewInstruction(
+			solana.SystemProgramID,
+			solana.AccountMetaSlice{
+				{PublicKey: sponsor, IsSigner: true, IsWritable: true},
+				{PublicKey: vaultPub, IsSigner: true, IsWritable: true},
+			},
+			[]byte{2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		)},
+		testutils.TestBlockhash,
+		solana.TransactionPayer(sponsor),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	returnedMsg, err := returned.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sponsorSignature := solana.SignatureFromBytes(ed25519.Sign(sponsorPriv, returnedMsg))
+	vaultSignature := solana.SignatureFromBytes(ed25519.Sign(vaultPriv, returnedMsg))
+	returned.Signatures = []solana.Signature{sponsorSignature, vaultSignature}
+	wireBytes, err := returned.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := newNativeTestSigner(t, nativeConfig(t), vaultPub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123"})
+		})
+		mux.HandleFunc(transactionsPath+"/tx-123", func(w http.ResponseWriter, _ *http.Request) {
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
+				"state":           "completed",
+				"raw_transaction": base64.StdEncoding.EncodeToString(wireBytes),
+			})
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(vaultPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.SignAndSendTransaction(context.Background(), tx)
+	if err != nil {
+		t.Fatalf("SignAndSendTransaction: %v", err)
+	}
+	if res != sponsorSignature {
+		t.Errorf("signature = %s, want the fee payer signature %s", res, sponsorSignature)
+	}
+}
+
+// The fee payer's signature is the broadcast id, so a returned transaction
+// whose slot 0 does not verify identifies nothing.
+func TestSignTransactionNativeRejectsAnUnverifiableFeePayerSignature(t *testing.T) {
+	vaultPriv := testutils.TestPrivateKey()
+	vaultPub := testutils.TestPublicKey()
+	sponsorPub, sponsorPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sponsor := solana.PublicKeyFromBytes(sponsorPub)
+
+	returned, err := solana.NewTransaction(
+		[]solana.Instruction{solana.NewInstruction(
+			solana.SystemProgramID,
+			solana.AccountMetaSlice{
+				{PublicKey: sponsor, IsSigner: true, IsWritable: true},
+				{PublicKey: vaultPub, IsSigner: true, IsWritable: true},
+			},
+			[]byte{2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		)},
+		testutils.TestBlockhash,
+		solana.TransactionPayer(sponsor),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	returnedMsg, err := returned.Message.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	returned.Signatures = []solana.Signature{
+		solana.SignatureFromBytes(ed25519.Sign(sponsorPriv, []byte("other bytes"))),
+		solana.SignatureFromBytes(ed25519.Sign(vaultPriv, returnedMsg)),
+	}
+	wireBytes, err := returned.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := newNativeTestSigner(t, nativeConfig(t), vaultPub.String(), func(mux *http.ServeMux) {
+		mux.HandleFunc(transactionsPath, func(w http.ResponseWriter, _ *http.Request) {
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-123"})
+		})
+		mux.HandleFunc(transactionsPath+"/tx-123", func(w http.ResponseWriter, _ *http.Request) {
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{
+				"state":           "completed",
+				"raw_transaction": base64.StdEncoding.EncodeToString(wireBytes),
+			})
+		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(vaultPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SignAndSendTransaction(context.Background(), tx); err == nil {
+		t.Fatal("expected a fee-payer signature that does not verify to be rejected")
+	}
+}
+
 func TestSignTransactionNativeRejectsMultiSigner(t *testing.T) {
 	pub := testutils.TestPublicKey()
 	var requests atomic.Int64
@@ -932,6 +1055,40 @@ func TestIsAvailable(t *testing.T) {
 	s := newTestSigner(t, baseConfig(t), testutils.TestPublicKey().String(), nil)
 	if !s.IsAvailable(context.Background()) {
 		t.Error("IsAvailable should be true when the vault is reachable")
+	}
+}
+
+// A vault holding a different address cannot sign for the configured key.
+func TestIsAvailableVaultHoldsAnotherAddress(t *testing.T) {
+	s := newTestSigner(t, baseConfig(t), solana.PublicKey{1}.String(), nil)
+	if s.IsAvailable(context.Background()) {
+		t.Error("IsAvailable should be false when the vault holds another address")
+	}
+}
+
+// Black box vaults carry no address, only a base64 raw public key.
+func TestIsAvailableBlackBoxVault(t *testing.T) {
+	mux := http.NewServeMux()
+	key := testutils.TestPublicKey()
+	mux.HandleFunc(vaultPath, func(w http.ResponseWriter, _ *http.Request) {
+		testutils.WriteJSON(w, http.StatusOK, map[string]any{
+			"id":                    testVaultID,
+			"type":                  "black_box",
+			"public_key_compressed": base64.StdEncoding.EncodeToString(key[:]),
+		})
+	})
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+
+	cfg := baseConfig(t)
+	cfg.APIBaseURL = srv.URL
+	cfg.HTTPClient = srv.Client()
+	s, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	if !s.IsAvailable(context.Background()) {
+		t.Error("IsAvailable should be true for a black box vault holding the configured key")
 	}
 }
 

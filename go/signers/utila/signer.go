@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -69,7 +70,7 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 
 	client := core.ResolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientConfig)
 
-	designatedSigners := cfg.DesignatedSigners
+	designatedSigners := slices.Clone(cfg.DesignatedSigners)
 	if designatedSigners == nil {
 		designatedSigners = []string{"users/" + cfg.ServiceAccountEmail}
 	}
@@ -93,16 +94,11 @@ func New(ctx context.Context, cfg Config) (*Signer, error) {
 		designatedSigners:   designatedSigners,
 	}
 
-	wallet, err := s.fetchWallet(ctx)
+	address, err := s.fetchWalletAddress(ctx)
 	if err != nil {
 		return nil, err
 	}
-	details := wallet.Wallet.SolanaDetails
-	if details == nil {
-		return nil, core.NewSignerError(core.CodeInvalidPublicKey,
-			"Utila wallet response did not include solanaDetails")
-	}
-	pubkey, err := solana.PublicKeyFromBase58(*details.Address)
+	pubkey, err := solana.PublicKeyFromBase58(address)
 	if err != nil {
 		return nil, core.NewSignerError(core.CodeInvalidPublicKey,
 			"Invalid Solana address returned by Utila wallet")
@@ -171,12 +167,17 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 }
 
 // IsAvailable reports whether the Utila wallet can be fetched within the
-// availability timeout. Errors are swallowed.
+// availability timeout and still resolves to the address this signer was
+// initialized with. Errors are swallowed.
 func (s *Signer) IsAvailable(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, core.AvailabilityTimeout)
 	defer cancel()
-	_, err := s.fetchWallet(ctx)
-	return err == nil
+	address, err := s.fetchWalletAddress(ctx)
+	if err != nil {
+		return false
+	}
+	pubkey, err := solana.PublicKeyFromBase58(address)
+	return err == nil && pubkey.Equals(s.pubkey)
 }
 
 // pollSignedTransaction drives an initiated transaction to the SIGNED state:

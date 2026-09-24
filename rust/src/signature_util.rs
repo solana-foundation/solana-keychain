@@ -3,6 +3,8 @@
 
 use crate::error::SignerError;
 use crate::sdk_adapter::{Pubkey, Signature};
+#[cfg(feature = "gcp_kms")]
+use base64::{engine::general_purpose::STANDARD, Engine};
 
 pub const EXPECTED_SIGNATURE_LENGTH: usize = 64;
 
@@ -118,6 +120,18 @@ pub(crate) fn extract_and_verify_rewritten_transaction(
     Ok((returned, signature))
 }
 
+/// Verify under the runtime's ZIP-215 rules, which the `verify_strict` behind
+/// [`Signature::verify`] is stricter than.
+pub fn verifies(signature: &Signature, public_key: &Pubkey, message: &[u8]) -> bool {
+    let Ok(signature) = <[u8; EXPECTED_SIGNATURE_LENGTH]>::try_from(signature.as_ref()) else {
+        return false;
+    };
+    ed25519_zebra::VerificationKey::try_from(public_key.to_bytes()).is_ok_and(|key| {
+        key.verify(&ed25519_zebra::Signature::from(signature), message)
+            .is_ok()
+    })
+}
+
 /// Reject a backend-returned signature that does not verify against the
 /// signer's public key over the signed bytes.
 pub fn verify_or_reject(
@@ -125,13 +139,43 @@ pub fn verify_or_reject(
     public_key: &Pubkey,
     message: &[u8],
 ) -> Result<(), SignerError> {
-    if signature.verify(&public_key.to_bytes(), message) {
+    if verifies(signature, public_key, message) {
         return Ok(());
     }
     Err(SignerError::SigningFailed(
         "Signature verification failed — the returned signature does not match the public key"
             .to_string(),
     ))
+}
+
+/// DER SubjectPublicKeyInfo header for an Ed25519 key: SEQUENCE, AlgorithmIdentifier
+/// with OID 1.3.101.112, then a 33-byte BIT STRING with zero unused bits.
+#[cfg(any(feature = "aws_kms", feature = "gcp_kms"))]
+const ED25519_SPKI_PREFIX: [u8; 12] = [
+    0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+];
+
+/// Extract the raw 32-byte Ed25519 key from a DER-encoded SubjectPublicKeyInfo.
+#[cfg(any(feature = "aws_kms", feature = "gcp_kms"))]
+pub(crate) fn ed25519_key_from_spki_der(der: &[u8]) -> Option<[u8; 32]> {
+    if der.len() != ED25519_SPKI_PREFIX.len() + 32
+        || der[..ED25519_SPKI_PREFIX.len()] != ED25519_SPKI_PREFIX
+    {
+        return None;
+    }
+    der[ED25519_SPKI_PREFIX.len()..].try_into().ok()
+}
+
+/// Extract the raw 32-byte Ed25519 key from a PEM-encoded SubjectPublicKeyInfo.
+#[cfg(feature = "gcp_kms")]
+pub(crate) fn ed25519_key_from_spki_pem(pem: &str) -> Option<[u8; 32]> {
+    let body: String = pem
+        .lines()
+        .filter(|line| !line.starts_with("-----"))
+        .flat_map(|line| line.chars().filter(|c| !c.is_whitespace()))
+        .collect();
+    let der = STANDARD.decode(body).ok()?;
+    ed25519_key_from_spki_der(&der)
 }
 
 #[cfg(all(
@@ -196,6 +240,41 @@ mod tests {
         assert!(matches!(error, SignerError::SigningFailed(_)));
     }
 
+    /// Zcash ZIP-215 vectors the runtime accepts and `Signature::verify` rejects.
+    #[test]
+    fn accepts_zip215_signatures_the_strict_path_rejects() {
+        const VECTORS: [(&str, &str); 3] = [
+            (
+                "0100000000000000000000000000000000000000000000000000000000000000",
+                "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+            (
+                "0100000000000000000000000000000000000000000000000000000000000000",
+                "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+            (
+                "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+                "01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            ),
+        ];
+
+        for (pubkey_hex, signature_hex) in VECTORS {
+            let pubkey = Pubkey::new_from_array(unhex::<32>(pubkey_hex));
+            let signature = Signature::from(unhex::<64>(signature_hex));
+
+            assert!(verifies(&signature, &pubkey, b"Zcash"));
+            assert!(!signature.verify(&pubkey.to_bytes(), b"Zcash"));
+        }
+    }
+
+    fn unhex<const N: usize>(hex: &str) -> [u8; N] {
+        let mut out = [0u8; N];
+        for (index, byte) in out.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16).expect("hex");
+        }
+        out
+    }
+
     #[test]
     fn rejects_a_signature_that_does_not_verify() {
         let (keypair, pubkey, message_bytes, _wire) = signed_returned_transaction();
@@ -217,5 +296,46 @@ mod tests {
             .expect_err("malformed bytes must be rejected");
 
         assert!(matches!(error, SignerError::SerializationError(_)));
+    }
+}
+
+#[cfg(all(test, any(feature = "aws_kms", feature = "gcp_kms")))]
+mod spki_tests {
+    use super::*;
+
+    fn spki_der(key: [u8; 32]) -> Vec<u8> {
+        let mut der = ED25519_SPKI_PREFIX.to_vec();
+        der.extend_from_slice(&key);
+        der
+    }
+
+    #[test]
+    fn extracts_key_from_spki_der() {
+        assert_eq!(
+            ed25519_key_from_spki_der(&spki_der([9u8; 32])),
+            Some([9u8; 32])
+        );
+    }
+
+    #[test]
+    fn rejects_der_that_is_not_an_ed25519_spki() {
+        let mut foreign_oid = spki_der([9u8; 32]);
+        foreign_oid[8] = 0x71;
+        assert_eq!(ed25519_key_from_spki_der(&foreign_oid), None);
+
+        assert_eq!(ed25519_key_from_spki_der(&spki_der([9u8; 32])[..40]), None);
+        assert_eq!(ed25519_key_from_spki_der(&[]), None);
+    }
+
+    #[cfg(feature = "gcp_kms")]
+    #[test]
+    fn extracts_key_from_spki_pem() {
+        let pem = format!(
+            "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
+            STANDARD.encode(spki_der([3u8; 32]))
+        );
+
+        assert_eq!(ed25519_key_from_spki_pem(&pem), Some([3u8; 32]));
+        assert_eq!(ed25519_key_from_spki_pem("not a pem"), None);
     }
 }

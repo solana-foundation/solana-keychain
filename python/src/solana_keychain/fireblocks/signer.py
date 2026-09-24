@@ -42,6 +42,12 @@ DEFAULT_POLL_INTERVAL_MS = 1000
 DEFAULT_MAX_POLL_ATTEMPTS = 300
 
 
+_DUPLICATE_EXTERNAL_TX_ID_CODE = 1438
+_DUPLICATE_EXTERNAL_TX_ID_DETAIL = (
+    "Fireblocks rejected the PROGRAM_CALL create as a duplicate externalTxId, so an "
+    "earlier create carrying the same message bytes already exists there"
+)
+
 _TERMINAL_FAILURE_STATUSES = frozenset({"FAILED", "CANCELLED", "REJECTED", "BLOCKED"})
 _BROADCAST_STATUSES = frozenset({"BROADCASTING", "CONFIRMING", "COMPLETED"})
 
@@ -96,6 +102,14 @@ class FireblocksSigner(TransactionSigner):
             pass
         self._vault_account_id = config.vault_account_id
         self._asset_id = config.asset_id
+        if config.poll_interval_ms <= 0:
+            raise SignerError(
+                SignerErrorCode.CONFIG_ERROR, "poll_interval_ms must be greater than 0"
+            )
+        if config.max_poll_attempts <= 0:
+            raise SignerError(
+                SignerErrorCode.CONFIG_ERROR, "max_poll_attempts must be greater than 0"
+            )
         self._poll_interval_ms = config.poll_interval_ms
         self._max_poll_attempts = config.max_poll_attempts
         self._use_program_call = config.use_program_call
@@ -185,8 +199,10 @@ class FireblocksSigner(TransactionSigner):
 
         A PROGRAM_CALL create that neither succeeds nor is rejected by a 4xx
         leaves a request Fireblocks may still act on, so it raises
-        ``BROADCAST_UNCONFIRMED``; check Fireblocks before retrying. A RAW
-        create signs nothing on its own and keeps the plain failure.
+        ``BROADCAST_UNCONFIRMED``; check Fireblocks before retrying. A duplicate
+        ``externalTxId`` is reported the same way, since it says Fireblocks already
+        holds a create for these bytes. A RAW create signs nothing on its own and
+        keeps the plain failure.
         """
         uri = "/v1/transactions"
         body = json.dumps(request, separators=(",", ":"))
@@ -202,6 +218,13 @@ class FireblocksSigner(TransactionSigner):
                 client=self._http_client,
             )
         except SignerError as error:
+            if program_call and error.provider_error_code == _DUPLICATE_EXTERNAL_TX_ID_CODE:
+                raise SignerError(
+                    SignerErrorCode.BROADCAST_UNCONFIRMED,
+                    _DUPLICATE_EXTERNAL_TX_ID_DETAIL,
+                    status_code=error.status_code,
+                    idempotency_key=request.get("externalTxId"),
+                ) from None
             if not program_call or not provider_may_have_accepted(error.status_code):
                 raise
             raise SignerError(

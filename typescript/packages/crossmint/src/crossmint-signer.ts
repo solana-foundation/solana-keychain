@@ -231,9 +231,10 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
      */
     private async signTransactionManaged(transaction: Transaction, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         const idempotencyKey = await idempotencyKeyFromMessage(this.namespacedKeyInput(transaction.messageBytes));
+        const transactionBase58 = this.encodeTransaction(transaction);
         let created: CrossmintTransactionResponse;
         try {
-            created = await this.createTransaction(transaction, idempotencyKey, abortSignal);
+            created = await this.createTransaction(transactionBase58, idempotencyKey, abortSignal);
         } catch (error) {
             if (!providerMayHaveAccepted(error)) {
                 throw error;
@@ -383,17 +384,24 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
         return parseTransactionResponse(result, 'submit approval');
     }
 
-    private async createTransaction(
-        transaction: Transaction,
-        idempotencyKey: string,
-        abortSignal?: AbortSignal,
-    ): Promise<CrossmintTransactionResponse> {
+    /**
+     * Encode a transaction for the create body. Kept out of the create itself so
+     * a serialization failure, which sends nothing, is not classified as a
+     * create Crossmint may have accepted.
+     */
+    private encodeTransaction(transaction: Transaction): string {
         const wireTransaction = getBase64EncodedWireTransaction(transaction);
         base64Encoder ||= getBase64Encoder();
         const transactionBytes = base64Encoder.encode(wireTransaction);
         base58Decoder ||= getBase58Decoder();
-        const transactionBase58 = base58Decoder.decode(transactionBytes);
+        return base58Decoder.decode(transactionBytes);
+    }
 
+    private async createTransaction(
+        transactionBase58: string,
+        idempotencyKey: string,
+        abortSignal?: AbortSignal,
+    ): Promise<CrossmintTransactionResponse> {
         const body: CrossmintCreateTransactionRequest = {
             params: {
                 transaction: transactionBase58,
@@ -575,15 +583,34 @@ async function deriveSignerSeed(secret: string, apiKey: string): Promise<Uint8Ar
         });
     }
     base16Encoder ||= getBase16Encoder();
-    const ikm = Buffer.from(base16Encoder.encode(rawSecret));
+    let ikm: Buffer;
+    try {
+        ikm = Buffer.from(base16Encoder.encode(rawSecret));
+    } catch {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'signerSecret must be a 64-char hex string',
+        });
+    }
 
     // Parse API key: {ck|sk}_{environment}_{base58data}
     // base58-decoded data is UTF-8: "projectId:nacl_signature"
     const parts = apiKey.split('_');
+    if (parts.length < 3) {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'apiKey must be of the form {ck|sk}_{environment}_{base58data}',
+        });
+    }
     const environment = parts[1];
     const base58Data = parts.slice(2).join('_');
     base58Encoder ||= getBase58Encoder();
-    const decoded = base58Encoder.encode(base58Data);
+    let decoded: ReturnType<typeof base58Encoder.encode>;
+    try {
+        decoded = base58Encoder.encode(base58Data);
+    } catch {
+        throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+            message: 'apiKey must be of the form {ck|sk}_{environment}_{base58data}',
+        });
+    }
     const projectId = new TextDecoder().decode(decoded).split(':')[0];
 
     const info = `${projectId}:${environment}:solana-ed25519`;

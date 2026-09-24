@@ -497,11 +497,100 @@ async fn test_turnkey_is_available() {
         .mount(&mock_server)
         .await;
 
+    Mock::given(method("POST"))
+        .and(path("/public/v1/query/get_private_key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "privateKey": {
+                "privateKeyId": "test-key-id",
+                "publicKey": hex::encode(keypair.pubkey().to_bytes()),
+                "addresses": [
+                    { "format": "ADDRESS_FORMAT_SOLANA", "address": keypair.pubkey().to_string() }
+                ]
+            }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
     let mut signer = TurnkeySigner::new(
         api_public_key,
         api_private_key,
         "test-org-id".to_string(),
         "test-key-id".to_string(),
+        keypair.pubkey().to_string(),
+    )
+    .unwrap();
+    signer.client = reqwest::Client::new();
+    signer.api_base_url = mock_server.uri();
+
+    assert!(signer.is_available().await);
+}
+
+#[tokio::test]
+async fn test_turnkey_is_not_available_when_key_is_not_the_configured_public_key() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let other = create_test_keypair();
+    let (api_public_key, api_private_key) = create_test_api_keys();
+
+    Mock::given(method("POST"))
+        .and(path("/public/v1/query/whoami"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "organizationId": "test-org-id"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/public/v1/query/get_private_key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "privateKey": {
+                "privateKeyId": "test-key-id",
+                "publicKey": hex::encode(other.pubkey().to_bytes()),
+                "addresses": [
+                    { "format": "ADDRESS_FORMAT_SOLANA", "address": other.pubkey().to_string() }
+                ]
+            }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut signer = TurnkeySigner::new(
+        api_public_key,
+        api_private_key,
+        "test-org-id".to_string(),
+        "test-key-id".to_string(),
+        keypair.pubkey().to_string(),
+    )
+    .unwrap();
+    signer.client = reqwest::Client::new();
+    signer.api_base_url = mock_server.uri();
+
+    assert!(!signer.is_available().await);
+}
+
+#[tokio::test]
+async fn test_turnkey_is_available_skips_lookup_when_sign_with_is_the_address() {
+    let mock_server = MockServer::start().await;
+    let keypair = create_test_keypair();
+    let (api_public_key, api_private_key) = create_test_api_keys();
+
+    Mock::given(method("POST"))
+        .and(path("/public/v1/query/whoami"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "organizationId": "test-org-id"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut signer = TurnkeySigner::new(
+        api_public_key,
+        api_private_key,
+        "test-org-id".to_string(),
+        keypair.pubkey().to_string(),
         keypair.pubkey().to_string(),
     )
     .unwrap();
@@ -608,4 +697,22 @@ async fn test_turnkey_sign_oversized_component() {
     let result = signer.sign_message(b"test").await;
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), SignerError::SigningFailed(_)));
+}
+
+#[test]
+fn test_from_config_trims_trailing_slashes_from_api_base_url() {
+    let keypair = create_test_keypair();
+    let (api_public_key, api_private_key) = create_test_api_keys();
+
+    let signer = TurnkeySigner::from_config(TurnkeySignerConfig {
+        api_public_key,
+        api_private_key,
+        organization_id: "test-org-id".to_string(),
+        private_key_id: "test-key-id".to_string(),
+        public_key: keypair.pubkey().to_string(),
+        api_base_url: Some("https://api.turnkey.com///".to_string()),
+        http_client_config: None,
+    })
+    .unwrap();
+    assert_eq!(signer.api_base_url, "https://api.turnkey.com");
 }

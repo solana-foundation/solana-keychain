@@ -364,6 +364,15 @@ async def test_is_available_true_and_false() -> None:
 
 
 @respx.mock
+async def test_is_available_false_without_the_initialized_address() -> None:
+    signer = await initialized_signer(Keypair())
+    mock_wallet(None)
+    assert not await signer.is_available()
+    mock_wallet(str(Keypair().pubkey()))
+    assert not await signer.is_available()
+
+
+@respx.mock
 async def test_create_utila_signer_factory_initializes() -> None:
     keypair = Keypair()
     mock_wallet(str(keypair.pubkey()))

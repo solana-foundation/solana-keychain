@@ -2,6 +2,9 @@ package core
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/pem"
 
 	"github.com/solana-foundation/solana-go/v2"
 )
@@ -159,4 +162,38 @@ func SignTransactionWith(
 		return SignedTransaction{}, err
 	}
 	return AttachSignature(tx, pubkey, sig)
+}
+
+// PublicKeyFromSPKIDER extracts the Ed25519 public key carried by a DER-encoded
+// SubjectPublicKeyInfo. ok is false when der is not one.
+func PublicKeyFromSPKIDER(der []byte) (solana.PublicKey, bool) {
+	parsed, err := x509.ParsePKIXPublicKey(der)
+	if err != nil {
+		return solana.PublicKey{}, false
+	}
+	key, ok := parsed.(ed25519.PublicKey)
+	if !ok {
+		return solana.PublicKey{}, false
+	}
+	return PublicKeyFromRawEd25519(key)
+}
+
+// PublicKeyFromSPKIPEM extracts the Ed25519 public key carried by a PEM-encoded
+// SubjectPublicKeyInfo. ok is false when pem is not one.
+func PublicKeyFromSPKIPEM(pemText string) (solana.PublicKey, bool) {
+	block, _ := pem.Decode([]byte(pemText))
+	if block == nil {
+		return solana.PublicKey{}, false
+	}
+	return PublicKeyFromSPKIDER(block.Bytes)
+}
+
+// PublicKeyFromRawEd25519 renders a raw 32-byte Ed25519 key as a public key.
+// ok is false for any other length.
+func PublicKeyFromRawEd25519(raw []byte) (key solana.PublicKey, ok bool) {
+	if len(raw) != len(key) {
+		return solana.PublicKey{}, false
+	}
+	copy(key[:], raw)
+	return key, true
 }

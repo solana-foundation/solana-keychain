@@ -117,3 +117,18 @@ fn test_remote_api_error_surfaces_a_pending_tx_id_but_not_detail() {
     let plain = format!("{:?}", SignerError::remote_api("sensitive-detail"));
     assert_eq!(plain, "SignerError::RemoteApiError([REDACTED])");
 }
+
+#[test]
+fn test_broadcast_unconfirmed_omits_the_id_clause_when_there_is_no_id() {
+    let err = SignerError::BroadcastUnconfirmed {
+        provider_tx_id: None,
+        provider_status: None,
+        idempotency_key: Some("idem-key-123".to_string()),
+        transaction_signature: None,
+        detail: "sensitive-detail".to_string(),
+    };
+    assert_eq!(
+        format!("{err}"),
+        "Broadcast unconfirmed; the provider may have executed the transaction"
+    );
+}

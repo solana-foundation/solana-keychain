@@ -888,3 +888,81 @@ fn test_use_program_call_config_carried_through_construction() {
     .unwrap();
     assert!(!signer_raw.use_program_call);
 }
+
+#[test]
+fn test_new_trims_trailing_slashes_from_api_base_url() {
+    let signer = FireblocksSigner::new(FireblocksSignerConfig {
+        api_key: "test-key".to_string(),
+        private_key_pem: TEST_RSA_KEY.to_string(),
+        vault_account_id: "test-vault".to_string(),
+        asset_id: None,
+        api_base_url: Some("https://api.fireblocks.io///".to_string()),
+        poll_interval_ms: None,
+        max_poll_attempts: None,
+        use_program_call: None,
+        http_client_config: None,
+    })
+    .unwrap();
+    assert_eq!(signer.api_base_url, "https://api.fireblocks.io");
+}
+
+#[tokio::test]
+async fn test_program_call_duplicate_external_tx_id_is_reported_as_unconfirmed() {
+    let mock_server = MockServer::start().await;
+    let keypair = Keypair::new();
+    let mut transaction = create_test_transaction(&keypair_pubkey(&keypair));
+    let message_bytes = transaction.message.serialize();
+    let signer = create_test_signer_program_call(&mock_server.uri(), keypair_pubkey(&keypair));
+    let expected = signer.external_tx_id(&message_bytes);
+
+    Mock::given(method("POST"))
+        .and(path("/v1/transactions"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "message": "The external tx id that was provided in the request, already exists",
+            "code": 1438
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let error = signer.sign_transaction(&mut transaction).await.unwrap_err();
+
+    match error {
+        SignerError::BroadcastUnconfirmed {
+            provider_status,
+            idempotency_key,
+            ..
+        } => {
+            assert_eq!(provider_status, Some(400));
+            assert_eq!(idempotency_key, Some(expected));
+        }
+        other => panic!(
+            "a duplicate externalTxId means Fireblocks already holds the create, got {other:?}"
+        ),
+    }
+}
+
+#[tokio::test]
+async fn test_program_call_other_bad_request_stays_a_plain_failure() {
+    let mock_server = MockServer::start().await;
+    let keypair = Keypair::new();
+    let mut transaction = create_test_transaction(&keypair_pubkey(&keypair));
+    let signer = create_test_signer_program_call(&mock_server.uri(), keypair_pubkey(&keypair));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/transactions"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "message": "Invalid asset",
+            "code": 1026
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let error = signer.sign_transaction(&mut transaction).await.unwrap_err();
+
+    assert!(
+        matches!(error, SignerError::RemoteApiError { .. }),
+        "a 4xx that is not a duplicate rules the create out: {error:?}"
+    );
+}

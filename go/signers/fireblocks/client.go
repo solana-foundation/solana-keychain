@@ -28,6 +28,9 @@ const (
 	statusCancelled    = "CANCELLED"
 	statusRejected     = "REJECTED"
 	statusBlocked      = "BLOCKED"
+
+	duplicateExternalTxIDCode   = 1438
+	duplicateExternalTxIDDetail = "Fireblocks rejected the PROGRAM_CALL create as a duplicate externalTxId, so an earlier create carrying the same message bytes already exists there"
 )
 
 // Wire types for the Fireblocks REST API.
@@ -98,13 +101,14 @@ type vaultAddress struct {
 	AssetID string `json:"assetId"`
 }
 
-// doRequest sends an authenticated request to the Fireblocks API and returns the
-// status code and body. The per-request JWT is computed over uri and body (empty
-// body for GET requests).
-func (s *Signer) doRequest(ctx context.Context, method, uri, body string) (int, []byte, error) {
+// newRequest builds an authenticated request. The per-request JWT is computed
+// over uri and body (empty body for GET requests). It is kept separate from
+// send so a caller classifying an ambiguous create covers only the hop that
+// could reach Fireblocks.
+func (s *Signer) newRequest(ctx context.Context, method, uri, body string) (*http.Request, error) {
 	token, err := createJWT(s.apiKey, s.signingKey, uri, body)
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
 
 	var reader io.Reader
@@ -113,15 +117,28 @@ func (s *Signer) doRequest(ctx context.Context, method, uri, body string) (int, 
 	}
 	req, err := http.NewRequestWithContext(ctx, method, s.apiBaseURL+uri, reader)
 	if err != nil {
-		return 0, nil, core.WrapSignerError(core.CodeHTTPError, "failed to build fireblocks request", err)
+		return nil, core.WrapSignerError(core.CodeHTTPError, "failed to build fireblocks request", err)
 	}
 	if method == http.MethodPost {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("X-API-Key", s.apiKey)
 	req.Header.Set("Authorization", "Bearer "+token)
+	return req, nil
+}
 
+func (s *Signer) send(req *http.Request) (int, []byte, error) {
 	return core.SendRequest(s.client, req, "fireblocks")
+}
+
+// doRequest sends an authenticated request to the Fireblocks API and returns the
+// status code and body.
+func (s *Signer) doRequest(ctx context.Context, method, uri, body string) (int, []byte, error) {
+	req, err := s.newRequest(ctx, method, uri, body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return s.send(req)
 }
 
 // fetchPublicKey retrieves the vault account's Solana address.
@@ -183,11 +200,18 @@ func (s *Signer) selectVaultAddress(addresses []vaultAddress) (string, error) {
 // create that neither succeeds nor is rejected by a 4xx leaves a request
 // Fireblocks may still act on, so it reports CodeBroadcastUnconfirmed with any
 // transaction id the response carried; a RAW create signs nothing on its own
-// and keeps the plain failure.
+// and keeps the plain failure. A duplicate externalTxId is reported the same
+// way, since it says Fireblocks already holds a create for these bytes.
 func (s *Signer) createTransaction(ctx context.Context, request createTransactionRequest, programCall bool) (createTransactionResponse, error) {
 	ambiguous := func(status int, respBody []byte, err error) error {
 		if !programCall {
 			return err
+		}
+		if isDuplicateExternalTxID(respBody) {
+			unconfirmed := core.NewBroadcastUnconfirmedError("", duplicateExternalTxIDDetail)
+			unconfirmed.IdempotencyKey = request.ExternalTxID
+			unconfirmed.ProviderStatus = status
+			return unconfirmed
 		}
 		return core.UnconfirmedUnlessRejected(status, transactionIDFromBody(respBody), request.ExternalTxID, err)
 	}
@@ -197,7 +221,12 @@ func (s *Signer) createTransaction(ctx context.Context, request createTransactio
 		return createTransactionResponse{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize fireblocks request", err)
 	}
 
-	status, respBody, err := s.doRequest(ctx, http.MethodPost, "/v1/transactions", string(body))
+	req, err := s.newRequest(ctx, http.MethodPost, "/v1/transactions", string(body))
+	if err != nil {
+		return createTransactionResponse{}, err
+	}
+
+	status, respBody, err := s.send(req)
 	if err != nil {
 		return createTransactionResponse{}, ambiguous(status, nil, err)
 	}
@@ -215,6 +244,19 @@ func (s *Signer) createTransaction(ctx context.Context, request createTransactio
 			core.NewSignerError(core.CodeSerializationError, "Fireblocks create response did not include a transaction id"))
 	}
 	return created, nil
+}
+
+// isDuplicateExternalTxID reports whether a failed create was rejected for
+// reusing an externalTxId, which means Fireblocks already holds a create for
+// these message bytes.
+func isDuplicateExternalTxID(body []byte) bool {
+	var parsed struct {
+		Code int `json:"code"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return false
+	}
+	return parsed.Code == duplicateExternalTxIDCode
 }
 
 func transactionIDFromBody(body []byte) string {

@@ -113,7 +113,7 @@ pub use fireblocks::{FireblocksSigner, FireblocksSignerConfig};
 pub use gcp_kms::{GcpKmsSigner, GcpKmsSignerConfig};
 
 #[cfg(feature = "cdp")]
-pub use cdp::{CdpSigner, CdpSignerConfig};
+pub use cdp::{CdpSigner, CdpSignerConfig, CDP_NETWORK_DEVNET, CDP_NETWORK_MAINNET};
 #[cfg(feature = "crossmint")]
 pub use crossmint::{CrossmintSigner, CrossmintSignerConfig};
 #[cfg(feature = "dfns")]
@@ -342,23 +342,10 @@ impl Signer {
 
     /// Create a CDP signer.
     ///
-    /// Pass `None` for `http_client_config` to use default timeout settings.
+    /// Set `config.network` to sign transactions that reference address lookup tables.
     #[cfg(feature = "cdp")]
-    pub fn from_cdp(
-        api_key_id: String,
-        api_key_secret: String,
-        wallet_secret: String,
-        address: String,
-        http_client_config: Option<HttpClientConfig>,
-    ) -> Result<Self, SignerError> {
-        Ok(Self::Cdp(CdpSigner::from_config(CdpSignerConfig {
-            api_key_id,
-            api_key_secret,
-            wallet_secret,
-            address,
-            api_base_url: None,
-            http_client_config,
-        })?))
+    pub fn from_cdp(config: CdpSignerConfig) -> Result<Self, SignerError> {
+        Ok(Self::Cdp(CdpSigner::from_config(config)?))
     }
 
     /// Create a Dfns signer (requires initialization)

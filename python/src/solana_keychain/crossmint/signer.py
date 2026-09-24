@@ -352,9 +352,11 @@ class CrossmintSigner(SendingSigner):
             json_body={"approvals": [{"signer": self._signer, "signature": str(signature)}]},
         )
 
-    def _extract_signature_from_serialized_transaction(
+    def _fee_payer_signature_from_serialized_transaction(
         self, serialized_transaction: str
-    ) -> tuple[Signature, VersionedTransaction]:
+    ) -> tuple[Signature, Pubkey, bytes]:
+        """The fee payer's signature out of a serialized ``onChain.transaction``,
+        with the key and bytes it has to be verified against."""
         try:
             transaction_bytes = base58.b58decode(serialized_transaction)
         except ValueError:
@@ -388,30 +390,9 @@ class CrossmintSigner(SendingSigner):
                 SignerErrorCode.SIGNING_FAILED,
                 "Crossmint transaction carries no signer signature",
             )
-        verify_returned_signature(signatures[0], account_keys[0], signed_message_bytes(message))
-        return signatures[0], transaction
+        return signatures[0], account_keys[0], signed_message_bytes(message)
 
-    @staticmethod
-    def _broadcast_transaction_id(transaction: VersionedTransaction) -> Signature:
-        """The landed transaction's fee-payer (slot 0) signature, the value RPC
-        transaction lookups accept."""
-        account_keys = list(transaction.message.account_keys)
-        signatures = list(transaction.signatures)
-        if not account_keys:
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Crossmint transaction has no fee payer to identify it by",
-            )
-        if not signatures or signatures[0] == Signature.default():
-            raise SignerError(
-                SignerErrorCode.SIGNING_FAILED,
-                "Crossmint transaction carries no fee-payer signature to identify it by",
-            )
-        return signatures[0]
-
-    def _extract_signature_from_response(
-        self, response: dict[str, Any], expected_message: bytes
-    ) -> Signature:
+    def _extract_signature_from_response(self, response: dict[str, Any]) -> Signature:
         """The signature identifying the transaction Crossmint landed.
 
         When Crossmint changed the message before signing, this is the landed
@@ -423,16 +404,17 @@ class CrossmintSigner(SendingSigner):
             serialized_transaction = on_chain.get("transaction")
             if isinstance(serialized_transaction, str):
                 try:
-                    signature, returned = self._extract_signature_from_serialized_transaction(
-                        serialized_transaction
+                    signature, fee_payer, message = (
+                        self._fee_payer_signature_from_serialized_transaction(
+                            serialized_transaction
+                        )
                     )
                 except SignerError:
                     if not isinstance(on_chain.get("txId"), str):
                         raise
                 else:
-                    if signed_message_bytes(returned.message) == expected_message:
-                        return signature
-                    return self._broadcast_transaction_id(returned)
+                    verify_returned_signature(signature, fee_payer, message)
+                    return signature
 
             tx_id = on_chain.get("txId")
             if isinstance(tx_id, str):
@@ -471,7 +453,7 @@ class CrossmintSigner(SendingSigner):
         if self._pending_transaction_id is not None:
             self._pending_transaction_id.set(provider_transaction_id)
         try:
-            signature = await self._finish_managed_transaction(create_response, expected_message)
+            signature = await self._finish_managed_transaction(create_response)
         except asyncio.CancelledError as error:
             _logger.warning(
                 "Crossmint may have executed cancelled transaction %s; check it before retrying",
@@ -482,25 +464,23 @@ class CrossmintSigner(SendingSigner):
                 f"not be confirmed (provider transaction id: {provider_transaction_id})"
             ) from error
         except SignerError as error:
-            self._clear_pending_transaction_id()
+            self._clear_pending_transaction_id(provider_transaction_id)
             raise SignerError(
                 SignerErrorCode.BROADCAST_UNCONFIRMED,
                 error._detail,
                 provider_transaction_id=provider_transaction_id,
                 idempotency_key=idempotency_key,
             ) from None
-        self._clear_pending_transaction_id()
+        self._clear_pending_transaction_id(provider_transaction_id)
         return signature
 
-    def _clear_pending_transaction_id(self) -> None:
+    def _clear_pending_transaction_id(self, provider_transaction_id: str) -> None:
         if self._pending_transaction_id is not None:
-            self._pending_transaction_id.clear()
+            self._pending_transaction_id.clear(provider_transaction_id)
 
-    async def _finish_managed_transaction(
-        self, create_response: dict[str, Any], expected_message: bytes
-    ) -> Signature:
+    async def _finish_managed_transaction(self, create_response: dict[str, Any]) -> Signature:
         final_response = await self._poll_transaction(create_response)
-        return self._extract_signature_from_response(final_response, expected_message)
+        return self._extract_signature_from_response(final_response)
 
     async def sign_and_send_transaction(self, transaction: VersionedTransaction) -> Signature:
         """Submit ``transaction`` through Crossmint's managed wallet flow.

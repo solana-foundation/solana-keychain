@@ -18,14 +18,26 @@ use types::{
 };
 
 use crate::remote_util::{
-    extract_api_error, parse_json_response, poll_until, read_body_capped, transaction_id_in_body,
-    PollOutcome,
+    extract_api_error_with_body, normalize_base_url, parse_json_response, poll_until,
+    read_body_capped, transaction_id_in_body, PollOutcome,
 };
 use crate::signature_util::{signature_from_base58, signature_from_hex, verify_or_reject};
 
 const DEFAULT_POLL_INTERVAL_MS: u64 = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 300;
 const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const DUPLICATE_EXTERNAL_TX_ID_CODE: u64 = 1438;
+const DUPLICATE_EXTERNAL_TX_ID_DETAIL: &str =
+    "Fireblocks rejected the PROGRAM_CALL create as a duplicate externalTxId, so an earlier create carrying the same message bytes already exists there";
+
+/// Whether a failed create was rejected for reusing an `externalTxId`, which
+/// means Fireblocks already holds a create for these message bytes.
+fn is_duplicate_external_tx_id(body: &[u8]) -> bool {
+    let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    parsed.get("code").and_then(serde_json::Value::as_u64) == Some(DUPLICATE_EXTERNAL_TX_ID_CODE)
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SigningMode {
@@ -127,9 +139,12 @@ impl FireblocksSigner {
             vault_account_id: config.vault_account_id,
             asset_id: config.asset_id.unwrap_or_else(|| "SOL".to_string()),
             public_key: None,
-            api_base_url: config
-                .api_base_url
-                .unwrap_or_else(|| "https://api.fireblocks.io".to_string()),
+            api_base_url: normalize_base_url(
+                config
+                    .api_base_url
+                    .as_deref()
+                    .unwrap_or("https://api.fireblocks.io"),
+            ),
             client,
             poll_interval_ms,
             max_poll_attempts,
@@ -308,7 +323,7 @@ impl FireblocksSigner {
             },
         };
 
-        if !sig.verify(&public_key.to_bytes(), message_bytes) {
+        if !crate::signature_util::verifies(&sig, &public_key, message_bytes) {
             return Err(SignerError::SigningFailed(
                 "Signature verification failed — the signature returned for the PROGRAM_CALL does not match the vault public key over the submitted message".to_string(),
             ));
@@ -321,7 +336,8 @@ impl FireblocksSigner {
     /// nor is rejected by a 4xx leaves a request Fireblocks may still act on,
     /// so it reports `BroadcastUnconfirmed` with any transaction id the
     /// response carried; a RAW create signs nothing on its own and keeps the
-    /// plain failure.
+    /// plain failure. A duplicate `externalTxId` is reported the same way,
+    /// since it says Fireblocks already holds a create for these bytes.
     async fn create_transaction(
         &self,
         request: CreateTransactionRequest,
@@ -361,7 +377,16 @@ impl FireblocksSigner {
         })?;
         let status = response.status().as_u16();
         if !response.status().is_success() {
-            let error = extract_api_error(response, CONTEXT).await;
+            let (error, body) = extract_api_error_with_body(response, CONTEXT).await;
+            if is_duplicate_external_tx_id(&body) {
+                return Err(SignerError::BroadcastUnconfirmed {
+                    provider_tx_id: None,
+                    provider_status: Some(status),
+                    idempotency_key: external_tx_id.clone(),
+                    transaction_signature: None,
+                    detail: DUPLICATE_EXTERNAL_TX_ID_DETAIL.to_string(),
+                });
+            }
             return Err(unconfirmed_unless_rejected(
                 Some(status),
                 None,

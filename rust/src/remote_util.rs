@@ -2,6 +2,12 @@
 
 use crate::error::SignerError;
 
+/// Trim surrounding whitespace and strip trailing slashes from a configured
+/// base URL, so paths can be appended with a single `/`.
+pub(crate) fn normalize_base_url(base_url: &str) -> String {
+    base_url.trim().trim_end_matches('/').to_string()
+}
+
 /// Reject an API base URL that is not valid HTTPS, parsing it rather than
 /// string-matching so `HTTPS://`, whitespace, and malformed URLs are all
 /// caught.
@@ -149,13 +155,13 @@ pub(crate) fn transaction_id_in_body(body: &[u8]) -> Option<String> {
         .map(str::to_string)
 }
 
-/// [`extract_api_error`] plus any transaction id the failed body named, for a
-/// create whose acceptance the caller still has to reconcile.
-#[cfg(feature = "fordefi")]
-pub(crate) async fn extract_api_error_with_transaction_id(
+/// [`extract_api_error`] plus the failed body, for a create whose acceptance the
+/// caller still has to reconcile from what the provider said.
+#[cfg(any(feature = "fireblocks", feature = "fordefi"))]
+pub(crate) async fn extract_api_error_with_body(
     response: reqwest::Response,
     context: &str,
-) -> (SignerError, Option<String>) {
+) -> (SignerError, Vec<u8>) {
     let status = response.status().as_u16();
     let body = read_body_capped(response).await.unwrap_or_default();
 
@@ -169,8 +175,19 @@ pub(crate) async fn extract_api_error_with_transaction_id(
 
     (
         SignerError::remote_api(format!("{context} error {status}")),
-        transaction_id_in_body(&body),
+        body,
     )
+}
+
+/// [`extract_api_error`] plus any transaction id the failed body named, for a
+/// create whose acceptance the caller still has to reconcile.
+#[cfg(feature = "fordefi")]
+pub(crate) async fn extract_api_error_with_transaction_id(
+    response: reqwest::Response,
+    context: &str,
+) -> (SignerError, Option<String>) {
+    let (error, body) = extract_api_error_with_body(response, context).await;
+    (error, transaction_id_in_body(&body))
 }
 
 /// Reject a non-success response via [`extract_api_error`], then parse the

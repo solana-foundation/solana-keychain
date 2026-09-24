@@ -8,6 +8,7 @@ import {
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
     idempotencyKeyFromMessage,
+    normalizeBaseUrl,
     normalizeMessageBytes,
     providerMayHaveAccepted,
     providerStatus,
@@ -73,6 +74,17 @@ const DEFAULT_API_BASE_URL = 'https://api.fireblocks.io';
 const DEFAULT_ASSET_ID = 'SOL';
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 60;
+const DUPLICATE_EXTERNAL_TX_ID_CODE = 1438;
+const DUPLICATE_EXTERNAL_TX_ID_MESSAGE =
+    'Fireblocks rejected the PROGRAM_CALL create as a duplicate externalTxId, so an earlier create carrying the same message bytes already exists there';
+
+/**
+ * Whether a failed create was rejected for reusing an `externalTxId`, which
+ * means Fireblocks already holds a create for these message bytes.
+ */
+function isDuplicateExternalTxId(error: unknown): boolean {
+    return error instanceof SignerError && error.context?.providerErrorCode === DUPLICATE_EXTERNAL_TX_ID_CODE;
+}
 
 /**
  * Fireblocks-based signer for Solana transactions
@@ -141,12 +153,23 @@ class FireblocksSigner<TAddress extends string = string>
         this.privateKeyPem = config.privateKeyPem;
         this.vaultAccountId = config.vaultAccountId;
         this.assetId = config.assetId ?? DEFAULT_ASSET_ID;
-        const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
+        const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl ?? DEFAULT_API_BASE_URL);
         assertHttpsUrl(apiBaseUrl, 'apiBaseUrl');
 
         this.apiBaseUrl = apiBaseUrl;
         this.pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+        if (this.pollIntervalMs <= 0) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'pollIntervalMs must be greater than 0',
+            });
+        }
+
         this.maxPollAttempts = config.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS;
+        if (this.maxPollAttempts <= 0) {
+            throwSignerError(SignerErrorCode.CONFIG_ERROR, {
+                message: 'maxPollAttempts must be greater than 0',
+            });
+        }
         this.requestDelayMs = config.requestDelayMs ?? 0;
 
         validateRequestDelayMs(this.requestDelayMs);
@@ -228,12 +251,21 @@ class FireblocksSigner<TAddress extends string = string>
         });
     }
 
-    private async request<T>(method: string, uri: string, body?: unknown, abortSignal?: AbortSignal): Promise<T> {
+    /**
+     * Serialize a body and mint its per-request JWT, without sending anything.
+     * Kept separate from the send so a caller classifying an ambiguous create
+     * covers only the hop that could reach Fireblocks: a malformed API private
+     * key fails here, having submitted nothing.
+     */
+    private async prepareRequest(
+        method: string,
+        uri: string,
+        body?: unknown,
+    ): Promise<{ init: RequestInit; url: string }> {
         const bodyStr = body ? JSON.stringify(body) : '';
         const token = await createJwt(this.apiKey, await this.getPrivateKey(), uri, bodyStr);
 
-        return await fetchSignerJson<T>({
-            abortSignal,
+        return {
             init: {
                 body: body ? bodyStr : undefined,
                 headers: {
@@ -243,9 +275,21 @@ class FireblocksSigner<TAddress extends string = string>
                 },
                 method,
             },
-            providerName: 'Fireblocks',
             url: `${this.apiBaseUrl}${uri}`,
+        };
+    }
+
+    private async send<T>(prepared: { init: RequestInit; url: string }, abortSignal?: AbortSignal): Promise<T> {
+        return await fetchSignerJson<T>({
+            abortSignal,
+            init: prepared.init,
+            providerName: 'Fireblocks',
+            url: prepared.url,
         });
+    }
+
+    private async request<T>(method: string, uri: string, body?: unknown, abortSignal?: AbortSignal): Promise<T> {
+        return await this.send<T>(await this.prepareRequest(method, uri, body), abortSignal);
     }
 
     private async signRawBytes(messageBytes: Uint8Array, abortSignal?: AbortSignal): Promise<SignatureBytes> {
@@ -319,15 +363,20 @@ class FireblocksSigner<TAddress extends string = string>
         externalTxId: string,
         abortSignal?: AbortSignal,
     ): Promise<string> {
+        const prepared = await this.prepareRequest('POST', '/v1/transactions', request);
         let createResponse: CreateTransactionResponse;
         try {
-            createResponse = await this.request<CreateTransactionResponse>(
-                'POST',
-                '/v1/transactions',
-                request,
-                abortSignal,
-            );
+            createResponse = await this.send<CreateTransactionResponse>(prepared, abortSignal);
         } catch (error) {
+            if (isDuplicateExternalTxId(error)) {
+                const status = providerStatus(error);
+                return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
+                    cause: error,
+                    idempotencyKey: externalTxId,
+                    message: DUPLICATE_EXTERNAL_TX_ID_MESSAGE,
+                    ...(status === undefined ? {} : { status }),
+                });
+            }
             if (!providerMayHaveAccepted(error)) {
                 throw error;
             }
@@ -501,11 +550,12 @@ class FireblocksSigner<TAddress extends string = string>
         this.ensureInitialized();
 
         const signOne = async (transaction: (typeof transactions)[number]): Promise<SignatureDictionary> => {
+            const messageBytes = normalizeMessageBytes(transaction.messageBytes);
             const signatureBytes = this.useProgramCall
                 ? await this.signProgramCall(transaction, config?.abortSignal)
-                : await this.signRawBytes(normalizeMessageBytes(transaction.messageBytes), config?.abortSignal);
+                : await this.signRawBytes(messageBytes, config?.abortSignal);
             await assertSignatureValid({
-                data: transaction.messageBytes,
+                data: messageBytes,
                 signature: signatureBytes,
                 signerAddress: this.address,
             });

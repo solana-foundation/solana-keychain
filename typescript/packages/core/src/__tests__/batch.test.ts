@@ -161,18 +161,57 @@ describe('signBatchSequential', () => {
         });
     });
 
-    it('rethrows a non-SignerError unchanged', async () => {
+    it('wraps a non-SignerError with the completed signatures and the original cause', async () => {
         const reason = new Error('not ours');
-        await expect(
-            signBatchSequential(
-                [1],
-                () => {
+        const error = await signBatchSequential(
+            [1, 2],
+            async (item: number) => {
+                if (item === 2) {
                     throw reason;
-                },
-                0,
-                'completedSignatures',
-            ),
-        ).rejects.toBe(reason);
+                }
+                return `signed-${item}`;
+            },
+            0,
+            'completedSignatures',
+        ).then(
+            () => {
+                throw new Error('expected the failing item to reject');
+            },
+            (thrown: SignerError) => thrown,
+        );
+
+        expect(error.code).toBe('SIGNER_SIGNING_FAILED');
+        expect(error.cause).toBe(reason);
+        expect(error.context).toMatchObject({
+            completedSignatures: ['signed-1'],
+            failedIndex: 1,
+        });
+    });
+
+    it('reports the completed signatures when the batch is aborted mid-flight', async () => {
+        const controller = new AbortController();
+        const reason = new Error('cancelled mid-batch');
+        const error = await signBatchSequential(
+            [1, 2],
+            async (item: number) => {
+                controller.abort(reason);
+                return `signed-${item}`;
+            },
+            0,
+            'completedSignatures',
+            controller.signal,
+        ).then(
+            () => {
+                throw new Error('expected the aborted batch to reject');
+            },
+            (thrown: SignerError) => thrown,
+        );
+
+        expect(error.cause).toBe(reason);
+        expect(error.context).toMatchObject({
+            completedSignatures: ['signed-1'],
+            failedIndex: 1,
+        });
     });
 
     it('rejects with the abort reason for an already-aborted signal without calling fn', async () => {

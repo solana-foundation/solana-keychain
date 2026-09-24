@@ -64,7 +64,7 @@ pub enum SignerError {
     ///
     /// `transaction_signature` identifies the completed transaction passed to a
     /// caller-managed sender. Provider-managed broadcasts leave it `None`.
-    #[error("Broadcast unconfirmed; the provider may have executed the transaction (provider transaction id: {})", provider_tx_id.as_deref().unwrap_or("unknown"))]
+    #[error("Broadcast unconfirmed; the provider may have executed the transaction{}", provider_tx_id.as_ref().map(|id| format!(" (provider transaction id: {id})")).unwrap_or_default())]
     BroadcastUnconfirmed {
         provider_tx_id: Option<String>,
         provider_status: Option<u16>,

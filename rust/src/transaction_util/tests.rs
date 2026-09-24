@@ -39,3 +39,18 @@ fn v1_wire_transaction_round_trips() {
     assert_eq!(decoded.message.serialize(), transaction.message.serialize());
     assert_eq!(decoded.signatures, transaction.signatures);
 }
+
+/// Concurrent sends share one handle, so finishing one must leave the other's
+/// id behind.
+#[cfg(any(feature = "crossmint", feature = "fordefi"))]
+#[test]
+fn a_finished_call_clears_only_its_own_pending_id() {
+    let pending = crate::transaction_util::PendingTransactionId::new();
+
+    pending.set("tx-first");
+    pending.set("tx-second");
+    pending.clear("tx-second");
+
+    assert_eq!(pending.ids(), vec!["tx-first".to_string()]);
+    assert_eq!(pending.get(), Some("tx-first".to_string()));
+}

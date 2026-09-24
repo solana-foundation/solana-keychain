@@ -9,6 +9,7 @@ from solders.transaction import VersionedTransaction
 
 from solana_keychain import SignerError, SignerErrorCode
 from solana_keychain.core import (
+    PendingTransactionId,
     add_signature_to_transaction,
     classify_signed_transaction,
     get_signing_keypair_position,
@@ -128,3 +129,16 @@ def test_signed_message_bytes_prefixes_v1_messages() -> None:
     signature = keypair.sign_message(message_bytes)
     assert signature.verify(keypair.pubkey(), message_bytes)
     assert not signature.verify(keypair.pubkey(), bytes(message))
+
+
+def test_a_finished_call_clears_only_its_own_pending_id() -> None:
+    """Concurrent sends share one handle, so finishing one must leave the
+    other's id behind."""
+    pending = PendingTransactionId()
+
+    pending.set("tx-first")
+    pending.set("tx-second")
+    pending.clear("tx-second")
+
+    assert pending.ids() == ["tx-first"]
+    assert pending.get() == "tx-first"

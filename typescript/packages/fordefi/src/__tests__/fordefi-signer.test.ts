@@ -506,6 +506,27 @@ describe('createFordefiSigner', () => {
     });
 
     describe('signAndSendTransactions (native solana mode)', () => {
+        it('does not report a request-signing failure as an unconfirmed broadcast', async () => {
+            const { config, fixture } = await setupNativeBroadcast(0);
+            const signer = await createFordefiSigner({
+                ...config,
+                privateKeyPem: undefined,
+                requestSigner: {
+                    signRequest: () => {
+                        throw new Error('kms unavailable');
+                    },
+                },
+            });
+
+            const mockTx = {
+                messageBytes: fixture.messageBytes,
+                signatures: { [fixture.feePayer]: null },
+            } as never;
+            const thrown: unknown = await signer.signAndSendTransactions([mockTx]).catch((error: unknown) => error);
+            expect((thrown as SignerError).code).not.toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            expect(fetch).not.toHaveBeenCalled();
+        });
+
         it.each([0, 1] as const)(
             'should expose a TransactionSendingSigner and return the broadcast signature from a v%i envelope',
             async version => {
@@ -565,6 +586,47 @@ describe('createFordefiSigner', () => {
             const postOpts = vi.mocked(fetch).mock.calls[0]![1] as RequestInit;
             const body = JSON.parse(postOpts.body as string);
             expect(new Uint8Array(Buffer.from(body.details.data as string, 'base64'))).toStrictEqual(messageBytes);
+        });
+
+        // A rewrite can move the fee payer slot off the vault, and that slot's
+        // signature is the broadcast id, so it is verified in its own right.
+        it('verifies the fee payer signature it returns as the broadcast id', async () => {
+            const sponsor = await generateKeyPairSigner();
+            const vault = await generateKeyPairSigner();
+            const rewritten = await partiallySignTransaction(
+                [sponsor.keyPair, vault.keyPair],
+                compileTransaction(
+                    pipe(
+                        createTransactionMessage({ version: 0 }),
+                        tx => setTransactionMessageFeePayer(sponsor.address, tx),
+                        tx =>
+                            setTransactionMessageLifetimeUsingBlockhash(
+                                { blockhash: blockhash(MOCK_ADDRESS), lastValidBlockHeight: 100n },
+                                tx,
+                            ),
+                        tx =>
+                            appendTransactionMessageInstruction(
+                                {
+                                    accounts: [{ address: vault.address, role: AccountRole.READONLY_SIGNER }],
+                                    programAddress: COMPUTE_BUDGET_PROGRAM_ADDRESS,
+                                },
+                                tx,
+                            ),
+                    ),
+                ),
+            );
+            vi.mocked(fetch)
+                .mockResolvedValueOnce(mockCreateTxResponse('tx-native'))
+                .mockResolvedValueOnce(
+                    mockPollResponse('completed', MOCK_SIGNATURE_BASE64, getBase64EncodedWireTransaction(rewritten)),
+                );
+
+            const signer = await createFordefiSigner({ ...nativeConfig, publicKey: vault.address });
+            await signer.signAndSendTransactions([unsignedManualTransaction(vault.address)]);
+
+            expect(assertSignatureValid).toHaveBeenCalledWith(
+                expect.objectContaining({ signerAddress: sponsor.address }),
+            );
         });
 
         it('sends a deterministic x-idempotence-id on the native create', async () => {
@@ -1142,7 +1204,12 @@ describe('createFordefiSigner', () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockCreateTxResponse('tx-manual'))
                 .mockResolvedValueOnce(mockPollResponse('signed', undefined, fixture.wireTransaction));
-            vi.mocked(assertSignatureValid).mockRejectedValueOnce(new Error('signature does not match'));
+            vi.mocked(assertSignatureValid).mockRejectedValueOnce(
+                new SignerError(SignerErrorCode.SIGNING_FAILED, {
+                    message:
+                        'Signature verification failed: returned signature does not match public key and signed data',
+                }),
+            );
 
             const signer = await createFordefiSigner(config);
             const callerTransaction = unsignedManualTransaction(fixture.feePayer);
@@ -1330,6 +1397,12 @@ describe('createFordefiSigner', () => {
         it('should return false on network error', async () => {
             const signer = await createFordefiSigner(mockConfig);
             vi.mocked(fetch).mockRejectedValueOnce(new Error('Network error'));
+            expect(await signer.isAvailable()).toBe(false);
+        });
+
+        it('should return false when the vault holds another address', async () => {
+            const signer = await createFordefiSigner(mockConfig);
+            vi.mocked(fetch).mockResolvedValueOnce(mockVaultResponse('SysvarC1ock11111111111111111111111111111111'));
             expect(await signer.isAvailable()).toBe(false);
         });
     });

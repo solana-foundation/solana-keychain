@@ -43,25 +43,25 @@
         "@solana/keychain-core": "workspace:*"
     },
     "peerDependencies": {
-        "@solana/addresses": ">=8.0.0",
-        "@solana/codecs-core": ">=8.0.0",
-        "@solana/codecs-strings": ">=8.0.0",
-        "@solana/keys": ">=8.0.0",
-        "@solana/signers": ">=8.0.0",
-        "@solana/transactions": ">=8.0.0"
+        "@solana/addresses": ">=8.1.0",
+        "@solana/codecs-core": ">=8.1.0",
+        "@solana/codecs-strings": ">=8.1.0",
+        "@solana/keys": ">=8.1.0",
+        "@solana/signers": ">=8.1.0",
+        "@solana/transactions": ">=8.1.0"
     },
     "publishConfig": {
         "access": "public"
     },
     "devDependencies": {
-        "@solana/addresses": "8.0.0",
-        "@solana/codecs-core": "8.0.0",
-        "@solana/codecs-strings": "8.0.0",
+        "@solana/addresses": "8.3.0",
+        "@solana/codecs-core": "8.3.0",
+        "@solana/codecs-strings": "8.3.0",
         "@solana/keychain-test-utils": "workspace:*",
-        "@solana/keys": "8.0.0",
-        "@solana/nominal-types": "8.0.0",
-        "@solana/signers": "8.0.0",
-        "@solana/transactions": "8.0.0",
+        "@solana/keys": "8.3.0",
+        "@solana/nominal-types": "8.3.0",
+        "@solana/signers": "8.3.0",
+        "@solana/transactions": "8.3.0",
         "dotenv": "^17.4.2"
     }
 }

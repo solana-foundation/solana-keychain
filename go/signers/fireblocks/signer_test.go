@@ -3,6 +3,7 @@ package fireblocks
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -989,5 +990,84 @@ func TestSignMessageNoSignedMessages(t *testing.T) {
 	}
 	if code, _ := core.CodeOf(err); code != core.CodeSigningFailed {
 		t.Errorf("got %s, want SIGNING_FAILED", code)
+	}
+}
+
+// A failure that happens before the create leaves the process must not be
+// reported as a create Fireblocks may still act on.
+func TestSignTransactionProgramCallPreSendFailureIsNotUnconfirmed(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := newTestSignerWithProgramCall(t, pub.String(), true, func(mux *http.ServeMux) {
+		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("create request reached Fireblocks")
+			testutils.WriteJSON(w, http.StatusOK, map[string]any{"id": "tx-789"})
+		})
+	})
+	s.signingKey = &rsa.PrivateKey{}
+
+	_, err = s.SignTransaction(context.Background(), tx)
+	if code, _ := core.CodeOf(err); code == core.CodeBroadcastUnconfirmed {
+		t.Fatalf("got %s, want a plain failure", code)
+	}
+}
+
+func TestCreateDuplicateExternalTxIDReportsUnconfirmed(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		body     map[string]any
+		wantCode core.Code
+	}{
+		{
+			"duplicate external tx id means the create already exists",
+			map[string]any{"message": "The external tx id that was provided in the request, already exists", "code": 1438},
+			core.CodeBroadcastUnconfirmed,
+		},
+		{
+			"any other 4xx rules the create out",
+			map[string]any{"message": "Invalid asset", "code": 1026},
+			core.CodeRemoteAPIError,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pub := testutils.TestPublicKey()
+			s := newTestSignerWithProgramCall(t, pub.String(), true, func(mux *http.ServeMux) {
+				mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
+					testutils.WriteJSON(w, http.StatusBadRequest, tc.body)
+				})
+			})
+
+			tx, err := testutils.CreateTestTransaction(pub)
+			if err != nil {
+				t.Fatal(err)
+			}
+			message, err := tx.Message.MarshalBinary()
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantIdempotencyKey := s.externalTxID(message)
+
+			_, err = s.SignTransaction(context.Background(), tx)
+			if code, _ := core.CodeOf(err); code != tc.wantCode {
+				t.Fatalf("got %s, want %s", code, tc.wantCode)
+			}
+			if tc.wantCode != core.CodeBroadcastUnconfirmed {
+				return
+			}
+			var signerErr *core.SignerError
+			if !errors.As(err, &signerErr) {
+				t.Fatalf("expected SignerError, got %T", err)
+			}
+			if signerErr.IdempotencyKey != wantIdempotencyKey {
+				t.Errorf("IdempotencyKey = %q, want %q", signerErr.IdempotencyKey, wantIdempotencyKey)
+			}
+			if signerErr.ProviderStatus != http.StatusBadRequest {
+				t.Errorf("ProviderStatus = %d, want 400", signerErr.ProviderStatus)
+			}
+		})
 	}
 }

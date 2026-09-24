@@ -1,4 +1,5 @@
-import { address } from '@solana/addresses';
+import { address, getAddressEncoder } from '@solana/addresses';
+import { getBase64Decoder } from '@solana/codecs-strings';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertIsSolanaTransactionSigner } from '@solana/keychain-core';
 
@@ -52,6 +53,13 @@ function assertAuthorizedRequest(url: string, method: string, callIndex = 0): Re
     const headers = new Headers(init.headers);
     expect(headers.get('authorization')).toBe('Bearer test-token');
     return init;
+}
+
+/** PEM-encoded SubjectPublicKeyInfo, the shape GCP KMS returns from GetPublicKey. */
+function spkiPem(publicKey: string): string {
+    const key = new Uint8Array(getAddressEncoder().encode(address(publicKey)));
+    const der = new Uint8Array([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, ...key]);
+    return `-----BEGIN PUBLIC KEY-----\n${getBase64Decoder().decode(der)}\n-----END PUBLIC KEY-----\n`;
 }
 
 describe('createGcpKmsSigner', () => {
@@ -432,7 +440,9 @@ describe('createGcpKmsSigner', () => {
 
     describe('isAvailable', () => {
         it('should return true for valid Ed25519 key', async () => {
-            mockFetch.mockResolvedValue(createJsonResponse({ algorithm: 'EC_SIGN_ED25519' }));
+            mockFetch.mockResolvedValue(
+                createJsonResponse({ algorithm: 'EC_SIGN_ED25519', pem: spkiPem(TEST_PUBLIC_KEY) }),
+            );
 
             const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME,
@@ -446,8 +456,26 @@ describe('createGcpKmsSigner', () => {
             assertAuthorizedRequest(PUBLIC_KEY_ENDPOINT, 'GET');
         });
 
+        it('should return false when KMS holds a different key', async () => {
+            mockFetch.mockResolvedValue(
+                createJsonResponse({
+                    algorithm: 'EC_SIGN_ED25519',
+                    pem: spkiPem('SysvarC1ock11111111111111111111111111111111'),
+                }),
+            );
+
+            const signer = createGcpKmsSigner({
+                keyName: TEST_KEY_NAME,
+                publicKey: TEST_PUBLIC_KEY,
+            });
+
+            expect(await signer.isAvailable()).toBe(false);
+        });
+
         it('should use canonical public key endpoint for valid key names', async () => {
-            mockFetch.mockResolvedValue(createJsonResponse({ algorithm: 'EC_SIGN_ED25519' }));
+            mockFetch.mockResolvedValue(
+                createJsonResponse({ algorithm: 'EC_SIGN_ED25519', pem: spkiPem(TEST_PUBLIC_KEY) }),
+            );
 
             const signer = createGcpKmsSigner({
                 keyName: TEST_KEY_NAME_WITH_LEADING_SLASH,

@@ -634,7 +634,7 @@ func TestIsAvailable(t *testing.T) {
 		testutils.WriteRawJSON(w, http.StatusOK, walletJSON(testutils.TestPublicKey().String()))
 	}))
 
-	s := newDirectSigner(t, srv, solana.PublicKey{})
+	s := newDirectSigner(t, srv, testutils.TestPublicKey())
 	if !s.IsAvailable(context.Background()) {
 		t.Error("IsAvailable should be true while the wallet endpoint is healthy")
 	}
@@ -643,10 +643,37 @@ func TestIsAvailable(t *testing.T) {
 		t.Error("IsAvailable should be false when the wallet endpoint errors")
 	}
 
-	unreachable := newDirectSigner(t, srv, solana.PublicKey{})
+	unreachable := newDirectSigner(t, srv, testutils.TestPublicKey())
 	unreachable.apiBaseURL = "https://127.0.0.1:1"
 	if unreachable.IsAvailable(context.Background()) {
 		t.Error("IsAvailable should be false when the endpoint is unreachable")
+	}
+}
+
+// TestIsAvailableRequiresTheInitializedAddress verifies a wallet that no longer
+// carries this signer's Solana address is reported unavailable rather than
+// usable.
+func TestIsAvailableRequiresTheInitializedAddress(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "no solana details", body: `{"wallet":{}}`},
+		{name: "unparsable address", body: walletJSON("not-a-valid-key!!")},
+		{name: "another wallet address", body: walletJSON(solana.NewWallet().PublicKey().String())},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := testutils.StartTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				testutils.WriteRawJSON(w, http.StatusOK, tc.body)
+			}))
+
+			s := newDirectSigner(t, srv, testutils.TestPublicKey())
+			if s.IsAvailable(context.Background()) {
+				t.Error("IsAvailable should be false unless the wallet still resolves to the initialized address")
+			}
+		})
 	}
 }
 

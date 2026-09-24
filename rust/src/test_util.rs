@@ -1,10 +1,8 @@
 use std::str::FromStr;
 
-#[cfg(feature = "sdk-v4")]
-use crate::sdk_adapter::Signature;
 use crate::sdk_adapter::{
-    AccountMeta, Hash, Instruction, Message, Pubkey, Transaction, VersionedMessage,
-    VersionedTransaction,
+    v0, AccountMeta, Hash, Instruction, Message, MessageAddressTableLookup, Pubkey, Signature,
+    Transaction, VersionedMessage, VersionedTransaction,
 };
 #[cfg(feature = "sdk-v4")]
 use solana_sdk_v4::message::v1::{Message as V1Message, TransactionConfig};
@@ -32,6 +30,23 @@ pub fn create_test_transaction_with_recipient(from: &Pubkey, to: &Pubkey) -> Ver
     let mut tx = Transaction::new_unsigned(message);
     tx.message.recent_blockhash = Hash::default();
     tx.into()
+}
+
+/// Build a v0 test transaction whose message references an address lookup table.
+pub fn create_test_transaction_with_lookups(from: &Pubkey) -> VersionedTransaction {
+    let message = v0::Message {
+        account_keys: vec![*from],
+        address_table_lookups: vec![MessageAddressTableLookup {
+            account_key: Pubkey::new_unique(),
+            writable_indexes: vec![0],
+            readonly_indexes: vec![],
+        }],
+        ..Default::default()
+    };
+    VersionedTransaction {
+        signatures: vec![Signature::default()],
+        message: VersionedMessage::V0(message),
+    }
 }
 
 /// Insert `pubkey` as a second required signer in a legacy test transaction.

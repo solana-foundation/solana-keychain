@@ -110,7 +110,7 @@ func stagger(ctx context.Context, start time.Time, index int, delay time.Duratio
 	if delay <= 0 || index == 0 {
 		return nil
 	}
-	wait := time.Until(start.Add(time.Duration(index) * delay))
+	wait := time.Until(start.Add(delay * time.Duration(index)))
 	if wait <= 0 {
 		return nil
 	}

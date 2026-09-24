@@ -18,6 +18,10 @@ const (
 	DefaultAPIBaseURL = "https://api.cdp.coinbase.com"
 	// basePath is the CDP Solana accounts base path.
 	basePath = "/platform/v2/solana/accounts"
+	// NetworkMainnet targets Solana mainnet-beta.
+	NetworkMainnet = "solana"
+	// NetworkDevnet targets Solana devnet.
+	NetworkDevnet = "solana-devnet"
 )
 
 // Signer signs Solana transactions and messages with CDP's managed key
@@ -28,6 +32,7 @@ type Signer struct {
 	apiKeyID     string
 	apiKeySecret string
 	walletSecret string
+	network      string
 	pubkey       solana.PublicKey
 	apiBaseURL   string
 	apiHost      string
@@ -53,6 +58,11 @@ func New(cfg Config) (*Signer, error) {
 		return nil, core.NewSignerError(core.CodeConfigError, "address must not be empty")
 	}
 
+	if cfg.Network != "" && cfg.Network != NetworkMainnet && cfg.Network != NetworkDevnet {
+		return nil, core.NewSignerError(core.CodeConfigError,
+			"network must be \""+NetworkMainnet+"\" or \""+NetworkDevnet+"\"")
+	}
+
 	pubkey, err := solana.PublicKeyFromBase58(cfg.Address)
 	if err != nil {
 		return nil, core.WrapSignerError(core.CodeInvalidPublicKey, "invalid Solana address: "+cfg.Address, err)
@@ -73,6 +83,7 @@ func New(cfg Config) (*Signer, error) {
 		apiKeyID:     cfg.APIKeyID,
 		apiKeySecret: cfg.APIKeySecret,
 		walletSecret: cfg.WalletSecret,
+		network:      cfg.Network,
 		pubkey:       pubkey,
 		apiBaseURL:   baseURL,
 		apiHost:      apiHost,
@@ -125,6 +136,11 @@ func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signat
 // signed transaction, verifies it against the original message bytes, and
 // applies it to tx.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
+	if len(tx.Message.AddressTableLookups) > 0 && s.network == "" {
+		return core.SignedTransaction{}, core.NewSignerError(core.CodeConfigError,
+			"network must be configured to sign a transaction with address lookup tables")
+	}
+
 	msgBytes, err := tx.Message.MarshalBinary()
 	if err != nil {
 		return core.SignedTransaction{}, core.WrapSignerError(core.CodeSerializationError,
@@ -147,6 +163,9 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 
 	path := basePath + "/" + s.pubkey.String() + "/sign/transaction"
 	body := map[string]any{"transaction": base64.StdEncoding.EncodeToString(serialized)}
+	if s.network != "" {
+		body["network"] = s.network
+	}
 	var resp signTransactionResponse
 	if err := s.doPost(ctx, path, body, &resp, "sign_transaction"); err != nil {
 		return core.SignedTransaction{}, err

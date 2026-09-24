@@ -917,6 +917,47 @@ func TestSignAndSendTransactionPrefersOnChainTransactionSignatureOverTxIDFallbac
 	}
 }
 
+// A returned transaction whose fee-payer signature does not verify is a
+// tampered response, so the unverified txId must not stand in for it.
+func TestSignAndSendTransactionRejectsAnUnverifiableTransactionCarryingATxID(t *testing.T) {
+	priv := testutils.TestPrivateKey()
+	signerPubkey := testutils.PubkeyOf(priv)
+
+	remoteTx, err := testutils.CreateTestTransaction(signerPubkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged := testutils.SignWith(priv, []byte("bytes the response does not carry"))
+	if err := core.AddSignature(remoteTx, signerPubkey, forged); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := remoteTx.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+testWalletPath, walletHandler(t, testAPIKey, signerPubkey.String()))
+	mux.HandleFunc("POST "+testWalletPath+"/transactions", func(w http.ResponseWriter, _ *http.Request) {
+		testutils.WriteRawJSON(w, http.StatusCreated, fmt.Sprintf(
+			`{"id":"tx-unverifiable","status":"success","onChain":{"transaction":%q,"txId":%q}}`,
+			base58.Encode(raw), base58.Encode(forged[:])))
+	})
+	srv := testutils.StartTLSServer(t, mux)
+
+	cfg := baseConfig(srv)
+	cfg.MaxPollAttempts = 1
+	s := newTestSigner(t, cfg)
+
+	localTx, err := testutils.CreateTestTransaction(signerPubkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SignAndSendTransaction(context.Background(), localTx); err == nil {
+		t.Fatal("expected a transaction whose signature does not verify to be rejected")
+	}
+}
+
 // TestSignTransactionAwaitingApproval: without a configured signer secret,
 // awaiting-approval is a terminal failure.
 func TestSignAndSendTransactionAwaitingApproval(t *testing.T) {

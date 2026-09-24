@@ -16,30 +16,35 @@ ED25519_SIGNATURE_LENGTH = 64
 
 
 class PendingTransactionId:
-    """A slot a broadcast-managed signer writes the accepted provider transaction
-    id into, so the id survives a cancelled call.
+    """A handle a broadcast-managed signer writes accepted provider transaction
+    ids into, one per in-flight call, so an id survives a cancelled call.
 
     A cancellation must be re-raised as ``asyncio.CancelledError``, which carries
     no structured field, and awaiting a cancelled task hands the awaiter a fresh
     instance without the raised message. Pass an instance of this class to the
     signer configuration, and read it after a cancellation to learn which
     provider transaction to reconcile before retrying. A call that returns
-    normally clears the slot, since the id is then already in the result or the
+    normally removes its own id, since it is then already in the result or the
     error.
     """
 
     def __init__(self) -> None:
-        self._provider_transaction_id: str | None = None
+        self._provider_transaction_ids: list[str] = []
 
     def get(self) -> str | None:
-        """The provider transaction id left behind by a cancelled call, if any."""
-        return self._provider_transaction_id
+        """The most recent id left behind by a cancelled call, if any."""
+        return self._provider_transaction_ids[-1] if self._provider_transaction_ids else None
+
+    def ids(self) -> list[str]:
+        """Every id still in flight, oldest first."""
+        return list(self._provider_transaction_ids)
 
     def set(self, provider_transaction_id: str) -> None:
-        self._provider_transaction_id = provider_transaction_id
+        self._provider_transaction_ids.append(provider_transaction_id)
 
-    def clear(self) -> None:
-        self._provider_transaction_id = None
+    def clear(self, provider_transaction_id: str) -> None:
+        if provider_transaction_id in self._provider_transaction_ids:
+            self._provider_transaction_ids.remove(provider_transaction_id)
 
 
 def idempotency_key_from_message(message_bytes: bytes) -> str:

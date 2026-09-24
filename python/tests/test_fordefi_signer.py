@@ -422,6 +422,26 @@ async def test_sign_transaction_native_polling_timeout_is_broadcast_unconfirmed(
 
 
 @respx.mock
+async def test_native_submit_request_signing_failure_is_not_unconfirmed() -> None:
+    """Request signing happens before the submit leaves the process, so its
+    failure cannot have reached Fordefi."""
+
+    class FailingRequestSigner(FordefiRequestSigner):
+        async def sign_request(self, payload: bytes) -> str:
+            raise SignerError(SignerErrorCode.SIGNING_FAILED, "kms unavailable")
+
+    keypair = Keypair()
+    signer = make_native_signer(
+        keypair, chain="solana_devnet", private_key_pem=None, request_signer=FailingRequestSigner()
+    )
+    route = respx.post(TRANSACTIONS_URL).mock(return_value=httpx.Response(200, json={"id": "tx-1"}))
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
+    assert excinfo.value.code == SignerErrorCode.SIGNING_FAILED
+    assert not route.called
+
+
+@respx.mock
 async def test_native_submit_server_error_keeps_a_transaction_id_from_the_body() -> None:
     keypair = Keypair()
     signer = make_native_signer(keypair, chain="solana_devnet")
@@ -700,6 +720,49 @@ async def test_sign_transaction_native_success() -> None:
     assert respx.calls[0].request.headers["x-idempotence-id"] == idempotency_key_from_message(
         namespaced
     )
+
+
+@respx.mock
+async def test_sign_transaction_native_returns_the_fee_payer_signature() -> None:
+    """A rewrite can hand the fee payer slot to another key, and the broadcast is
+    identified by that slot's signature, not by the vault's."""
+    keypair = Keypair()
+    sponsor = Keypair()
+    signer = make_native_signer(keypair, chain="solana_devnet")
+
+    returned = create_two_signer_transaction(sponsor.pubkey(), keypair.pubkey())
+    message = signed_message_bytes(returned.message)
+    sponsor_signature = sponsor.sign_message(message)
+    vault_signature = keypair.sign_message(message)
+    returned.signatures = [sponsor_signature, vault_signature]
+    raw_transaction = base64.b64encode(bytes(returned)).decode("ascii")
+    mock_sign_flow(status_response("completed", raw_transaction=raw_transaction))
+
+    result = await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
+
+    assert result == sponsor_signature
+    assert result != vault_signature
+
+
+@respx.mock
+async def test_sign_transaction_native_rejects_an_unverifiable_fee_payer_signature() -> None:
+    """The fee payer's signature is the broadcast id, so a returned transaction
+    whose slot 0 does not verify identifies nothing."""
+    keypair = Keypair()
+    sponsor = Keypair()
+    signer = make_native_signer(keypair, chain="solana_devnet")
+
+    returned = create_two_signer_transaction(sponsor.pubkey(), keypair.pubkey())
+    message = signed_message_bytes(returned.message)
+    returned.signatures = [
+        sponsor.sign_message(b"bytes the returned transaction does not carry"),
+        keypair.sign_message(message),
+    ]
+    raw_transaction = base64.b64encode(bytes(returned)).decode("ascii")
+    mock_sign_flow(status_response("completed", raw_transaction=raw_transaction))
+
+    with pytest.raises(SignerError):
+        await signer.sign_and_send_transaction(create_test_transaction(keypair.pubkey()))
 
 
 @respx.mock
@@ -1067,8 +1130,28 @@ async def test_manual_mode_signs_messages_through_solana_message() -> None:
 
 @respx.mock
 async def test_is_available_success() -> None:
-    mock_vault({"id": VAULT_ID})
-    assert await make_black_box_signer(Keypair()).is_available()
+    keypair = Keypair()
+    mock_vault({"address": str(keypair.pubkey()), "id": VAULT_ID})
+    assert await make_black_box_signer(keypair).is_available()
+
+
+@respx.mock
+async def test_is_available_success_for_black_box_vault() -> None:
+    keypair = Keypair()
+    mock_vault(
+        {
+            "id": VAULT_ID,
+            "public_key_compressed": base64.b64encode(bytes(keypair.pubkey())).decode("ascii"),
+            "type": "black_box",
+        }
+    )
+    assert await make_black_box_signer(keypair).is_available()
+
+
+@respx.mock
+async def test_is_available_false_when_vault_holds_another_key() -> None:
+    mock_vault({"address": str(Keypair().pubkey()), "id": VAULT_ID})
+    assert not await make_black_box_signer(Keypair()).is_available()
 
 
 @respx.mock
@@ -1083,9 +1166,10 @@ async def test_is_available_false_on_failing_request_signer() -> None:
         async def sign_request(self, payload: bytes) -> str:
             raise RuntimeError("kms unavailable")
 
-    mock_vault({"id": VAULT_ID})
+    keypair = Keypair()
+    mock_vault({"address": str(keypair.pubkey()), "id": VAULT_ID})
     signer = make_black_box_signer(
-        Keypair(), private_key_pem=None, request_signer=FailingRequestSigner()
+        keypair, private_key_pem=None, request_signer=FailingRequestSigner()
     )
     assert not await signer.is_available()
 

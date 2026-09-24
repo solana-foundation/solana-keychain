@@ -68,7 +68,7 @@ It returns the signature identifying the landed transaction and leaves your tran
 
 ### Kit 8 peer dependencies
 
-All packages now require `@solana/*` >= 8.0.0 (previously >= 6.0.1). Upgrade `@solana/kit` and friends first.
+All packages now require `@solana/*` >= 8.1.0 (previously >= 6.0.1). Upgrade `@solana/kit` and friends first.
 
 ### `SolanaSigner` is now a capability union
 

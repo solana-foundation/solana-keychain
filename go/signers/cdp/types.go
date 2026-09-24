@@ -29,6 +29,12 @@ type Config struct {
 	// Address is the Solana account address managed by CDP (base58 pubkey).
 	Address string
 
+	// Network is the Solana network the signed transaction targets, either
+	// NetworkMainnet or NetworkDevnet. CDP requires it to resolve address
+	// lookup tables, so it is mandatory for versioned transactions that carry
+	// any, and optional otherwise.
+	Network string
+
 	// APIBaseURL optionally overrides the CDP API base URL. Defaults to
 	// https://api.cdp.coinbase.com.
 	APIBaseURL string

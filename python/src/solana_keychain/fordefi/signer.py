@@ -7,6 +7,7 @@ signature in the ``x-signature`` header.
 
 import asyncio
 import base64
+import binascii
 import json
 import logging
 import time
@@ -62,6 +63,7 @@ SUPPORTED_CHAINS = ("solana_devnet", "solana_mainnet")
 
 FordefiPushMode = Literal["auto", "manual"]
 
+_TRANSACTIONS_PATH = "/api/v1/transactions"
 _PUSHABLE_SUCCESS_STATES = frozenset({"completed"})
 _NON_PUSHABLE_SUCCESS_STATES = frozenset({"signed", "completed"})
 _TERMINAL_FAILURE_STATES = frozenset(
@@ -126,7 +128,8 @@ class _FordefiSignerBase(SolanaSigner):
     """Shared Fordefi API plumbing: request signing, submit, polling, vault lookup.
 
     The configured ``public_key`` is trusted as the vault's Solana address;
-    no remote lookup is performed at construction time.
+    no remote lookup is performed at construction time. ``is_available`` checks
+    it against the vault for callers that want the round trip.
     """
 
     def __init__(self, config: FordefiSignerConfig) -> None:
@@ -197,13 +200,19 @@ class _FordefiSignerBase(SolanaSigner):
             client=self._http_client,
         )
 
-    async def _post_transaction(
+    async def _prepare_transaction_post(
         self, request: dict[str, Any], idempotence_id: str | None = None
-    ) -> str:
-        path = "/api/v1/transactions"
+    ) -> tuple[str, dict[str, str]]:
+        """Serialize and sign a create, without sending it.
+
+        Kept separate from the send so a caller classifying an ambiguous create
+        covers only the hop that could reach Fordefi: request signing runs
+        through a caller-supplied ``FordefiRequestSigner`` that may fail for its
+        own reasons, none of which submit anything.
+        """
         body = json.dumps(request, separators=(",", ":"))
         timestamp = _timestamp_ms()
-        signature = await self._sign_request(path, timestamp, body)
+        signature = await self._sign_request(_TRANSACTIONS_PATH, timestamp, body)
         headers = {
             "Authorization": f"Bearer {self._access_token}",
             "Content-Type": "application/json",
@@ -212,8 +221,11 @@ class _FordefiSignerBase(SolanaSigner):
         }
         if idempotence_id is not None:
             headers["x-idempotence-id"] = idempotence_id
+        return body, headers
+
+    async def _send_transaction_post(self, body: str, headers: dict[str, str]) -> str:
         response = await fetch_signer_json(
-            url=f"{self._api_base_url}{path}",
+            url=f"{self._api_base_url}{_TRANSACTIONS_PATH}",
             provider_name="Fordefi",
             method="POST",
             headers=headers,
@@ -224,6 +236,12 @@ class _FordefiSignerBase(SolanaSigner):
         if not isinstance(transaction_id, str) or not transaction_id.strip():
             raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
         return transaction_id
+
+    async def _post_transaction(
+        self, request: dict[str, Any], idempotence_id: str | None = None
+    ) -> str:
+        body, headers = await self._prepare_transaction_post(request, idempotence_id)
+        return await self._send_transaction_post(body, headers)
 
     async def _poll_for_result(self, transaction_id: str, *, pushable: bool) -> dict[str, Any]:
         success_states = _PUSHABLE_SUCCESS_STATES if pushable else _NON_PUSHABLE_SUCCESS_STATES
@@ -279,12 +297,35 @@ class _FordefiSignerBase(SolanaSigner):
             raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
         return response
 
+    def _vault_holds_configured_pubkey(self, vault: dict[str, Any]) -> bool:
+        """Confirm the configured public key is the one Fordefi holds for the
+        vault. Chain-specific vaults expose it as a base58 ``address``, black box
+        vaults as a base64 raw key."""
+        address = vault.get("address")
+        if isinstance(address, str):
+            try:
+                return Pubkey.from_string(address) == self._public_key
+            except ValueError:
+                return False
+
+        encoded = vault.get("public_key_compressed")
+        if isinstance(encoded, str):
+            try:
+                return Pubkey(base64.b64decode(encoded, validate=True)) == self._public_key
+            except (binascii.Error, ValueError):
+                return False
+
+        return False
+
     async def is_available(self) -> bool:
-        """Readiness probe: the vault is reachable with the bearer token and the
-        request signer can produce an ``x-signature`` value."""
+        """Readiness probe: the vault is reachable with the bearer token, holds
+        the configured public key, and the request signer can produce an
+        ``x-signature`` value."""
 
         async def probe() -> bool:
-            await self._fetch_vault(AVAILABILITY_TIMEOUT_SECONDS)
+            vault = await self._fetch_vault(AVAILABILITY_TIMEOUT_SECONDS)
+            if not self._vault_holds_configured_pubkey(vault):
+                return False
             await self._sign_request("/api/v1/vaults", _timestamp_ms(), "")
             return True
 
@@ -522,11 +563,11 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
         self._require_sole_required_signer(transaction)
         message_data = signed_message_bytes(transaction.message)
         idempotency_key = self._native_idempotence_id(message_data)
+        body, headers = await self._prepare_transaction_post(
+            self._solana_transaction_request(message_data), idempotence_id=idempotency_key
+        )
         try:
-            transaction_id = await self._post_transaction(
-                self._solana_transaction_request(message_data),
-                idempotence_id=idempotency_key,
-            )
+            transaction_id = await self._send_transaction_post(body, headers)
         except asyncio.CancelledError as error:
             # The re-raise must stay a CancelledError for asyncio, so the warning
             # goes to the log.
@@ -562,21 +603,28 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
                 f"not be confirmed (provider transaction id: {transaction_id})"
             ) from error
         except SignerError as error:
-            self._clear_pending_transaction_id()
+            self._clear_pending_transaction_id(transaction_id)
             raise SignerError(
                 SignerErrorCode.BROADCAST_UNCONFIRMED,
                 error._detail,
                 provider_transaction_id=transaction_id,
                 idempotency_key=idempotency_key,
             ) from None
-        self._clear_pending_transaction_id()
+        self._clear_pending_transaction_id(transaction_id)
         return signed
 
-    def _clear_pending_transaction_id(self) -> None:
+    def _clear_pending_transaction_id(self, provider_transaction_id: str) -> None:
         if self._pending_transaction_id is not None:
-            self._pending_transaction_id.clear()
+            self._pending_transaction_id.clear(provider_transaction_id)
 
     async def _finish_native_broadcast(self, transaction_id: str) -> SignedTransaction:
+        """Poll to completion and verify the vault's signature over the returned
+        message.
+
+        The broadcast is identified by the fee payer's signature, which the
+        rewrite need not leave to the vault, so it is read from slot 0 rather
+        than from the vault's own slot and verified in its own right.
+        """
         result = await self._poll_for_result(transaction_id, pushable=True)
         raw_transaction = result.get("raw_transaction")
         if not isinstance(raw_transaction, str):
@@ -608,7 +656,17 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
         verify_returned_signature(
             signature, self._public_key, signed_message_bytes(returned.message)
         )
-        return classify_signed_transaction(returned, "", signature)
+        account_keys = list(returned.message.account_keys)
+        if signatures[0] == Signature.default() or not account_keys:
+            raise SignerError(
+                SignerErrorCode.SIGNING_FAILED,
+                "Fordefi wire transaction carries no fee-payer signature to identify "
+                "the broadcast by",
+            )
+        verify_returned_signature(
+            signatures[0], account_keys[0], signed_message_bytes(returned.message)
+        )
+        return classify_signed_transaction(returned, "", signatures[0])
 
 
 class FordefiNativeManualSigner(_FordefiNativeSignerBase, ModifyingSigner):

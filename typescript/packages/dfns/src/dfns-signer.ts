@@ -6,6 +6,7 @@ import {
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
+    normalizeBaseUrl,
     normalizeMessageBytes,
     signBatchStaggered,
     SignerErrorCode,
@@ -161,7 +162,7 @@ class DfnsSigner<TAddress extends string = string>
             });
         }
 
-        const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_API_BASE_URL;
+        const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl ?? DEFAULT_API_BASE_URL);
         assertHttpsUrl(apiBaseUrl, 'apiBaseUrl');
         const requestDelayMs = config.requestDelayMs ?? 0;
         validateRequestDelayMs(requestDelayMs);
@@ -296,10 +297,7 @@ class DfnsSigner<TAddress extends string = string>
         request: GenerateSignatureRequest,
         abortSignal?: AbortSignal,
     ): Promise<SignatureBytes> {
-        // keyId is server-issued (from the wallet response) and this path is signed into the
-        // Dfns user-action challenge, which must match the routed request path verbatim — so it
-        // is interpolated raw rather than percent-encoded.
-        const httpPath = `/keys/${this.keyId}/signatures`;
+        const httpPath = `/keys/${encodeURIComponent(this.keyId)}/signatures`;
         const requestBody = JSON.stringify(request);
 
         const userAction = await signUserAction(
@@ -411,30 +409,27 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Pad signature component to exactly 32 bytes.
- * Components from Dfns may be shorter than 32 bytes and need left-padding with zeros.
+ * Decode a signature component, which Dfns returns as a full-width 32-byte hex
+ * string with its leading and trailing zero bytes retained.
  */
-function padSignatureComponent(hex: string): Uint8Array {
+function decodeSignatureComponent(hex: string): Uint8Array {
     const bytes = hexToBytes(hex);
 
-    if (bytes.length > 32) {
+    if (bytes.length !== 32) {
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
-            message: `Invalid signature component length: ${bytes.length} (max 32)`,
+            message: `Invalid signature component length: ${bytes.length} (expected 32)`,
         });
     }
 
-    const padded = new Uint8Array(32);
-    padded.set(bytes, 32 - bytes.length);
-    return padded;
+    return bytes;
 }
 
 /**
  * Combine r and s hex-encoded components into a 64-byte Ed25519 signature.
- * Each component is individually validated and left-padded to 32 bytes.
  */
 function combineSignature(r: string, s: string): SignatureBytes {
-    const rBytes = padSignatureComponent(r);
-    const sBytes = padSignatureComponent(s);
+    const rBytes = decodeSignatureComponent(r);
+    const sBytes = decodeSignatureComponent(s);
     const combined = new Uint8Array(ED25519_SIGNATURE_LENGTH);
     combined.set(rBytes, 0);
     combined.set(sBytes, ED25519_SIGNATURE_LENGTH / 2);

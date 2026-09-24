@@ -1,3 +1,4 @@
+from solders.address_lookup_table_account import AddressLookupTableAccount
 from solders.hash import Hash
 from solders.instruction import AccountMeta, Instruction
 from solders.message import Message, MessageV0, MessageV1, TransactionConfig
@@ -39,6 +40,16 @@ def create_test_v0_transaction(
 ) -> VersionedTransaction:
     instruction = _transfer_instruction(from_pubkey, to_pubkey)
     message = MessageV0.try_compile(from_pubkey, [instruction], [], Hash.default())
+    unsigned = [Signature.default()] * message.header.num_required_signatures
+    return VersionedTransaction.populate(message, unsigned)
+
+
+def create_test_transaction_with_lookups(from_pubkey: Pubkey) -> VersionedTransaction:
+    """A v0 transaction whose message resolves its recipient through a lookup table."""
+    recipient = Pubkey.new_unique()
+    lookup_table = AddressLookupTableAccount(key=Pubkey.new_unique(), addresses=[recipient])
+    instruction = _transfer_instruction(from_pubkey, recipient)
+    message = MessageV0.try_compile(from_pubkey, [instruction], [lookup_table], Hash.default())
     unsigned = [Signature.default()] * message.header.num_required_signatures
     return VersionedTransaction.populate(message, unsigned)
 

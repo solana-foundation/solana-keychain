@@ -1,6 +1,9 @@
 """Signature verification shared by every backend that receives signatures from a
 remote service."""
 
+import base64
+import binascii
+
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
@@ -85,3 +88,29 @@ def extract_and_verify_rewritten_transaction(
     signature = _signature_at_signer_position(returned, public_key, provider_name)
     verify_returned_signature(signature, public_key, signed_message_bytes(returned.message))
     return returned, signature
+
+
+_ED25519_SPKI_PREFIX = bytes(
+    (0x30, 0x2A, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x03, 0x21, 0x00)
+)
+
+
+def public_key_from_spki_der(der: bytes) -> Pubkey | None:
+    """Extract the Ed25519 public key carried by a DER-encoded
+    SubjectPublicKeyInfo, or ``None`` when the bytes are not one."""
+    if len(der) != len(_ED25519_SPKI_PREFIX) + 32:
+        return None
+    if not der.startswith(_ED25519_SPKI_PREFIX):
+        return None
+    return Pubkey(der[len(_ED25519_SPKI_PREFIX) :])
+
+
+def public_key_from_spki_pem(pem: str) -> Pubkey | None:
+    """Extract the Ed25519 public key carried by a PEM-encoded
+    SubjectPublicKeyInfo, or ``None`` when the text is not one."""
+    body = "".join(line.strip() for line in pem.splitlines() if not line.startswith("-----"))
+    try:
+        der = base64.b64decode(body, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    return public_key_from_spki_der(der)

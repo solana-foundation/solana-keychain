@@ -60,6 +60,13 @@ describe('DfnsSigner', () => {
             expect(signer.address).toBeDefined();
         });
 
+        it('removes trailing slashes from apiBaseUrl', async () => {
+            mockWalletFetch();
+            await createDfnsSigner({ ...defaultConfig, apiBaseUrl: 'https://api.dfns.test///' });
+            const [url] = mockFetch.mock.calls[0] as [string];
+            expect(url).toContain('https://api.dfns.test/wallets/');
+        });
+
         it('throws error for missing authToken', async () => {
             await expect(createDfnsSigner({ ...defaultConfig, authToken: '' })).rejects.toThrow(
                 'Missing required authToken field',
@@ -282,7 +289,7 @@ describe('DfnsSigner', () => {
             expect(sig.length).toBe(64);
         });
 
-        it('left-pads short signature components', async () => {
+        it('rejects a signature component that is not 32 bytes', async () => {
             // r is 31 bytes (short by 1), s is 32 bytes
             const rHex = 'ff'.repeat(31);
             const sHex = 'aa'.repeat(32);
@@ -306,13 +313,9 @@ describe('DfnsSigner', () => {
 
             const signer = await createDfnsSigner(defaultConfig);
 
-            const result = await signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }]);
-
-            const sig = result[0]![signer.address]!;
-            expect(sig.length).toBe(64);
-            // First byte should be 0x00 (left-pad), then 31 bytes of 0xff
-            expect(sig[0]).toBe(0x00);
-            expect(sig[1]).toBe(0xff);
+            await expect(signer.signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }])).rejects.toThrow(
+                /Invalid signature component length: 31 \(expected 32\)/,
+            );
         });
 
         it('throws PARSING_ERROR for malformed auth challenge response shape', async () => {

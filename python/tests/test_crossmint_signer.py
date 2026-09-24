@@ -279,6 +279,39 @@ async def test_sign_and_send_transaction_falls_back_to_tx_id() -> None:
 
 
 @respx.mock
+async def test_sign_and_send_transaction_rejects_an_unverifiable_transaction_carrying_a_tx_id() -> (
+    None
+):
+    """A returned transaction whose fee-payer signature does not verify is a
+    tampered response, so the unverified txId must not stand in for it."""
+    from solders.transaction import Transaction
+
+    keypair = Keypair()
+    signer = await initialized_signer(keypair)
+    transaction = create_test_transaction(keypair.pubkey())
+    forged = Transaction.from_bytes(bytes(transaction))
+    forged_signature = keypair.sign_message(b"bytes the response does not carry")
+    forged.signatures = [forged_signature]
+
+    respx.post(TRANSACTIONS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=tx_response(
+                "success",
+                onChain={
+                    "transaction": base58.b58encode(bytes(forged)).decode(),
+                    "txId": str(forged_signature),
+                },
+            ),
+        )
+    )
+
+    with pytest.raises(SignerError) as excinfo:
+        await signer.sign_and_send_transaction(transaction)
+    assert excinfo.value.code == SignerErrorCode.BROADCAST_UNCONFIRMED
+
+
+@respx.mock
 async def test_sign_and_send_transaction_accepts_provider_tx_id() -> None:
     keypair = Keypair()
     signer = await initialized_signer(keypair)

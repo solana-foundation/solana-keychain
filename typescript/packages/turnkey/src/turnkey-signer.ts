@@ -1,12 +1,14 @@
 import { Address, assertIsAddress } from '@solana/addresses';
 import { getBase16Decoder, getBase16Encoder, getBase64Encoder } from '@solana/codecs-strings';
 import {
+    addressFromEd25519Key,
     assertHttpsUrl,
     assertSignatureValid,
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
     extractAndVerifyReturnedSignature,
     fetchSignerJson,
+    normalizeBaseUrl,
     normalizeMessageBytes,
     signBatchStaggered,
     SignerErrorCode,
@@ -30,7 +32,18 @@ import {
 } from '@solana/transactions';
 
 import { ApiKeyStamper } from './stamper.js';
-import type { ActivityResponse, SignRequest, SignTransactionRequest, WhoAmIRequest, WhoAmIResponse } from './types.js';
+import type {
+    ActivityResponse,
+    GetPrivateKeyRequest,
+    GetPrivateKeyResponse,
+    SignRequest,
+    SignTransactionRequest,
+    WhoAmIRequest,
+    WhoAmIResponse,
+} from './types.js';
+
+/** Turnkey's address-format discriminator for Solana addresses. */
+const TURNKEY_SOLANA_ADDRESS_FORMAT = 'ADDRESS_FORMAT_SOLANA';
 
 /**
  * Create a Turnkey-backed signer.
@@ -105,7 +118,7 @@ class TurnkeySigner<TAddress extends string = string>
 
         this.organizationId = config.organizationId;
         this.privateKeyId = config.privateKeyId;
-        const apiBaseUrl = config.apiBaseUrl || 'https://api.turnkey.com';
+        const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl || 'https://api.turnkey.com');
         assertHttpsUrl(apiBaseUrl, 'apiBaseUrl');
 
         this.apiBaseUrl = apiBaseUrl;
@@ -218,10 +231,11 @@ class TurnkeySigner<TAddress extends string = string>
             messages,
             async message => {
                 const bytesToHex = getBase16Decoder().decode;
-                const hexMessage = bytesToHex(normalizeMessageBytes(message.content));
+                const messageBytes = normalizeMessageBytes(message.content);
+                const hexMessage = bytesToHex(messageBytes);
                 const signatureBytes = await this.sign(hexMessage, config?.abortSignal);
                 await assertSignatureValid({
-                    data: message.content,
+                    data: messageBytes,
                     signature: signatureBytes,
                     signerAddress: this.address,
                 });
@@ -338,9 +352,62 @@ class TurnkeySigner<TAddress extends string = string>
                 url: `${this.apiBaseUrl}/public/v1/query/whoami`,
             });
 
-            return whoami?.organizationId === this.organizationId;
+            if (whoami?.organizationId !== this.organizationId) {
+                return false;
+            }
+
+            return await this.signWithMatchesAddress();
         } catch {
             return false;
         }
+    }
+
+    /**
+     * Confirm the configured address is the key Turnkey signs with.
+     *
+     * `get_private_key` returns the private key's *metadata* (public key,
+     * curve, derived addresses), never key material: export is a separate
+     * activity that targets an enclave key. It is a read, so an API key the
+     * policy engine scopes to signing alone may be denied it.
+     */
+    private async signWithMatchesAddress(): Promise<boolean> {
+        // `privateKeyId` may itself be the Solana address Turnkey signs with,
+        // in which case it already is the public key and needs no lookup.
+        if (this.privateKeyId === this.address) {
+            return true;
+        }
+
+        const request: GetPrivateKeyRequest = {
+            organizationId: this.organizationId,
+            privateKeyId: this.privateKeyId,
+        };
+        const body = JSON.stringify(request);
+        const stamp = this.stamper.stamp(body);
+
+        const response = await fetchSignerJson<GetPrivateKeyResponse>({
+            init: {
+                body,
+                headers: {
+                    'Content-Type': 'application/json',
+                    [stamp.stampHeaderName]: stamp.stampHeaderValue,
+                },
+                method: 'POST',
+            },
+            providerName: 'Turnkey',
+            url: `${this.apiBaseUrl}/public/v1/query/get_private_key`,
+        });
+
+        const matchesAddress = response?.privateKey?.addresses?.some(
+            entry => entry.format === TURNKEY_SOLANA_ADDRESS_FORMAT && entry.address === this.address,
+        );
+        if (matchesAddress === true) {
+            return true;
+        }
+
+        const publicKey = response?.privateKey?.publicKey;
+        if (publicKey === undefined) {
+            return false;
+        }
+        return addressFromEd25519Key(new Uint8Array(getBase16Encoder().encode(publicKey))) === this.address;
     }
 }
