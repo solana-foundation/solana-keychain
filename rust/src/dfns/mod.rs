@@ -262,19 +262,6 @@ impl DfnsSigner {
             signature,
         ))
     }
-
-    /// Check if the Dfns wallet is available and healthy: reachable, active,
-    /// and backed by an EdDSA/ed25519 signing key
-    async fn check_availability(&self) -> bool {
-        match self.get_wallet().await {
-            Ok(wallet) => {
-                wallet.status == "Active"
-                    && wallet.signing_key.scheme == "EdDSA"
-                    && wallet.signing_key.curve == "ed25519"
-            }
-            Err(_) => false,
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -288,8 +275,17 @@ impl SolanaSigner for DfnsSigner {
         self.sign_bytes(message).await
     }
 
+    /// Check if the Dfns wallet is available and healthy: reachable, active,
+    /// and backed by an EdDSA/ed25519 signing key
     async fn is_available(&self) -> bool {
-        self.check_availability().await
+        match self.get_wallet().await {
+            Ok(wallet) => {
+                wallet.status == "Active"
+                    && wallet.signing_key.scheme == "EdDSA"
+                    && wallet.signing_key.curve == "ed25519"
+            }
+            Err(_) => false,
+        }
     }
 }
 

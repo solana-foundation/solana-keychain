@@ -423,13 +423,6 @@ async fn test_is_available_failure() {
     assert!(!signer.is_available().await);
 }
 
-#[tokio::test]
-async fn test_clone() {
-    let signer = create_test_signer("http://localhost");
-    let clone = signer.clone();
-    assert_eq!(signer.pubkey(), clone.pubkey());
-}
-
 #[test]
 fn test_der_to_pkcs8_pem() {
     let der = vec![0x30u8, 0x2e, 0x01]; // minimal fake DER

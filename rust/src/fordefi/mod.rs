@@ -16,7 +16,7 @@ use crate::error::SignerError;
 use crate::http_client_config::HttpClientConfig;
 use crate::remote_util::{
     extract_api_error_with_transaction_id, normalize_base_url, parse_json_response, poll_until,
-    read_body_capped, transaction_id_in_body, PollOutcome,
+    read_body_capped, transaction_id_in_body, PollOutcome, AVAILABILITY_TIMEOUT,
 };
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{extract_and_verify_rewritten_transaction, signature_from_base64};
@@ -39,7 +39,6 @@ pub use types::{FordefiPriorityLevel, FordefiPushMode, FordefiSolanaFee, SolanaC
 const DEFAULT_BASE_URL: &str = "https://api.fordefi.com";
 const DEFAULT_POLL_INTERVAL_MS: u64 = 2000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 50;
-const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 fn canonical_fee(fee: Option<&FordefiSolanaFee>) -> String {
     match fee {

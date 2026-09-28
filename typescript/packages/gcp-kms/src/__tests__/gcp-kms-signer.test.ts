@@ -86,28 +86,7 @@ describe('createGcpKmsSigner', () => {
         globalThis.fetch = originalFetch;
     });
 
-    describe('basic construction', () => {
-        it('creates a GcpKmsSigner with valid config', () => {
-            const signer = createGcpKmsSigner({
-                keyName: TEST_KEY_NAME,
-                publicKey: TEST_PUBLIC_KEY,
-            });
-
-            expect(signer.address).toBe(TEST_PUBLIC_KEY);
-            assertIsSolanaTransactionSigner(signer);
-        });
-
-        it('should throw error for missing keyName', () => {
-            expect(() => {
-                createGcpKmsSigner({
-                    keyName: '',
-                    publicKey: TEST_PUBLIC_KEY,
-                });
-            }).toThrow('Missing required keyName field');
-        });
-    });
-
-    describe('additional cases', () => {
+    describe('construction', () => {
         it('creates a GcpKmsSigner with valid config', () => {
             const config: GcpKmsSignerConfig = {
                 keyName: TEST_KEY_NAME,
@@ -118,9 +97,6 @@ describe('createGcpKmsSigner', () => {
 
             expect(signer.address).toBe(TEST_PUBLIC_KEY);
             assertIsSolanaTransactionSigner(signer);
-            expect(signer.signMessages).toBeDefined();
-            expect(signer.signTransactions).toBeDefined();
-            expect(signer.isAvailable).toBeDefined();
         });
 
         it('should throw error for missing keyName', () => {

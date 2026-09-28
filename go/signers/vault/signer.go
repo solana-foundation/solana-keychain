@@ -85,16 +85,11 @@ func (s Signer) String() string {
 // GoString mirrors String so %#v cannot leak secrets either.
 func (s Signer) GoString() string { return s.String() }
 
-// SignMessage signs arbitrary bytes via the Vault transit sign endpoint.
-func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
-	return s.signBytes(ctx, message)
-}
-
 // SignTransaction signs the transaction's message bytes via Vault and inserts
 // the signature at this signer's required-signer position, returning the encoded
 // transaction and its completeness.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
-	return core.SignTransactionWith(ctx, tx, s.pubkey, s.signBytes)
+	return core.SignTransactionWith(ctx, tx, s.pubkey, s.SignMessage)
 }
 
 // IsAvailable reads the transit key's metadata as a health check and reports
@@ -137,10 +132,10 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 	return ok && key == s.pubkey
 }
 
-// signBytes posts the payload to the transit sign endpoint, decodes the returned
+// SignMessage posts the payload to the transit sign endpoint, decodes the returned
 // signature (stripping the "vault:vN:" prefix), and verifies it against the
 // configured public key before returning it.
-func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signature, error) {
+func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
 	url := s.vaultAddr + "/v1/transit/sign/" + s.keyName
 	payload, err := json.Marshal(signRequest{Input: base64.StdEncoding.EncodeToString(message)})
 	if err != nil {

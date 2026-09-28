@@ -93,16 +93,11 @@ func (s *Signer) init(ctx context.Context) error {
 // Pubkey returns the wallet's Solana public key fetched during New.
 func (s *Signer) Pubkey() solana.PublicKey { return s.pubkey }
 
-// SignMessage signs arbitrary bytes via Para's sign-raw endpoint.
-func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
-	return s.signBytes(ctx, message)
-}
-
 // SignTransaction signs the transaction's message bytes via Para's sign-raw
 // endpoint, inserts the signature at this signer's required-signer position,
 // and returns the encoded transaction with its completeness.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
-	return core.SignTransactionWith(ctx, tx, s.pubkey, s.signBytes)
+	return core.SignTransactionWith(ctx, tx, s.pubkey, s.SignMessage)
 }
 
 // IsAvailable reports whether the wallet is a SOLANA wallet in ACTIVE or READY
@@ -142,9 +137,9 @@ func (s *Signer) fetchWallet(ctx context.Context) (*walletResponse, error) {
 	return &wallet, nil
 }
 
-// signBytes signs data via POST /v1/wallets/{walletId}/sign-raw with a
+// SignMessage signs data via POST /v1/wallets/{walletId}/sign-raw with a
 // hex-encoded payload, then decodes and verifies the returned signature.
-func (s *Signer) signBytes(ctx context.Context, data []byte) (solana.Signature, error) {
+func (s *Signer) SignMessage(ctx context.Context, data []byte) (solana.Signature, error) {
 	if s.pubkey.IsZero() {
 		return solana.Signature{}, core.NewNotInitializedError("para")
 	}

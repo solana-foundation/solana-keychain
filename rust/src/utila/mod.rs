@@ -2,7 +2,9 @@
 
 mod types;
 
-use crate::remote_util::{encode_uri_component, normalize_base_url, parse_json_response};
+use crate::remote_util::{
+    encode_uri_component, normalize_base_url, parse_json_response, AVAILABILITY_TIMEOUT,
+};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::extract_and_verify_returned_signature;
 use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
@@ -23,7 +25,6 @@ const UTILA_API_AUDIENCE: &str = "https://api.utila.io/";
 const DEFAULT_POLL_INTERVAL_MS: u64 = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 60;
 const TOKEN_TTL_MINUTES: i64 = 55;
-const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Configuration for creating a UtilaSigner.
 #[derive(Clone)]
@@ -339,14 +340,6 @@ impl UtilaSigner {
             signature,
         ))
     }
-
-    async fn check_availability(&self) -> bool {
-        let Ok(public_key) = self.initialized_pubkey() else {
-            return false;
-        };
-        let result = tokio::time::timeout(AVAILABILITY_TIMEOUT, self.fetch_wallet_address()).await;
-        matches!(result, Ok(Ok(address)) if Pubkey::from_str(&address).is_ok_and(|fetched| fetched == public_key))
-    }
 }
 
 #[async_trait::async_trait]
@@ -362,7 +355,11 @@ impl SolanaSigner for UtilaSigner {
     }
 
     async fn is_available(&self) -> bool {
-        self.check_availability().await
+        let Ok(public_key) = self.initialized_pubkey() else {
+            return false;
+        };
+        let result = tokio::time::timeout(AVAILABILITY_TIMEOUT, self.fetch_wallet_address()).await;
+        matches!(result, Ok(Ok(address)) if Pubkey::from_str(&address).is_ok_and(|fetched| fetched == public_key))
     }
 }
 

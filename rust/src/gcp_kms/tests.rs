@@ -30,6 +30,7 @@ fn spki_pem(public_key: &crate::sdk_adapter::Pubkey) -> String {
 
 /// Helper to create a KMS client configured for testing with wiremock
 async fn create_test_client(endpoint: &str) -> KeyManagementService {
+    let _ = rustls::crypto::ring::default_provider().install_default();
     KeyManagementService::builder()
         .with_endpoint(endpoint)
         .build()
@@ -40,7 +41,7 @@ async fn create_test_client(endpoint: &str) -> KeyManagementService {
 #[tokio::test]
 #[serial]
 async fn test_gcp_kms_new_invalid_pubkey() {
-    let client = KeyManagementService::builder().build().await.unwrap();
+    let client = create_test_client("http://127.0.0.1:1").await;
     let result = GcpKmsSigner::with_client(
         client,
         TEST_KEY_NAME.to_string(),
@@ -56,7 +57,7 @@ async fn test_gcp_kms_new_invalid_pubkey() {
 #[tokio::test]
 #[serial]
 async fn test_gcp_kms_new_empty_pubkey() {
-    let client = KeyManagementService::builder().build().await.unwrap();
+    let client = create_test_client("http://127.0.0.1:1").await;
     let result = GcpKmsSigner::with_client(client, TEST_KEY_NAME.to_string(), "".to_string());
     assert!(result.is_err());
     assert!(matches!(
@@ -66,58 +67,40 @@ async fn test_gcp_kms_new_empty_pubkey() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_gcp_kms_new_valid_pubkey() {
     let keypair = create_test_keypair();
-    let pubkey_str = keypair.pubkey().to_string();
+    let client = create_test_client("http://127.0.0.1:1").await;
 
-    let result = GcpKmsSigner::new(TEST_KEY_NAME.to_string(), pubkey_str).await;
+    let signer = GcpKmsSigner::with_client(
+        client,
+        TEST_KEY_NAME.to_string(),
+        keypair.pubkey().to_string(),
+    )
+    .expect("signer construction should succeed");
 
-    if let Ok(signer) = result {
-        assert_eq!(signer.public_key, keypair.pubkey());
-        assert_eq!(signer.key_name, TEST_KEY_NAME);
-    }
+    assert_eq!(signer.pubkey(), keypair.pubkey());
+    assert_eq!(signer.key_name(), TEST_KEY_NAME);
 }
 
 #[tokio::test]
-async fn test_gcp_kms_pubkey() {
-    let keypair = create_test_keypair();
-    let pubkey_str = keypair.pubkey().to_string();
-
-    let result = GcpKmsSigner::new(TEST_KEY_NAME.to_string(), pubkey_str.clone()).await;
-
-    if let Ok(signer) = result {
-        assert_eq!(signer.pubkey(), keypair.pubkey());
-        assert_eq!(signer.pubkey().to_string(), pubkey_str);
-    }
-}
-
-#[tokio::test]
-async fn test_gcp_kms_key_id_accessor() {
-    let keypair = create_test_keypair();
-    let pubkey_str = keypair.pubkey().to_string();
-
-    let result = GcpKmsSigner::new(TEST_KEY_NAME.to_string(), pubkey_str).await;
-
-    if let Ok(signer) = result {
-        assert_eq!(signer.key_name(), TEST_KEY_NAME);
-    }
-}
-
-#[tokio::test]
+#[serial]
 async fn test_gcp_kms_debug_impl() {
     let keypair = create_test_keypair();
-    let pubkey_str = keypair.pubkey().to_string();
+    let client = create_test_client("http://127.0.0.1:1").await;
 
-    let result = GcpKmsSigner::new(TEST_KEY_NAME.to_string(), pubkey_str).await;
+    let signer = GcpKmsSigner::with_client(
+        client,
+        TEST_KEY_NAME.to_string(),
+        keypair.pubkey().to_string(),
+    )
+    .expect("signer construction should succeed");
 
-    if let Ok(signer) = result {
-        let debug_str = format!("{:?}", signer);
-
-        assert!(debug_str.contains("GcpKmsSigner"));
-        assert!(debug_str.contains("key_name"));
-        assert!(debug_str.contains("public_key"));
-        assert!(!debug_str.contains("client"));
-    }
+    let debug_str = format!("{:?}", signer);
+    assert!(debug_str.contains("GcpKmsSigner"));
+    assert!(debug_str.contains("key_name"));
+    assert!(debug_str.contains("public_key"));
+    assert!(!debug_str.contains("client"));
 }
 
 #[tokio::test]

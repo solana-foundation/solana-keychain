@@ -86,12 +86,6 @@ func (s Signer) String() string {
 // GoString mirrors String so %#v cannot leak secrets either.
 func (s Signer) GoString() string { return s.String() }
 
-// SignMessage signs arbitrary bytes with a Fireblocks RAW operation and returns
-// the verified 64-byte signature.
-func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
-	return s.signRawBytes(ctx, message)
-}
-
 // HasServerSideEffects reports whether signing creates a Fireblocks-side request
 // per transaction, which PROGRAM_CALL does and RAW does not. A batch of
 // PROGRAM_CALL transactions is therefore signed sequentially, so a failure cannot
@@ -113,7 +107,7 @@ func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (c
 	if s.useProgramCall {
 		signature, err = s.signProgramCall(ctx, tx, messageBytes)
 	} else {
-		signature, err = s.signRawBytes(ctx, messageBytes)
+		signature, err = s.SignMessage(ctx, messageBytes)
 	}
 	if err != nil {
 		return core.SignedTransaction{}, err
@@ -130,11 +124,11 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 	return err == nil && core.IsSuccess(status)
 }
 
-// signRawBytes signs message with a Fireblocks RAW operation: the message bytes
+// SignMessage signs message with a Fireblocks RAW operation: the message bytes
 // are hex-encoded into rawMessageData, the request is polled to completion, and
 // the returned signature is verified against the signer's pubkey before being
 // surfaced.
-func (s *Signer) signRawBytes(ctx context.Context, message []byte) (solana.Signature, error) {
+func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
 	request := createTransactionRequest{
 		AssetID:   s.assetID,
 		Operation: operationRaw,

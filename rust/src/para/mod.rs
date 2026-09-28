@@ -2,7 +2,9 @@
 
 mod types;
 
-use crate::remote_util::{normalize_base_url, parse_json_response, validate_https_url};
+use crate::remote_util::{
+    normalize_base_url, parse_json_response, validate_https_url, AVAILABILITY_TIMEOUT,
+};
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_hex, verify_or_reject};
 use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
@@ -12,8 +14,6 @@ use std::str::FromStr;
 use types::{SignRawRequest, SignRawResponse, WalletResponse};
 
 const DEFAULT_BASE_URL: &str = "https://api.getpara.com";
-const CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Para-based signer using Para's wallet API
 #[derive(Clone)]
@@ -88,11 +88,7 @@ impl ParaSigner {
             validate_https_url(url)?;
         }
 
-        let client = HttpClientConfig {
-            request_timeout: Some(CLIENT_TIMEOUT),
-            connect_timeout: None,
-        }
-        .build_client()?;
+        let client = HttpClientConfig::default().build_client()?;
 
         Ok(Self {
             api_key: config.api_key,
@@ -195,20 +191,6 @@ impl ParaSigner {
         Ok(sig)
     }
 
-    /// Check wallet availability with a timeout
-    async fn check_availability(&self) -> bool {
-        let result = tokio::time::timeout(AVAILABILITY_TIMEOUT, self.fetch_wallet()).await;
-
-        match result {
-            Ok(Ok(wallet)) => {
-                wallet.wallet_type.eq_ignore_ascii_case("SOLANA")
-                    && (wallet.status.eq_ignore_ascii_case("ACTIVE")
-                        || wallet.status.eq_ignore_ascii_case("READY"))
-            }
-            _ => false,
-        }
-    }
-
     async fn sign_and_serialize(
         &self,
         transaction: &mut VersionedTransaction,
@@ -252,7 +234,16 @@ impl SolanaSigner for ParaSigner {
     /// Check if the signer is available. Makes a network call to the Para API
     /// with a 5-second timeout. Callers should cache the result if frequent checks are needed.
     async fn is_available(&self) -> bool {
-        self.check_availability().await
+        let result = tokio::time::timeout(AVAILABILITY_TIMEOUT, self.fetch_wallet()).await;
+
+        match result {
+            Ok(Ok(wallet)) => {
+                wallet.wallet_type.eq_ignore_ascii_case("SOLANA")
+                    && (wallet.status.eq_ignore_ascii_case("ACTIVE")
+                        || wallet.status.eq_ignore_ascii_case("READY"))
+            }
+            _ => false,
+        }
     }
 }
 

@@ -68,12 +68,6 @@ func (s Signer) String() string {
 // GoString mirrors String so %#v cannot leak secrets either.
 func (s Signer) GoString() string { return s.String() }
 
-// SignMessage signs arbitrary bytes with the Privy wallet and verifies the
-// returned signature against the wallet's public key before returning it.
-func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
-	return s.signBytes(ctx, message)
-}
-
 // SignTransaction signs tx via Privy's signTransaction RPC, submitting the
 // full wire transaction so wallet policies with transaction conditions apply.
 // Policies must allow the signTransaction method.
@@ -195,10 +189,10 @@ func (s *Signer) fetchPublicKey(ctx context.Context) (solana.PublicKey, error) {
 	return pubkey, nil
 }
 
-// signBytes signs message via POST /wallets/{id}/rpc with method "signMessage",
+// SignMessage signs message via POST /wallets/{id}/rpc with method "signMessage",
 // sending the bytes base64-encoded and decoding the base64 signature from the
 // response, then verifies it locally.
-func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signature, error) {
+func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
 	request := signMessageRequest{
 		Method:    "signMessage",
 		ChainType: "solana",

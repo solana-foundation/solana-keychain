@@ -27,7 +27,6 @@ const TEST_REGION: &str = "us-east-1";
 
 #[tokio::test]
 async fn test_kms_new_invalid_pubkey() {
-    // Test that invalid pubkey is caught before AWS config is loaded
     let result = AwsKmsSigner::new(
         TEST_KEY_ID.to_string(),
         "not-a-valid-pubkey".to_string(),
@@ -61,173 +60,47 @@ async fn test_kms_new_empty_pubkey() {
 #[tokio::test]
 async fn test_kms_new_valid_pubkey() {
     let keypair = create_test_keypair();
-    let pubkey_str = keypair.pubkey().to_string();
 
-    let result = AwsKmsSigner::new(
+    let signer = AwsKmsSigner::new(
         TEST_KEY_ID.to_string(),
-        pubkey_str,
+        keypair.pubkey().to_string(),
         Some(TEST_REGION.to_string()),
     )
-    .await;
+    .await
+    .expect("signer construction should succeed");
 
-    if let Ok(signer) = result {
-        assert_eq!(signer.public_key, keypair.pubkey());
-        assert_eq!(signer.key_id, TEST_KEY_ID);
-    }
+    assert_eq!(signer.pubkey(), keypair.pubkey());
+    assert_eq!(signer.key_id(), TEST_KEY_ID);
 }
 
 #[tokio::test]
 async fn test_kms_new_without_region() {
     let keypair = create_test_keypair();
-    let pubkey_str = keypair.pubkey().to_string();
 
-    let result = AwsKmsSigner::new(TEST_KEY_ID.to_string(), pubkey_str, None).await;
+    let signer = AwsKmsSigner::new(TEST_KEY_ID.to_string(), keypair.pubkey().to_string(), None)
+        .await
+        .expect("signer construction should succeed");
 
-    if let Ok(signer) = result {
-        assert_eq!(signer.public_key, keypair.pubkey());
-        assert_eq!(signer.key_id, TEST_KEY_ID);
-    }
-}
-
-#[tokio::test]
-async fn test_kms_pubkey() {
-    let keypair = create_test_keypair();
-    let pubkey_str = keypair.pubkey().to_string();
-
-    let result = AwsKmsSigner::new(
-        TEST_KEY_ID.to_string(),
-        pubkey_str.clone(),
-        Some(TEST_REGION.to_string()),
-    )
-    .await;
-
-    if let Ok(signer) = result {
-        assert_eq!(signer.pubkey(), keypair.pubkey());
-        assert_eq!(signer.pubkey().to_string(), pubkey_str);
-    }
-}
-
-#[tokio::test]
-async fn test_kms_key_id_accessor() {
-    let keypair = create_test_keypair();
-    let pubkey_str = keypair.pubkey().to_string();
-
-    let result = AwsKmsSigner::new(
-        TEST_KEY_ID.to_string(),
-        pubkey_str,
-        Some(TEST_REGION.to_string()),
-    )
-    .await;
-
-    if let Ok(signer) = result {
-        assert_eq!(signer.key_id(), TEST_KEY_ID);
-    }
+    assert_eq!(signer.pubkey(), keypair.pubkey());
 }
 
 #[tokio::test]
 async fn test_kms_debug_impl() {
     let keypair = create_test_keypair();
-    let pubkey_str = keypair.pubkey().to_string();
 
-    let result = AwsKmsSigner::new(
+    let signer = AwsKmsSigner::new(
         TEST_KEY_ID.to_string(),
-        pubkey_str,
+        keypair.pubkey().to_string(),
         Some(TEST_REGION.to_string()),
     )
-    .await;
+    .await
+    .expect("signer construction should succeed");
 
-    if let Ok(signer) = result {
-        let debug_str = format!("{:?}", signer);
-
-        assert!(debug_str.contains("AwsKmsSigner"));
-        assert!(debug_str.contains("key_id"));
-        assert!(debug_str.contains("public_key"));
-        assert!(!debug_str.contains("client"));
-    }
-}
-
-#[tokio::test]
-async fn test_kms_key_id_variations() {
-    let keypair = create_test_keypair();
-    let pubkey_str = keypair.pubkey().to_string();
-
-    let key_ids = vec![
-        "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012",
-        "12345678-1234-1234-1234-123456789012",
-        "alias/my-key",
-    ];
-
-    for key_id in key_ids {
-        let result = AwsKmsSigner::new(
-            key_id.to_string(),
-            pubkey_str.clone(),
-            Some(TEST_REGION.to_string()),
-        )
-        .await;
-
-        if let Ok(signer) = result {
-            assert_eq!(signer.key_id, key_id);
-        }
-    }
-}
-
-#[test]
-fn test_signing_algorithm_spec_from_str() {
-    // Test that SigningAlgorithmSpec can be created from string
-    let algo = SigningAlgorithmSpec::from("ED25519_SHA_512");
-    let algo_str = algo.as_str();
-    assert_eq!(algo_str, "ED25519_SHA_512");
-}
-
-#[test]
-fn test_message_type_raw() {
-    // Test that MessageType::Raw is available
-    let msg_type = MessageType::Raw;
-    let msg_type_str = msg_type.as_str();
-    assert_eq!(msg_type_str, "RAW");
-}
-
-#[tokio::test]
-async fn test_kms_clone() {
-    let keypair = create_test_keypair();
-    let pubkey_str = keypair.pubkey().to_string();
-
-    let result = AwsKmsSigner::new(
-        TEST_KEY_ID.to_string(),
-        pubkey_str,
-        Some(TEST_REGION.to_string()),
-    )
-    .await;
-
-    if let Ok(signer) = result {
-        let cloned = signer.clone();
-
-        assert_eq!(signer.pubkey(), cloned.pubkey());
-        assert_eq!(signer.key_id, cloned.key_id);
-    }
-}
-
-#[test]
-fn test_signature_length_validation_logic() {
-    // Valid Ed25519 signature is 64 bytes
-    let valid_sig: [u8; 64] = [0u8; 64];
-    assert_eq!(valid_sig.len(), 64);
-
-    // Invalid lengths
-    let invalid_sigs = vec![
-        vec![0u8; 63], // Too short
-        vec![0u8; 65], // Too long
-        vec![0u8; 0],  // Empty
-        vec![0u8; 32], // Half length
-    ];
-
-    for invalid_sig in invalid_sigs {
-        assert_ne!(
-            invalid_sig.len(),
-            64,
-            "Signature length should not be 64 bytes"
-        );
-    }
+    let debug_str = format!("{:?}", signer);
+    assert!(debug_str.contains("AwsKmsSigner"));
+    assert!(debug_str.contains("key_id"));
+    assert!(debug_str.contains("public_key"));
+    assert!(!debug_str.contains("client"));
 }
 
 // Wiremock tests for actual signing operations

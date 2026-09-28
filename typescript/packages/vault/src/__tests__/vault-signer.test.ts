@@ -39,20 +39,7 @@ describe('createVaultSigner', () => {
         vi.clearAllMocks();
     });
 
-    describe('basic construction', () => {
-        it('should create a signer with valid configuration', () => {
-            const signer = createVaultSigner(mockConfig);
-            expect(signer.address).toBe(mockConfig.publicKey);
-        });
-
-        it('should throw error for missing config fields', () => {
-            expect(() => createVaultSigner({ ...mockConfig, vaultAddr: '' })).toThrow(
-                'Missing required configuration fields',
-            );
-        });
-    });
-
-    describe('additional cases', () => {
+    describe('construction', () => {
         it('should create a signer with valid configuration', () => {
             const signer = createVaultSigner(mockConfig);
             expect(signer.address).toBe(mockConfig.publicKey);

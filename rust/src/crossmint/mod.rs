@@ -4,6 +4,7 @@ mod types;
 
 use crate::remote_util::{
     encode_uri_component, normalize_base_url, read_body_capped, validate_https_url,
+    AVAILABILITY_TIMEOUT,
 };
 use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::signature_util::{signature_from_base58, verify_or_reject};
@@ -20,7 +21,6 @@ use types::{
 
 const DEFAULT_BASE_URL: &str = "https://www.crossmint.com/api";
 const CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const DEFAULT_POLL_INTERVAL_MS: u64 = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 60;
 
@@ -701,11 +701,6 @@ impl CrossmintSigner {
         let final_response = self.poll_transaction(create_response).await?;
         self.extract_signature_from_response(&final_response)
     }
-
-    async fn check_availability(&self) -> bool {
-        let result = tokio::time::timeout(AVAILABILITY_TIMEOUT, self.fetch_wallet()).await;
-        matches!(result, Ok(Ok(_)))
-    }
 }
 
 #[async_trait::async_trait]
@@ -722,7 +717,8 @@ impl SolanaSigner for CrossmintSigner {
     }
 
     async fn is_available(&self) -> bool {
-        self.check_availability().await
+        let result = tokio::time::timeout(AVAILABILITY_TIMEOUT, self.fetch_wallet()).await;
+        matches!(result, Ok(Ok(_)))
     }
 }
 

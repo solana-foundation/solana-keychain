@@ -65,10 +65,10 @@ func (s *Signer) KeyName() string { return s.keyName }
 // close it themselves instead of calling Close here.
 func (s *Signer) Close() error { return s.client.Close() }
 
-// signBytes signs message with GCP KMS EdDSA signing. EC_SIGN_ED25519 operates
+// SignMessage signs message with GCP KMS EdDSA signing. EC_SIGN_ED25519 operates
 // in PureEdDSA mode, so the raw message bytes go in the request's data field
 // (not a digest).
-func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signature, error) {
+func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
 	resp, err := s.client.AsymmetricSign(ctx, &kmspb.AsymmetricSignRequest{
 		Name: s.keyName,
 		Data: message,
@@ -92,16 +92,11 @@ func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signatur
 	return sig, nil
 }
 
-// SignMessage signs arbitrary bytes with the KMS-held key.
-func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
-	return s.signBytes(ctx, message)
-}
-
 // SignTransaction signs the transaction's message bytes and inserts the
 // signature at this signer's required-signer position, returning the encoded
 // transaction and its completeness.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
-	return core.SignTransactionWith(ctx, tx, s.pubkey, s.signBytes)
+	return core.SignTransactionWith(ctx, tx, s.pubkey, s.SignMessage)
 }
 
 // IsAvailable reports whether the crypto key version is reachable and uses the

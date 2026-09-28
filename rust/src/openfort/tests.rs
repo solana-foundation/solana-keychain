@@ -447,13 +447,6 @@ async fn test_sign_transaction_success() {
     assert_eq!(returned_sig.as_ref(), signature.as_ref());
 }
 
-#[tokio::test]
-async fn test_clone() {
-    let signer = create_test_signer("http://localhost");
-    let clone = signer.clone();
-    assert_eq!(signer.pubkey(), clone.pubkey());
-}
-
 #[test]
 fn test_wallet_secret_to_pem_passthrough_for_pem_input() {
     let pem = test_wallet_secret_pem();

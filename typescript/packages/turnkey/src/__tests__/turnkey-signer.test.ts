@@ -118,31 +118,7 @@ describe('createTurnkeySigner', () => {
         });
     };
 
-    describe('basic construction', () => {
-        it('creates a TurnkeySigner with valid config', async () => {
-            const keyPair = await generateKeyPairSigner();
-
-            const signer = createTurnkeySigner({
-                ...mockConfig,
-                publicKey: keyPair.address,
-            });
-
-            expect(signer.address).toBe(keyPair.address);
-            assertIsSolanaTransactionSigner(signer);
-        });
-
-        it('should throw error for missing config fields', () => {
-            expect(() => {
-                createTurnkeySigner({
-                    ...mockConfig,
-                    publicKey: 'some-key',
-                    organizationId: '',
-                });
-            }).toThrow('Missing required configuration fields');
-        });
-    });
-
-    describe('additional cases', () => {
+    describe('construction', () => {
         it('creates a TurnkeySigner with valid config', async () => {
             const keyPair = await generateKeyPairSigner();
 
@@ -155,22 +131,6 @@ describe('createTurnkeySigner', () => {
 
             expect(signer.address).toBe(keyPair.address);
             assertIsSolanaTransactionSigner(signer);
-            expect(signer.signMessages).toBeDefined();
-            expect(signer.signTransactions).toBeDefined();
-            expect(signer.isAvailable).toBeDefined();
-        });
-
-        it('sets address field correctly from config', async () => {
-            const keyPair = await generateKeyPairSigner();
-
-            const config = {
-                ...mockConfig,
-                publicKey: keyPair.address,
-            };
-
-            const signer = createTurnkeySigner(config);
-
-            expect(signer.address).toBe(keyPair.address);
         });
 
         describe('config validation', () => {

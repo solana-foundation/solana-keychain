@@ -180,7 +180,6 @@ impl TransactionUtil {
     ) -> Result<(), SignerError> {
         let position = Self::get_signing_keypair_position(transaction, pubkey)?;
 
-        // Ensure signatures vec is large enough
         let num_required_signatures = transaction.message.header().num_required_signatures as usize;
         if transaction.signatures.len() < num_required_signatures {
             transaction
@@ -188,7 +187,6 @@ impl TransactionUtil {
                 .resize(num_required_signatures, Signature::default());
         }
 
-        // Place signature at the correct position
         transaction.signatures[position] = signature;
 
         Ok(())

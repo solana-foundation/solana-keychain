@@ -79,12 +79,6 @@ func (s Signer) String() string {
 // GoString mirrors String so %#v cannot leak secrets either.
 func (s Signer) GoString() string { return s.String() }
 
-// SignMessage signs arbitrary bytes via the Turnkey sign_raw_payload activity
-// and returns the 64-byte Ed25519 signature.
-func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
-	return s.signBytes(ctx, message)
-}
-
 // SignTransaction signs tx via the sign_transaction activity, submitting the
 // full wire transaction so Turnkey's policy engine can evaluate solana.tx
 // conditions. Policies must allow ACTIVITY_TYPE_SIGN_TRANSACTION_V2.
@@ -218,10 +212,10 @@ func (s *Signer) signWithIsConfiguredKey(ctx context.Context) bool {
 	return ok && key == s.publicKey
 }
 
-// signBytes signs message via the Turnkey API, assembles the left-padded r/s
+// SignMessage signs message via the Turnkey API, assembles the left-padded r/s
 // components into a 64-byte signature, and verifies it locally before
 // returning.
-func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signature, error) {
+func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
 	req := signRequest{
 		Type:           "ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2",
 		TimestampMs:    strconv.FormatInt(time.Now().UnixMilli(), 10),

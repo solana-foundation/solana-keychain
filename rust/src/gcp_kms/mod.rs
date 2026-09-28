@@ -132,9 +132,20 @@ impl GcpKmsSigner {
             signature,
         ))
     }
+}
+
+#[async_trait::async_trait]
+impl SolanaSigner for GcpKmsSigner {
+    fn pubkey(&self) -> Pubkey {
+        self.public_key
+    }
+
+    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        self.sign_bytes(message).await
+    }
 
     /// Check if GCP KMS is available and the key is accessible
-    async fn check_availability(&self) -> bool {
+    async fn is_available(&self) -> bool {
         // Try to get the public key as a health check
         let result = self
             .client
@@ -156,21 +167,6 @@ impl GcpKmsSigner {
                 false
             }
         }
-    }
-}
-
-#[async_trait::async_trait]
-impl SolanaSigner for GcpKmsSigner {
-    fn pubkey(&self) -> Pubkey {
-        self.public_key
-    }
-
-    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        self.sign_bytes(message).await
-    }
-
-    async fn is_available(&self) -> bool {
-        self.check_availability().await
     }
 }
 

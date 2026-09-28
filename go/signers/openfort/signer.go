@@ -88,17 +88,11 @@ func (s Signer) String() string {
 // GoString mirrors String so %#v cannot leak secrets either.
 func (s Signer) GoString() string { return s.String() }
 
-// SignMessage signs arbitrary bytes via the Openfort API and verifies the
-// returned ed25519 signature against the signer's address.
-func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
-	return s.signBytes(ctx, message)
-}
-
 // SignTransaction signs the transaction's message bytes via the Openfort API,
 // inserts the signature at this signer's required-signer position, and returns
 // the encoded transaction and its completeness.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
-	return core.SignTransactionWith(ctx, tx, s.pubkey, s.signBytes)
+	return core.SignTransactionWith(ctx, tx, s.pubkey, s.SignMessage)
 }
 
 // IsAvailable re-fetches the account and reports whether its address still
@@ -172,9 +166,9 @@ func (s *Signer) callSign(ctx context.Context, message []byte) (signResponse, er
 	return resp, nil
 }
 
-// signBytes signs message via the Openfort API, decodes the 0x-prefixed hex
+// SignMessage signs message via the Openfort API, decodes the 0x-prefixed hex
 // signature, and verifies it against the signer's address.
-func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signature, error) {
+func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
 	resp, err := s.callSign(ctx, message)
 	if err != nil {
 		return solana.Signature{}, err

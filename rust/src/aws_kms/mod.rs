@@ -189,8 +189,39 @@ impl AwsKmsSigner {
         ))
     }
 
+    /// Confirm the configured Solana public key is the one AWS KMS holds for
+    /// `key_id`. Requires the `kms:GetPublicKey` permission on the key policy.
+    async fn key_matches_configured_public_key(&self) -> bool {
+        let Ok(response) = self
+            .client
+            .get_public_key()
+            .key_id(&self.key_id)
+            .send()
+            .await
+        else {
+            return false;
+        };
+
+        let Some(der) = response.public_key() else {
+            return false;
+        };
+
+        ed25519_key_from_spki_der(der.as_ref()) == Some(self.public_key.to_bytes())
+    }
+}
+
+#[async_trait::async_trait]
+impl SolanaSigner for AwsKmsSigner {
+    fn pubkey(&self) -> Pubkey {
+        self.public_key
+    }
+
+    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
+        self.sign_bytes(message).await
+    }
+
     /// Check if AWS KMS is available and the key is accessible
-    async fn check_availability(&self) -> bool {
+    async fn is_available(&self) -> bool {
         // Try to describe the key as a health check
         let result = self.client.describe_key().key_id(&self.key_id).send().await;
 
@@ -225,41 +256,6 @@ impl AwsKmsSigner {
             }
             Err(_) => false,
         }
-    }
-
-    /// Confirm the configured Solana public key is the one AWS KMS holds for
-    /// `key_id`. Requires the `kms:GetPublicKey` permission on the key policy.
-    async fn key_matches_configured_public_key(&self) -> bool {
-        let Ok(response) = self
-            .client
-            .get_public_key()
-            .key_id(&self.key_id)
-            .send()
-            .await
-        else {
-            return false;
-        };
-
-        let Some(der) = response.public_key() else {
-            return false;
-        };
-
-        ed25519_key_from_spki_der(der.as_ref()) == Some(self.public_key.to_bytes())
-    }
-}
-
-#[async_trait::async_trait]
-impl SolanaSigner for AwsKmsSigner {
-    fn pubkey(&self) -> Pubkey {
-        self.public_key
-    }
-
-    async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        self.sign_bytes(message).await
-    }
-
-    async fn is_available(&self) -> bool {
-        self.check_availability().await
     }
 }
 

@@ -348,22 +348,6 @@ impl CdpSigner {
             signature,
         ))
     }
-
-    /// Check if CDP API is reachable by fetching the account info.
-    async fn check_availability(&self) -> bool {
-        let path = format!("{}/{}", CDP_BASE_PATH, self.public_key);
-
-        let headers = match self.build_get_headers(&path) {
-            Ok(h) => h,
-            Err(_) => return false,
-        };
-
-        let url = format!("{}{}", self.api_base_url, path);
-        match self.client.get(&url).headers(headers).send().await {
-            Ok(resp) => resp.status().is_success(),
-            Err(_) => false,
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -376,8 +360,20 @@ impl SolanaSigner for CdpSigner {
         self.sign_bytes(message).await
     }
 
+    /// Check if CDP API is reachable by fetching the account info.
     async fn is_available(&self) -> bool {
-        self.check_availability().await
+        let path = format!("{}/{}", CDP_BASE_PATH, self.public_key);
+
+        let headers = match self.build_get_headers(&path) {
+            Ok(h) => h,
+            Err(_) => return false,
+        };
+
+        let url = format!("{}{}", self.api_base_url, path);
+        match self.client.get(&url).headers(headers).send().await {
+            Ok(resp) => resp.status().is_success(),
+            Err(_) => false,
+        }
     }
 }
 

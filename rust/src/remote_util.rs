@@ -95,6 +95,8 @@ pub(crate) fn encode_uri_component(input: &str) -> String {
     encoded
 }
 
+pub(crate) const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Maximum number of response-body bytes read from a remote signer API
 /// (1 MiB, matching Go's `core.MaxResponseBytes`).
 pub(crate) const MAX_RESPONSE_BYTES: usize = 1024 * 1024;

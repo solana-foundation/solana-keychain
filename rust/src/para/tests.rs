@@ -17,7 +17,7 @@ fn create_test_signer(api_key: &str, wallet_id: &str, base_url: Option<String>) 
         wallet_id: wallet_id.to_string(),
         api_base_url: base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string()),
         client: reqwest::Client::builder()
-            .timeout(CLIENT_TIMEOUT)
+            .timeout(HttpClientConfig::DEFAULT_REQUEST_TIMEOUT)
             .build()
             .unwrap(),
         public_key: None,

@@ -283,27 +283,6 @@ impl TurnkeySigner {
         response.status().is_success().then_some(response)
     }
 
-    async fn check_availability(&self) -> bool {
-        let request = WhoAmIRequest {
-            organization_id: self.organization_id.clone(),
-        };
-
-        let body = match serde_json::to_string(&request) {
-            Ok(b) => b,
-            Err(_) => return false,
-        };
-
-        if self
-            .post_query("/public/v1/query/whoami", body)
-            .await
-            .is_none()
-        {
-            return false;
-        }
-
-        self.sign_with_matches_public_key().await
-    }
-
     /// Confirm the configured Solana public key is the key Turnkey signs with.
     ///
     /// `get_private_key` returns the private key's *metadata* (public key,
@@ -367,7 +346,24 @@ impl SolanaSigner for TurnkeySigner {
     }
 
     async fn is_available(&self) -> bool {
-        self.check_availability().await
+        let request = WhoAmIRequest {
+            organization_id: self.organization_id.clone(),
+        };
+
+        let body = match serde_json::to_string(&request) {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+
+        if self
+            .post_query("/public/v1/query/whoami", body)
+            .await
+            .is_none()
+        {
+            return false;
+        }
+
+        self.sign_with_matches_public_key().await
     }
 }
 

@@ -73,17 +73,11 @@ func (s *Signer) Pubkey() solana.PublicKey { return s.pub }
 // KeyID returns the configured AWS KMS key ID/ARN/alias.
 func (s *Signer) KeyID() string { return s.keyID }
 
-// SignMessage signs arbitrary bytes via the KMS Sign operation and verifies the
-// returned signature against the configured public key before surfacing it.
-func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
-	return s.signBytes(ctx, message)
-}
-
 // SignTransaction signs the transaction's message bytes via AWS KMS, inserts the
 // signature at this signer's required-signer position, and returns the encoded
 // transaction with its completeness.
 func (s *Signer) SignTransaction(ctx context.Context, tx *solana.Transaction) (core.SignedTransaction, error) {
-	return core.SignTransactionWith(ctx, tx, s.pub, s.signBytes)
+	return core.SignTransactionWith(ctx, tx, s.pub, s.SignMessage)
 }
 
 // IsAvailable reports whether the KMS key is reachable and usable for Solana
@@ -109,10 +103,10 @@ func (s *Signer) IsAvailable(ctx context.Context) bool {
 	return ok && key == s.pub
 }
 
-// signBytes performs the KMS Sign call with MessageType RAW and the
+// SignMessage performs the KMS Sign call with MessageType RAW and the
 // ED25519_SHA_512 signing algorithm, validates the 64-byte signature, and
 // verifies it against the configured public key.
-func (s *Signer) signBytes(ctx context.Context, message []byte) (solana.Signature, error) {
+func (s *Signer) SignMessage(ctx context.Context, message []byte) (solana.Signature, error) {
 	out, err := s.client.Sign(ctx, &kms.SignInput{
 		KeyId:            aws.String(s.keyID),
 		Message:          message,

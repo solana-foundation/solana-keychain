@@ -16,12 +16,13 @@ use types::{
     TransactionResponse, TransactionSource, VaultAddress, VaultAddressesResponse,
 };
 
-use crate::remote_util::{normalize_base_url, parse_json_response, poll_until, PollOutcome};
+use crate::remote_util::{
+    normalize_base_url, parse_json_response, poll_until, PollOutcome, AVAILABILITY_TIMEOUT,
+};
 use crate::signature_util::{signature_from_base58, signature_from_hex, verify_or_reject};
 
 const DEFAULT_POLL_INTERVAL_MS: u64 = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 300;
-const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SigningMode {

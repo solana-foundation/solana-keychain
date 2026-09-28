@@ -30,7 +30,7 @@ import {
 } from '@solana/transactions';
 
 import type { DfnsCredentialKey } from './auth.js';
-import { importDfnsCredentialKey, signUserAction } from './auth.js';
+import { importDfnsCredentialKey, isObject, signUserAction } from './auth.js';
 import type {
     DfnsSignerConfig,
     GenerateSignatureRequest,
@@ -402,10 +402,6 @@ function parseWalletResponse(raw: unknown): GetWalletResponse {
     }
 
     return raw as unknown as GetWalletResponse;
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null;
 }
 
 /**
