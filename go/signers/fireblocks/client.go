@@ -28,9 +28,6 @@ const (
 	statusCancelled    = "CANCELLED"
 	statusRejected     = "REJECTED"
 	statusBlocked      = "BLOCKED"
-
-	duplicateExternalTxIDCode   = 1438
-	duplicateExternalTxIDDetail = "Fireblocks rejected the PROGRAM_CALL create as a duplicate externalTxId, so an earlier create carrying the same message bytes already exists there"
 )
 
 // Wire types for the Fireblocks REST API.
@@ -39,7 +36,6 @@ type createTransactionRequest struct {
 	AssetID         string            `json:"assetId"`
 	Operation       string            `json:"operation"`
 	Source          transactionSource `json:"source"`
-	ExternalTxID    string            `json:"externalTxId,omitempty"`
 	ExtraParameters any               `json:"extraParameters"`
 }
 
@@ -196,26 +192,8 @@ func (s *Signer) selectVaultAddress(addresses []vaultAddress) (string, error) {
 	}
 }
 
-// createTransaction creates a signing request in Fireblocks. A PROGRAM_CALL
-// create that neither succeeds nor is rejected by a 4xx leaves a request
-// Fireblocks may still act on, so it reports CodeBroadcastUnconfirmed with any
-// transaction id the response carried; a RAW create signs nothing on its own
-// and keeps the plain failure. A duplicate externalTxId is reported the same
-// way, since it says Fireblocks already holds a create for these bytes.
-func (s *Signer) createTransaction(ctx context.Context, request createTransactionRequest, programCall bool) (createTransactionResponse, error) {
-	ambiguous := func(status int, respBody []byte, err error) error {
-		if !programCall {
-			return err
-		}
-		if isDuplicateExternalTxID(respBody) {
-			unconfirmed := core.NewBroadcastUnconfirmedError("", duplicateExternalTxIDDetail)
-			unconfirmed.IdempotencyKey = request.ExternalTxID
-			unconfirmed.ProviderStatus = status
-			return unconfirmed
-		}
-		return core.UnconfirmedUnlessRejected(status, transactionIDFromBody(respBody), request.ExternalTxID, err)
-	}
-
+// createTransaction creates a signing request in Fireblocks.
+func (s *Signer) createTransaction(ctx context.Context, request createTransactionRequest) (createTransactionResponse, error) {
 	body, err := json.Marshal(request)
 	if err != nil {
 		return createTransactionResponse{}, core.WrapSignerError(core.CodeSerializationError, "failed to serialize fireblocks request", err)
@@ -228,48 +206,20 @@ func (s *Signer) createTransaction(ctx context.Context, request createTransactio
 
 	status, respBody, err := s.send(req)
 	if err != nil {
-		return createTransactionResponse{}, ambiguous(status, nil, err)
+		return createTransactionResponse{}, err
 	}
 	if !core.IsSuccess(status) {
-		return createTransactionResponse{}, ambiguous(status, respBody, core.NewRemoteAPIError("API error", status, respBody))
+		return createTransactionResponse{}, core.NewRemoteAPIError("API error", status, respBody)
 	}
 
 	var created createTransactionResponse
 	if err := json.Unmarshal(respBody, &created); err != nil {
-		return createTransactionResponse{}, ambiguous(status, respBody,
-			core.WrapSignerError(core.CodeSerializationError, "failed to parse response", err))
+		return createTransactionResponse{}, core.WrapSignerError(core.CodeSerializationError, "failed to parse response", err)
 	}
 	if strings.TrimSpace(created.ID) == "" {
-		return createTransactionResponse{}, ambiguous(status, respBody,
-			core.NewSignerError(core.CodeSerializationError, "Fireblocks create response did not include a transaction id"))
+		return createTransactionResponse{}, core.NewSignerError(core.CodeSerializationError, "Fireblocks create response did not include a transaction id")
 	}
 	return created, nil
-}
-
-// isDuplicateExternalTxID reports whether a failed create was rejected for
-// reusing an externalTxId, which means Fireblocks already holds a create for
-// these message bytes.
-func isDuplicateExternalTxID(body []byte) bool {
-	var parsed struct {
-		Code int `json:"code"`
-	}
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return false
-	}
-	return parsed.Code == duplicateExternalTxIDCode
-}
-
-func transactionIDFromBody(body []byte) string {
-	var parsed struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return ""
-	}
-	if strings.TrimSpace(parsed.ID) == "" {
-		return ""
-	}
-	return parsed.ID
 }
 
 // getTransaction fetches the current status of a Fireblocks transaction.
@@ -298,11 +248,7 @@ func (s *Signer) pollForSignature(ctx context.Context, txID string, programCall 
 	for attempt := 0; attempt < s.maxPollAttempts; attempt++ {
 		response, err := s.getTransaction(ctx, txID)
 		if err != nil {
-			if !programCall || ctx.Err() != nil {
-				return transactionResponse{}, err
-			}
-			return transactionResponse{}, core.NewBroadcastUnconfirmedError(txID,
-				"fireblocks PROGRAM_CALL outcome could not be resolved: "+err.Error())
+			return transactionResponse{}, err
 		}
 
 		if programCall {
@@ -331,10 +277,5 @@ func (s *Signer) pollForSignature(ctx context.Context, txID string, programCall 
 		}
 	}
 
-	if programCall {
-		return transactionResponse{}, core.NewBroadcastUnconfirmedError(txID,
-			"fireblocks PROGRAM_CALL polling timed out after "+strconv.Itoa(s.maxPollAttempts)+
-				" attempts; the transaction may already be executing")
-	}
 	return transactionResponse{}, core.PollTimeoutError("fireblocks", s.maxPollAttempts, "")
 }

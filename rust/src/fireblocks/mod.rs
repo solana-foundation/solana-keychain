@@ -7,8 +7,7 @@ use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::{SignTransactionResult, SignedTransaction, TransactionSigner};
 use crate::{
     error::SignerError, http_client_config::HttpClientConfig, traits::SolanaSigner,
-    transaction_util, transaction_util::idempotency_key_from_message,
-    transaction_util::unconfirmed_unless_rejected, transaction_util::TransactionUtil,
+    transaction_util, transaction_util::TransactionUtil,
 };
 use std::{str::FromStr, sync::Arc};
 use types::{
@@ -17,27 +16,12 @@ use types::{
     TransactionResponse, TransactionSource, VaultAddress, VaultAddressesResponse,
 };
 
-use crate::remote_util::{
-    extract_api_error_with_body, normalize_base_url, parse_json_response, poll_until,
-    read_body_capped, transaction_id_in_body, PollOutcome,
-};
+use crate::remote_util::{normalize_base_url, parse_json_response, poll_until, PollOutcome};
 use crate::signature_util::{signature_from_base58, signature_from_hex, verify_or_reject};
 
 const DEFAULT_POLL_INTERVAL_MS: u64 = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS: u32 = 300;
 const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-const DUPLICATE_EXTERNAL_TX_ID_CODE: u64 = 1438;
-const DUPLICATE_EXTERNAL_TX_ID_DETAIL: &str =
-    "Fireblocks rejected the PROGRAM_CALL create as a duplicate externalTxId, so an earlier create carrying the same message bytes already exists there";
-
-/// Whether a failed create was rejected for reusing an `externalTxId`, which
-/// means Fireblocks already holds a create for these message bytes.
-fn is_duplicate_external_tx_id(body: &[u8]) -> bool {
-    let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(body) else {
-        return false;
-    };
-    parsed.get("code").and_then(serde_json::Value::as_u64) == Some(DUPLICATE_EXTERNAL_TX_ID_CODE)
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SigningMode {
@@ -251,10 +235,9 @@ impl FireblocksSigner {
                     }],
                 },
             })),
-            external_tx_id: None,
         };
 
-        let create_response = self.create_transaction(request, SigningMode::Raw).await?;
+        let create_response = self.create_transaction(request).await?;
         let tx_response = self
             .poll_for_completion(&create_response.id, SigningMode::Raw)
             .await?;
@@ -262,16 +245,6 @@ impl FireblocksSigner {
         verify_or_reject(&sig, &public_key, message)?;
 
         Ok(sig)
-    }
-
-    fn external_tx_id(&self, message_bytes: &[u8]) -> String {
-        let mut namespaced = format!(
-            "fireblocks:solana:program_call:{}:{}:",
-            self.asset_id, self.vault_account_id
-        )
-        .into_bytes();
-        namespaced.extend_from_slice(message_bytes);
-        idempotency_key_from_message(&namespaced)
     }
 
     /// Sign a transaction with the PROGRAM_CALL operation in sign-only mode.
@@ -305,12 +278,9 @@ impl FireblocksSigner {
                 sign_only: true,
                 use_durable_nonce: false,
             })),
-            external_tx_id: Some(self.external_tx_id(message_bytes)),
         };
 
-        let create_response = self
-            .create_transaction(request, SigningMode::ProgramCall)
-            .await?;
+        let create_response = self.create_transaction(request).await?;
         let tx_response = self
             .poll_for_completion(&create_response.id, SigningMode::ProgramCall)
             .await?;
@@ -332,21 +302,11 @@ impl FireblocksSigner {
         Ok(sig)
     }
 
-    /// Create a signing request. A PROGRAM_CALL create that neither succeeds
-    /// nor is rejected by a 4xx leaves a request Fireblocks may still act on,
-    /// so it reports `BroadcastUnconfirmed` with any transaction id the
-    /// response carried; a RAW create signs nothing on its own and keeps the
-    /// plain failure. A duplicate `externalTxId` is reported the same way,
-    /// since it says Fireblocks already holds a create for these bytes.
     async fn create_transaction(
         &self,
         request: CreateTransactionRequest,
-        mode: SigningMode,
     ) -> Result<CreateTransactionResponse, SignerError> {
-        const CONTEXT: &str = "Fireblocks API create_transaction";
-
         let uri = "/v1/transactions";
-        let external_tx_id = request.external_tx_id.clone();
         let body = serde_json::to_string(&request)?;
         let token = self.create_auth_token(uri, &body)?;
 
@@ -359,66 +319,13 @@ impl FireblocksSigner {
             .header("Authorization", format!("Bearer {}", token))
             .body(body)
             .send()
-            .await;
+            .await?;
 
-        if matches!(mode, SigningMode::Raw) {
-            let created: CreateTransactionResponse =
-                parse_json_response(response?, CONTEXT).await?;
-            if created.id.trim().is_empty() {
-                return Err(SignerError::SerializationError(
-                    "Fireblocks create response did not include a transaction id".to_string(),
-                ));
-            }
-            return Ok(created);
-        }
-
-        let response = response.map_err(|error| {
-            unconfirmed_unless_rejected(None, None, external_tx_id.as_deref(), error.into())
-        })?;
-        let status = response.status().as_u16();
-        if !response.status().is_success() {
-            let (error, body) = extract_api_error_with_body(response, CONTEXT).await;
-            if is_duplicate_external_tx_id(&body) {
-                return Err(SignerError::BroadcastUnconfirmed {
-                    provider_tx_id: None,
-                    provider_status: Some(status),
-                    idempotency_key: external_tx_id.clone(),
-                    transaction_signature: None,
-                    detail: DUPLICATE_EXTERNAL_TX_ID_DETAIL.to_string(),
-                });
-            }
-            return Err(unconfirmed_unless_rejected(
-                Some(status),
-                None,
-                external_tx_id.as_deref(),
-                error,
-            ));
-        }
-
-        let body = read_body_capped(response).await.map_err(|error| {
-            unconfirmed_unless_rejected(Some(status), None, external_tx_id.as_deref(), error)
-        })?;
-        // The create may have been accepted even when the body is otherwise
-        // unusable, so an id present there is the caller's recovery handle.
-        let provider_tx_id = transaction_id_in_body(&body);
-        let created: CreateTransactionResponse = serde_json::from_slice(&body).map_err(|_e| {
-            #[cfg(feature = "unsafe-debug")]
-            log::error!("Failed to parse {CONTEXT} response: {_e}");
-            unconfirmed_unless_rejected(
-                Some(status),
-                provider_tx_id,
-                external_tx_id.as_deref(),
-                SignerError::SerializationError(format!("Failed to parse {CONTEXT} response")),
-            )
-        })?;
+        let created: CreateTransactionResponse =
+            parse_json_response(response, "Fireblocks API create_transaction").await?;
         if created.id.trim().is_empty() {
-            return Err(unconfirmed_unless_rejected(
-                Some(status),
-                None,
-                external_tx_id.as_deref(),
-                SignerError::SerializationError(
-                    "Fireblocks create response did not include a transaction id".to_string(),
-                ),
+            return Err(SignerError::SerializationError(
+                "Fireblocks create response did not include a transaction id".to_string(),
             ));
         }
         Ok(created)
@@ -432,36 +339,14 @@ impl FireblocksSigner {
         poll_until(
             self.max_poll_attempts,
             self.poll_interval_ms,
-            || match mode {
-                SigningMode::ProgramCall => SignerError::BroadcastUnconfirmed {
-                    provider_tx_id: Some(tx_id.to_string()),
-                    provider_status: None,
-                    idempotency_key: None,
-                    transaction_signature: None,
-                    detail: format!(
-                        "Fireblocks PROGRAM_CALL polling timeout after {} attempts; the transaction may already be executing",
-                        self.max_poll_attempts
-                    ),
-                },
-                SigningMode::Raw => SignerError::remote_api(format!(
+            || {
+                SignerError::remote_api(format!(
                     "Transaction polling timeout after {} attempts - signing request may still complete",
                     self.max_poll_attempts
-                )),
+                ))
             },
             || async {
-                let response = self.get_transaction(tx_id).await.map_err(|error| match mode {
-                    SigningMode::ProgramCall => SignerError::BroadcastUnconfirmed {
-                        provider_tx_id: Some(tx_id.to_string()),
-                        provider_status: None,
-                        idempotency_key: None,
-                        transaction_signature: None,
-                        detail: format!(
-                            "Fireblocks PROGRAM_CALL outcome could not be resolved: {}",
-                            error
-                        ),
-                    },
-                    SigningMode::Raw => error,
-                })?;
+                let response = self.get_transaction(tx_id).await?;
 
                 match (mode, response.status.as_str()) {
                     (SigningMode::ProgramCall, "SIGNED") | (SigningMode::Raw, "COMPLETED") => {

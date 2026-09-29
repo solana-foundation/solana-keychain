@@ -145,7 +145,7 @@ pub(crate) async fn extract_api_error(response: reqwest::Response, context: &str
 /// has already accepted a transaction may still answer with a non-2xx status or
 /// an otherwise unusable body, and that id is the caller's only handle for
 /// reconciling it.
-#[cfg(any(feature = "crossmint", feature = "fireblocks", feature = "fordefi"))]
+#[cfg(any(feature = "crossmint", feature = "fordefi"))]
 pub(crate) fn transaction_id_in_body(body: &[u8]) -> Option<String> {
     serde_json::from_slice::<serde_json::Value>(body)
         .ok()?
@@ -157,7 +157,7 @@ pub(crate) fn transaction_id_in_body(body: &[u8]) -> Option<String> {
 
 /// [`extract_api_error`] plus the failed body, for a create whose acceptance the
 /// caller still has to reconcile from what the provider said.
-#[cfg(any(feature = "fireblocks", feature = "fordefi"))]
+#[cfg(feature = "fordefi")]
 pub(crate) async fn extract_api_error_with_body(
     response: reqwest::Response,
     context: &str,

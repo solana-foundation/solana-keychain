@@ -173,10 +173,9 @@ func (s *Signer) signProgramCall(ctx context.Context, tx *solana.Transaction, me
 	}
 
 	request := createTransactionRequest{
-		AssetID:      s.assetID,
-		Operation:    operationProgramCall,
-		Source:       transactionSource{Type: sourceVaultAccount, ID: s.vaultAccountID},
-		ExternalTxID: s.externalTxID(message),
+		AssetID:   s.assetID,
+		Operation: operationProgramCall,
+		Source:    transactionSource{Type: sourceVaultAccount, ID: s.vaultAccountID},
 		ExtraParameters: programCallExtraParameters{
 			ProgramCallData: encoded,
 			SignOnly:        true,
@@ -196,14 +195,9 @@ func (s *Signer) signProgramCall(ctx context.Context, tx *solana.Transaction, me
 	return sig, nil
 }
 
-func (s *Signer) externalTxID(message []byte) string {
-	namespace := "fireblocks:solana:program_call:" + s.assetID + ":" + s.vaultAccountID + ":"
-	return core.IdempotencyKeyFromMessage(append([]byte(namespace), message...))
-}
-
 // requestAndPollSignature creates a signing request and polls it to completion.
 func (s *Signer) requestAndPollSignature(ctx context.Context, request createTransactionRequest, programCall bool) (solana.Signature, error) {
-	created, err := s.createTransaction(ctx, request, programCall)
+	created, err := s.createTransaction(ctx, request)
 	if err != nil {
 		return solana.Signature{}, err
 	}

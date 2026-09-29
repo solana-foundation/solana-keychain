@@ -17,7 +17,6 @@ from solana_keychain.core.http import (
     fetch_signer_json,
     normalize_base_url,
     probe_availability,
-    provider_may_have_accepted,
 )
 from solana_keychain.core.poll import poll_attempts
 from solana_keychain.core.signature_util import verify_returned_signature
@@ -30,7 +29,6 @@ from solana_keychain.core.transaction_util import (
     ED25519_SIGNATURE_LENGTH,
     add_signature_to_transaction,
     classify_signed_transaction,
-    idempotency_key_from_message,
     serialize_transaction,
     signed_message_bytes,
 )
@@ -41,12 +39,6 @@ DEFAULT_ASSET_ID = "SOL"
 DEFAULT_POLL_INTERVAL_MS = 1000
 DEFAULT_MAX_POLL_ATTEMPTS = 300
 
-
-_DUPLICATE_EXTERNAL_TX_ID_CODE = 1438
-_DUPLICATE_EXTERNAL_TX_ID_DETAIL = (
-    "Fireblocks rejected the PROGRAM_CALL create as a duplicate externalTxId, so an "
-    "earlier create carrying the same message bytes already exists there"
-)
 
 _TERMINAL_FAILURE_STATUSES = frozenset({"FAILED", "CANCELLED", "REJECTED", "BLOCKED"})
 _BROADCAST_STATUSES = frozenset({"BROADCASTING", "CONFIRMING", "COMPLETED"})
@@ -194,55 +186,21 @@ class FireblocksSigner(TransactionSigner):
             f"{self._vault_account_id} asset {self._asset_id}; cannot choose a signing identity",
         )
 
-    async def _create_transaction(self, request: dict[str, Any], *, program_call: bool) -> str:
-        """Create a signing request.
-
-        A PROGRAM_CALL create that neither succeeds nor is rejected by a 4xx
-        leaves a request Fireblocks may still act on, so it raises
-        ``BROADCAST_UNCONFIRMED``; check Fireblocks before retrying. A duplicate
-        ``externalTxId`` is reported the same way, since it says Fireblocks already
-        holds a create for these bytes. A RAW create signs nothing on its own and
-        keeps the plain failure.
-        """
+    async def _create_transaction(self, request: dict[str, Any]) -> str:
         uri = "/v1/transactions"
         body = json.dumps(request, separators=(",", ":"))
         headers = self._auth_headers(uri, body)
         headers["Content-Type"] = "application/json"
-        try:
-            response = await fetch_signer_json(
-                url=f"{self._api_base_url}{uri}",
-                provider_name="Fireblocks",
-                method="POST",
-                headers=headers,
-                content=body.encode(),
-                client=self._http_client,
-            )
-        except SignerError as error:
-            if program_call and error.provider_error_code == _DUPLICATE_EXTERNAL_TX_ID_CODE:
-                raise SignerError(
-                    SignerErrorCode.BROADCAST_UNCONFIRMED,
-                    _DUPLICATE_EXTERNAL_TX_ID_DETAIL,
-                    status_code=error.status_code,
-                    idempotency_key=request.get("externalTxId"),
-                ) from None
-            if not program_call or not provider_may_have_accepted(error.status_code):
-                raise
-            raise SignerError(
-                SignerErrorCode.BROADCAST_UNCONFIRMED,
-                error._detail,
-                provider_transaction_id=error.provider_transaction_id,
-                status_code=error.status_code,
-                idempotency_key=request.get("externalTxId"),
-            ) from None
+        response = await fetch_signer_json(
+            url=f"{self._api_base_url}{uri}",
+            provider_name="Fireblocks",
+            method="POST",
+            headers=headers,
+            content=body.encode(),
+            client=self._http_client,
+        )
         transaction_id = response.get("id") if isinstance(response, dict) else None
         if not isinstance(transaction_id, str) or not transaction_id:
-            if program_call:
-                raise SignerError(
-                    SignerErrorCode.BROADCAST_UNCONFIRMED,
-                    "Fireblocks accepted the PROGRAM_CALL but returned no transaction id, "
-                    "so the outcome cannot be confirmed",
-                    idempotency_key=request.get("externalTxId"),
-                )
             raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
         return transaction_id
 
@@ -250,18 +208,7 @@ class FireblocksSigner(TransactionSigner):
         self, transaction_id: str, *, program_call: bool = False
     ) -> dict[str, Any]:
         async for _ in poll_attempts(self._max_poll_attempts, self._poll_interval_ms):
-            try:
-                response = await self._get_json(
-                    f"/v1/transactions/{quote(transaction_id, safe='')}"
-                )
-            except SignerError as error:
-                if not program_call:
-                    raise
-                raise SignerError(
-                    SignerErrorCode.BROADCAST_UNCONFIRMED,
-                    f"Fireblocks PROGRAM_CALL outcome could not be resolved: {error._detail}",
-                    provider_transaction_id=transaction_id,
-                ) from None
+            response = await self._get_json(f"/v1/transactions/{quote(transaction_id, safe='')}")
             if not isinstance(response, dict):
                 raise SignerError(SignerErrorCode.SERIALIZATION_ERROR, "Failed to parse response")
             status = response.get("status")
@@ -281,13 +228,6 @@ class FireblocksSigner(TransactionSigner):
                 raise SignerError(
                     SignerErrorCode.SIGNING_FAILED, f"Transaction {status}: {transaction_id}"
                 )
-        if program_call:
-            raise SignerError(
-                SignerErrorCode.BROADCAST_UNCONFIRMED,
-                f"Fireblocks PROGRAM_CALL polling timeout after {self._max_poll_attempts} "
-                "attempts; the transaction may already be executing",
-                provider_transaction_id=transaction_id,
-            )
         raise SignerError(
             SignerErrorCode.REMOTE_API_ERROR,
             f"Transaction polling timeout after {self._max_poll_attempts} attempts - "
@@ -339,26 +279,11 @@ class FireblocksSigner(TransactionSigner):
                 "source": {"type": "VAULT_ACCOUNT", "id": self._vault_account_id},
                 "extraParameters": {"rawMessageData": {"messages": [{"content": message.hex()}]}},
             },
-            program_call=False,
         )
         response = await self._poll_for_signature(transaction_id)
         signature = self._extract_signature(response)
         verify_returned_signature(signature, public_key, message)
         return signature
-
-    def _external_tx_id(self, message: bytes) -> str:
-        """Derive the ``externalTxId`` a PROGRAM_CALL create carries.
-
-        Args:
-            message: The message bytes being submitted for signing.
-
-        Returns:
-            The message-derived id.
-        """
-        namespace = (
-            f"fireblocks:solana:program_call:{self._asset_id}:{self._vault_account_id}:"
-        ).encode()
-        return idempotency_key_from_message(namespace + message)
 
     async def _sign_program_call(
         self, transaction: VersionedTransaction, message: bytes
@@ -376,12 +301,10 @@ class FireblocksSigner(TransactionSigner):
                 "Fireblocks PROGRAM_CALL accepts legacy and v0 messages only; a v1 message "
                 "cannot be signed in this mode",
             )
-        external_tx_id = self._external_tx_id(message)
         transaction_id = await self._create_transaction(
             {
                 "assetId": self._asset_id,
                 "operation": "PROGRAM_CALL",
-                "externalTxId": external_tx_id,
                 "source": {"type": "VAULT_ACCOUNT", "id": self._vault_account_id},
                 "extraParameters": {
                     "programCallData": serialize_transaction(transaction),
@@ -389,7 +312,6 @@ class FireblocksSigner(TransactionSigner):
                     "useDurableNonce": False,
                 },
             },
-            program_call=True,
         )
         response = await self._poll_for_signature(transaction_id, program_call=True)
         signature = self._extract_signature(response, allow_tx_hash_carrier=True)

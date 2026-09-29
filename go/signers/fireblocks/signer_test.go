@@ -262,7 +262,7 @@ func TestSignTransactionProgramCallSignOnly(t *testing.T) {
 	}
 }
 
-func TestSignTransactionProgramCallCarriesAMessageDerivedExternalTxID(t *testing.T) {
+func TestSignTransactionProgramCallCarriesNoExternalTxID(t *testing.T) {
 	priv := testutils.TestPrivateKey()
 	pub := testutils.TestPublicKey()
 
@@ -288,14 +288,12 @@ func TestSignTransactionProgramCallCarriesAMessageDerivedExternalTxID(t *testing
 		t.Fatal(err)
 	}
 
-	want := core.IdempotencyKeyFromMessage(
-		append([]byte("fireblocks:solana:program_call:SOL:"+testVaultID+":"), msgBytes...))
 	request := created.Load()
 	if request == nil {
 		t.Fatal("no create request recorded")
 	}
-	if got := (*request)["externalTxId"]; got != want {
-		t.Errorf("externalTxId = %v, want %s", got, want)
+	if got, ok := (*request)["externalTxId"]; ok {
+		t.Errorf("externalTxId = %v, want absent", got)
 	}
 }
 
@@ -441,7 +439,7 @@ func TestSignTransactionProgramCallBroadcastIsUnconfirmed(t *testing.T) {
 	}
 }
 
-func TestSignTransactionProgramCallUnresolvedPollKeepsTransactionID(t *testing.T) {
+func TestSignTransactionProgramCallUnresolvedPollIsAPlainFailure(t *testing.T) {
 	pub := testutils.TestPublicKey()
 
 	for _, tc := range []struct {
@@ -468,12 +466,8 @@ func TestSignTransactionProgramCallUnresolvedPollKeepsTransactionID(t *testing.T
 			})
 
 			_, err = s.SignTransaction(context.Background(), tx)
-			if code, _ := core.CodeOf(err); code != core.CodeBroadcastUnconfirmed {
-				t.Fatalf("got %s, want BROADCAST_UNCONFIRMED", code)
-			}
-			var se *core.SignerError
-			if errors.As(err, &se) && se.ProviderTxID != "tx-789" {
-				t.Errorf("ProviderTxID = %q, want tx-789", se.ProviderTxID)
+			if code, _ := core.CodeOf(err); code != core.CodeRemoteAPIError {
+				t.Fatalf("got %s, want %s", code, core.CodeRemoteAPIError)
 			}
 		})
 	}
@@ -486,7 +480,7 @@ func TestCreateWithUnusableBody(t *testing.T) {
 		wantCode       core.Code
 		wantTxID       string
 	}{
-		{"program call reports unconfirmed with the id", true, core.CodeBroadcastUnconfirmed, "tx-accepted"},
+		{"program call stays a plain failure", true, core.CodeSerializationError, ""},
 		{"raw stays a plain failure", false, core.CodeSerializationError, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -520,7 +514,7 @@ func TestCreateRejectsBlankTransactionIDWithoutPolling(t *testing.T) {
 		useProgramCall bool
 		wantCode       core.Code
 	}{
-		{"program call preserves its recovery key", true, core.CodeBroadcastUnconfirmed},
+		{"program call reports a serialization failure", true, core.CodeSerializationError},
 		{"raw reports a serialization failure", false, core.CodeSerializationError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -537,17 +531,11 @@ func TestCreateRejectsBlankTransactionIDWithoutPolling(t *testing.T) {
 			})
 
 			var err error
-			var wantIdempotencyKey string
 			if tc.useProgramCall {
 				tx, createErr := testutils.CreateTestTransaction(pub)
 				if createErr != nil {
 					t.Fatal(createErr)
 				}
-				message, marshalErr := tx.Message.MarshalBinary()
-				if marshalErr != nil {
-					t.Fatal(marshalErr)
-				}
-				wantIdempotencyKey = s.externalTxID(message)
 				_, err = s.SignTransaction(context.Background(), tx)
 			} else {
 				_, err = s.SignMessage(context.Background(), []byte("hello"))
@@ -558,18 +546,6 @@ func TestCreateRejectsBlankTransactionIDWithoutPolling(t *testing.T) {
 			}
 			if polls.Load() != 0 {
 				t.Fatalf("blank transaction id triggered %d polls", polls.Load())
-			}
-			if tc.useProgramCall {
-				var signerErr *core.SignerError
-				if !errors.As(err, &signerErr) {
-					t.Fatalf("expected SignerError, got %T", err)
-				}
-				if signerErr.ProviderTxID != "" {
-					t.Errorf("ProviderTxID = %q, want empty", signerErr.ProviderTxID)
-				}
-				if signerErr.IdempotencyKey != wantIdempotencyKey {
-					t.Errorf("IdempotencyKey = %q, want %q", signerErr.IdempotencyKey, wantIdempotencyKey)
-				}
 			}
 		})
 	}
@@ -1016,58 +992,20 @@ func TestSignTransactionProgramCallPreSendFailureIsNotUnconfirmed(t *testing.T) 
 	}
 }
 
-func TestCreateDuplicateExternalTxIDReportsUnconfirmed(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		body     map[string]any
-		wantCode core.Code
-	}{
-		{
-			"duplicate external tx id means the create already exists",
-			map[string]any{"message": "The external tx id that was provided in the request, already exists", "code": 1438},
-			core.CodeBroadcastUnconfirmed,
-		},
-		{
-			"any other 4xx rules the create out",
-			map[string]any{"message": "Invalid asset", "code": 1026},
-			core.CodeRemoteAPIError,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			pub := testutils.TestPublicKey()
-			s := newTestSignerWithProgramCall(t, pub.String(), true, func(mux *http.ServeMux) {
-				mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
-					testutils.WriteJSON(w, http.StatusBadRequest, tc.body)
-				})
-			})
-
-			tx, err := testutils.CreateTestTransaction(pub)
-			if err != nil {
-				t.Fatal(err)
-			}
-			message, err := tx.Message.MarshalBinary()
-			if err != nil {
-				t.Fatal(err)
-			}
-			wantIdempotencyKey := s.externalTxID(message)
-
-			_, err = s.SignTransaction(context.Background(), tx)
-			if code, _ := core.CodeOf(err); code != tc.wantCode {
-				t.Fatalf("got %s, want %s", code, tc.wantCode)
-			}
-			if tc.wantCode != core.CodeBroadcastUnconfirmed {
-				return
-			}
-			var signerErr *core.SignerError
-			if !errors.As(err, &signerErr) {
-				t.Fatalf("expected SignerError, got %T", err)
-			}
-			if signerErr.IdempotencyKey != wantIdempotencyKey {
-				t.Errorf("IdempotencyKey = %q, want %q", signerErr.IdempotencyKey, wantIdempotencyKey)
-			}
-			if signerErr.ProviderStatus != http.StatusBadRequest {
-				t.Errorf("ProviderStatus = %d, want 400", signerErr.ProviderStatus)
-			}
+func TestCreateBadRequestIsAPlainFailure(t *testing.T) {
+	pub := testutils.TestPublicKey()
+	s := newTestSignerWithProgramCall(t, pub.String(), true, func(mux *http.ServeMux) {
+		mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, _ *http.Request) {
+			testutils.WriteJSON(w, http.StatusBadRequest, map[string]any{"message": "Invalid asset", "code": 1026})
 		})
+	})
+
+	tx, err := testutils.CreateTestTransaction(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SignTransaction(context.Background(), tx)
+	if code, _ := core.CodeOf(err); code != core.CodeRemoteAPIError {
+		t.Fatalf("got %s, want %s", code, core.CodeRemoteAPIError)
 	}
 }

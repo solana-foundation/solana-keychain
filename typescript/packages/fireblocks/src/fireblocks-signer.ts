@@ -1,5 +1,5 @@
 import { Address, assertIsAddress } from '@solana/addresses';
-import { getBase16Decoder, getBase16Encoder, getBase58Encoder, getUtf8Encoder } from '@solana/codecs-strings';
+import { getBase16Decoder, getBase16Encoder, getBase58Encoder } from '@solana/codecs-strings';
 import {
     abortableDelay,
     assertHttpsUrl,
@@ -7,14 +7,10 @@ import {
     createSignatureDictionary,
     ED25519_SIGNATURE_LENGTH,
     fetchSignerJson,
-    idempotencyKeyFromMessage,
     normalizeBaseUrl,
     normalizeMessageBytes,
-    providerMayHaveAccepted,
-    providerStatus,
     signBatchSequential,
     signBatchStaggered,
-    SignerError,
     SignerErrorCode,
     SolanaMessageSigner,
     SolanaTransactionSigner,
@@ -62,7 +58,6 @@ export async function createFireblocksSigner<TAddress extends string = string>(
 let base16Encoder: ReturnType<typeof getBase16Encoder> | undefined;
 let base16Decoder: ReturnType<typeof getBase16Decoder> | undefined;
 let base58Encoder: ReturnType<typeof getBase58Encoder> | undefined;
-let utf8Encoder: ReturnType<typeof getUtf8Encoder> | undefined;
 
 /** The version prefix sets the high bit of the first message byte, low bits hold the version. */
 function isV1Message(messageBytes: Transaction['messageBytes']): boolean {
@@ -74,18 +69,6 @@ const DEFAULT_API_BASE_URL = 'https://api.fireblocks.io';
 const DEFAULT_ASSET_ID = 'SOL';
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 60;
-const DUPLICATE_EXTERNAL_TX_ID_CODE = 1438;
-const DUPLICATE_EXTERNAL_TX_ID_MESSAGE =
-    'Fireblocks rejected the PROGRAM_CALL create as a duplicate externalTxId, so an earlier create carrying the same message bytes already exists there';
-
-/**
- * Whether a failed create was rejected for reusing an `externalTxId`, which
- * means Fireblocks already holds a create for these message bytes.
- */
-function isDuplicateExternalTxId(error: unknown): boolean {
-    return error instanceof SignerError && error.context?.providerErrorCode === DUPLICATE_EXTERNAL_TX_ID_CODE;
-}
-
 /**
  * Fireblocks-based signer for Solana transactions
  *
@@ -337,10 +320,8 @@ class FireblocksSigner<TAddress extends string = string>
             });
         }
 
-        const externalTxId = await this.externalTxId(transaction.messageBytes);
         const request: CreateTransactionRequest = {
             assetId: this.assetId,
-            externalTxId,
             extraParameters: {
                 programCallData: getBase64EncodedWireTransaction(transaction),
                 signOnly: true,
@@ -353,65 +334,18 @@ class FireblocksSigner<TAddress extends string = string>
             },
         };
 
-        const transactionId = await this.createProgramCallTransaction(request, externalTxId, abortSignal);
-        return await this.pollForSignature(transactionId, 'PROGRAM_CALL', abortSignal);
-    }
-
-    /** Creates a PROGRAM_CALL signing request. */
-    private async createProgramCallTransaction(
-        request: CreateTransactionRequest,
-        externalTxId: string,
-        abortSignal?: AbortSignal,
-    ): Promise<string> {
-        const prepared = await this.prepareRequest('POST', '/v1/transactions', request);
-        let createResponse: CreateTransactionResponse;
-        try {
-            createResponse = await this.send<CreateTransactionResponse>(prepared, abortSignal);
-        } catch (error) {
-            if (isDuplicateExternalTxId(error)) {
-                const status = providerStatus(error);
-                return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
-                    cause: error,
-                    idempotencyKey: externalTxId,
-                    message: DUPLICATE_EXTERNAL_TX_ID_MESSAGE,
-                    ...(status === undefined ? {} : { status }),
-                });
-            }
-            if (!providerMayHaveAccepted(error)) {
-                throw error;
-            }
-            const status = providerStatus(error);
-            const providerTransactionId =
-                error instanceof SignerError ? error.context?.providerTransactionId : undefined;
-            return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
-                cause: error,
-                idempotencyKey: externalTxId,
-                message:
-                    typeof providerTransactionId === 'string'
-                        ? `Fireblocks may have accepted the PROGRAM_CALL, but the outcome could not be confirmed (provider transaction id: ${providerTransactionId})`
-                        : 'Fireblocks may have accepted the PROGRAM_CALL, but the outcome could not be confirmed and no transaction id was returned',
-                ...(status === undefined ? {} : { status }),
-                ...(typeof providerTransactionId === 'string' ? { providerTransactionId } : {}),
-            });
-        }
+        const createResponse = await this.request<CreateTransactionResponse>(
+            'POST',
+            '/v1/transactions',
+            request,
+            abortSignal,
+        );
         if (typeof createResponse.id !== 'string' || createResponse.id.length === 0) {
-            return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
-                idempotencyKey: externalTxId,
-                message:
-                    'Fireblocks accepted the PROGRAM_CALL but returned no transaction id, so the outcome cannot be confirmed',
+            throwSignerError(SignerErrorCode.PARSING_ERROR, {
+                message: 'Fireblocks create response did not include a transaction id',
             });
         }
-        return createResponse.id;
-    }
-
-    private async externalTxId(messageBytes: ArrayLike<number>): Promise<string> {
-        utf8Encoder ||= getUtf8Encoder();
-        const namespace = utf8Encoder.encode(`fireblocks:solana:program_call:${this.assetId}:${this.vaultAccountId}:`);
-        const bytes = normalizeMessageBytes(messageBytes);
-        const namespaced = new Uint8Array(namespace.length + bytes.length);
-        namespaced.set(namespace);
-        namespaced.set(bytes, namespace.length);
-        return await idempotencyKeyFromMessage(namespaced);
+        return await this.pollForSignature(createResponse.id, 'PROGRAM_CALL', abortSignal);
     }
 
     /**
@@ -425,19 +359,7 @@ class FireblocksSigner<TAddress extends string = string>
         const uri = `/v1/transactions/${encodeURIComponent(transactionId)}`;
 
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
-            let txResponse: TransactionResponse;
-            try {
-                txResponse = await this.request<TransactionResponse>('GET', uri, undefined, abortSignal);
-            } catch (error) {
-                if (operation !== 'PROGRAM_CALL' || abortSignal?.aborted === true) {
-                    throw error;
-                }
-                return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
-                    cause: error,
-                    message: 'Fireblocks PROGRAM_CALL outcome could not be resolved',
-                    providerTransactionId: transactionId,
-                });
-            }
+            const txResponse = await this.request<TransactionResponse>('GET', uri, undefined, abortSignal);
 
             const status = txResponse.status as FireblocksTransactionStatus;
 
@@ -465,12 +387,6 @@ class FireblocksSigner<TAddress extends string = string>
             await abortableDelay(this.pollIntervalMs, abortSignal);
         }
 
-        if (operation === 'PROGRAM_CALL') {
-            return throwSignerError(SignerErrorCode.BROADCAST_UNCONFIRMED, {
-                message: `Fireblocks PROGRAM_CALL did not resolve within ${this.maxPollAttempts} attempts; the transaction may already be executing`,
-                providerTransactionId: transactionId,
-            });
-        }
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
             message: `Transaction did not complete within ${this.maxPollAttempts} attempts`,
         });

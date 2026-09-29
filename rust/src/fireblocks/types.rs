@@ -11,8 +11,6 @@ pub struct CreateTransactionRequest {
     pub source: TransactionSource,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra_parameters: Option<ExtraParameters>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub external_tx_id: Option<String>,
 }
 
 #[derive(Serialize)]

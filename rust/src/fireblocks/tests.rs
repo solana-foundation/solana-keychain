@@ -502,31 +502,18 @@ async fn test_program_call_signs_only_and_takes_the_signature_from_signed_messag
 }
 
 #[tokio::test]
-async fn test_program_call_create_carries_a_message_derived_external_tx_id() {
+async fn test_program_call_create_carries_no_external_tx_id() {
     let mock_server = MockServer::start().await;
     let keypair = Keypair::new();
     let mut transaction = create_test_transaction(&keypair_pubkey(&keypair));
-    let message_bytes = transaction.message.serialize();
-    let signature = keypair.sign_message(&message_bytes);
+    let signature = keypair.sign_message(&transaction.message.serialize());
     let signer = create_test_signer_program_call(&mock_server.uri(), keypair_pubkey(&keypair));
 
-    let mut namespaced = b"fireblocks:solana:program_call:SOL:test-vault-id:".to_vec();
-    namespaced.extend_from_slice(&message_bytes);
-    let expected = idempotency_key_from_message(&namespaced);
-
-    Mock::given(method("POST"))
-        .and(path("/v1/transactions"))
-        .and(body_partial_json(serde_json::json!({
-            "operation": "PROGRAM_CALL",
-            "externalTxId": expected
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": "tx-789",
-            "status": "SUBMITTED"
-        })))
-        .expect(1)
-        .mount(&mock_server)
-        .await;
+    mount_program_call_create(
+        &mock_server,
+        &TransactionUtil::serialize_transaction(&transaction).unwrap(),
+    )
+    .await;
     mount_program_call_poll(
         &mock_server,
         serde_json::json!({
@@ -538,6 +525,16 @@ async fn test_program_call_create_carries_a_message_derived_external_tx_id() {
     .await;
 
     signer.sign_transaction(&mut transaction).await.unwrap();
+
+    let create = mock_server
+        .received_requests()
+        .await
+        .expect("requests are recorded")
+        .into_iter()
+        .find(|request| request.method == wiremock::http::Method::POST)
+        .expect("the create was sent");
+    let body: serde_json::Value = serde_json::from_slice(&create.body).unwrap();
+    assert!(body.get("externalTxId").is_none());
 }
 
 #[tokio::test]
@@ -585,7 +582,7 @@ async fn test_raw_create_carries_no_external_tx_id() {
 }
 
 #[tokio::test]
-async fn test_program_call_create_with_an_unusable_body_keeps_the_transaction_id() {
+async fn test_program_call_create_with_an_unusable_body_is_a_plain_failure() {
     let mock_server = MockServer::start().await;
     let keypair = Keypair::new();
     let mut transaction = create_test_transaction(&keypair_pubkey(&keypair));
@@ -603,17 +600,10 @@ async fn test_program_call_create_with_an_unusable_body_keeps_the_transaction_id
 
     let error = signer.sign_transaction(&mut transaction).await.unwrap_err();
 
-    match error {
-        SignerError::BroadcastUnconfirmed {
-            provider_tx_id,
-            provider_status,
-            ..
-        } => {
-            assert_eq!(provider_tx_id, Some("tx-accepted".to_string()));
-            assert_eq!(provider_status, None);
-        }
-        other => panic!("expected BroadcastUnconfirmed, got {other:?}"),
-    }
+    assert!(
+        matches!(error, SignerError::SerializationError(_)),
+        "a sign-only PROGRAM_CALL cannot broadcast, so it must not report BroadcastUnconfirmed: {error:?}"
+    );
 }
 
 #[tokio::test]
@@ -644,9 +634,7 @@ async fn test_program_call_create_rejects_blank_id_without_polling() {
     let mock_server = MockServer::start().await;
     let keypair = Keypair::new();
     let mut transaction = create_test_transaction(&keypair_pubkey(&keypair));
-    let message_bytes = transaction.message.serialize();
     let signer = create_test_signer_program_call(&mock_server.uri(), keypair_pubkey(&keypair));
-    let expected = signer.external_tx_id(&message_bytes);
 
     Mock::given(method("POST"))
         .and(path("/v1/transactions"))
@@ -660,17 +648,7 @@ async fn test_program_call_create_rejects_blank_id_without_polling() {
 
     let error = signer.sign_transaction(&mut transaction).await.unwrap_err();
 
-    match error {
-        SignerError::BroadcastUnconfirmed {
-            provider_tx_id,
-            idempotency_key,
-            ..
-        } => {
-            assert_eq!(provider_tx_id, None);
-            assert_eq!(idempotency_key, Some(expected));
-        }
-        other => panic!("expected BroadcastUnconfirmed, got {other:?}"),
-    }
+    assert!(matches!(error, SignerError::SerializationError(_)));
     assert_eq!(mock_server.received_requests().await.unwrap().len(), 1);
 }
 
@@ -795,7 +773,7 @@ async fn test_program_call_broadcast_despite_sign_only_is_reported_as_unconfirme
 }
 
 #[tokio::test]
-async fn test_program_call_unresolved_poll_keeps_the_transaction_id() {
+async fn test_program_call_unresolved_poll_is_a_plain_failure() {
     for poll_response in [
         ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": "tx-789",
@@ -820,12 +798,11 @@ async fn test_program_call_unresolved_poll_keeps_the_transaction_id() {
             .mount(&mock_server)
             .await;
 
-        match signer.sign_transaction(&mut transaction).await {
-            Err(SignerError::BroadcastUnconfirmed { provider_tx_id, .. }) => {
-                assert_eq!(provider_tx_id.as_deref(), Some("tx-789"));
-            }
-            other => unreachable!("expected BroadcastUnconfirmed, got {other:?}"),
-        }
+        let result = signer.sign_transaction(&mut transaction).await;
+        assert!(
+            matches!(result, Err(SignerError::RemoteApiError { .. })),
+            "a sign-only PROGRAM_CALL cannot broadcast, so it must not report BroadcastUnconfirmed: {result:?}"
+        );
     }
 }
 
@@ -907,43 +884,7 @@ fn test_new_trims_trailing_slashes_from_api_base_url() {
 }
 
 #[tokio::test]
-async fn test_program_call_duplicate_external_tx_id_is_reported_as_unconfirmed() {
-    let mock_server = MockServer::start().await;
-    let keypair = Keypair::new();
-    let mut transaction = create_test_transaction(&keypair_pubkey(&keypair));
-    let message_bytes = transaction.message.serialize();
-    let signer = create_test_signer_program_call(&mock_server.uri(), keypair_pubkey(&keypair));
-    let expected = signer.external_tx_id(&message_bytes);
-
-    Mock::given(method("POST"))
-        .and(path("/v1/transactions"))
-        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
-            "message": "The external tx id that was provided in the request, already exists",
-            "code": 1438
-        })))
-        .expect(1)
-        .mount(&mock_server)
-        .await;
-
-    let error = signer.sign_transaction(&mut transaction).await.unwrap_err();
-
-    match error {
-        SignerError::BroadcastUnconfirmed {
-            provider_status,
-            idempotency_key,
-            ..
-        } => {
-            assert_eq!(provider_status, Some(400));
-            assert_eq!(idempotency_key, Some(expected));
-        }
-        other => panic!(
-            "a duplicate externalTxId means Fireblocks already holds the create, got {other:?}"
-        ),
-    }
-}
-
-#[tokio::test]
-async fn test_program_call_other_bad_request_stays_a_plain_failure() {
+async fn test_program_call_bad_request_is_a_plain_failure() {
     let mock_server = MockServer::start().await;
     let keypair = Keypair::new();
     let mut transaction = create_test_transaction(&keypair_pubkey(&keypair));
@@ -963,6 +904,6 @@ async fn test_program_call_other_bad_request_stays_a_plain_failure() {
 
     assert!(
         matches!(error, SignerError::RemoteApiError { .. }),
-        "a 4xx that is not a duplicate rules the create out: {error:?}"
+        "a 4xx rules the create out: {error:?}"
     );
 }
