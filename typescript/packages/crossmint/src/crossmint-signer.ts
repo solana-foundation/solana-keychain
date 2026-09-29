@@ -232,6 +232,7 @@ class CrossmintSigner<TAddress extends string = string> implements SolanaSending
     private async signTransactionManaged(transaction: Transaction, abortSignal?: AbortSignal): Promise<SignatureBytes> {
         const idempotencyKey = await idempotencyKeyFromMessage(this.namespacedKeyInput(transaction.messageBytes));
         const transactionBase58 = this.encodeTransaction(transaction);
+        abortSignal?.throwIfAborted();
         let created: CrossmintTransactionResponse;
         try {
             created = await this.createTransaction(transactionBase58, idempotencyKey, abortSignal);

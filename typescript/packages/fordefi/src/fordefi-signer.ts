@@ -726,6 +726,7 @@ class FordefiSigner<TAddress extends string = string> implements SolanaMessageSi
                     this.solanaTransactionRequestBody(base64Data, 'auto'),
                     idempotencyKey,
                 );
+                config?.abortSignal?.throwIfAborted();
                 let txId: string;
                 try {
                     txId = await this.sendTransactionSubmit(prepared, config?.abortSignal);
