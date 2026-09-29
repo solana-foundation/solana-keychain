@@ -273,6 +273,23 @@ describe('CrossmintSigner', () => {
             expect(fetch).toHaveBeenCalledTimes(1);
         });
 
+        it('does not report an abort during preparation as an unconfirmed create', async () => {
+            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
+            const signer = await createCrossmintSigner(mockConfig);
+            const controller = new AbortController();
+            vi.mocked(getBase64EncodedWireTransaction).mockImplementationOnce(() => {
+                controller.abort();
+                return 'AQID' as never;
+            });
+
+            const thrown: unknown = await signer
+                .signAndSendTransactions([createMockTransaction()], { abortSignal: controller.signal })
+                .catch((error: unknown) => error);
+
+            expect((thrown as SignerError).code).not.toBe('SIGNER_BROADCAST_UNCONFIRMED');
+            expect(fetch).toHaveBeenCalledTimes(1);
+        });
+
         it('signs via managed flow and extracts signature from txId', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create()
