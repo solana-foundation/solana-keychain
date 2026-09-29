@@ -848,12 +848,13 @@ describe('createFordefiSigner', () => {
 
         it('does not report a caller abort during preparation as unconfirmed', async () => {
             const controller = new AbortController();
+            const reason = new Error('caller aborted');
             const signer = await createFordefiSigner({
                 ...nativeConfig,
                 privateKeyPem: undefined,
                 requestSigner: {
                     signRequest: () => {
-                        controller.abort();
+                        controller.abort(reason);
                         return 'custom-sig-value';
                     },
                 },
@@ -863,11 +864,13 @@ describe('createFordefiSigner', () => {
                 signatures: { [MOCK_ADDRESS]: null },
             } as never;
 
-            const thrown: unknown = await signer
-                .signAndSendTransactions([mockTx], { abortSignal: controller.signal })
-                .catch((error: unknown) => error);
-
-            expect((thrown as SignerError).code).not.toBe(SignerErrorCode.BROADCAST_UNCONFIRMED);
+            await expect(
+                signer.signAndSendTransactions([mockTx], { abortSignal: controller.signal }),
+            ).rejects.toMatchObject({
+                cause: reason,
+                code: SignerErrorCode.SIGNING_FAILED,
+                context: { failedIndex: 0 },
+            });
             expect(fetch).not.toHaveBeenCalled();
         });
 
