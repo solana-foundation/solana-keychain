@@ -790,6 +790,7 @@ describe('createFireblocksSigner', () => {
 
             await expect(signer.signTransactions([transaction])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
+                context: { providerTransactionId: 'tx-789' },
             });
         });
 

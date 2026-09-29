@@ -389,6 +389,7 @@ class FireblocksSigner<TAddress extends string = string>
 
         throwSignerError(SignerErrorCode.SIGNING_FAILED, {
             message: `Transaction did not complete within ${this.maxPollAttempts} attempts`,
+            providerTransactionId: transactionId,
         });
     }
 

@@ -277,5 +277,5 @@ func (s *Signer) pollForSignature(ctx context.Context, txID string, programCall 
 		}
 	}
 
-	return transactionResponse{}, core.PollTimeoutError("fireblocks", s.maxPollAttempts, "")
+	return transactionResponse{}, core.PollTimeoutError("fireblocks", s.maxPollAttempts, txID)
 }

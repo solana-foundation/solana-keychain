@@ -247,6 +247,7 @@ async def test_program_call_polling_timeout_is_a_plain_failure() -> None:
         await signer.sign_transaction(transaction)
 
     assert excinfo.value.code == SignerErrorCode.REMOTE_API_ERROR
+    assert excinfo.value.provider_transaction_id == "tx-1"
 
 
 @respx.mock

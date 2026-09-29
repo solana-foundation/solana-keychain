@@ -774,12 +774,18 @@ async fn test_program_call_broadcast_despite_sign_only_is_reported_as_unconfirme
 
 #[tokio::test]
 async fn test_program_call_unresolved_poll_is_a_plain_failure() {
-    for poll_response in [
-        ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": "tx-789",
-            "status": "SUBMITTED"
-        })),
-        ResponseTemplate::new(503).set_body_string("unavailable"),
+    for (poll_response, expect_tx_id) in [
+        (
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "tx-789",
+                "status": "SUBMITTED"
+            })),
+            true,
+        ),
+        (
+            ResponseTemplate::new(503).set_body_string("unavailable"),
+            false,
+        ),
     ] {
         let mock_server = MockServer::start().await;
         let keypair = Keypair::new();
@@ -803,6 +809,12 @@ async fn test_program_call_unresolved_poll_is_a_plain_failure() {
             matches!(result, Err(SignerError::RemoteApiError { .. })),
             "a sign-only PROGRAM_CALL cannot broadcast, so it must not report BroadcastUnconfirmed: {result:?}"
         );
+        if expect_tx_id {
+            assert!(
+                matches!(&result, Err(SignerError::RemoteApiError { provider_tx_id: Some(id), .. }) if id == "tx-789"),
+                "a timed-out request may still be awaiting approval, so its id must survive: {result:?}"
+            );
+        }
     }
 }
 

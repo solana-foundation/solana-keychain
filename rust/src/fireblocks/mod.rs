@@ -339,11 +339,12 @@ impl FireblocksSigner {
         poll_until(
             self.max_poll_attempts,
             self.poll_interval_ms,
-            || {
-                SignerError::remote_api(format!(
+            || SignerError::RemoteApiError {
+                detail: format!(
                     "Transaction polling timeout after {} attempts - signing request may still complete",
                     self.max_poll_attempts
-                ))
+                ),
+                provider_tx_id: Some(tx_id.to_string()),
             },
             || async {
                 let response = self.get_transaction(tx_id).await?;

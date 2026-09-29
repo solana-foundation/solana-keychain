@@ -446,9 +446,10 @@ func TestSignTransactionProgramCallUnresolvedPollIsAPlainFailure(t *testing.T) {
 		name       string
 		pollStatus int
 		pollBody   map[string]any
+		wantTxID   string
 	}{
-		{"budget exhausted", http.StatusOK, map[string]any{"id": "tx-789", "status": "SUBMITTED"}},
-		{"poll failed", http.StatusServiceUnavailable, map[string]any{"error": "unavailable"}},
+		{"budget exhausted", http.StatusOK, map[string]any{"id": "tx-789", "status": "SUBMITTED"}, "tx-789"},
+		{"poll failed", http.StatusServiceUnavailable, map[string]any{"error": "unavailable"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tx, err := testutils.CreateTestTransaction(pub)
@@ -468,6 +469,13 @@ func TestSignTransactionProgramCallUnresolvedPollIsAPlainFailure(t *testing.T) {
 			_, err = s.SignTransaction(context.Background(), tx)
 			if code, _ := core.CodeOf(err); code != core.CodeRemoteAPIError {
 				t.Fatalf("got %s, want %s", code, core.CodeRemoteAPIError)
+			}
+			var se *core.SignerError
+			if !errors.As(err, &se) {
+				t.Fatalf("expected SignerError, got %T", err)
+			}
+			if se.ProviderTxID != tc.wantTxID {
+				t.Errorf("ProviderTxID = %q, want %q", se.ProviderTxID, tc.wantTxID)
 			}
 		})
 	}

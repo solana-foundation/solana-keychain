@@ -232,6 +232,7 @@ class FireblocksSigner(TransactionSigner):
             SignerErrorCode.REMOTE_API_ERROR,
             f"Transaction polling timeout after {self._max_poll_attempts} attempts - "
             "signing request may still complete",
+            provider_transaction_id=transaction_id,
         )
 
     @staticmethod
