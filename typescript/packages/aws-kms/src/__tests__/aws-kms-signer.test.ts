@@ -12,10 +12,14 @@ vi.mock('@solana/keychain-core', async importOriginal => {
 });
 
 const mockSend = vi.fn();
+const mockClientConfig = vi.fn();
 
 vi.mock('@aws-sdk/client-kms', () => {
     class MockKMSClient {
         send = mockSend;
+        constructor(config: unknown) {
+            mockClientConfig(config);
+        }
     }
 
     class MockSignCommand {
@@ -146,6 +150,19 @@ describe('createAwsKmsSigner', () => {
             expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
 
             warnSpy.mockRestore();
+        });
+
+        it('passes region and credentials to the KMS client', async () => {
+            const keyPair = await generateKeyPairSigner();
+            const credentials = {
+                accessKeyId: 'test-access-key',
+                secretAccessKey: 'test-secret-key',
+                sessionToken: 'test-session-token',
+            };
+
+            createAwsKmsSigner({ credentials, keyId: TEST_KEY_ID, publicKey: keyPair.address, region: 'us-west-2' });
+
+            expect(mockClientConfig).toHaveBeenCalledWith({ credentials, region: 'us-west-2' });
         });
     });
 

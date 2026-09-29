@@ -95,6 +95,13 @@ pub(crate) fn encode_uri_component(input: &str) -> String {
     encoded
 }
 
+#[cfg(any(
+    feature = "crossmint",
+    feature = "fireblocks",
+    feature = "fordefi",
+    feature = "para",
+    feature = "utila"
+))]
 pub(crate) const AVAILABILITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Maximum number of response-body bytes read from a remote signer API
