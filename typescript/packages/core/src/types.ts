@@ -36,7 +36,8 @@ export interface SolanaTransactionSigner<TAddress extends string = string> exten
 /**
  * A signer that may rewrite parts of the transaction before signing it, then
  * returns the modified transaction without broadcasting. Mirrors Kit's
- * {@link TransactionModifyingSigner}. No keychain backend has this shape yet.
+ * {@link TransactionModifyingSigner}. Fordefi native manual mode has this
+ * shape: continue from the transaction it returns, never the one you submitted.
  */
 export interface SolanaModifyingSigner<TAddress extends string = string> extends TransactionModifyingSigner<TAddress> {
     /**
