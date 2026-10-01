@@ -157,7 +157,7 @@ typing-extensions==4.16.0
     #   pyjwt
     #   pytest-asyncio
     #   solders
-urllib3==2.7.0
+urllib3==2.8.0
     # via
     #   botocore
     #   requests
