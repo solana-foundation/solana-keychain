@@ -13,7 +13,7 @@ mod tests {
     use crate::test_util::create_test_transaction;
     use crate::traits::{SolanaSigner, TransactionSigner};
     use crate::transaction_util::deserialize_wire_transaction;
-    use crate::vault::VaultSigner;
+    use crate::vault::{reqwest, VaultSigner};
     use std::env;
 
     async fn get_signer() -> VaultSigner {
@@ -28,8 +28,14 @@ mod tests {
         let signer_pubkey_str = env::var(VAULT_SIGNER_PUBKEY)
             .expect("VAULT_SIGNER_PUBKEY must be set for integration tests");
 
-        VaultSigner::new(vault_addr, vault_token, key_name, signer_pubkey_str)
-            .expect("Failed to create VaultSigner")
+        VaultSigner::with_client_builder(
+            reqwest::Client::builder(),
+            vault_addr,
+            vault_token,
+            key_name,
+            signer_pubkey_str,
+        )
+        .expect("Failed to create VaultSigner")
     }
 
     #[tokio::test]
