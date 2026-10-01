@@ -18,9 +18,16 @@ The audit covered the Rust, TypeScript, Python and Go implementations. All 27
 findings (4 medium, 15 low, 8 informational) are resolved as of the
 audited-through commit.
 
-The Ledger backend (`rust/src/ledger` and Ledger-related changes) was excluded
-from scope and is **unaudited**, even though it predates the audited-through
-commit, so the delta below does not show it. It landed in `6461a18` (#301):
+### Unaudited backends
+
+These backends were excluded from scope. They predate the audited-through
+commit, so the unaudited delta does not show them.
+
+- **Ledger**: Rust only, behind the opt-in `ledger` feature. Covers
+  `rust/src/ledger` and Ledger-related changes. Landed in `6461a18` (#301).
+
+Every other backend is audited in every language that implements it. To
+inspect what an unaudited backend's commit touched:
 
 ```bash
 git show --stat 6461a18

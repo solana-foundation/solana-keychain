@@ -12,7 +12,7 @@ This repository contains four implementations:
 
 Framework-agnostic Rust library with async support and multiple signing backends.
 
-- **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila, Fordefi
+- **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila, Fordefi, Ledger (opt-in, unaudited)
 - **Features**: Async/await, feature flags for zero-cost abstractions, SDK v2, v3 & v4 support
 - [View Rust Documentation →](rust/README.md)
 
