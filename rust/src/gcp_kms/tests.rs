@@ -28,8 +28,13 @@ fn spki_pem(public_key: &crate::sdk_adapter::Pubkey) -> String {
     )
 }
 
+fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// Helper to create a KMS client configured for testing with wiremock
 async fn create_test_client(endpoint: &str) -> KeyManagementService {
+    install_crypto_provider();
     KeyManagementService::builder()
         .with_endpoint(endpoint)
         .build()
@@ -40,6 +45,7 @@ async fn create_test_client(endpoint: &str) -> KeyManagementService {
 #[tokio::test]
 #[serial]
 async fn test_gcp_kms_new_invalid_pubkey() {
+    install_crypto_provider();
     let client = KeyManagementService::builder().build().await.unwrap();
     let result = GcpKmsSigner::with_client(
         client,
@@ -56,6 +62,7 @@ async fn test_gcp_kms_new_invalid_pubkey() {
 #[tokio::test]
 #[serial]
 async fn test_gcp_kms_new_empty_pubkey() {
+    install_crypto_provider();
     let client = KeyManagementService::builder().build().await.unwrap();
     let result = GcpKmsSigner::with_client(client, TEST_KEY_NAME.to_string(), "".to_string());
     assert!(result.is_err());
