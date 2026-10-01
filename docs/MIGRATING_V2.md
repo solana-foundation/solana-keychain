@@ -1,6 +1,6 @@
 # Migrating to 2.0
 
-Covers the upgrade from `solana-keychain` 1.4.0 (Rust) and `@solana/keychain*` 1.4.0 (TypeScript) to 2.0.0. The theme of the release: a backend's transaction shape is now a compile-time fact. `SolanaSigner` keeps identity, message signing and health; transaction handling moved to one capability per backend (sign, rewrite-and-sign, or sign-and-broadcast). The [security model](SECURITY_MODEL.md) explains why the shapes differ. A pre-release is available as `2.0.0-beta.1`: `cargo add solana-keychain@2.0.0-beta.1`, `npm install @solana/keychain-core@beta`.
+Covers the upgrade from `solana-keychain` 1.4.0 (Rust) and `@solana/keychain*` 1.4.0 (TypeScript) to 2.0.0. The theme of the release: a backend's transaction shape is now a compile-time fact. `SolanaSigner` keeps identity, message signing and health; transaction handling moved to one capability per backend (sign, rewrite-and-sign, or sign-and-broadcast). The [security model](SECURITY_MODEL.md) explains why the shapes differ.
 
 ## Rust
 
