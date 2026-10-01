@@ -23,7 +23,7 @@ Consumer-facing summary in [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md); kee
 - **Redirects always rejected**, timeouts always set, HTTPS enforced on configured base URLs. Two carve-outs: Vault allows plain-HTTP loopback for `vault server -dev`, and the KMS backends use their vendor SDK's transport over rustls with ring: AWS is handed an explicitly built connector, and GCP reads the process-default `CryptoProvider`, which `GcpKmsSigner::from_config` installs as ring if nothing else claimed it first. Signing before `init()` fails rather than using the zero address.
 - **Pinned wire format.** Golden vectors freeze the serialized bytes; never regenerate them to make a suite pass.
 - Rust zeroizes intermediate key buffers. Go and Python cannot: treat the whole process memory as sensitive with local-key backends.
-- Audit coverage is uneven across the four languages and moves every release. [audits/AUDIT_STATUS.md](audits/AUDIT_STATUS.md) is the source of truth.
+- OtterSec audited all four languages; the opt-in Ledger backend was excluded, and anything after the audited-through commit is unaudited. [audits/AUDIT_STATUS.md](audits/AUDIT_STATUS.md) is the source of truth.
 
 ## Cross-language gotchas
 

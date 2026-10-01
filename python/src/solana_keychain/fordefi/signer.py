@@ -514,7 +514,7 @@ class FordefiNativeAutoSigner(_FordefiNativeSignerBase, SendingSigner):
         Submits the message for signing with ``push_mode: auto``: Fordefi
         replaces the blockhash (and optionally fees), signs, and broadcasts the
         transaction itself, so ``transaction`` is left unmodified and the
-        returned signature identifies the on-chain transaction. Only legacy
+        returned signature identifies the on-chain transaction. Only
         transactions whose sole required signer is the configured vault, and
         which carry no signature yet, are supported.
 
