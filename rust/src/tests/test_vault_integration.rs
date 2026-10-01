@@ -29,7 +29,9 @@ mod tests {
             .expect("VAULT_SIGNER_PUBKEY must be set for integration tests");
 
         VaultSigner::with_client_builder(
-            reqwest::Client::builder(),
+            reqwest::Client::builder()
+                .timeout(crate::HttpClientConfig::DEFAULT_REQUEST_TIMEOUT)
+                .connect_timeout(crate::HttpClientConfig::DEFAULT_CONNECT_TIMEOUT),
             vault_addr,
             vault_token,
             key_name,
