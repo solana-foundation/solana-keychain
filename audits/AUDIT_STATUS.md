@@ -19,7 +19,12 @@ findings (4 medium, 15 low, 8 informational) are resolved as of the
 audited-through commit.
 
 The Ledger backend (`rust/src/ledger` and Ledger-related changes) was excluded
-from scope and is **unaudited**.
+from scope and is **unaudited**, even though it predates the audited-through
+commit, so the delta below does not show it. It landed in `6461a18` (#301):
+
+```bash
+git show --stat 6461a18
+```
 
 ## Previous Audits
 
