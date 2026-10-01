@@ -33,7 +33,7 @@ Only the backend a configuration dispatches to is bundled — backend packages a
 
 ## Managed-broadcast backends are excluded
 
-Crossmint, and Fordefi in native mode (`chain` set), rewrite and broadcast transactions server-side. They are Kit `TransactionSendingSigner`s with no `signTransactions`, so they cannot serve as a client `payer` or `identity` — client send flows build, sign, and broadcast themselves, and Kit routes a sending signer only through `signAndSendTransactionMessageWithSigners()`. These plugins reject such configs at compile time (`KeychainKitPluginConfig`). Use the signer directly instead:
+Crossmint and Fordefi native auto mode rewrite and broadcast transactions server-side, and Fordefi native manual mode rewrites the transaction before signing it. None of them has `signTransactions`, so they cannot serve as a client `payer` or `identity` — client send flows build, sign, and broadcast themselves, and Kit routes a sending signer only through `signAndSendTransactionMessageWithSigners()`. These plugins reject Crossmint and any Fordefi config with `chain` set at compile time (`KeychainKitPluginConfig`). Use the signer directly instead:
 
 ```ts
 import { signAndSendTransactionMessageWithSigners } from '@solana/signers';
@@ -60,7 +60,7 @@ import { createClient } from '@solana/kit';
 import { keychainIdentity, keychainPayer } from '@solana/keychain-kit-plugin';
 
 const client = await createClient()
-    .use(keychainPayer({ backend: 'memory', privateKeyPath: '~/.config/solana/id.json' }))
+    .use(keychainPayer({ backend: 'memory', privateKeyPath: `${process.env.HOME}/.config/solana/id.json` }))
     .use(keychainIdentity({ backend: 'turnkey', ...turnkeyConfig }));
 ```
 

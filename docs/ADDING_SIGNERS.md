@@ -4,7 +4,7 @@
 
 This guide is for wallet service providers and developers who want to integrate new key management solutions into the `solana-keychain` library. By adding your signer implementation, you'll enable developers to use your service for secure Solana transaction signing through a unified interface.
 
-We strongly prefer PRs that include the [Rust](#rust), [TypeScript](#typescript), and [Python](#python) implementations — the library maintains parity across all three. If you can only contribute one, that's fine, but expect the others to be required before the signer ships in a release.
+We strongly prefer PRs that include the [Rust](#rust), [TypeScript](#typescript), [Python](#python) and Go implementations: the library maintains parity across all four. Go has no section here yet; follow an existing module under `go/signers/`. If you can only contribute one, that's fine, but expect the others to be required before the signer ships in a release.
 
 > **Using Claude Code?** This repo includes an `add-signer-ci` skill (`.claude/skills/add-signer-ci/`) that wires up the CI workflows for a new signer contributed via a fork PR.
 
@@ -22,7 +22,7 @@ The library uses a trait-based architecture defined in [src/traits.rs](../rust/s
 - [ ] Implement the `SolanaSigner` base trait plus the capability trait matching your provider's shape (usually `TransactionSigner`)
 - [ ] Add a feature flag in `Cargo.toml`
 - [ ] Update the `Signer` enum in `src/lib.rs` (variant, `dispatch_signer!` arm, `TransactionSigner` match arm)
-- [ ] Update `src/error.rs` reqwest `From` impl cfg gate (if your signer uses reqwest)
+- [ ] Add the internal `_remote` feature to your feature list (if your signer uses reqwest)
 - [ ] Enforce HTTPS and configure timeouts on HTTP clients
 - [ ] Add comprehensive unit tests (wiremock-based, in your module)
 - [ ] Add integration test file `rust/src/tests/test_<name>_integration.rs`
@@ -50,7 +50,7 @@ In `src/your_service/mod.rs`, define your signer struct:
 ```rust
 //! YourService API signer integration
 
-use crate::sdk_adapter::{Pubkey, Signature, Transaction};
+use crate::sdk_adapter::{Pubkey, Signature, VersionedTransaction};
 use crate::traits::SignedTransaction;
 use crate::{error::SignerError, traits::SolanaSigner};
 use std::str::FromStr;
@@ -168,7 +168,10 @@ The `SolanaSigner` base trait has 2 async methods (`sign_message`, `is_available
 
 Use the shared `TransactionUtil` helpers for signing and serialization instead of implementing your own.
 
+Sign the message bytes, never the whole wire transaction, and verify the provider's signature against them before using it.
+
 ```rust
+use crate::signature_util::verify_or_reject;
 use crate::transaction_util::TransactionUtil;
 use crate::traits::{SignTransactionResult, TransactionSigner};
 
@@ -179,7 +182,9 @@ impl SolanaSigner for YourServiceSigner {
     }
 
     async fn sign_message(&self, message: &[u8]) -> Result<Signature, SignerError> {
-        self.sign(message).await
+        let signature = self.sign(message).await?;
+        verify_or_reject(&signature, &self.public_key, message)?;
+        Ok(signature)
     }
 
     async fn is_available(&self) -> bool {
@@ -199,14 +204,14 @@ impl SolanaSigner for YourServiceSigner {
 impl TransactionSigner for YourServiceSigner {
     async fn sign_transaction(
         &self,
-        tx: &mut Transaction,
+        tx: &mut VersionedTransaction,
     ) -> Result<SignTransactionResult, SignerError> {
-        // 1. Serialize the transaction for your API
-        let tx_bytes = bincode::serialize(tx)
-            .map_err(|e| SignerError::SerializationError(format!("Failed to serialize: {e}")))?;
+        // 1. Sign the message bytes the signature has to cover
+        let message = tx.message.serialize();
+        let signature = self.sign(&message).await?;
 
-        // 2. Call your signing API
-        let signature = self.sign(&tx_bytes).await?;
+        // 2. Reject a signature that does not verify against those bytes
+        verify_or_reject(&signature, &self.public_key, &message)?;
 
         // 3. Add the signature to the transaction at the correct position
         TransactionUtil::add_signature_to_transaction(tx, &self.public_key, signature)?;
@@ -246,13 +251,12 @@ Update `Cargo.toml` to add your signer as an optional feature:
 
 ```toml
 [features]
-default = ["memory"]
+default = ["memory", "sdk-v2"]
 memory = []
-vault = ["dep:reqwest", "dep:vaultrs", "dep:base64"]
-privy = ["dep:reqwest", "dep:base64"]
-turnkey = ["dep:reqwest", "dep:base64", "dep:p256", "dep:hex", "dep:chrono"]
-your_service = ["dep:reqwest", "dep:base64"]  # Add your feature
-all = ["memory", "vault", "privy", "turnkey", "your_service"]  # Update all
+vault = ["dep:reqwest", "_remote"]
+privy = ["dep:reqwest", "dep:p256", "_remote"]
+your_service = ["dep:reqwest", "_remote"]  # Add your feature
+all = ["memory", "vault", "privy", "...", "your_service"]  # Update all
 
 [dependencies]
 # Add any specific dependencies your signer needs under the optional section
@@ -412,30 +416,9 @@ mod tests {
 }
 ```
 
-### Step 9: Update `error.rs` Reqwest Cfg Gate
+### Step 9: Mark Your Feature as Remote
 
-If your signer uses `reqwest`, you must add your feature to the `#[cfg(any(...))]` gate on the `From<reqwest::Error>` impl in `rust/src/error.rs`:
-
-```rust
-#[cfg(any(
-    feature = "vault",
-    feature = "privy",
-    feature = "turnkey",
-    feature = "fireblocks",
-    feature = "cdp",
-    feature = "dfns",
-    feature = "para",
-    feature = "crossmint",
-    feature = "your_service"  // Add your feature here
-))]
-impl From<reqwest::Error> for SignerError {
-    fn from(err: reqwest::Error) -> Self {
-        SignerError::HttpError(err.to_string())
-    }
-}
-```
-
-Without this, `?` on reqwest calls won't compile when only your feature is enabled.
+If your signer uses `reqwest`, include the internal `_remote` feature in its feature list (Step 6). It gates the `From<reqwest::Error>` impl in `rust/src/error.rs`, so without it `?` on reqwest calls won't compile when only your feature is enabled.
 
 ### Step 10: Add Integration Tests
 
@@ -907,12 +890,14 @@ Copy `packages/para/package.json` as a starting point and modify. Key fields:
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
-        "@solana/keychain-core": "workspace:*",
-        "@solana/addresses": "^6.0.1",
-        "@solana/codecs-strings": "^6.0.1",
-        "@solana/keys": "^6.0.1",
-        "@solana/signers": "^6.0.1",
-        "@solana/transactions": "^6.0.1"
+        "@solana/keychain-core": "workspace:*"
+    },
+    "peerDependencies": {
+        "@solana/addresses": ">=8.1.0",
+        "@solana/codecs-strings": ">=8.1.0",
+        "@solana/keys": ">=8.1.0",
+        "@solana/signers": ">=8.1.0",
+        "@solana/transactions": ">=8.1.0"
     },
     "devDependencies": {
         "@solana/keychain-test-utils": "workspace:*",
@@ -1063,7 +1048,7 @@ Before submitting your PR:
 - [ ] HTTPS enforced on HTTP clients (Rust: `https_only(true)`, TS: URL protocol check)
 - [ ] HTTP timeouts configured via `HttpClientConfig`
 - [ ] Follows naming conventions (snake_case for Rust and Python, camelCase for TypeScript)
-- [ ] `error.rs` reqwest cfg gate updated (if using reqwest)
+- [ ] `_remote` added to the feature list (if using reqwest)
 - [ ] Integration test file added with standard test scenarios
 - [ ] `.env.example` updated (root + TS package)
 - [ ] Added to README.md supported backends table
@@ -1178,7 +1163,7 @@ Adds support for YourService as a signing backend. [Link to YourService Document
 - [X] Add comprehensive tests with wiremock - All tests pass (`just test`)
 - [X] Implemented SolanaSigner trait for YourServiceSigner
 - [X] Added feature flag 'your_service'
-- [X] Updated error.rs reqwest cfg gate
+- [X] Added `_remote` to the feature list
 - [X] HTTPS enforced, HTTP timeouts configured
 - [X] Added integration tests (sign_message, sign_transaction, is_available)
 - [X] Updated .env.example

@@ -6,7 +6,7 @@
 
 ## Features
 
-- **Unified Interface**: Single `SolanaSigner` trait for all backends
+- **Unified Interface**: one `SolanaSigner` base trait for all backends, plus one capability trait per backend (`TransactionSigner`, `ModifyingSigner` or `SendingSigner`)
 - **Async-First**: Built with `async/await` for modern Rust applications
 - **Modular**: Feature flags for zero-cost backend selection
 - **Type-Safe**: Compile-time guarantees and error handling
@@ -37,25 +37,25 @@
 ```toml
 [dependencies]
 # Basic usage (memory signer only)
-solana-keychain = "0.5"
+solana-keychain = "2.0"
 
 # With CDP support
-solana-keychain = { version = "0.5", features = ["cdp"] }
+solana-keychain = { version = "2.0", features = ["cdp"] }
 
 # With Vault support
-solana-keychain = { version = "0.5", features = ["vault"] }
+solana-keychain = { version = "2.0", features = ["vault"] }
 
 # With Crossmint support
-solana-keychain = { version = "0.5", features = ["crossmint"] }
+solana-keychain = { version = "2.0", features = ["crossmint"] }
 
 # With Openfort support
-solana-keychain = { version = "0.5", features = ["openfort"] }
+solana-keychain = { version = "2.0", features = ["openfort"] }
 
 # With Utila support
-solana-keychain = { version = "0.5", features = ["utila"] }
+solana-keychain = { version = "2.0", features = ["utila"] }
 
-# All backends
-solana-keychain = { version = "0.5", features = ["all"] }
+# All backends except Ledger, which is opt-in via `ledger`
+solana-keychain = { version = "2.0", features = ["all"] }
 ```
 
 ### Solana SDK version
@@ -70,7 +70,7 @@ The Solana SDK line is selected by a mutually-exclusive feature (exactly one is 
 
 ```toml
 # Use the Solana 4.x SDK line with all backends
-solana-keychain = { version = "0.5", default-features = false, features = ["all", "sdk-v4"] }
+solana-keychain = { version = "2.0", default-features = false, features = ["all", "sdk-v4"] }
 ```
 
 ## Quick Start
@@ -231,6 +231,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut signer = CrossmintSigner::new(CrossmintSignerConfig {
         api_key: std::env::var("CROSSMINT_API_KEY")?,
         wallet_locator: std::env::var("CROSSMINT_WALLET_LOCATOR")?,
+        signer_secret: std::env::var("CROSSMINT_SIGNER_SECRET").ok(), // optional
         signer: std::env::var("CROSSMINT_SIGNER").ok(), // optional
         api_base_url: std::env::var("CROSSMINT_API_BASE_URL").ok(), // optional
         poll_interval_ms: None,

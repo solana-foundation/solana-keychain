@@ -29,7 +29,7 @@ interface SolanaTransactionSigner {
 }
 ```
 
-**`SolanaModifyingSigner`** - A signer that may rewrite parts of the transaction before signing it, then returns the modified transaction without broadcasting. Extends Kit's `TransactionModifyingSigner`. No keychain backend has this shape yet.
+**`SolanaModifyingSigner`** - A signer that may rewrite parts of the transaction before signing it, then returns the modified transaction without broadcasting. Extends Kit's `TransactionModifyingSigner`. Fordefi native manual mode (`FordefiNativeManualSigner`) has this shape: continue from the transaction it returns, never the one you submitted.
 
 **`SolanaSendingSigner`** - Interface for managed-broadcast backends. A backend belongs in this category when it rewrites the transaction message and/or broadcasts server-side, so its signature cannot be applied to the caller's transaction. Such signers expose `signAndSendTransactions()` (Kit's `TransactionSendingSigner`) and deliberately **no** `signTransactions` — Kit classifies signers by duck-typed method presence, and a present-but-throwing method would make Kit misroute the transaction and fail at runtime:
 

@@ -6,7 +6,7 @@ TypeScript packages for building custom Solana signers compatible with `@solana/
 
 ```typescript
 import { createKeychainSigner } from '@solana/keychain';
-import { signTransactionWithSigners } from '@solana/signers'; // requires @solana/signers ≥ 6.5
+import { signTransactionWithSigners } from '@solana/signers'; // requires @solana/signers ≥ 8.1
 
 // Create any signer via the unified factory
 const signer = await createKeychainSigner({
@@ -38,7 +38,7 @@ const signedTx = await signTransactionWithSigners([signer], compiledTransaction)
 `@solana/keychain-core` defines one capability interface per Kit signer shape, each adding `isAvailable(): Promise<boolean>` to the corresponding `@solana/signers` interface:
 
 - `SolanaTransactionSigner` — Kit's `TransactionPartialSigner`: returns signatures for a caller-owned transaction.
-- `SolanaModifyingSigner` — Kit's `TransactionModifyingSigner`: may rewrite the transaction before signing it. No backend has this shape yet.
+- `SolanaModifyingSigner` — Kit's `TransactionModifyingSigner`: may rewrite the transaction before signing it. Fordefi native manual mode (`FordefiNativeManualSigner`) has this shape: continue from the transaction it returns, never the one you submitted.
 - `SolanaSendingSigner` — Kit's `TransactionSendingSigner`: signs and broadcasts through its provider (managed broadcast).
 - `SolanaMessageSigner` — Kit's `MessagePartialSigner`: signs off-chain messages. Orthogonal to the transaction shapes, exactly as Kit separates `MessageSigner` from `TransactionSigner`.
 
@@ -72,7 +72,8 @@ Most backends sign a transaction you own and hand back signatures (`SolanaTransa
 | utila | `SolanaTransactionSigner` | yes | no | no |
 | crossmint | `SolanaSendingSigner` | no | yes | no |
 | fordefi (black-box mode) | `FordefiBlackBoxSigner` (`SolanaTransactionSigner & SolanaMessageSigner`) | yes | no | yes |
-| fordefi (native mode) | `FordefiNativeSigner` (`SolanaSendingSigner & SolanaMessageSigner`) | no | yes | yes |
+| fordefi (native auto mode) | `FordefiNativeSigner` (`SolanaSendingSigner & SolanaMessageSigner`) | no | yes | yes |
+| fordefi (native manual mode) | `FordefiNativeManualSigner` (`SolanaModifyingSigner & SolanaMessageSigner`), signs through `modifyAndSignTransactions()` | no | no | yes |
 
 `signAndSendTransaction()` from `@solana/keychain-core` gets a transaction on chain through any shape, routing by capability. Signers that cannot broadcast use the send function you inject — core has no RPC dependency:
 
