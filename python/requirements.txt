@@ -118,7 +118,7 @@ pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementatio
     # via cffi
 pygments==2.21.0
     # via pytest
-pyjwt==2.13.0
+pyjwt==2.15.0
     # via solana-keychain (pyproject.toml)
 pyproject-hooks==1.2.0
     # via build
