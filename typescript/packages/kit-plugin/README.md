@@ -43,6 +43,13 @@ const crossmint = await createKeychainSigner({ backend: 'crossmint', apiKey, wal
 const signature = await signAndSendTransactionMessageWithSigners(transactionMessage);
 ```
 
+Fordefi native manual mode does not broadcast. Sign with `modifyAndSignTransactions()`, then submit the transaction it returns, never the one you passed in:
+
+```ts
+const fordefi = await createKeychainSigner({ backend: 'fordefi', ...fordefiConfig, chain, pushMode: 'manual' });
+const [signedTransaction] = await fordefi.modifyAndSignTransactions([transaction]);
+```
+
 Fordefi in black-box mode (no `chain`) is a regular partial signer and remains supported.
 
 ## Plugin variants
@@ -56,11 +63,13 @@ Fordefi in black-box mode (no `chain`) is a regular partial signer and remains s
 Mix backends on one client:
 
 ```ts
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { createClient } from '@solana/kit';
 import { keychainIdentity, keychainPayer } from '@solana/keychain-kit-plugin';
 
 const client = await createClient()
-    .use(keychainPayer({ backend: 'memory', privateKeyPath: `${process.env.HOME}/.config/solana/id.json` }))
+    .use(keychainPayer({ backend: 'memory', privateKeyPath: join(homedir(), '.config/solana/id.json') }))
     .use(keychainIdentity({ backend: 'turnkey', ...turnkeyConfig }));
 ```
 

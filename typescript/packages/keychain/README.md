@@ -186,15 +186,18 @@ try {
 
 `@solana/keychain-core` defines one capability interface per Kit signer shape, each adding `isAvailable(): Promise<boolean>`: `SolanaTransactionSigner` (Kit's `TransactionPartialSigner`), `SolanaModifyingSigner` (Kit's `TransactionModifyingSigner`), `SolanaSendingSigner` (Kit's `TransactionSendingSigner`), and the orthogonal `SolanaMessageSigner` (Kit's `MessagePartialSigner`). `SolanaSigner` is the union of the three transaction shapes — any keychain signer.
 
-When the `backend` literal is known, `createKeychainSigner`'s overloads return the exact shape: `crossmint` → `SolanaSendingSigner`, `fordefi` with `chain` set → `FordefiNativeSigner`, or `FordefiNativeManualSigner` (`SolanaModifyingSigner & SolanaMessageSigner`) with `pushMode: 'manual'`, `utila` → `SolanaTransactionSigner` (no `signMessages`), and every other backend (including Fordefi black-box mode) → `SolanaTransactionSigner & SolanaMessageSigner`. With a widened `KeychainSignerConfig` — e.g. config loaded at runtime — the return type is the `SolanaSigner` union; narrow with `isSolanaTransactionSigner()` / `isSolanaSendingSigner()` from `@solana/keychain-core` before calling a signing method:
+When the `backend` literal is known, `createKeychainSigner`'s overloads return the exact shape: `crossmint` → `SolanaSendingSigner`, `fordefi` with `chain` set → `FordefiNativeSigner`, or `FordefiNativeManualSigner` (`SolanaModifyingSigner & SolanaMessageSigner`) with `pushMode: 'manual'`, `utila` → `SolanaTransactionSigner` (no `signMessages`), and every other backend (including Fordefi black-box mode) → `SolanaTransactionSigner & SolanaMessageSigner`. With a widened `KeychainSignerConfig` — e.g. config loaded at runtime — the return type is the `SolanaSigner` union; narrow with `isSolanaTransactionSigner()` / `isSolanaModifyingSigner()` / `isSolanaSendingSigner()` from `@solana/keychain-core` before calling a signing method:
 
 ```typescript
-import { isSolanaSendingSigner, isSolanaTransactionSigner } from '@solana/keychain-core';
+import { isSolanaModifyingSigner, isSolanaSendingSigner, isSolanaTransactionSigner } from '@solana/keychain-core';
 
 const signer = await createKeychainSigner(loadConfig()); // SolanaSigner
 
 if (isSolanaSendingSigner(signer)) {
     await signer.signAndSendTransactions([transaction]);
+} else if (isSolanaModifyingSigner(signer)) {
+    // Fordefi native manual mode: continue from the returned transaction, never the one you passed in
+    const [signedTransaction] = await signer.modifyAndSignTransactions([transaction]);
 } else if (isSolanaTransactionSigner(signer)) {
     await signer.signTransactions([transaction]);
 }

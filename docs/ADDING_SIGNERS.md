@@ -256,7 +256,8 @@ memory = []
 vault = ["dep:reqwest", "_remote"]
 privy = ["dep:reqwest", "dep:p256", "_remote"]
 your_service = ["dep:reqwest", "_remote"]  # Add your feature
-all = ["memory", "vault", "privy", "...", "your_service"]  # Update all
+# Append your feature to the existing `all` list
+all = ["memory", "vault", "privy", "your_service"]
 
 [dependencies]
 # Add any specific dependencies your signer needs under the optional section
@@ -900,8 +901,13 @@ Copy `packages/para/package.json` as a starting point and modify. Key fields:
         "@solana/transactions": ">=8.1.0"
     },
     "devDependencies": {
+        "@solana/addresses": "8.3.0",
+        "@solana/codecs-strings": "8.3.0",
         "@solana/keychain-test-utils": "workspace:*",
-        "dotenv": "^17.2.3"
+        "@solana/keys": "8.3.0",
+        "@solana/signers": "8.3.0",
+        "@solana/transactions": "8.3.0",
+        "dotenv": "^17.4.2"
     },
     "publishConfig": {
         "access": "public"
