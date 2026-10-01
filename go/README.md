@@ -296,10 +296,9 @@ message payloads.
 
 ## Security
 
-The published [Accretion audit](../audits/2026-accretion-solana-foundation-solana-keychain-audit-A26SFR2.pdf)
-covers the Rust and TypeScript implementations. The Go implementation is new and
-has **not** yet been independently audited. Audit status is tracked in
-[audits/AUDIT_STATUS.md](../audits/AUDIT_STATUS.md).
+The Go implementation is covered by the
+[OtterSec audit](../audits/2026-ottersec-solana-foundation-solana-keychain-audit.pdf).
+Audit status is tracked in [audits/AUDIT_STATUS.md](../audits/AUDIT_STATUS.md).
 
 Go offers no reliable way to zero memory: the garbage collector may copy and
 retain key bytes (`memory` keypairs, derived Crossmint/Openfort keys) until

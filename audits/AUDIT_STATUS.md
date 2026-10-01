@@ -1,23 +1,30 @@
 # Audit Status
 
-Last updated: 2026-04-03
+Last updated: 2026-10-01
 
 ## Current Baseline
 
-- Auditor: Accretion
-- Report: `audits/2026-accretion-solana-foundation-solana-keychain-audit-A26SFR2.pdf`
-- Audited-through commit: `475beb7c372e805e081ebcd85d84923460267da6`
-- Compare unaudited delta: https://github.com/solana-foundation/solana-keychain/compare/475beb7c372e805e081ebcd85d84923460267da6...main
+- Auditor: OtterSec
+- Report: `audits/2026-ottersec-solana-foundation-solana-keychain-audit.pdf`
+- Audited commit: `e685e353b6bc12f7d31d96aa324964f3c1e7ffd7`
+- Audited-through commit (remediation review): `8ea75de5c47fb3d22d704ab175cbe10483db2ff2`
+- Compare unaudited delta: https://github.com/solana-foundation/solana-keychain/compare/8ea75de5c47fb3d22d704ab175cbe10483db2ff2...main
 
 Audit scope is commit-based. Commits after the audited-through SHA are considered unaudited until a new audit or mitigation review updates this file.
 
 ### Language scope
 
-The audit covered the Rust and TypeScript implementations. The Python
-implementation (`python/`) landed after the audited-through commit and is
-**entirely unaudited**, including its port of previously audited signer logic.
-The same applies to the Go implementation (`go/`): it landed after the
-audited-through commit and is **entirely unaudited**.
+The audit covered the Rust, TypeScript, Python and Go implementations. All 27
+findings (4 medium, 15 low, 8 informational) are resolved as of the
+audited-through commit.
+
+The Ledger backend (`rust/src/ledger` and Ledger-related changes) was excluded
+from scope and is **unaudited**.
+
+## Previous Audits
+
+- Accretion, `audits/2026-accretion-solana-foundation-solana-keychain-audit-A26SFR2.pdf`,
+  audited through `475beb7c372e805e081ebcd85d84923460267da6` (Rust and TypeScript only).
 
 ## Branch and Release Model
 
@@ -29,13 +36,13 @@ audited-through commit and is **entirely unaudited**.
 
 ```bash
 # Count commits after the audited baseline
-git rev-list --count 475beb7c372e805e081ebcd85d84923460267da6..main
+git rev-list --count 8ea75de5c47fb3d22d704ab175cbe10483db2ff2..main
 
 # Inspect commit list since audited baseline
-git log --oneline 475beb7c372e805e081ebcd85d84923460267da6..main
+git log --oneline 8ea75de5c47fb3d22d704ab175cbe10483db2ff2..main
 
 # Inspect file-level diff since audited baseline
-git diff --name-status 475beb7c372e805e081ebcd85d84923460267da6..main
+git diff --name-status 8ea75de5c47fb3d22d704ab175cbe10483db2ff2..main
 ```
 
 ## Maintenance Rules

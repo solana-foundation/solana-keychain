@@ -668,7 +668,7 @@ without blind signing. Keeping payloads to printable ASCII avoids it entirely.
 
 ## Security Audit
 
-`solana-keychain` has been audited by [Accretion](https://accretion.xyz). View the [audit report](../audits/2026-accretion-solana-foundation-solana-keychain-audit-A26SFR2.pdf).
+`solana-keychain` has been audited by [OtterSec](https://osec.io) (Rust, TypeScript, Python and Go; the Ledger backend was out of scope). View the [audit report](../audits/2026-ottersec-solana-foundation-solana-keychain-audit.pdf). An earlier [Accretion](https://accretion.xyz) audit of the Rust and TypeScript implementations is also [available](../audits/2026-accretion-solana-foundation-solana-keychain-audit-A26SFR2.pdf).
 
 Audit status, audited-through commit, and the current unaudited delta are tracked in [audits/AUDIT_STATUS.md](../audits/AUDIT_STATUS.md).
 
