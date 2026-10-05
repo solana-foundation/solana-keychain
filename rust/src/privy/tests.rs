@@ -42,7 +42,13 @@ async fn test_privy_fetch_public_key() {
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": "test-wallet-id",
             "address": pubkey_str,
-            "chain_type": "solana"
+            "chain_type": "solana",
+            "additional_signers": [{
+                "signer_id": "test-signer-id",
+                "override_policy_ids": []
+            }, {
+                "signer_id": "test-signer-with-default-policies"
+            }]
         })))
         .expect(1)
         .mount(&mock_server)

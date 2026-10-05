@@ -65,7 +65,13 @@ def make_signer(
 def mock_wallet_response(address: str, chain_type: str = "solana") -> None:
     respx.get(WALLET_URL).mock(
         return_value=httpx.Response(
-            200, json={"id": WALLET_ID, "address": address, "chain_type": chain_type}
+            200,
+            json={
+                "id": WALLET_ID,
+                "address": address,
+                "chain_type": chain_type,
+                "additional_signers": [{"signer_id": "test-signer-id", "override_policy_ids": []}],
+            },
         )
     )
 

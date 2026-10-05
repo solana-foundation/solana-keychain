@@ -57,6 +57,13 @@ pub struct SignTransactionData {
     pub encoding: String,
 }
 
+#[derive(Deserialize)]
+#[allow(dead_code)]
+pub struct AdditionalSigner {
+    pub signer_id: String,
+    pub override_policy_ids: Option<Vec<String>>,
+}
+
 // Wallet info response
 #[derive(Deserialize)]
 #[allow(dead_code)]
@@ -81,7 +88,7 @@ pub struct WalletResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub additional_signers: Option<Vec<String>>,
+    pub additional_signers: Option<Vec<AdditionalSigner>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exported_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -75,6 +75,12 @@ describe('createPrivySigner', () => {
         (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
             json: () =>
                 Promise.resolve({
+                    additional_signers: [
+                        {
+                            override_policy_ids: [],
+                            signer_id: 'test-signer-id',
+                        },
+                    ],
                     address,
                     chain_type: 'solana',
                     id: mockConfig.walletId,

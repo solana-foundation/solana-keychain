@@ -55,8 +55,11 @@ func addWalletRoute(t *testing.T, mux *http.ServeMux, address string) {
 			t.Errorf("privy-app-id = %q, want %q", got, testAppID)
 		}
 		testutils.WriteJSON(w, http.StatusOK, map[string]any{
-			"id":         testWalletID,
-			"address":    address,
+			"id":      testWalletID,
+			"address": address,
+			"additional_signers": []map[string]any{
+				{"signer_id": "test-signer-id", "override_policy_ids": []string{}},
+			},
 			"chain_type": "solana",
 		})
 	})
