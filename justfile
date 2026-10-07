@@ -15,16 +15,16 @@ default:
     @just --list
 
 # Format and lint
-fmt: rust-fmt ts-fmt py-fmt go-fmt
+fmt: rust-fmt ts-fmt py-fmt go-fmt kotlin-fmt
 
 # Build
-build: rust-build ts-build py-build go-build
+build: rust-build ts-build py-build go-build kotlin-build
 
 # Unit tests
-test: rust-test ts-test py-test go-test
+test: rust-test ts-test py-test go-test kotlin-test
 
 # Integration tests
-test-integration: rust-test-integration ts-test-integration py-test-integration go-test-integration
+test-integration: rust-test-integration ts-test-integration py-test-integration go-test-integration kotlin-test
 
 # All tests
 test-all: test test-integration
@@ -391,6 +391,28 @@ go-test-integration:
     for mod in $(find . -name go.mod | sort); do
         (cd "$(dirname "$mod")" && go test -tags=integration ./...)
     done
+
+# ===========================================================
+# ========================== Kotlin =========================
+# ===========================================================
+
+# Gradle 9.7.1, the version kotlin-ci.yml pins.
+
+[working-directory: 'kotlin']
+kotlin-fmt:
+    gradle spotlessApply
+
+[working-directory: 'kotlin']
+kotlin-check:
+    gradle spotlessCheck test
+
+[working-directory: 'kotlin']
+kotlin-build:
+    gradle installDist
+
+[working-directory: 'kotlin']
+kotlin-test:
+    gradle test
 
 # ===========================================================
 # ========================= Release =========================

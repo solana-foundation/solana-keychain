@@ -6,7 +6,7 @@
 
 ## Implementations
 
-This repository contains four implementations:
+This repository contains five implementations:
 
 ### [Rust](rust/)
 
@@ -39,6 +39,13 @@ Async-free signer library built on [`solana-go`](https://github.com/solana-found
 - **Backends**: Memory, Vault, Privy, Turnkey, AWS KMS, Fireblocks, GCP KMS, Dfns, Para, CDP, Crossmint, Openfort, Utila, Fordefi
 - **Features**: Per-backend modules, golden wire-format vectors, redacted errors matched by stable code
 - [View Go Documentation →](go/README.md)
+
+### [Kotlin](kotlin/)
+
+Blocking JVM signer library with Ed25519 from [BouncyCastle](https://www.bouncycastle.org/), for Kotlin web3 libraries on JVM and Android.
+
+- **Backends**: Memory
+- **Features**: Wire-format v0 and legacy signing, golden wire-format vectors, redacted errors matched by stable code
 
 ## Security Model
 
