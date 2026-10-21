@@ -16,7 +16,7 @@ botocore==1.43.101
     #   s3transfer
 build==1.5.0
     # via solana-keychain (pyproject.toml)
-certifi==2026.7.22
+certifi==2026.10.19
     # via
     #   httpcore
     #   httpx
