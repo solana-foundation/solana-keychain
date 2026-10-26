@@ -14,4 +14,9 @@ ignore = [
     "RUSTSEC-2026-0099",
     # h2 0.3.x has no patched release; pinned by the AWS smithy HTTP stack.
     "RUSTSEC-2026-0258",
+    # crypto-bigint 0.5.x has no patched release and is pinned by elliptic-curve 0.13. It
+    # reaches the P-256 API-key signing of Privy, Turnkey, Dfns and Fordefi (p256 0.13) and
+    # the ES256 JWTs of CDP and Openfort (jsonwebtoken 11 still pins p256 0.13), plus k256
+    # via solana-sdk. The fix landed in 0.7.6, which needs elliptic-curve 0.14.
+    "RUSTSEC-2026-0387",
 ]
