@@ -4,14 +4,11 @@ ignore = [
     "RUSTSEC-2024-0344",
     # ed25519-dalek 1.x comes from the Solana/litesvm stack.
     "RUSTSEC-2022-0093",
-    # rsa has no patched release; reached through transitive auth dependencies.
+    # rsa has no patched release; a direct dependency of `dfns` and reached via jsonwebtoken.
     "RUSTSEC-2023-0071",
-    # rustls-webpki 0.101.x is pinned by the transitive rustls 0.21 TLS stack.
-    "RUSTSEC-2026-0104",
-    # rustls-webpki 0.101.x is pinned by the transitive rustls 0.21 TLS stack.
-    "RUSTSEC-2026-0098",
-    # rustls-webpki 0.101.x is pinned by the transitive rustls 0.21 TLS stack.
-    "RUSTSEC-2026-0099",
-    # h2 0.3.x has no patched release; pinned by the AWS smithy HTTP stack.
-    "RUSTSEC-2026-0258",
+    # crypto-bigint 0.5.x has no patched release and is pinned by elliptic-curve 0.13. It
+    # reaches the P-256 API-key signing of Privy, Turnkey, Dfns and Fordefi (p256 0.13) and
+    # the ES256 JWTs of CDP and Openfort (jsonwebtoken 11 still pins p256 0.13), plus k256
+    # via solana-sdk. The fix landed in 0.7.6, which needs elliptic-curve 0.14.
+    "RUSTSEC-2026-0387",
 ]

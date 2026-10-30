@@ -37,8 +37,8 @@
     "prettier": "^3.9.9",
     "rollup": "^4.62.5",
     "typescript": "^5.9.3",
-    "vite": "^7.3.6",
-    "vitest": "^4.1.11"
+    "vite": "^7.3.7",
+    "vitest": "^4.1.12"
   },
   "prettier": "@solana/prettier-config-solana",
   "packageManager": "pnpm@11.22.0"

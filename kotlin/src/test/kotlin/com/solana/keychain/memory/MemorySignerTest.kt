@@ -181,12 +181,19 @@ class MemorySignerTest {
     }
 
     @Test
+    fun `decoded key bytes are zeroed after use`() {
+        val decoded = keypair.copyOf()
+        assertEquals(ADDRESS, MemorySigner.fromKeypairBytes(decoded).address)
+        assertContentEquals(ByteArray(64), decoded)
+    }
+
+    @Test
     fun `transactions the signer cannot sign are refused`() {
         val signer = MemorySigner.fromBytes(seed)
         val tooFewKeys = unsigned.copyOf().also { it[65] = 4 }
         val v1 = byteArrayOf(0, 0x81.toByte()) + unsigned.copyOfRange(66, unsigned.size)
         assertRefused("SIGNER_SIGNING_FAILED") { MemorySigner.fromBytes(ByteArray(32) { 9 }).signTransaction(unsigned) }
-        assertRefused("SIGNER_SIGNING_FAILED") { signer.signTransaction(tooFewKeys) }
+        assertRefused("SIGNER_SERIALIZATION_ERROR") { signer.signTransaction(tooFewKeys) }
         assertRefused("SIGNER_SERIALIZATION_ERROR") { signer.signTransaction(v1) }
         assertRefused("SIGNER_SERIALIZATION_ERROR") { signer.signTransaction(unsigned.copyOf(100)) }
     }
@@ -204,8 +211,11 @@ class MemorySignerTest {
     fun `non-canonical lengths and extra signature slots are refused`() {
         val signer = MemorySigner.fromBytes(seed)
         val message = unsigned.copyOfRange(65, unsigned.size)
+        val dataOver65535 =
+            byteArrayOf(1) + ByteArray(64) + byteArrayOf(1, 0, 0, 1) + publicKey + ByteArray(32) +
+                byteArrayOf(1, 0, 0, 0x80.toByte(), 0x80.toByte(), 0x04) + ByteArray(65536)
         assertRefused("SIGNER_SERIALIZATION_ERROR") { signer.signTransaction(byteArrayOf(0x81.toByte(), 0) + ByteArray(64) + message) }
-        assertRefused("SIGNER_SERIALIZATION_ERROR") { signer.signTransaction(byteArrayOf(0x80.toByte(), 0x80.toByte(), 0x04) + message) }
+        assertRefused("SIGNER_SERIALIZATION_ERROR") { signer.signTransaction(dataOver65535) }
         assertRefused("SIGNER_SERIALIZATION_ERROR") { signer.signTransaction(byteArrayOf(2) + ByteArray(128) + message) }
     }
 

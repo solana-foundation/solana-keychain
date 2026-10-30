@@ -24,7 +24,7 @@ build: rust-build ts-build py-build go-build kotlin-build
 test: rust-test ts-test py-test go-test kotlin-test
 
 # Integration tests
-test-integration: rust-test-integration ts-test-integration py-test-integration go-test-integration kotlin-test
+test-integration: rust-test-integration ts-test-integration py-test-integration go-test-integration
 
 # All tests
 test-all: test test-integration

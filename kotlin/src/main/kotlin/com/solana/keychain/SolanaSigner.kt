@@ -65,7 +65,12 @@ object Base58 {
             if (digit < 0) return null
             n = n * BASE + digit.toBigInteger()
         }
-        return ByteArray(text.takeWhile { it == '1' }.length) + n.toByteArray().dropWhile { it == 0.toByte() }
+        val raw = n.toByteArray()
+        return try {
+            ByteArray(text.takeWhile { it == '1' }.length) + raw.dropWhile { it == 0.toByte() }
+        } finally {
+            raw.fill(0)
+        }
     }
 }
 
@@ -88,12 +93,12 @@ fun signWireTransaction(
     reader.take(2)
     val accountKeys = List(reader.compactU16()) { reader.take(PUBKEY_LENGTH) }
     reader.skipMessageBody(versioned)
-    val position = accountKeys.take(numRequired).indexOfFirst { it.contentEquals(pubkey) }
-    if (accountKeys.size < numRequired || position < 0) {
-        throw SignerError(SignerErrorCode.SIGNING_FAILED, "pubkey is not a required signer of the transaction")
+    if (accountKeys.size < numRequired || signatures.size > numRequired) {
+        throw SignerError(SignerErrorCode.SERIALIZATION_ERROR, "message header does not match its account keys or signatures")
     }
-    if (signatures.size > numRequired) {
-        throw SignerError(SignerErrorCode.SERIALIZATION_ERROR, "transaction has more signatures than the message requires")
+    val position = accountKeys.take(numRequired).indexOfFirst { it.contentEquals(pubkey) }
+    if (position < 0) {
+        throw SignerError(SignerErrorCode.SIGNING_FAILED, "pubkey is not a required signer of the transaction")
     }
     val message = transaction.copyOfRange(messageStart, transaction.size)
     val signature = sign(message)
@@ -146,11 +151,8 @@ private class WireReader(
             if (index > 0 && byte == 0) {
                 throw SignerError(SignerErrorCode.SERIALIZATION_ERROR, "compact-u16 is not canonical")
             }
-            if (index == 2 && byte > 0x03) {
-                throw SignerError(SignerErrorCode.SERIALIZATION_ERROR, "compact-u16 overflows")
-            }
             value = value or ((byte and 0x7f) shl (7 * index))
-            if ((byte and 0x80) == 0) return value
+            if ((byte and 0x80) == 0 && value <= 0xffff) return value
         }
         throw SignerError(SignerErrorCode.SERIALIZATION_ERROR, "compact-u16 overflows")
     }

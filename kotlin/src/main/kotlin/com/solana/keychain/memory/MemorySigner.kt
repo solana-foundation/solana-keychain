@@ -39,7 +39,7 @@ class MemorySigner private constructor(
             if (privateKey.size != SEED_LENGTH && privateKey.size != KEYPAIR_LENGTH) {
                 throw invalidKey("private key must be 32 (seed) or 64 (seed‖pubkey) bytes")
             }
-            val signer = MemorySigner(privateKey.copyOf(SEED_LENGTH))
+            val signer = MemorySigner(privateKey)
             val publicHalf = privateKey.copyOfRange(SEED_LENGTH, privateKey.size)
             if (privateKey.size == KEYPAIR_LENGTH && !signer.publicKey.contentEquals(publicHalf)) {
                 throw invalidKey("public key half does not match the key derived from the seed")
@@ -62,8 +62,12 @@ class MemorySigner private constructor(
             return fromKeypairBytes(parseU8Array(contents.trim()))
         }
 
-        private fun fromKeypairBytes(bytes: ByteArray?): MemorySigner =
-            fromBytes(bytes?.takeIf { it.size == KEYPAIR_LENGTH } ?: throw invalidKey("private key must decode to 64 bytes"))
+        internal fun fromKeypairBytes(bytes: ByteArray?): MemorySigner =
+            try {
+                fromBytes(bytes?.takeIf { it.size == KEYPAIR_LENGTH } ?: throw invalidKey("private key must decode to 64 bytes"))
+            } finally {
+                bytes?.fill(0)
+            }
 
         private fun parseU8Array(text: String): ByteArray? {
             if (!text.startsWith("[") || !text.endsWith("]")) return null

@@ -46,6 +46,8 @@ Blocking JVM signer library with Ed25519 from [BouncyCastle](https://www.bouncyc
 
 - **Backends**: Memory
 - **Features**: Wire-format v0 and legacy signing, golden wire-format vectors, redacted errors matched by stable code
+- **Audit**: not audited ([status](audits/AUDIT_STATUS.md))
+- [View Kotlin Documentation →](kotlin/README.md)
 
 ## Security Model
 

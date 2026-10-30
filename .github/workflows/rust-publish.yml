@@ -41,6 +41,7 @@ jobs:
     name: Publish solana-keychain crate
     runs-on: ubuntu-latest
     needs: guard-allowed-branch
+    environment: release
     defaults:
       run:
         working-directory: rust

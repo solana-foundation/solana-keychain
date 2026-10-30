@@ -54,8 +54,8 @@
         "@solana/keys": "8.3.0",
         "@solana/signers": "8.3.0",
         "@solana/transactions": "8.3.0",
-        "vite": "^7.3.6",
-        "vitest": "^4.1.11"
+        "vite": "^7.3.7",
+        "vitest": "^4.1.12"
     },
     "publishConfig": {
         "access": "public"
