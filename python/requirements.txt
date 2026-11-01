@@ -8,28 +8,28 @@ backports-asyncio-runner==1.2.0 ; python_full_version < '3.11'
     # via pytest-asyncio
 base58==2.1.1
     # via solana-keychain (pyproject.toml)
-boto3==1.43.101
+boto3==1.43.118
     # via solana-keychain (pyproject.toml)
-botocore==1.43.101
+botocore==1.43.118
     # via
     #   boto3
     #   s3transfer
 build==1.5.0
     # via solana-keychain (pyproject.toml)
-certifi==2026.10.19
+certifi==2026.10.23
     # via
     #   httpcore
     #   httpx
     #   requests
 cffi==2.1.1 ; platform_python_implementation != 'PyPy'
     # via cryptography
-charset-normalizer==3.5.1
+charset-normalizer==3.5.2
     # via requests
 colorama==0.4.6 ; os_name == 'nt' or sys_platform == 'win32'
     # via
     #   build
     #   pytest
-cryptography==50.0.1
+cryptography==50.0.2
     # via
     #   solana-keychain (pyproject.toml)
     #   google-auth
@@ -45,12 +45,12 @@ google-auth==2.56.3
     #   google-cloud-kms
 google-cloud-kms==3.16.0
     # via solana-keychain (pyproject.toml)
-googleapis-common-protos==1.75.3
+googleapis-common-protos==1.75.5
     # via
     #   google-api-core
     #   grpc-google-iam-v1
     #   grpcio-status
-grpc-google-iam-v1==0.14.5
+grpc-google-iam-v1==0.14.6
     # via google-cloud-kms
 grpcio==1.83.1
     # via
@@ -76,13 +76,13 @@ idna==3.18
     #   requests
 importlib-metadata==9.0.0 ; python_full_version < '3.10.2'
     # via build
-iniconfig==2.3.0
+iniconfig==2.3.1
     # via pytest
 jmespath==1.1.0
     # via
     #   boto3
     #   botocore
-jsonalias==0.1.1
+jsonalias==0.1.2
     # via solders
 librt==0.15.0 ; platform_python_implementation != 'PyPy'
     # via mypy
@@ -118,7 +118,7 @@ pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementatio
     # via cffi
 pygments==2.21.0
     # via pytest
-pyjwt==2.15.0
+pyjwt==2.15.1
     # via solana-keychain (pyproject.toml)
 pyproject-hooks==1.2.0
     # via build
@@ -134,9 +134,9 @@ requests==2.34.2
     # via google-api-core
 respx==0.23.1
     # via solana-keychain (pyproject.toml)
-ruff==0.16.8
+ruff==0.16.10
     # via solana-keychain (pyproject.toml)
-s3transfer==0.19.2
+s3transfer==0.19.3
     # via boto3
 six==1.17.0
     # via python-dateutil
