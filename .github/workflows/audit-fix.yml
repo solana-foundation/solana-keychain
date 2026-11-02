@@ -43,9 +43,9 @@ jobs:
         working-directory: rust
         run: |
           cargo audit --json \
-            | jq -r '.vulnerabilities.list[].package | "\(.name)@\(.version)"' \
+            | jq -r '.vulnerabilities.list[].package | "--package=\(.name)@\(.version)"' \
             | sort -u \
-            | xargs -r -n1 cargo update -p
+            | xargs -r cargo update
 
       - name: Verify audits pass
         run: |
