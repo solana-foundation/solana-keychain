@@ -26,25 +26,22 @@
 //! request/reply against the shared thread from inside
 //! [`tokio::task::spawn_blocking`].
 //!
-//! ## One session, and what that costs
+//! ## One session per device, and what that costs
 //!
-//! The device thread caches **one** session at a time. Two consequences worth
-//! knowing before designing around this backend.
+//! The device thread caches **one** session per `host_device_path`. Two
+//! consequences worth knowing before designing around this backend.
 //!
 //! One on-device confirmation at a time, per process. Signing serializes through
 //! the single actor, and a dispatched APDU cannot be cancelled, so a second
 //! signing request arriving while the device is mid-prompt fails fast rather
 //! than queueing behind a human who may never answer.
 //!
-//! Two physical Ledgers cannot be used concurrently. Alternating between signers
-//! bound to different devices thrashes the one cached session: each command
-//! re-establishes against its own `host_device_path`, so throughput collapses,
-//! and a signature produced on the wrong device fails closed at
-//! `verify_or_reject` rather than being attached. It is safe, but it is not
-//! usable. Sequential use of one device at a time is the supported shape.
-//!
-//! Tracked as solana-foundation/solana-keychain#307, which carries the design
-//! and the two constraints on it, rather than as a comment here.
+//! Two physical Ledgers can be used alternately but not concurrently. Signers
+//! bound to different devices each reuse their own session, but the claim is
+//! process-wide, so a command for one device fails fast while another is
+//! mid-prompt. A session opened with `None` is never held beside a named one:
+//! `None` resolves only when exactly one Ledger is attached, so both could be
+//! the same device.
 //!
 //! Works under any of `sdk-v2`/`sdk-v3`/`sdk-v4`. The backend needs
 //! `solana-remote-wallet` 4.x — the first line carrying the Nano Gen5 product
@@ -55,6 +52,7 @@
 
 mod dashboard;
 
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -197,6 +195,10 @@ enum DeviceCommand {
     /// Exists so callers never have to touch `hidapi` themselves; see
     /// [`device_channel`] for why that matters.
     IsAttached { reply: Sender<bool> },
+    /// The last signer bound to `host_device_path` was dropped; close its
+    /// session. Carries no claim: a drop cannot fail fast, and closing a handle
+    /// never waits on the user.
+    Release { host_device_path: Option<String> },
 }
 
 /// The one, process-wide device thread. Started on first use, never joined.
@@ -255,6 +257,56 @@ fn device_channel() -> &'static Sender<DeviceCommand> {
     })
 }
 
+/// Live [`DeviceBinding`]s per host path: one per signer and one per command in
+/// flight.
+static BOUND: std::sync::Mutex<BTreeMap<Option<String>, usize>> =
+    std::sync::Mutex::new(BTreeMap::new());
+
+/// A signer's hold on its `host_device_path`. Dropping the last one for a path
+/// sends [`DeviceCommand::Release`], so the device thread keeps no session that
+/// no live signer is bound to.
+struct DeviceBinding {
+    host_device_path: Option<String>,
+}
+
+impl DeviceBinding {
+    fn bind(host_device_path: Option<String>) -> Self {
+        *BOUND
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(host_device_path.clone())
+            .or_default() += 1;
+        Self { host_device_path }
+    }
+}
+
+/// A command in flight holds a clone, so a signer dropped before the command is
+/// sent cannot release the session ahead of it.
+impl Clone for DeviceBinding {
+    fn clone(&self) -> Self {
+        Self::bind(self.host_device_path.clone())
+    }
+}
+
+impl Drop for DeviceBinding {
+    fn drop(&mut self) {
+        let mut bound = BOUND.lock().unwrap_or_else(|e| e.into_inner());
+        let count = bound
+            .get_mut(&self.host_device_path)
+            .expect("counted by bind");
+        *count -= 1;
+        if *count == 0 {
+            bound.remove(&self.host_device_path);
+            // Every command is sent while a binding is live, and this is sent
+            // under the lock, so it reaches the thread after every command for
+            // this path and ahead of the connect of any signer that rebinds it.
+            let _ = command_channel().send(DeviceCommand::Release {
+                host_device_path: self.host_device_path.take(),
+            });
+        }
+    }
+}
+
 /// A [`SolanaSigner`] backed by a Ledger hardware wallet.
 ///
 /// Cheap to create and drop: it holds no thread and no device handle, only the
@@ -266,7 +318,7 @@ pub struct LedgerSigner {
     /// The device this signer was opened against, carried on every later
     /// command so a lost session re-establishes against the same one rather
     /// than whichever Ledger happens to be attached.
-    host_device_path: Option<String>,
+    device: DeviceBinding,
     /// Timeout for the device commands that wait on a button press.
     signing_timeout: Duration,
 }
@@ -294,10 +346,9 @@ impl LedgerSigner {
     /// placed in the error; `just rust-ledger-diagnose` lists them.
     ///
     /// Naming a path does **not** make two devices usable concurrently. The
-    /// device thread caches one session, so alternating between signers bound to
-    /// different devices re-establishes on every command. It stays correct -- a
-    /// signature from the wrong device fails closed at verification -- but it is
-    /// not a supported concurrency model. See the module documentation.
+    /// device thread caches one session per path, so signers bound to different
+    /// devices alternate without re-establishing, but one process-wide claim
+    /// still serializes them. See the module documentation.
     ///
     /// Requires the Ledger to be plugged in, unlocked, and running the Solana
     /// app. On Linux, the appropriate `udev` rules must be installed.
@@ -354,7 +405,7 @@ impl LedgerSigner {
             OPS_TIMEOUT
         };
 
-        let requested_device = host_device_path.clone();
+        let device = DeviceBinding::bind(host_device_path.clone());
         // A connect can reach the user too, so it takes the same claim rather
         // than racing a signature already at the confirm screen.
         let claim = DeviceClaim::acquire()?;
@@ -372,14 +423,14 @@ impl LedgerSigner {
         Ok(Self {
             pubkey: Pubkey::from(pubkey_bytes),
             path_str,
-            host_device_path: requested_device,
+            device,
             signing_timeout,
         })
     }
 
     /// The device this signer was opened against, if one was named.
     pub fn host_device_path(&self) -> Option<&str> {
-        self.host_device_path.as_deref()
+        self.device.host_device_path.as_deref()
     }
 
     /// The timeout this signer applies to commands that wait on a button press.
@@ -448,7 +499,7 @@ impl SolanaSigner for LedgerSigner {
         // into the device closure.
         let verify_against = serialized.clone();
         let path_str = self.path_str.clone();
-        let host_device_path = self.host_device_path.clone();
+        let device = self.device.clone();
         let timeout = self.signing_timeout;
         // One process serializes to one on-device confirmation at a time. Claim
         // the device before enqueueing, so a racing caller fails fast instead of
@@ -461,7 +512,7 @@ impl SolanaSigner for LedgerSigner {
                     claim,
                     path_str,
                     message: serialized,
-                    host_device_path,
+                    host_device_path: device.host_device_path.clone(),
                     reply,
                 }
             })
@@ -483,7 +534,7 @@ impl SolanaSigner for LedgerSigner {
     /// `false` rather than blocking when the device thread is wedged.
     async fn is_available(&self) -> bool {
         let path_str = self.path_str.clone();
-        let host_device_path = self.host_device_path.clone();
+        let device = self.device.clone();
         tokio::task::spawn_blocking(move || {
             // Probe, not an operation: if someone else holds the device, report
             // "not available" rather than queueing behind their prompt.
@@ -495,7 +546,7 @@ impl SolanaSigner for LedgerSigner {
                 .send(DeviceCommand::IsAvailable {
                     claim,
                     path_str,
-                    host_device_path,
+                    host_device_path: device.host_device_path.clone(),
                     reply: reply_tx,
                 })
                 .is_err()
@@ -537,7 +588,7 @@ impl TransactionSigner for LedgerSigner {
         // into the device closure.
         let verify_against = message.clone();
         let path_str = self.path_str.clone();
-        let host_device_path = self.host_device_path.clone();
+        let device = self.device.clone();
         let timeout = self.signing_timeout;
         // One process serializes to one on-device confirmation at a time. Claim
         // the device before enqueueing, so a racing caller fails fast instead of
@@ -550,7 +601,7 @@ impl TransactionSigner for LedgerSigner {
                     claim,
                     path_str,
                     message,
-                    host_device_path,
+                    host_device_path: device.host_device_path.clone(),
                     reply,
                 }
             })
@@ -738,6 +789,9 @@ pub(crate) const NO_DEVICE_DETAIL: &str =
 /// the actor instead was the alternative and it does not work: the actor cannot
 /// refuse a command it has not dequeued yet, so a queued second signature would
 /// still sit behind the first, which is the bug.
+///
+/// The claim is process-wide, not per device: one thread serves every Ledger,
+/// so a command for device B would queue behind device A's untimed HID read.
 struct DeviceClaim;
 
 impl DeviceClaim {
@@ -1052,22 +1106,15 @@ fn unenumerated_detail(attached: &[u16], resolved: &str) -> String {
     )
 }
 
-/// A live device session, cached on the device thread between commands.
-struct Session {
-    wallet: Rc<LedgerWallet>,
-    /// The host path this session was opened against, so a `Connect` asking for
-    /// a *different* device re-establishes instead of silently using this one.
-    host_device_path: Option<String>,
-}
-
 /// The device thread body. Runs for the life of the process.
 ///
-/// Holds at most one open session and reuses it across commands, so repeated
-/// `LedgerSigner::connect` calls do not re-enumerate HID. Any device error drops
-/// the session, so the next connect re-establishes rather than reusing a handle
-/// to a device that has been unplugged, locked or switched apps.
+/// Holds at most one open session per host path and reuses it across commands,
+/// so repeated `LedgerSigner::connect` calls do not re-enumerate HID. A device
+/// error drops only that device's session, so its next command re-establishes
+/// rather than reusing a handle to a device that has been unplugged, locked or
+/// switched apps. Dropping the last signer bound to a path releases its session.
 fn device_thread(cmd_rx: Receiver<DeviceCommand>) {
-    let mut session: Option<Session> = None;
+    let mut sessions: HashMap<Option<String>, Rc<LedgerWallet>> = HashMap::new();
 
     // Every command needs the caller's derivation path parsed; `connect` has
     // already validated it, so a failure here is genuinely unexpected.
@@ -1090,17 +1137,17 @@ fn device_thread(cmd_rx: Receiver<DeviceCommand>) {
                     // Reuse only when it is the same device *and* the caller
                     // does not need an on-screen confirmation, which by
                     // definition has to reach the device.
-                    if let Some(existing) = session
-                        .as_ref()
-                        .filter(|s| s.host_device_path == host_device_path)
+                    if let Some(existing) = sessions
+                        .get(&host_device_path)
                         .filter(|_| !confirm_pubkey_on_device)
                     {
-                        if let Ok(pubkey) = existing.wallet.get_pubkey(&path, false) {
+                        if let Ok(pubkey) = existing.get_pubkey(&path, false) {
                             return Ok(pubkey.to_bytes());
                         }
                         // The cached handle is stale; fall through and rebuild.
                     }
-                    session = None;
+                    sessions.remove(&host_device_path);
+                    evict_overlapping(&mut sessions, host_device_path.as_deref());
                     let attempt = |host: Option<&str>| {
                         establish_session(&path, confirm_pubkey_on_device, host)
                     };
@@ -1142,10 +1189,7 @@ fn device_thread(cmd_rx: Receiver<DeviceCommand>) {
                     }
 
                     let (wallet, pubkey_bytes) = connected?;
-                    session = Some(Session {
-                        wallet,
-                        host_device_path,
-                    });
+                    sessions.insert(host_device_path, wallet);
                     Ok(pubkey_bytes)
                 });
                 let _ = reply.send(result);
@@ -1159,9 +1203,10 @@ fn device_thread(cmd_rx: Receiver<DeviceCommand>) {
                 reply,
             } => {
                 let result = with_session(
-                    &mut session,
+                    &mut sessions,
                     &path_str,
                     host_device_path.as_deref(),
+                    |path, host| establish_session(path, false, host).map(|(wallet, _)| wallet),
                     |wallet, path| {
                         wallet
                             .sign_message(path, &message)
@@ -1180,9 +1225,10 @@ fn device_thread(cmd_rx: Receiver<DeviceCommand>) {
                 reply,
             } => {
                 let result = with_session(
-                    &mut session,
+                    &mut sessions,
                     &path_str,
                     host_device_path.as_deref(),
+                    |path, host| establish_session(path, false, host).map(|(wallet, _)| wallet),
                     |wallet, path| {
                         wallet
                             .sign_offchain_message(path, &message)
@@ -1200,9 +1246,10 @@ fn device_thread(cmd_rx: Receiver<DeviceCommand>) {
                 reply,
             } => {
                 let ok = with_session(
-                    &mut session,
+                    &mut sessions,
                     &path_str,
                     host_device_path.as_deref(),
+                    |path, host| establish_session(path, false, host).map(|(wallet, _)| wallet),
                     |wallet, path| wallet.get_pubkey(path, false).map_err(map_rw_err),
                 )
                 .is_ok();
@@ -1214,6 +1261,10 @@ fn device_thread(cmd_rx: Receiver<DeviceCommand>) {
                     .map(|api| api.device_list().any(|d| d.vendor_id() == LEDGER_VID))
                     .unwrap_or(false);
                 let _ = reply.send(attached);
+            }
+
+            DeviceCommand::Release { host_device_path } => {
+                sessions.remove(&host_device_path);
             }
         }
     }
@@ -1242,45 +1293,47 @@ fn session_action(error: &SignerError) -> SessionAction {
     }
 }
 
-/// Run `f` against the cached session, re-establishing it if it is gone.
+/// Drop every session that could be the device `host_device_path` names, so no
+/// device is ever held by two handles. `None` resolves only when exactly one
+/// Ledger is attached, so it can be any named device.
+fn evict_overlapping<W>(sessions: &mut HashMap<Option<String>, W>, host_device_path: Option<&str>) {
+    match host_device_path {
+        None => sessions.clear(),
+        Some(_) => {
+            sessions.remove(&None);
+        }
+    }
+}
+
+/// Run `f` against the session cached for `host_device_path`, establishing it
+/// if it is gone.
 ///
 /// Re-establishes against the host path this signer was opened with, which is
 /// safe because the cached pubkey verifies every signature. A re-established
 /// session on the wrong device fails closed at verification, not with a
 /// wrong-key signature. Re-establishes without dashboard auto-launch: signing
 /// is not the moment to drive app management.
-fn with_session<T>(
-    session: &mut Option<Session>,
+fn with_session<W, T>(
+    sessions: &mut HashMap<Option<String>, W>,
     path_str: &str,
     host_device_path: Option<&str>,
-    f: impl FnOnce(&Rc<LedgerWallet>, &DerivationPath) -> Result<T, SignerError>,
+    establish: impl FnOnce(&DerivationPath, Option<&str>) -> Result<W, SignerError>,
+    f: impl FnOnce(&W, &DerivationPath) -> Result<T, SignerError>,
 ) -> Result<T, SignerError> {
     let path = DerivationPath::from_absolute_path_str(path_str)
         .map_err(|e| SignerError::ConfigError(format!("invalid derivation path: {e}")))?;
 
-    // A session opened against a different device is not ours to use. See the
-    // two-device limitation on the module doc: one cached session means
-    // alternating signers thrash it, and this is where that shows up.
-    if session
-        .as_ref()
-        .is_some_and(|active| active.host_device_path.as_deref() != host_device_path)
-    {
-        *session = None;
+    let key = host_device_path.map(str::to_string);
+    if !sessions.contains_key(&key) {
+        evict_overlapping(sessions, host_device_path);
+        let wallet = establish(&path, host_device_path)?;
+        sessions.insert(key.clone(), wallet);
     }
 
-    if session.is_none() {
-        let (wallet, _pubkey) = establish_session(&path, false, host_device_path)?;
-        *session = Some(Session {
-            wallet,
-            host_device_path: host_device_path.map(str::to_string),
-        });
-    }
-    let active = session.as_ref().expect("just established");
-
-    let result = f(&active.wallet, &path);
+    let result = f(&sessions[&key], &path);
     if let Err(error) = &result {
         if session_action(error) == SessionAction::Drop {
-            *session = None;
+            sessions.remove(&key);
         }
     }
     result
@@ -1662,6 +1715,98 @@ mod tests {
         }
     }
 
+    /// One command on `host`, against handles numbered by establish order.
+    fn run_on(
+        sessions: &mut HashMap<Option<String>, usize>,
+        established: &mut usize,
+        host: Option<&str>,
+        outcome: Result<(), SignerError>,
+    ) -> Result<usize, SignerError> {
+        with_session(
+            sessions,
+            DEFAULT_DERIVATION_PATH,
+            host,
+            |_, _| {
+                *established += 1;
+                Ok(*established)
+            },
+            |handle, _| outcome.map(|()| *handle),
+        )
+    }
+
+    #[test]
+    fn two_devices_used_alternately_establish_once_each() {
+        let (mut sessions, mut established) = (HashMap::new(), 0);
+        let handles: Vec<usize> = ["/a", "/b", "/a", "/b"]
+            .into_iter()
+            .map(|host| run_on(&mut sessions, &mut established, Some(host), Ok(())).unwrap())
+            .collect();
+        assert_eq!(handles, [1, 2, 1, 2]);
+        assert_eq!(established, 2);
+    }
+
+    #[test]
+    fn a_fault_on_one_device_rebuilds_only_that_session() {
+        let (mut sessions, mut established) = (HashMap::new(), 0);
+        let b = run_on(&mut sessions, &mut established, Some("/b"), Ok(())).unwrap();
+        let a = run_on(&mut sessions, &mut established, Some("/a"), Ok(())).unwrap();
+        let gone = Err(SignerError::NotAvailable("gone".into()));
+        run_on(&mut sessions, &mut established, Some("/a"), gone).unwrap_err();
+
+        let reused = run_on(&mut sessions, &mut established, Some("/b"), Ok(())).unwrap();
+        assert_eq!(reused, b);
+        let rebuilt = run_on(&mut sessions, &mut established, Some("/a"), Ok(())).unwrap();
+        assert_ne!(rebuilt, a);
+        assert_eq!(established, 3);
+    }
+
+    #[test]
+    fn a_sole_device_session_and_a_named_one_are_never_held_together() {
+        let (mut sessions, mut established) = (HashMap::new(), 0);
+        run_on(&mut sessions, &mut established, Some("/a"), Ok(())).unwrap();
+        run_on(&mut sessions, &mut established, Some("/b"), Ok(())).unwrap();
+
+        run_on(&mut sessions, &mut established, None, Ok(())).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert!(sessions.contains_key(&None));
+
+        run_on(&mut sessions, &mut established, Some("/a"), Ok(())).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert!(sessions.contains_key(&Some("/a".to_string())));
+    }
+
+    #[test]
+    fn dropping_the_last_signer_on_a_device_releases_only_its_session() {
+        let _guard = BUSY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (tx, rx) = mpsc::channel();
+        *CHANNEL_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+        let released = || -> Vec<Option<String>> {
+            rx.try_iter()
+                .filter_map(|cmd| match cmd {
+                    DeviceCommand::Release { host_device_path } => Some(host_device_path),
+                    _ => None,
+                })
+                .collect()
+        };
+        let (a, b) = (Some("/a".to_string()), Some("/b".to_string()));
+
+        let (signer_a, bound_b) = (
+            DeviceBinding::bind(a.clone()),
+            DeviceBinding::bind(b.clone()),
+        );
+        let in_flight_a = signer_a.clone();
+        drop(signer_a);
+        let early = released();
+        drop(in_flight_a);
+        let late = released();
+        drop(bound_b);
+        *CHANNEL_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+
+        assert!(!early.contains(&a), "a command in flight still holds /a");
+        assert!(late.contains(&a));
+        assert!(!early.contains(&b) && !late.contains(&b));
+    }
+
     #[test]
     fn a_signer_remembers_the_device_it_was_opened_against() {
         // Needed so a lost session re-establishes against the same Ledger
@@ -1670,7 +1815,7 @@ mod tests {
         let signer = LedgerSigner {
             pubkey: Pubkey::from([1u8; 32]),
             path_str: DEFAULT_DERIVATION_PATH.to_string(),
-            host_device_path: Some("/dev/hidraw3".to_string()),
+            device: DeviceBinding::bind(Some("/dev/hidraw3".to_string())),
             signing_timeout: DEFAULT_SIGN_TIMEOUT,
         };
         assert_eq!(signer.host_device_path(), Some("/dev/hidraw3"));
@@ -1678,7 +1823,7 @@ mod tests {
         let sole = LedgerSigner {
             pubkey: Pubkey::from([2u8; 32]),
             path_str: DEFAULT_DERIVATION_PATH.to_string(),
-            host_device_path: None,
+            device: DeviceBinding::bind(None),
             signing_timeout: DEFAULT_SIGN_TIMEOUT,
         };
         assert_eq!(sole.host_device_path(), None);
@@ -1864,6 +2009,7 @@ mod tests {
                         DeviceCommand::IsAttached { reply } => {
                             let _ = reply.send(true);
                         }
+                        DeviceCommand::Release { .. } => {}
                     }
                 }
             });
@@ -1894,7 +2040,7 @@ mod tests {
         LedgerSigner {
             pubkey,
             path_str: DEFAULT_DERIVATION_PATH.to_string(),
-            host_device_path: None,
+            device: DeviceBinding::bind(None),
             signing_timeout: Duration::from_secs(5),
         }
     }
@@ -1962,6 +2108,26 @@ mod tests {
         let (_serialized, signature) = result.into_signed_transaction();
         assert_eq!(tx.signatures[0], signature);
         assert!(crate::signature_util::verify_or_reject(&signature, &pubkey, &message).is_ok());
+    }
+
+    /// The fake device signs anything it receives, so a busy error proves the
+    /// command never reached it.
+    #[tokio::test]
+    async fn a_busy_claim_refuses_a_signer_bound_to_another_device() {
+        let (_device, pubkey) = FakeDevice::attach(15, false);
+        let _held = DeviceClaim::acquire().expect("idle");
+        let signer = LedgerSigner {
+            device: DeviceBinding::bind(Some("/b".to_string())),
+            ..signer_for(pubkey)
+        };
+        let err = signer
+            .sign_message(b"pay 1 SOL")
+            .await
+            .expect_err("a held claim must refuse every device");
+        assert!(
+            matches!(&err, SignerError::NotAvailable(d) if d == BUSY_DETAIL),
+            "got: {err:?}"
+        );
     }
 
     /// Print what is actually attached and what the device says about itself.
