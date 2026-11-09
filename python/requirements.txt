@@ -8,9 +8,9 @@ backports-asyncio-runner==1.2.0 ; python_full_version < '3.11'
     # via pytest-asyncio
 base58==2.1.1
     # via solana-keychain (pyproject.toml)
-boto3==1.43.119
+boto3==1.43.123
     # via solana-keychain (pyproject.toml)
-botocore==1.43.119
+botocore==1.43.123
     # via
     #   boto3
     #   s3transfer
@@ -126,7 +126,7 @@ pytest==9.1.1
     # via
     #   solana-keychain (pyproject.toml)
     #   pytest-asyncio
-pytest-asyncio==1.4.1
+pytest-asyncio==1.4.1.post1
     # via solana-keychain (pyproject.toml)
 python-dateutil==2.9.0.post0
     # via botocore
