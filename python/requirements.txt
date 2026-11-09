@@ -82,7 +82,7 @@ jmespath==1.1.0
     # via
     #   boto3
     #   botocore
-jsonalias==0.1.2
+jsonalias==0.1.1
     # via solders
 librt==0.15.0 ; platform_python_implementation != 'PyPy'
     # via mypy
