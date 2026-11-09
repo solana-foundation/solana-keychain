@@ -41,6 +41,8 @@ updates:
       - dependency-name: "*"
         update-types:
           - version-update:semver-patch
+    ignore:
+      - dependency-name: jsonalias
 
   - package-ecosystem: github-actions
     directory: "/"
