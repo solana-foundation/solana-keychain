@@ -181,11 +181,11 @@ fn is_sibling_interface(a: &str, b: &str) -> bool {
 
 /// One attached Ledger APDU interface, as [`sole_ledger`] compares them.
 #[derive(Clone, Copy)]
-struct Candidate<'a> {
-    path: &'a str,
+pub(super) struct Candidate<'a> {
+    pub(super) path: &'a str,
     /// USB serial number, when the platform reports one. This is the only
     /// direct evidence that two interfaces belong to the same physical device.
-    serial: Option<&'a str>,
+    pub(super) serial: Option<&'a str>,
 }
 
 /// Which device to use when the caller named none: exactly one, or an error.
@@ -194,7 +194,7 @@ struct Candidate<'a> {
 /// (multiple interfaces). Grouping by: (1) serial number when available (shared
 /// by interfaces of one device, unique per device), or (2) path adjacency
 /// (accepts IOUSBHostInterface@0/@1, rejects /dev/hidraw2/@3).
-fn sole_ledger(candidates: &[Candidate<'_>]) -> Result<usize, SignerError> {
+pub(super) fn sole_ledger(candidates: &[Candidate<'_>]) -> Result<usize, SignerError> {
     if candidates.is_empty() {
         return Err(SignerError::NotAvailable(
             "no Ledger device found (plug in and unlock)".to_string(),

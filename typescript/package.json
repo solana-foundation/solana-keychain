@@ -24,7 +24,7 @@
   },
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^16.0.3",
-    "@rollup/plugin-virtual": "^3.0.2",
+    "@rollup/plugin-virtual": "^3.0.3",
     "@solana/eslint-config-solana": "^6.0.1",
     "@solana/prettier-config-solana": "0.0.7",
     "@types/node": "^26.1.2",
@@ -34,7 +34,7 @@
     "eslint": "^9.39.5",
     "eslint-plugin-jest": "^29.15.5",
     "globals": "^17.7.0",
-    "prettier": "^3.9.9",
+    "prettier": "^3.9.10",
     "rollup": "^4.62.5",
     "typescript": "^5.9.3",
     "vite": "^7.3.7",

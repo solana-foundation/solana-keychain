@@ -41,6 +41,19 @@ updates:
       - dependency-name: "*"
         update-types:
           - version-update:semver-patch
+    ignore:
+      - dependency-name: jsonalias
+
+  - package-ecosystem: gradle
+    directory: "/kotlin"
+    multi-ecosystem-group: all-deps
+    patterns: ["*"]
+    cooldown:
+      default-days: 7
+    allow:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-patch
 
   - package-ecosystem: github-actions
     directory: "/"
