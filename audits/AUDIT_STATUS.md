@@ -33,6 +33,11 @@ inspect what an unaudited backend's commit touched:
 git show --stat 6461a18
 ```
 
+### Unaudited implementations
+
+- **Kotlin**: not audited. Added after the audited-through commit, so the
+  unaudited delta shows it. Covers `kotlin/` only.
+
 ## Previous Audits
 
 - Accretion, `audits/2026-accretion-solana-foundation-solana-keychain-audit-A26SFR2.pdf`,
