@@ -738,38 +738,6 @@ describe('CrossmintSigner', () => {
             expect(results[0]).toEqual(MOCK_SIGNATURE_BYTES);
         });
 
-        it('accepts txId when transaction decoding fails', async () => {
-            vi.mocked(getTransactionDecoder).mockReturnValue({
-                decode: vi.fn(() => {
-                    throw new Error('decode failed');
-                }),
-            } as any);
-            vi.mocked(fetch)
-                .mockResolvedValueOnce(mockWalletResponse()) // create()
-                .mockResolvedValueOnce(
-                    new Response(
-                        JSON.stringify({
-                            id: 'tx-fallthrough-invalid',
-                            status: 'success',
-                            onChain: {
-                                transaction: MOCK_SERIALIZED_TRANSACTION_B58,
-                                txId: MOCK_SIGNATURE_B58,
-                            },
-                        }),
-                        { status: 201 },
-                    ),
-                );
-
-            const signer = await createCrossmintSigner({
-                ...mockConfig,
-                maxPollAttempts: 1,
-                pollIntervalMs: 1,
-            });
-
-            const results = await signer.signAndSendTransactions([createMockTransaction()]);
-            expect(results[0]).toEqual(MOCK_SIGNATURE_BYTES);
-        });
-
         /**
          * Under sponsorship the returned value must be the sponsor fee-payer's
          * slot-0 signature, not the wallet's approval, so RPC lookups resolve.

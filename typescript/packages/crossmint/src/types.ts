@@ -25,11 +25,6 @@ export interface CrossmintSignerConfig {
     walletLocator: string;
 }
 
-export interface CrossmintApiError {
-    error?: unknown;
-    message?: string;
-}
-
 export interface CrossmintWalletResponse {
     address: string;
     chainType: string;

@@ -138,13 +138,6 @@ describe('FordefiSigner Integration', () => {
         },
         TEST_TIMEOUT_MS,
     );
-    it.skipIf(!process.env.FORDEFI_BB_VAULT_ID)(
-        'simulates transactions with real API',
-        async () => {
-            await runSignerIntegrationTest(await getConfig(['simulateTransaction']));
-        },
-        TEST_TIMEOUT_MS,
-    );
 
     it.skipIf(!process.env.FORDEFI_VAULT_ID)(
         'native auto mode signs and broadcasts a devnet transfer',

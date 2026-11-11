@@ -54,31 +54,12 @@ export interface SignatureComponents {
     s: string;
 }
 
-export interface UserActionInitRequest {
-    userActionHttpMethod: string;
-    userActionHttpPath: string;
-    userActionPayload: string;
-    userActionServerKind: string;
-}
-
 export interface UserActionInitResponse {
     allowCredentials: {
         key: Array<{ id: string }>;
     };
     challenge: string;
     challengeIdentifier: string;
-}
-
-export interface UserActionSignRequest {
-    challengeIdentifier: string;
-    firstFactor: {
-        credentialAssertion: {
-            clientData: string;
-            credId: string;
-            signature: string;
-        };
-        kind: string;
-    };
 }
 
 export interface UserActionResponse {

@@ -11,7 +11,4 @@ describe('VaultSigner Integration', () => {
     it.skipIf(!process.env.VAULT_ADDR)('signs messages with real API', async () => {
         await runSignerIntegrationTest(await getConfig(['signMessage']));
     });
-    it.skipIf(!process.env.VAULT_ADDR)('simulates transactions with real API', async () => {
-        await runSignerIntegrationTest(await getConfig(['simulateTransaction']));
-    });
 });

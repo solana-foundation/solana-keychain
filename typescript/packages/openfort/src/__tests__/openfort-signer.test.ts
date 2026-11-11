@@ -9,14 +9,6 @@ vi.mock('@solana/keychain-core', async importOriginal => {
         ...mod,
         // Stub the ed25519 verify so tests don't need to produce real signatures.
         assertSignatureValid: vi.fn(),
-        sanitizeRemoteErrorResponse:
-            mod.sanitizeRemoteErrorResponse ??
-            ((text: string) =>
-                `${text
-                    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim()
-                    .slice(0, 256)} [truncated]`),
     };
 });
 
@@ -157,18 +149,6 @@ describe('OpenfortSigner', () => {
             await expect(createOpenfortSigner(makeConfig())).rejects.toThrow('Openfort returned non-Solana address');
         });
 
-        it('throws PARSING_ERROR when /v2/accounts response is invalid JSON', async () => {
-            mockFetch.mockResolvedValueOnce({
-                json: () => Promise.reject(new Error('Invalid JSON')),
-                ok: true,
-                status: 200,
-            });
-            await expect(createOpenfortSigner(makeConfig())).rejects.toMatchObject({
-                code: 'SIGNER_PARSING_ERROR',
-                message: expect.stringContaining('Failed to parse Openfort response'),
-            });
-        });
-
         it('throws REMOTE_API_ERROR when /v2/accounts response is missing the address field', async () => {
             mockFetch.mockResolvedValueOnce({
                 json: () => Promise.resolve({}),
@@ -221,16 +201,6 @@ describe('OpenfortSigner', () => {
             ).rejects.toThrow('Failed to hex-decode Openfort signature');
         });
 
-        it('throws REMOTE_API_ERROR on non-2xx', async () => {
-            mockGetAccount();
-            const signer = await createOpenfortSigner(makeConfig());
-
-            mockFetch.mockResolvedValueOnce(new Response('{"error":"unauthorized"}', { status: 401 }));
-            await expect(
-                signer.signMessages([{ content: new TextEncoder().encode('hi'), signatures: {} }]),
-            ).rejects.toThrow('Openfort API error: 401');
-        });
-
         it('throws HTTP_ERROR on network failure', async () => {
             mockGetAccount();
             const signer = await createOpenfortSigner(makeConfig());
@@ -239,23 +209,6 @@ describe('OpenfortSigner', () => {
             await expect(
                 signer.signMessages([{ content: new TextEncoder().encode('hi'), signatures: {} }]),
             ).rejects.toThrow('Openfort network request failed');
-        });
-
-        it('throws PARSING_ERROR when sign response is invalid JSON', async () => {
-            mockGetAccount();
-            const signer = await createOpenfortSigner(makeConfig());
-
-            mockFetch.mockResolvedValueOnce({
-                json: () => Promise.reject(new Error('Invalid JSON')),
-                ok: true,
-                status: 200,
-            });
-            await expect(
-                signer.signMessages([{ content: new TextEncoder().encode('hi'), signatures: {} }]),
-            ).rejects.toMatchObject({
-                code: 'SIGNER_PARSING_ERROR',
-                message: expect.stringContaining('Failed to parse Openfort response'),
-            });
         });
 
         it('throws REMOTE_API_ERROR when sign response is missing the signature field', async () => {

@@ -12,7 +12,7 @@ import {
 import { getTransferSolInstruction } from '@solana-program/system';
 import { LiteSVM } from 'litesvm';
 
-import { airdropLamports, formatSimulationResult, truncateAddress } from './litesvm-helpers.js';
+import { airdropLamports, formatSimulationResult } from './litesvm-helpers.js';
 import type { SignerTestConfig, TestContext, TestOptions, TestScenario, TestSigner } from './types.js';
 
 const DEFAULT_AIRDROP = BigInt(1_000_000_000);
@@ -24,10 +24,9 @@ const FAUCET_RESERVE = BigInt(10_000_000);
 const DEFAULT_OPTIONS: Required<TestOptions> = {
     airdropAmount: DEFAULT_AIRDROP,
     transferAmount: DEFAULT_TRANSFER,
-    verbose: false,
 };
 
-const ALL_SCENARIOS: TestScenario[] = ['signTransaction', 'signMessage', 'simulateTransaction', 'badSignature'];
+const ALL_SCENARIOS: TestScenario[] = ['signTransaction', 'signMessage', 'badSignature'];
 
 /**
  * Main entry point for running integration tests
@@ -54,11 +53,6 @@ export async function runSignerIntegrationTest<T extends TestSigner>(
         .withPrecompiles();
 
     const signer = await config.createSigner();
-
-    if (opts.verbose) {
-        console.log(`Testing ${config.signerType} signer`);
-        console.log(`Address: ${truncateAddress(signer.address)}`);
-    }
 
     // The recipient is funded by the test transfer itself, so only the signer
     // needs an airdrop here.
@@ -99,9 +93,6 @@ async function runScenario<T extends TestSigner>(scenario: TestScenario, context
         case 'signMessage':
             await testSignMessage(context);
             break;
-        case 'simulateTransaction':
-            await testSimulateTransaction(context);
-            break;
         case 'badSignature':
             await testBadSignature(context);
             break;
@@ -112,10 +103,6 @@ async function runScenario<T extends TestSigner>(scenario: TestScenario, context
 
 async function testSignTransaction<T extends TestSigner>(context: TestContext<T>): Promise<void> {
     const { signer, litesvm, options, recipientAddress } = context;
-
-    if (options.verbose) {
-        console.log('Testing transaction signing...');
-    }
 
     const instruction = getTransferSolInstruction({
         amount: options.transferAmount,
@@ -147,19 +134,10 @@ async function testSignTransaction<T extends TestSigner>(context: TestContext<T>
     if (!formatted.success) {
         throw new Error(`Transaction simulation failed: ${formatted?.error?.toString()}`);
     }
-
-    if (options.verbose) {
-        console.log('✓ Transaction signed and simulated successfully');
-        console.log(`  Compute units: ${formatted.computeUnits}`);
-    }
 }
 
 async function testSignMessage<T extends TestSigner>(context: TestContext<T>): Promise<void> {
-    const { signer, options } = context;
-
-    if (options.verbose) {
-        console.log('Testing message signing...');
-    }
+    const { signer } = context;
 
     if (!signer.signMessages) {
         throw new Error('Signer exposes no signMessages; drop the signMessage scenario for this backend');
@@ -183,57 +161,10 @@ async function testSignMessage<T extends TestSigner>(context: TestContext<T>): P
     if (signature.length !== ED25519_SIGNATURE_LENGTH) {
         throw new Error(`Invalid signature length: expected ${ED25519_SIGNATURE_LENGTH}, got ${signature.length}`);
     }
-
-    if (options.verbose) {
-        console.log('✓ Message signed successfully');
-    }
-}
-
-async function testSimulateTransaction<T extends TestSigner>(context: TestContext<T>): Promise<void> {
-    const { signer, litesvm, options, recipientAddress } = context;
-
-    if (options.verbose) {
-        console.log('Testing transaction simulation...');
-    }
-
-    const instruction = getTransferSolInstruction({
-        amount: options.transferAmount,
-        destination: recipientAddress,
-        source: signer,
-    });
-    litesvm.expireBlockhash();
-
-    const transaction = pipe(
-        createTransactionMessage({ version: 0 }),
-        tx => setTransactionMessageFeePayerSigner(signer, tx),
-        tx => appendTransactionMessageInstructions([instruction], tx),
-        tx => litesvm.setTransactionMessageLifetimeUsingLatestBlockhash(tx),
-    );
-
-    const signedTransaction = await signTransactionMessageWithSigners(transaction);
-    const result = litesvm.simulateTransaction(signedTransaction);
-    const formatted = formatSimulationResult(result);
-
-    if (!formatted.success) {
-        throw new Error(`Simulation failed: ${formatted?.error?.toString()}`);
-    }
-
-    if (!formatted.logs || formatted.logs.length === 0) {
-        throw new Error('Simulation returned no logs');
-    }
-
-    if (options.verbose) {
-        console.log('✓ Transaction simulated successfully');
-        console.log(`  Logs: ${formatted.logs.length} entries`);
-    }
 }
 
 async function testBadSignature<T extends TestSigner>(context: TestContext<T>): Promise<void> {
     const { signer, litesvm, options, recipientAddress } = context;
-
-    if (options.verbose) {
-        console.log('Testing bad signature detection...');
-    }
 
     const instruction = getTransferSolInstruction({
         amount: options.transferAmount,
@@ -271,10 +202,5 @@ async function testBadSignature<T extends TestSigner>(context: TestContext<T>): 
     // so a successful simulation here means sigverify was bypassed — surface that loud.
     if (formatted.success) {
         throw new Error('Expected transaction with bad signature to fail, but it succeeded');
-    }
-
-    if (options.verbose) {
-        console.log('✓ Bad signature correctly rejected');
-        console.log(`  Error: ${formatted?.error?.toString()}`);
     }
 }
