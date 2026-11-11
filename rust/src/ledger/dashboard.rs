@@ -111,7 +111,7 @@ pub fn ensure_solana_app_open(host_device_path: Option<&str>) -> Result<bool, Si
 /// Paths may name different interfaces of the same device. Prefix matching
 /// requires 80% common prefix ending on delimiter, accepting only if exactly
 /// one matches. Ambiguity returns `None`, never an arbitrary device.
-fn select_ledger(available: &[&str], want: &str) -> Option<usize> {
+pub(super) fn select_ledger(available: &[&str], want: &str) -> Option<usize> {
     if let Some(exact) = available.iter().position(|p| *p == want) {
         return Some(exact);
     }
@@ -230,7 +230,7 @@ pub(super) fn sole_ledger(candidates: &[Candidate<'_>]) -> Result<usize, SignerE
 /// agree; fails closed. Serial: Nano Gen5 reports "0001" on all interfaces
 /// (fixed per model), so equality doesn't prove same device, only inequality.
 /// Path adjacency: platform-dependent, weak toward "different" (safe).
-fn same_device(a: &Candidate<'_>, b: &Candidate<'_>) -> bool {
+pub(super) fn same_device(a: &Candidate<'_>, b: &Candidate<'_>) -> bool {
     // A filled-in serial that differs is proof of two devices, whatever the
     // paths look like.
     if let (Some(x), Some(y)) = (a.serial, b.serial) {

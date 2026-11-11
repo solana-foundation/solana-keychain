@@ -10,8 +10,7 @@
 //!
 //! Two independent reasons, and the second is the strict one.
 //!
-//! `solana-remote-wallet` is single-threaded: its `RemoteWalletManager` and
-//! `LedgerWallet` handles are reference-counted with [`std::rc::Rc`] and wrap a
+//! `solana-remote-wallet` is single-threaded: its `LedgerWallet` handle wraps a
 //! `hidapi` device that is not [`Sync`], while the [`SolanaSigner`] trait is
 //! `async` and `Send + Sync`. Confining device I/O to one OS thread bridges
 //! that, and is correct on its own terms — a Ledger services one APDU exchange
@@ -178,14 +177,14 @@ enum DeviceCommand {
         binding: Arc<Binding>,
         reply: Sender<Result<[u8; 64], SignerError>>,
     },
-    /// Liveness probe: can we read the pubkey without on-device confirmation?
+    /// Liveness probe: read the pubkey without on-device confirmation.
     IsAvailable {
         /// Released when the actor drops this command, so a caller-side
         /// timeout cannot free a device that is still busy.
         claim: DeviceClaim,
         path_str: String,
         binding: Arc<Binding>,
-        reply: Sender<bool>,
+        reply: Sender<Result<[u8; 32], SignerError>>,
     },
     /// Is any Ledger attached, regardless of whether it is usable?
     ///
@@ -229,10 +228,6 @@ impl Drop for Binding {
 /// exchange at a time, so serialising through a single thread costs nothing.
 static DEVICE_THREAD: std::sync::OnceLock<Sender<DeviceCommand>> = std::sync::OnceLock::new();
 
-/// Channel to the device thread, starting it if this is the first call.
-///
-/// Everything that touches `hidapi` must go through here; calling
-/// `HidApi::new()` from any other thread is what crashes. See [`DEVICE_THREAD`].
 /// The channel every command goes out on.
 ///
 /// In production this is always [`device_channel`]. Under `cfg(test)` a test can
@@ -253,6 +248,10 @@ fn command_channel() -> Sender<DeviceCommand> {
     device_channel().clone()
 }
 
+/// Channel to the device thread, starting it if this is the first call.
+///
+/// Everything that touches `hidapi` must go through here; calling
+/// `HidApi::new()` from any other thread is what crashes. See [`DEVICE_THREAD`].
 fn device_channel() -> &'static Sender<DeviceCommand> {
     DEVICE_THREAD.get_or_init(|| {
         let (cmd_tx, cmd_rx) = mpsc::channel();
@@ -269,8 +268,9 @@ fn device_channel() -> &'static Sender<DeviceCommand> {
 /// A [`SolanaSigner`] backed by a Ledger hardware wallet.
 ///
 /// Cheap to create and drop: it holds no thread and no device handle, only the
-/// cached pubkey and the derivation path to use. All device work happens on the
-/// shared thread described at [`DEVICE_THREAD`].
+/// cached pubkey and the derivation path to use. Dropping the last signer bound
+/// to a host path sends `Release`, which closes that device's session. All
+/// device work happens on the shared thread described at [`DEVICE_THREAD`].
 pub struct LedgerSigner {
     pubkey: Pubkey,
     path_str: String,
@@ -494,8 +494,10 @@ impl SolanaSigner for LedgerSigner {
 
     /// Liveness probe. Never waits on the user, so it is bounded by
     /// [`OPS_TIMEOUT`] rather than the signing timeout, and reports
-    /// `false` rather than blocking when the device thread is wedged.
+    /// `false` rather than blocking when the device thread is wedged, and
+    /// `false` when the device answers with another key.
     async fn is_available(&self) -> bool {
+        let pubkey = self.pubkey;
         let path_str = self.path_str.clone();
         let binding = Arc::clone(&self.binding);
         tokio::task::spawn_blocking(move || {
@@ -517,7 +519,7 @@ impl SolanaSigner for LedgerSigner {
                 return false;
             }
             match reply_rx.recv_timeout(OPS_TIMEOUT) {
-                Ok(available) => available,
+                Ok(read) => read.is_ok_and(|bytes| Pubkey::from(bytes) == pubkey),
                 Err(RecvTimeoutError::Timeout) => false,
                 Err(RecvTimeoutError::Disconnected) => false,
             }
@@ -785,9 +787,7 @@ impl Drop for DeviceClaim {
 /// Send a command to the device actor and block for its reply, up to `timeout`.
 ///
 /// Called from inside `spawn_blocking`. On timeout the reply receiver is
-/// dropped, which the actor detects when it finally answers: see
-/// [`respond`], which drops the cached session so the next connect
-/// re-establishes rather than reusing a handle left mid-exchange.
+/// dropped; the actor still finishes the command and keeps its session.
 fn request_on<T: Send + 'static>(
     cmd_tx: &Sender<DeviceCommand>,
     timeout: Duration,
@@ -815,11 +815,16 @@ fn request_on<T: Send + 'static>(
 /// driven without hardware.
 trait Hardware {
     type Wallet;
-    /// List attached Ledgers without opening any, and return the host path of
-    /// the only one.
-    fn resolve(&self) -> Result<String, SignerError>;
-    /// Open the device at `host_path` and nothing else.
-    fn open(&self, host_path: &str) -> Result<Self::Wallet, SignerError>;
+    /// List attached Ledgers without opening any, and return the host paths of
+    /// the interfaces of the device at `host_device_path`, its own first, or
+    /// of the only one when it is `None`.
+    fn resolve(&self, host_device_path: Option<&str>) -> Result<Vec<String>, SignerError>;
+    /// Open the device at `host_path` and nothing else, with the listed path
+    /// it opened. `None` when no Ledger is listed there, as when it was
+    /// unplugged after [`Hardware::resolve`].
+    fn open(&self, host_path: &str) -> Result<Option<(String, Self::Wallet)>, SignerError>;
+    /// See [`no_ledger_enumerated_error`].
+    fn unenumerated(&self) -> SignerError;
     /// See [`dashboard::ensure_solana_app_open`].
     fn launch_app(&self, host_device_path: Option<&str>) -> Result<bool, SignerError>;
     fn pubkey(
@@ -851,7 +856,7 @@ struct LedgerHid;
 impl Hardware for LedgerHid {
     type Wallet = LedgerWallet;
 
-    fn resolve(&self) -> Result<String, SignerError> {
+    fn resolve(&self, host_device_path: Option<&str>) -> Result<Vec<String>, SignerError> {
         let api = hid_api()?;
         let ledgers = listed_ledgers(&api)?;
         let paths: Vec<String> = ledgers
@@ -866,25 +871,39 @@ impl Hardware for LedgerHid {
                 serial: d.serial_number(),
             })
             .collect();
-        sole_path(&candidates)
+        match host_device_path {
+            Some(want) => device_interfaces(&candidates, want),
+            None => sole_interfaces(&candidates),
+        }
     }
 
-    fn open(&self, host_path: &str) -> Result<LedgerWallet, SignerError> {
+    fn open(&self, host_path: &str) -> Result<Option<(String, LedgerWallet)>, SignerError> {
         let api = hid_api()?;
-        let info = listed_ledgers(&api)?
-            .into_iter()
-            .find(|d| d.path().to_string_lossy() == host_path)
-            .ok_or_else(|| {
-                SignerError::NotAvailable(format!("no Ledger device at host path `{host_path}`"))
-            })?;
+        let ledgers = listed_ledgers(&api)?;
+        let paths: Vec<String> = ledgers
+            .iter()
+            .map(|d| d.path().to_string_lossy().into_owned())
+            .collect();
+        let listed: Vec<&str> = paths.iter().map(String::as_str).collect();
+        let Some(i) = dashboard::select_ledger(&listed, host_path) else {
+            return Ok(None);
+        };
+        let info = ledgers[i];
         let device = info.open_device(&api).map_err(|_e| {
             #[cfg(feature = "unsafe-debug")]
             log::error!("cannot open Ledger at `{host_path}`: {_e}");
             no_ledger_enumerated_error()
         })?;
         let mut wallet = LedgerWallet::new(device);
-        wallet.read_device(info).map_err(map_rw_err)?;
-        Ok(wallet)
+        wallet.pretty_path = wallet
+            .read_device(info)
+            .map_err(map_rw_err)?
+            .get_pretty_path();
+        Ok(Some((listed[i].to_string(), wallet)))
+    }
+
+    fn unenumerated(&self) -> SignerError {
+        no_ledger_enumerated_error()
     }
 
     fn launch_app(&self, host_device_path: Option<&str>) -> Result<bool, SignerError> {
@@ -938,12 +957,30 @@ impl Hardware for LedgerHid {
     }
 }
 
-/// The host path of the one physical Ledger among `candidates`, counting
-/// sibling interfaces of one device once.
-fn sole_path(candidates: &[dashboard::Candidate<'_>]) -> Result<String, SignerError> {
-    Ok(candidates[dashboard::sole_ledger(candidates)?]
-        .path
-        .to_string())
+/// The host paths of the one physical Ledger's interfaces among `candidates`,
+/// counting sibling interfaces of one device once.
+fn sole_interfaces(candidates: &[dashboard::Candidate<'_>]) -> Result<Vec<String>, SignerError> {
+    // `sole_ledger` succeeds only when every candidate is one device's interface.
+    dashboard::sole_ledger(candidates)?;
+    Ok(candidates.iter().map(|c| c.path.to_string()).collect())
+}
+
+/// The host paths of the interfaces of the device `want` selects among
+/// `candidates`, the selected one first.
+fn device_interfaces(
+    candidates: &[dashboard::Candidate<'_>],
+    want: &str,
+) -> Result<Vec<String>, SignerError> {
+    let listed: Vec<&str> = candidates.iter().map(|c| c.path).collect();
+    let selected = dashboard::select_ledger(&listed, want).ok_or_else(|| no_device_at(want))?;
+    let siblings = candidates
+        .iter()
+        .enumerate()
+        .filter(|(i, c)| *i != selected && dashboard::same_device(c, &candidates[selected]));
+    Ok(std::iter::once(listed[selected])
+        .chain(siblings.map(|(_, c)| c.path))
+        .map(str::to_string)
+        .collect())
 }
 
 fn hid_api() -> Result<hidapi::HidApi, SignerError> {
@@ -976,6 +1013,10 @@ fn listed_ledgers(api: &hidapi::HidApi) -> Result<Vec<&hidapi::DeviceInfo>, Sign
         return Err(no_ledger_enumerated_error());
     }
     Ok(ledgers)
+}
+
+fn no_device_at(host_path: &str) -> SignerError {
+    SignerError::NotAvailable(format!("no Ledger device at host path `{host_path}`"))
 }
 
 /// Host paths identify devices to a caller but are host-local detail, so they
@@ -1156,11 +1197,12 @@ fn unenumerated_detail(attached: &[u16], resolved: &str) -> String {
 
 /// The device thread body. Runs for the life of the process.
 ///
-/// Holds at most one open session per host path and reuses it across commands,
-/// so repeated `LedgerSigner::connect` calls do not re-enumerate HID. A device
-/// error drops only that device's session, so its next command re-establishes
-/// rather than reusing a handle to a device that has been unplugged, locked or
-/// switched apps. A session closes once no live signer is bound to it.
+/// Holds at most one open session per device and reuses it across commands.
+/// A named `LedgerSigner::connect` reuses its device's session; an unnamed one
+/// lists devices on every connect. A device error drops only that device's
+/// session, so its next command re-establishes rather than reusing a handle to
+/// a device that has been unplugged, locked or switched apps. A session closes
+/// once no live signer is bound to it.
 fn device_thread<H: Hardware>(hardware: H, cmd_rx: Receiver<DeviceCommand>) {
     let mut sessions = Sessions {
         hardware,
@@ -1228,14 +1270,12 @@ fn device_thread<H: Hardware>(hardware: H, cmd_rx: Receiver<DeviceCommand>) {
                 binding,
                 reply,
             } => {
-                let ok = parse(&path_str)
-                    .and_then(|path| {
-                        sessions.run(&binding, |hardware, wallet| {
-                            hardware.pubkey(wallet, &path, false)
-                        })
+                let result = parse(&path_str).and_then(|path| {
+                    sessions.run(&binding, |hardware, wallet| {
+                        hardware.pubkey(wallet, &path, false)
                     })
-                    .is_ok();
-                let _ = reply.send(ok);
+                });
+                let _ = reply.send(result);
             }
 
             DeviceCommand::IsAttached { reply } => {
@@ -1247,7 +1287,7 @@ fn device_thread<H: Hardware>(hardware: H, cmd_rx: Receiver<DeviceCommand>) {
     }
 }
 
-/// The device thread's open sessions, keyed by host path.
+/// The device thread's open sessions, keyed by the host path each was opened at.
 struct Sessions<H: Hardware> {
     hardware: H,
     open: HashMap<String, H::Wallet>,
@@ -1259,22 +1299,37 @@ struct Sessions<H: Hardware> {
 }
 
 impl<H: Hardware> Sessions<H> {
-    /// The host path `binding` names. A `None` binding resolves to the sole
-    /// attached Ledger, and lists devices again only once that session closes.
-    fn key(&mut self, binding: &Binding) -> Result<String, SignerError> {
-        if let Some(path) = &binding.host_device_path {
-            return Ok(path.clone());
+    /// The host paths `binding`'s device may answer at. A named binding uses the
+    /// open session at its path or the one it last ran on; a `None` binding
+    /// uses the one a `None` binding last resolved to, if `cached`. Otherwise
+    /// this lists the interfaces of the named device, or of the sole one.
+    fn targets(&self, binding: &Binding, cached: bool) -> Result<Vec<String>, SignerError> {
+        let held = match &binding.host_device_path {
+            Some(path) => Some(path)
+                .filter(|path| self.open.contains_key(*path))
+                .or_else(|| self.last_run_on(binding)),
+            None => self
+                .sole
+                .as_ref()
+                .filter(|sole| cached && self.open.contains_key(*sole)),
+        };
+        match held {
+            Some(key) => Ok(vec![key.clone()]),
+            None => self.hardware.resolve(binding.host_device_path.as_deref()),
         }
-        if let Some(sole) = self
-            .sole
-            .as_ref()
-            .filter(|sole| self.open.contains_key(*sole))
-        {
-            return Ok(sole.clone());
-        }
-        let sole = self.hardware.resolve()?;
-        self.sole = Some(sole.clone());
-        Ok(sole)
+    }
+
+    /// The open session `binding` last ran on.
+    fn last_run_on(&self, binding: &Binding) -> Option<&String> {
+        self.bound
+            .iter()
+            .find(|(_, bound)| {
+                bound
+                    .iter()
+                    .any(|bound| std::ptr::eq(bound.as_ptr(), binding))
+            })
+            .map(|(key, _)| key)
+            .filter(|key| self.open.contains_key(*key))
     }
 
     /// Run `f` against the session for `binding`'s device, opening it if it is
@@ -1290,42 +1345,76 @@ impl<H: Hardware> Sessions<H> {
         binding: &Arc<Binding>,
         f: impl FnOnce(&H, &H::Wallet) -> Result<T, SignerError>,
     ) -> Result<T, SignerError> {
-        let key = self.key(binding)?;
-        self.run_on(&key, binding, f)
+        let targets = self.targets(binding, true)?;
+        self.run_on(&targets, binding, f)
     }
 
+    /// Run `f` against the first of `targets` with an open session, or else
+    /// the first that opens.
     fn run_on<T>(
         &mut self,
-        key: &str,
+        targets: &[String],
         binding: &Arc<Binding>,
         f: impl FnOnce(&H, &H::Wallet) -> Result<T, SignerError>,
     ) -> Result<T, SignerError> {
-        let bound = self.bound.entry(key.to_string()).or_default();
-        if !bound
-            .iter()
-            .any(|bound| bound.as_ptr() == Arc::as_ptr(binding))
-        {
-            bound.push(Arc::downgrade(binding));
+        let key = match targets.iter().find(|key| self.open.contains_key(*key)) {
+            Some(key) => key.clone(),
+            None => self.open_first(targets, binding.host_device_path.is_some())?,
+        };
+        if !self.bound.get(&key).is_some_and(|bound| {
+            bound
+                .iter()
+                .any(|bound| bound.as_ptr() == Arc::as_ptr(binding))
+        }) {
+            // A `None` binding whose device re-resolved leaves its old path.
+            for bound in self.bound.values_mut() {
+                bound.retain(|bound| bound.as_ptr() != Arc::as_ptr(binding));
+            }
+            self.bound
+                .entry(key.clone())
+                .or_default()
+                .push(Arc::downgrade(binding));
+            self.release();
         }
-        if !self.open.contains_key(key) {
-            let wallet = self.hardware.open(key)?;
-            self.open.insert(key.to_string(), wallet);
-        }
-        let wallet = &self.open[key];
+        let wallet = &self.open[&key];
 
         let result = f(&self.hardware, wallet);
-        if result
+        let dropped = result
             .as_ref()
-            .is_err_and(|error| session_action(error) == SessionAction::Drop)
-        {
-            self.open.remove(key);
+            .is_err_and(|error| session_action(error) == SessionAction::Drop);
+        if dropped {
+            self.open.remove(&key);
+        }
+        if binding.host_device_path.is_none() {
+            self.sole = (!dropped).then_some(key);
         }
         result
     }
 
-    /// Read the pubkey a new signer caches. An on-screen confirmation always
-    /// reaches the device on a fresh session; otherwise a held session is
-    /// reused, and rebuilt once if it has gone stale.
+    fn open_first(&mut self, targets: &[String], named: bool) -> Result<String, SignerError> {
+        let mut failed = None;
+        for key in targets {
+            match self.hardware.open(key) {
+                Ok(Some((opened, wallet))) => {
+                    self.open.insert(opened.clone(), wallet);
+                    return Ok(opened);
+                }
+                Ok(None) if named => failed = Some(no_device_at(key)),
+                Ok(None) => {
+                    #[cfg(feature = "unsafe-debug")]
+                    log::error!("no Ledger listed at `{key}` any more");
+                    failed = Some(self.hardware.unenumerated());
+                }
+                Err(error) => failed = Some(error),
+            }
+        }
+        Err(failed.unwrap_or_else(|| self.hardware.unenumerated()))
+    }
+
+    /// Read the pubkey a new signer caches. A `None` binding always lists
+    /// devices, so it refuses while more than one Ledger is attached. An
+    /// on-screen confirmation always reaches the device on a fresh session;
+    /// otherwise a held session is reused, and rebuilt once if it has gone stale.
     fn connect(
         &mut self,
         binding: &Arc<Binding>,
@@ -1336,18 +1425,18 @@ impl<H: Hardware> Sessions<H> {
         let read = |hardware: &H, wallet: &H::Wallet| {
             hardware.pubkey(wallet, path, confirm_pubkey_on_device)
         };
-        let key = self.key(binding)?;
+        let targets = self.targets(binding, false)?;
         if confirm_pubkey_on_device {
-            self.open.remove(&key);
+            self.open.retain(|key, _| !targets.contains(key));
         }
-        let held = self.open.contains_key(&key);
-        let mut connected = self.run_on(&key, binding, read);
+        let held = targets.iter().any(|key| self.open.contains_key(key));
+        let mut connected = self.run_on(&targets, binding, read);
         if held
             && connected
                 .as_ref()
                 .is_err_and(|error| session_action(error) == SessionAction::Drop)
         {
-            connected = self.run_on(&key, binding, read);
+            connected = self.run_on(&targets, binding, read);
         }
 
         // The Solana app may simply not be running. Once the user
@@ -1358,8 +1447,12 @@ impl<H: Hardware> Sessions<H> {
         // unreachable we keep the original connect error. Declining
         // the launch prompt on-device, though, is a real user
         // decision — surface it.
-        if connected.is_err() && auto_open_app {
-            self.open.remove(&key);
+        if auto_open_app
+            && connected
+                .as_ref()
+                .is_err_and(|error| session_action(error) == SessionAction::Drop)
+        {
+            self.open.retain(|key, _| !targets.contains(key));
             match self
                 .hardware
                 .launch_app(binding.host_device_path.as_deref())
@@ -1373,10 +1466,13 @@ impl<H: Hardware> Sessions<H> {
                 {
                     return Err(e)
                 }
-                Ok(_launched) => {
+                Ok(false) => {}
+                Ok(true) => {
                     for _ in 0..20 {
                         self.hardware.settle();
-                        connected = self.run(binding, read);
+                        connected = self
+                            .targets(binding, false)
+                            .and_then(|targets| self.run_on(&targets, binding, read));
                         if connected.is_ok() {
                             break;
                         }
@@ -1875,9 +1971,9 @@ mod tests {
         assert!(!quiet.auto_open_app);
     }
 
-    // NOTE: signing paths require a physical device and are covered by the
-    // hardware integration test (see `tests/test_ledger_integration.rs`), not
-    // here — these unit tests only cover the pure logic that needs no device.
+    // NOTE: the `Rig` tests below drive `sign_message` through the real
+    // `device_thread` over `FakeHardware`; the device itself is covered by the
+    // hardware integration test (see `tests/test_ledger_integration.rs`).
 
     /// Two distinct keys, standing in for two physically different Ledgers.
     fn device_key(seed: u8) -> (crate::sdk_adapter::Keypair, Pubkey) {
@@ -1997,7 +2093,7 @@ mod tests {
                             let _ = reply.send(Ok(pubkey.to_bytes()));
                         }
                         DeviceCommand::IsAvailable { reply, .. } => {
-                            let _ = reply.send(true);
+                            let _ = reply.send(Ok(pubkey.to_bytes()));
                         }
                         DeviceCommand::IsAttached { reply } => {
                             let _ = reply.send(true);
@@ -2110,14 +2206,24 @@ mod tests {
     /// it drives.
     #[derive(Default)]
     struct Bench {
-        /// Host paths of the attached devices.
-        attached: Vec<String>,
+        /// The attached devices, each as its interfaces' host paths.
+        attached: Vec<Vec<String>>,
         /// Every hardware call, in order, as `"<call> <host path>"`.
         calls: Vec<String>,
         /// Devices whose next call fails the way a lost device does.
         faulty: Vec<String>,
+        /// Devices whose next prompt the user declines.
+        declined: Vec<String>,
+        /// Devices that open but fail the device read, as a locked one does.
+        locked: Vec<String>,
+        /// Devices unplugged between being listed and opened.
+        vanished: Vec<String>,
+        /// Devices that hold another path's key, as host path to that path.
+        keys: HashMap<String, String>,
         /// Where the attached device re-enumerates once its app launches.
         relaunched_at: Option<String>,
+        /// The Solana app already runs, so a launch has nothing to do.
+        app_running: bool,
         /// Holds the next signature at its prompt: reports reaching it, then
         /// waits for an answer or for the answering side to drop.
         prompt: Option<(Sender<()>, Receiver<()>)>,
@@ -2136,6 +2242,11 @@ mod tests {
         fn drop(&mut self) {
             self.hardware.log("close", &self.host_path);
         }
+    }
+
+    /// What a locked Nano Gen5 answers the device read with.
+    fn locked_error() -> SignerError {
+        map_rw_err(RemoteWalletError::Protocol("Unknown error"))
     }
 
     fn fake_key(host_path: &str) -> (crate::sdk_adapter::Keypair, Pubkey) {
@@ -2164,45 +2275,110 @@ mod tests {
             }
         }
 
+        /// [`FakeHardware::call`] for a call the user can decline.
+        fn prompt(&self, call: &str, host_path: &str) -> Result<(), SignerError> {
+            self.call(call, host_path)?;
+            let mut bench = self.bench();
+            match bench.declined.iter().position(|p| p == host_path) {
+                Some(i) => {
+                    bench.declined.remove(i);
+                    Err(SignerError::UserRejected("declined".to_string()))
+                }
+                None => Ok(()),
+            }
+        }
+
         fn sign(&self, wallet: &FakeWallet, message: &[u8]) -> Result<[u8; 64], SignerError> {
-            self.call("sign", &wallet.host_path)?;
+            self.prompt("sign", &wallet.host_path)?;
             let prompt = self.bench().prompt.take();
             if let Some((reached, answer)) = prompt {
                 let _ = reached.send(());
                 let _ = answer.recv();
             }
-            let (key, _) = fake_key(&wallet.host_path);
+            let (key, _) = self.key(&wallet.host_path);
             signature_bytes(crate::sdk_adapter::keypair_sign_message(&key, message))
+        }
+
+        fn key(&self, host_path: &str) -> (crate::sdk_adapter::Keypair, Pubkey) {
+            let bench = self.bench();
+            fake_key(bench.keys.get(host_path).map_or(host_path, String::as_str))
         }
     }
 
     impl Hardware for FakeHardware {
         type Wallet = FakeWallet;
 
-        fn resolve(&self) -> Result<String, SignerError> {
+        fn resolve(&self, host_device_path: Option<&str>) -> Result<Vec<String>, SignerError> {
             let mut bench = self.bench();
-            bench.calls.push("resolve".to_string());
-            match bench.attached.as_slice() {
-                [sole] => Ok(sole.clone()),
-                attached => Err(multiple_devices_error(attached.len())),
-            }
+            let Some(want) = host_device_path else {
+                bench.calls.push("resolve".to_string());
+                return match bench.attached.as_slice() {
+                    [sole] => Ok(sole.clone()),
+                    attached => Err(multiple_devices_error(attached.len())),
+                };
+            };
+            bench.calls.push(format!("resolve {want}"));
+            let listed: Vec<&str> = bench
+                .attached
+                .iter()
+                .flatten()
+                .map(String::as_str)
+                .collect();
+            let selected = dashboard::select_ledger(&listed, want)
+                .map(|i| listed[i])
+                .ok_or_else(|| no_device_at(want))?;
+            let device = bench
+                .attached
+                .iter()
+                .find(|device| device.iter().any(|p| p == selected))
+                .expect("a listed path belongs to a device");
+            Ok(std::iter::once(selected)
+                .chain(device.iter().map(String::as_str).filter(|p| *p != selected))
+                .map(str::to_string)
+                .collect())
         }
 
-        fn open(&self, host_path: &str) -> Result<FakeWallet, SignerError> {
+        fn open(&self, host_path: &str) -> Result<Option<(String, FakeWallet)>, SignerError> {
             self.call("open", host_path)?;
-            Ok(FakeWallet {
-                host_path: host_path.to_string(),
-                hardware: self.clone(),
-            })
+            let bench = self.bench();
+            if bench.vanished.iter().any(|p| p == host_path) {
+                return Ok(None);
+            }
+            if bench.locked.iter().any(|p| p == host_path) {
+                return Err(locked_error());
+            }
+            let listed: Vec<&str> = bench
+                .attached
+                .iter()
+                .flatten()
+                .map(String::as_str)
+                .collect();
+            let Some(host_path) =
+                dashboard::select_ledger(&listed, host_path).map(|i| listed[i].to_string())
+            else {
+                return Ok(None);
+            };
+            drop(bench);
+            Ok(Some((
+                host_path.clone(),
+                FakeWallet {
+                    host_path,
+                    hardware: self.clone(),
+                },
+            )))
+        }
+
+        fn unenumerated(&self) -> SignerError {
+            SignerError::NotAvailable(unenumerated_detail(&[0x0008], RESOLVED_REMOTE_WALLET))
         }
 
         fn launch_app(&self, _: Option<&str>) -> Result<bool, SignerError> {
             let mut bench = self.bench();
             bench.calls.push("launch".to_string());
             if let Some(host_path) = bench.relaunched_at.take() {
-                bench.attached = vec![host_path];
+                bench.attached = vec![vec![host_path]];
             }
-            Ok(true)
+            Ok(!bench.app_running)
         }
 
         fn pubkey(
@@ -2212,8 +2388,8 @@ mod tests {
             confirm: bool,
         ) -> Result<[u8; 32], SignerError> {
             let call = if confirm { "confirm" } else { "pubkey" };
-            self.call(call, &wallet.host_path)?;
-            Ok(fake_key(&wallet.host_path).1.to_bytes())
+            self.prompt(call, &wallet.host_path)?;
+            Ok(self.key(&wallet.host_path).1.to_bytes())
         }
 
         fn sign_transaction(
@@ -2254,7 +2430,7 @@ mod tests {
             let guard = BUSY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             DEVICE_BUSY.store(false, Ordering::SeqCst);
             let hardware = FakeHardware(Arc::default());
-            hardware.bench().attached = host_paths.iter().map(|p| p.to_string()).collect();
+            hardware.bench().attached = host_paths.iter().map(|p| vec![p.to_string()]).collect();
             let (tx, rx) = mpsc::channel();
             let on_thread = hardware.clone();
             std::thread::spawn(move || device_thread(on_thread, rx));
@@ -2313,6 +2489,16 @@ mod tests {
         LedgerSigner::connect_with(config).expect("the fake device connects")
     }
 
+    fn assert_refuses_two(connected: Result<LedgerSigner, SignerError>) {
+        let Err(err) = connected else {
+            panic!("connected with two Ledgers attached");
+        };
+        assert_eq!(
+            err.detail_string(),
+            multiple_devices_error(2).detail_string()
+        );
+    }
+
     async fn sign(signer: &LedgerSigner) -> Result<Signature, SignerError> {
         assert!(idle(), "the device thread kept its claim");
         signer.sign_message(b"pay 1 SOL").await
@@ -2348,9 +2534,11 @@ mod tests {
         assert_eq!(
             rig.calls(),
             [
+                "resolve",
                 "pubkey /a",
                 "sign /a",
                 "close /a",
+                "resolve /a",
                 "open /a",
                 "sign /a",
                 "sign /a"
@@ -2371,8 +2559,10 @@ mod tests {
         assert_eq!(
             rig.calls(),
             [
+                "resolve /a",
                 "open /a",
                 "pubkey /a",
+                "resolve /b",
                 "open /b",
                 "pubkey /b",
                 "sign /a",
@@ -2395,7 +2585,14 @@ mod tests {
         sign(&a).await.expect("reopened");
         assert_eq!(
             rig.calls(),
-            ["sign /a", "close /a", "sign /b", "open /a", "sign /a"]
+            [
+                "sign /a",
+                "close /a",
+                "sign /b",
+                "resolve /a",
+                "open /a",
+                "sign /a"
+            ]
         );
     }
 
@@ -2410,6 +2607,7 @@ mod tests {
         assert_eq!(
             rig.calls(),
             [
+                "resolve /a",
                 "open /a",
                 "pubkey /a",
                 "resolve",
@@ -2431,6 +2629,7 @@ mod tests {
         assert_eq!(
             rig.calls(),
             [
+                "resolve /a",
                 "open /a",
                 "pubkey /a",
                 "pubkey /a",
@@ -2451,7 +2650,14 @@ mod tests {
         });
         assert_eq!(
             rig.calls(),
-            ["open /a", "pubkey /a", "close /a", "open /a", "confirm /a"]
+            [
+                "resolve /a",
+                "open /a",
+                "pubkey /a",
+                "close /a",
+                "open /a",
+                "confirm /a"
+            ]
         );
     }
 
@@ -2477,6 +2683,278 @@ mod tests {
                 "resolve",
                 "open /solana",
                 "pubkey /solana"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_named_signer_follows_its_relaunched_device() {
+        let at = |interface: u8| {
+            format!("IOService:/AppleT8103/usb-drd0/ledger@01100000/IOUSBHostInterface@{interface}")
+        };
+        let (dashboard, solana) = (at(0), at(1));
+        let rig = Rig::attach(&[&dashboard]);
+        {
+            let mut bench = rig.hardware.bench();
+            bench.faulty.push(dashboard.clone());
+            bench.relaunched_at = Some(solana.clone());
+        }
+        let signer = connect(LedgerConfig {
+            auto_open_app: true,
+            ..quiet(Some(&dashboard))
+        });
+        assert_eq!(signer.pubkey(), fake_key(&solana).1);
+        assert_eq!(
+            rig.calls(),
+            [
+                format!("resolve {dashboard}"),
+                format!("open {dashboard}"),
+                "launch".to_string(),
+                format!("resolve {dashboard}"),
+                format!("open {solana}"),
+                format!("pubkey {solana}")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_declined_confirm_is_not_retried() {
+        let rig = Rig::attach(&["/a"]);
+        let _held = connect(quiet(Some("/a")));
+        rig.calls();
+        rig.hardware.bench().declined.push("/a".to_string());
+        assert!(idle(), "the device thread kept its claim");
+        let err = LedgerSigner::connect_with(LedgerConfig {
+            confirm_pubkey_on_device: true,
+            auto_open_app: true,
+            ..quiet(Some("/a"))
+        })
+        .expect_err("declined");
+        assert!(matches!(err, SignerError::UserRejected(_)), "got: {err:?}");
+        assert_eq!(rig.calls(), ["close /a", "open /a", "confirm /a"]);
+    }
+
+    #[test]
+    fn a_running_app_is_not_waited_for() {
+        let rig = Rig::attach(&["/a"]);
+        {
+            let mut bench = rig.hardware.bench();
+            bench.faulty.push("/a".to_string());
+            bench.app_running = true;
+        }
+        assert!(idle(), "the device thread kept its claim");
+        let err = LedgerSigner::connect_with(LedgerConfig {
+            auto_open_app: true,
+            ..quiet(Some("/a"))
+        })
+        .expect_err("the device was lost");
+        assert!(
+            matches!(&err, SignerError::NotAvailable(d) if d == "device lost"),
+            "got: {err:?}"
+        );
+        assert_eq!(rig.calls(), ["resolve /a", "open /a", "launch"]);
+    }
+
+    #[test]
+    fn an_unnamed_confirm_refuses_two_devices() {
+        let rig = Rig::attach(&["/a"]);
+        let _unnamed = connect(quiet(None));
+        rig.calls();
+        rig.hardware.bench().attached.push(vec!["/b".to_string()]);
+        assert!(idle(), "the device thread kept its claim");
+        assert_refuses_two(LedgerSigner::connect(None, true, None));
+        assert_eq!(rig.calls(), ["resolve"]);
+    }
+
+    #[test]
+    fn an_unnamed_connect_refuses_two_devices() {
+        let rig = Rig::attach(&["/a"]);
+        let _unnamed = connect(quiet(None));
+        rig.calls();
+        rig.hardware.bench().attached.push(vec!["/b".to_string()]);
+        assert!(idle(), "the device thread kept its claim");
+        assert_refuses_two(LedgerSigner::connect_with(quiet(None)));
+        assert_eq!(rig.calls(), ["resolve"]);
+    }
+
+    #[test]
+    fn a_confirm_relists_devices() {
+        let rig = Rig::attach(&["/a"]);
+        let _unnamed = connect(quiet(None));
+        rig.calls();
+        let _confirmed = connect(LedgerConfig {
+            confirm_pubkey_on_device: true,
+            ..quiet(None)
+        });
+        assert_eq!(
+            rig.calls(),
+            ["resolve", "close /a", "open /a", "confirm /a"]
+        );
+    }
+
+    #[test]
+    fn resolve_skips_a_sibling_that_does_not_open() {
+        let rig = Rig::attach(&[]);
+        {
+            let mut bench = rig.hardware.bench();
+            bench.attached = vec![vec!["/a@0".to_string(), "/a@1".to_string()]];
+            bench.faulty.push("/a@0".to_string());
+        }
+        let signer = connect(quiet(None));
+        assert_eq!(signer.pubkey(), fake_key("/a@1").1);
+        assert_eq!(
+            rig.calls(),
+            ["resolve", "open /a@0", "open /a@1", "pubkey /a@1"]
+        );
+    }
+
+    #[test]
+    fn a_locked_sole_device_says_so() {
+        let rig = Rig::attach(&["/a"]);
+        rig.hardware.bench().locked.push("/a".to_string());
+        assert!(idle(), "the device thread kept its claim");
+        let err = LedgerSigner::connect_with(quiet(None)).expect_err("locked");
+        assert_eq!(err.detail_string(), locked_error().detail_string());
+    }
+
+    #[test]
+    fn a_locked_named_device_says_so() {
+        let rig = Rig::attach(&["/a"]);
+        rig.hardware.bench().locked.push("/a".to_string());
+        assert!(idle(), "the device thread kept its claim");
+        let err = LedgerSigner::connect_with(quiet(Some("/a"))).expect_err("locked");
+        assert_eq!(err.detail_string(), locked_error().detail_string());
+    }
+
+    #[test]
+    fn a_vanished_sole_device_names_no_path() {
+        let rig = Rig::attach(&["/a"]);
+        rig.hardware.bench().vanished.push("/a".to_string());
+        assert!(idle(), "the device thread kept its claim");
+        let err = LedgerSigner::connect_with(quiet(None)).expect_err("unplugged");
+        assert_eq!(
+            err.detail_string(),
+            rig.hardware.unenumerated().detail_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_command_resolves_again() {
+        let rig = Rig::attach(&["/a"]);
+        let unnamed = connect(quiet(None));
+        rig.calls();
+        rig.hardware.bench().declined.push("/a".to_string());
+        sign(&unnamed).await.expect_err("declined");
+        sign(&unnamed).await.expect("signs");
+        assert_eq!(rig.calls(), ["sign /a", "sign /a"]);
+        rig.hardware.bench().faulty.push("/a".to_string());
+        sign(&unnamed).await.expect_err("the device was lost");
+        sign(&unnamed).await.expect("signs");
+        assert_eq!(
+            rig.calls(),
+            ["sign /a", "close /a", "resolve", "open /a", "sign /a"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_moved_device_leaves_its_old_path() {
+        let rig = Rig::attach(&["/a"]);
+        let unnamed = connect(quiet(None));
+        rig.hardware.bench().faulty.push("/a".to_string());
+        sign(&unnamed).await.expect_err("the device was lost");
+        {
+            let mut bench = rig.hardware.bench();
+            bench.attached = vec![vec!["/b".to_string()]];
+            bench.keys.insert("/b".to_string(), "/a".to_string());
+        }
+        assert!(idle(), "the device thread kept its claim");
+        assert!(unnamed.is_available().await, "reachable at its new path");
+        rig.hardware.bench().attached.push(vec!["/a".to_string()]);
+        let named = connect(quiet(Some("/a")));
+        rig.calls();
+        drop(named);
+        assert_eq!(rig.calls(), ["close /a"], "the unnamed signer left /a");
+    }
+
+    fn attach_two_interfaces() -> Rig {
+        let rig = Rig::attach(&[]);
+        rig.hardware.bench().attached = vec![vec!["/a@0".to_string(), "/a@1".to_string()]];
+        rig
+    }
+
+    #[tokio::test]
+    async fn siblings_share_one_session() {
+        let rig = attach_two_interfaces();
+        let first = connect(quiet(Some("/a@0")));
+        let second = connect(quiet(Some("/a@1")));
+        sign(&second).await.expect("signs");
+        drop(first);
+        sign(&second).await.expect("still bound");
+        assert_eq!(
+            rig.calls(),
+            [
+                "resolve /a@0",
+                "open /a@0",
+                "pubkey /a@0",
+                "resolve /a@1",
+                "pubkey /a@0",
+                "sign /a@0",
+                "sign /a@0"
+            ]
+        );
+        drop(second);
+        assert_eq!(rig.calls(), ["close /a@0"]);
+    }
+
+    #[test]
+    fn a_sibling_session_closes_before_launch() {
+        let rig = attach_two_interfaces();
+        let _held = connect(quiet(Some("/a@1")));
+        rig.calls();
+        {
+            let mut bench = rig.hardware.bench();
+            bench.faulty = ["/a@1", "/a@0", "/a@1"].map(String::from).to_vec();
+            bench.app_running = true;
+        }
+        assert!(idle(), "the device thread kept its claim");
+        LedgerSigner::connect_with(LedgerConfig {
+            auto_open_app: true,
+            ..quiet(Some("/a@0"))
+        })
+        .expect_err("the device was lost");
+        assert_eq!(
+            rig.calls(),
+            [
+                "resolve /a@0",
+                "pubkey /a@1",
+                "close /a@1",
+                "open /a@0",
+                "open /a@1",
+                "launch"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_swapped_device_is_not_available() {
+        let rig = Rig::attach(&["/a"]);
+        let signer = connect(quiet(Some("/a")));
+        assert!(idle(), "the device thread kept its claim");
+        assert!(signer.is_available().await);
+        rig.hardware
+            .bench()
+            .keys
+            .insert("/a".to_string(), "/b".to_string());
+        assert!(idle(), "the device thread kept its claim");
+        assert!(!signer.is_available().await, "another Ledger answers at /a");
+        assert_eq!(
+            rig.calls(),
+            [
+                "resolve /a",
+                "open /a",
+                "pubkey /a",
+                "pubkey /a",
+                "pubkey /a"
             ]
         );
     }
@@ -2517,12 +2995,15 @@ mod tests {
     }
 
     #[test]
-    fn sibling_interfaces_resolve_to_one_path() {
+    fn sibling_interfaces_resolve_to_one_device() {
         let first = "IOService:/AppleT8103/usb-drd0/ledger@01100000/IOUSBHostInterface@0";
         let second = "IOService:/AppleT8103/usb-drd0/ledger@01100000/IOUSBHostInterface@1";
         for serial in [Some("0001"), None] {
             let candidates = [first, second].map(|path| dashboard::Candidate { path, serial });
-            assert_eq!(sole_path(&candidates).expect("one device"), first);
+            assert_eq!(
+                sole_interfaces(&candidates).expect("one device"),
+                [first, second]
+            );
         }
     }
 
