@@ -35,7 +35,3 @@ export function formatSimulationResult(result: SimulateResult): {
         success: true,
     };
 }
-
-export function truncateAddress(address: string, prefixLen = 4, suffixLen = 4): string {
-    return `${address.slice(0, prefixLen)}...${address.slice(-suffixLen)}`;
-}

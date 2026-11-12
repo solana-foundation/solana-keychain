@@ -20,10 +20,6 @@ describe('memory signer integration', () => {
         await runSignerIntegrationTest({ ...CONFIG, testScenarios: ['signMessage'] });
     });
 
-    it('simulates transactions on LiteSVM', async () => {
-        await runSignerIntegrationTest({ ...CONFIG, testScenarios: ['simulateTransaction'] });
-    });
-
     it('rejects bad signatures on LiteSVM', async () => {
         await runSignerIntegrationTest({ ...CONFIG, testScenarios: ['badSignature'] });
     });

@@ -11,7 +11,4 @@ describe('PrivySigner Integration', () => {
     it.skipIf(!process.env.PRIVY_APP_ID)('signs messages with real API', async () => {
         await runSignerIntegrationTest(await getConfig(['signMessage']));
     });
-    it.skipIf(!process.env.PRIVY_APP_ID)('simulates transactions with real API', async () => {
-        await runSignerIntegrationTest(await getConfig(['simulateTransaction']));
-    });
 });

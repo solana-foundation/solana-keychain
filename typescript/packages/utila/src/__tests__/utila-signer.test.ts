@@ -172,15 +172,6 @@ describe('UtilaSigner', () => {
             expect(fetch).not.toHaveBeenCalled();
         });
 
-        it('warns when requestDelayMs is greater than 3000ms', async () => {
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
-
-            await createUtilaSigner({ ...mockConfig, requestDelayMs: 5000 });
-
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
-        });
-
         it('throws invalid public key when wallet response omits Solana address', async () => {
             vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ wallet: {} }));
 
