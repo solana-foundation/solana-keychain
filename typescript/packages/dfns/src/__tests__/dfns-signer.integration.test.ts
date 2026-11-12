@@ -11,7 +11,4 @@ describe('DfnsSigner Integration', () => {
     it.skipIf(!process.env.DFNS_AUTH_TOKEN)('signs messages with real API', async () => {
         await runSignerIntegrationTest(await getConfig(['signMessage']));
     });
-    it.skipIf(!process.env.DFNS_AUTH_TOKEN)('simulates transactions with real API', async () => {
-        await runSignerIntegrationTest(await getConfig(['simulateTransaction']));
-    });
 });

@@ -58,9 +58,3 @@ export interface SignTransactionResponse {
     /** Base64-encoded signed wire transaction. */
     signedTransaction: string;
 }
-
-/** Response from the CDP getAccount endpoint. */
-export interface AccountResponse {
-    /** Solana account address (base58). */
-    address: string;
-}

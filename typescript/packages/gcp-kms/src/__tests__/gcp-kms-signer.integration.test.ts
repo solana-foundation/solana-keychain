@@ -13,7 +13,4 @@ describe('GcpKmsSigner Integration', () => {
     it.skipIf(!process.env.GCP_KMS_KEY_NAME)('signs messages with real API', async () => {
         await runSignerIntegrationTest(await getConfig(['signMessage']));
     });
-    it.skipIf(!process.env.GCP_KMS_KEY_NAME)('simulates transactions with real API', async () => {
-        await runSignerIntegrationTest(await getConfig(['simulateTransaction']));
-    });
 });

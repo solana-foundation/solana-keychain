@@ -13,7 +13,4 @@ describe('CdpSigner Integration', () => {
     it.skipIf(!process.env.CDP_API_KEY_ID)('signs messages with real API', async () => {
         await runSignerIntegrationTest(await getConfig(['signMessage']));
     });
-    it.skipIf(!process.env.CDP_API_KEY_ID)('simulates transactions with real API', async () => {
-        await runSignerIntegrationTest(await getConfig(['simulateTransaction']));
-    });
 });

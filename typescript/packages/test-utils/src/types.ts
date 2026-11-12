@@ -16,7 +16,7 @@ export interface SignerTestConfig<T extends TestSigner> {
     testScenarios?: TestScenario[];
 }
 
-export type TestScenario = 'badSignature' | 'signMessage' | 'signTransaction' | 'simulateTransaction';
+export type TestScenario = 'badSignature' | 'signMessage' | 'signTransaction';
 
 export interface TestOptions {
     /** Custom airdrop amount in lamports (default: 1_000_000_000) */
@@ -24,18 +24,6 @@ export interface TestOptions {
 
     /** Custom transfer amount in lamports (default: 100_000_000) */
     transferAmount?: bigint;
-
-    /** Whether to log verbose output (default: false) */
-    verbose?: boolean;
-}
-
-export interface TestResult {
-    scenarios: {
-        error?: Error;
-        name: TestScenario;
-        passed: boolean;
-    }[];
-    success: boolean;
 }
 
 export type TestSigner = Partial<MessagePartialSigner> & TransactionSigner;

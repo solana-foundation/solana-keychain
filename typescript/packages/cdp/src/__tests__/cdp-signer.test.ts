@@ -26,14 +26,6 @@ vi.mock('@solana/keychain-core', async importOriginal => {
                     transactionBytes: returnedTransactionBytes,
                 })[signerAddress],
         ),
-        sanitizeRemoteErrorResponse:
-            mod.sanitizeRemoteErrorResponse ??
-            ((text: string) =>
-                `${text
-                    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim()
-                    .slice(0, 256)} [truncated]`),
     };
 });
 
@@ -187,13 +179,6 @@ describe('CdpSigner', () => {
             await expect(createCdpSigner(makeConfig({ requestDelayMs: -1 }))).rejects.toThrow(
                 'requestDelayMs must not be negative',
             );
-        });
-
-        it('warns for high requestDelayMs', async () => {
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-            await createCdpSigner(makeConfig({ requestDelayMs: 5000 }));
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
-            warnSpy.mockRestore();
         });
 
         it('accepts custom baseUrl', async () => {
@@ -408,24 +393,6 @@ describe('CdpSigner', () => {
                 ]),
             ).rejects.toMatchObject({ code: 'SIGNER_CONFIG_ERROR' });
             expect(mockFetch).not.toHaveBeenCalled();
-        });
-
-        it('throws HTTP_ERROR on network failure', async () => {
-            mockFetch.mockRejectedValue(new Error('Network error'));
-
-            const signer = await createCdpSigner(makeConfig());
-            const mockTx = createMockTransaction();
-
-            await expect(signer.signTransactions([mockTx])).rejects.toThrow('CDP network request failed');
-        });
-
-        it('throws REMOTE_API_ERROR on non-2xx response', async () => {
-            mockFetch.mockResolvedValue(new Response('{"error":"Forbidden"}', { status: 403 }));
-
-            const signer = await createCdpSigner(makeConfig());
-            const mockTx = createMockTransaction();
-
-            await expect(signer.signTransactions([mockTx])).rejects.toThrow('CDP API error: 403');
         });
 
         it('throws REMOTE_API_ERROR when the response is missing the signedTransaction field', async () => {

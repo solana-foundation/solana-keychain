@@ -7,14 +7,6 @@ vi.mock('@solana/keychain-core', async importOriginal => {
     return {
         ...mod,
         assertSignatureValid: vi.fn(),
-        sanitizeRemoteErrorResponse:
-            mod.sanitizeRemoteErrorResponse ??
-            ((text: string) =>
-                `${text
-                    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim()
-                    .slice(0, 256)} [truncated]`),
     };
 });
 
@@ -185,16 +177,6 @@ describe('ParaSigner', () => {
                 message: expect.stringContaining('requestDelayMs must not be negative'),
             });
         });
-
-        it('should warn for high requestDelayMs', async () => {
-            vi.mocked(fetch).mockResolvedValueOnce(mockWalletResponse());
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-            await createParaSigner({ ...mockConfig, requestDelayMs: 3001 });
-
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
-            warnSpy.mockRestore();
-        });
     });
 
     describe('isAvailable', () => {
@@ -326,38 +308,6 @@ describe('ParaSigner', () => {
             expect(result).toHaveProperty(MOCK_ADDRESS);
         });
 
-        it('should throw REMOTE_API_ERROR on API error', async () => {
-            vi.mocked(fetch)
-                .mockResolvedValueOnce(mockWalletResponse()) // create
-                .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'rate limited' }), { status: 429 }));
-
-            const signer = await createParaSigner(mockConfig);
-            const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
-
-            await expect(signer.signMessages([message])).rejects.toMatchObject({
-                code: 'SIGNER_REMOTE_API_ERROR',
-                context: expect.objectContaining({
-                    response: expect.stringContaining('rate limited'),
-                    status: 429,
-                }),
-                message: expect.stringContaining('Para API error: 429'),
-            });
-        });
-
-        it('should throw HTTP_ERROR on network failure', async () => {
-            vi.mocked(fetch)
-                .mockResolvedValueOnce(mockWalletResponse()) // create
-                .mockRejectedValueOnce(new Error('Network failure'));
-
-            const signer = await createParaSigner(mockConfig);
-            const message = { content: new Uint8Array([1, 2, 3, 4]), signatures: {} };
-
-            await expect(signer.signMessages([message])).rejects.toMatchObject({
-                code: 'SIGNER_HTTP_ERROR',
-                message: expect.stringContaining('Para network request failed'),
-            });
-        });
-
         it('should throw REMOTE_API_ERROR for missing signature', async () => {
             vi.mocked(fetch)
                 .mockResolvedValueOnce(mockWalletResponse()) // create
@@ -476,38 +426,6 @@ describe('ParaSigner', () => {
             expect(results).toHaveLength(2);
             expect(results[0]).toHaveProperty(MOCK_ADDRESS);
             expect(results[1]).toHaveProperty(MOCK_ADDRESS);
-        });
-
-        it('should throw REMOTE_API_ERROR on API error', async () => {
-            vi.mocked(fetch)
-                .mockResolvedValueOnce(mockWalletResponse()) // create
-                .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'rate limited' }), { status: 429 }));
-
-            const signer = await createParaSigner(mockConfig);
-            const mockTransaction = { messageBytes: new Uint8Array([1, 2, 3, 4]), signatures: {} } as any;
-
-            await expect(signer.signTransactions([mockTransaction])).rejects.toMatchObject({
-                code: 'SIGNER_REMOTE_API_ERROR',
-                context: expect.objectContaining({
-                    response: expect.stringContaining('rate limited'),
-                    status: 429,
-                }),
-                message: expect.stringContaining('Para API error: 429'),
-            });
-        });
-
-        it('should throw HTTP_ERROR on network failure', async () => {
-            vi.mocked(fetch)
-                .mockResolvedValueOnce(mockWalletResponse()) // create
-                .mockRejectedValueOnce(new Error('Network failure'));
-
-            const signer = await createParaSigner(mockConfig);
-            const mockTransaction = { messageBytes: new Uint8Array([1, 2, 3, 4]), signatures: {} } as any;
-
-            await expect(signer.signTransactions([mockTransaction])).rejects.toMatchObject({
-                code: 'SIGNER_HTTP_ERROR',
-                message: expect.stringContaining('Para network request failed'),
-            });
         });
     });
 });

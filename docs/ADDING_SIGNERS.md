@@ -763,9 +763,6 @@ describe('YourSigner Integration', () => {
     it.skipIf(!process.env.YOUR_API_KEY)('signs messages with real API', async () => {
         await runSignerIntegrationTest(await getConfig(['signMessage']));
     });
-    it.skipIf(!process.env.YOUR_API_KEY)('simulates transactions with real API', async () => {
-        await runSignerIntegrationTest(await getConfig(['simulateTransaction']));
-    });
 });
 ```
 

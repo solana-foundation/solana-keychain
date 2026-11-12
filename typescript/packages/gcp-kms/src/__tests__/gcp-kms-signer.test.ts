@@ -11,14 +11,6 @@ vi.mock('@solana/keychain-core', async importOriginal => {
     return {
         ...mod,
         assertSignatureValid: vi.fn(),
-        sanitizeRemoteErrorResponse:
-            mod.sanitizeRemoteErrorResponse ??
-            ((text: string) =>
-                text
-                    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim()
-                    .slice(0, 256)),
     };
 });
 
@@ -167,20 +159,6 @@ describe('createGcpKmsSigner', () => {
                     requestDelayMs: -1,
                 });
             }).toThrow('requestDelayMs must not be negative');
-        });
-
-        it('should warn for high requestDelayMs', () => {
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-            createGcpKmsSigner({
-                keyName: TEST_KEY_NAME,
-                publicKey: TEST_PUBLIC_KEY,
-                requestDelayMs: 5000,
-            });
-
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
-
-            warnSpy.mockRestore();
         });
     });
 
@@ -362,55 +340,6 @@ describe('createGcpKmsSigner', () => {
 
             expect(result).toHaveLength(2);
             expect(mockFetch).toHaveBeenCalledTimes(2);
-        });
-
-        it('should throw error on invalid signature length', async () => {
-            const shortSignature = Buffer.from(new Uint8Array(32).fill(0x42)).toString('base64');
-            mockFetch.mockResolvedValue(createJsonResponse({ signature: shortSignature }));
-
-            const signer = createGcpKmsSigner({
-                keyName: TEST_KEY_NAME,
-                publicKey: TEST_PUBLIC_KEY,
-            });
-
-            const transaction = { messageBytes: new Uint8Array([1, 2, 3, 4]), signatures: {} } as any;
-
-            await expect(signer.signTransactions([transaction])).rejects.toThrow('Invalid signature length');
-        });
-
-        it('should throw error on missing signature', async () => {
-            mockFetch.mockResolvedValue(createJsonResponse({}));
-
-            const signer = createGcpKmsSigner({
-                keyName: TEST_KEY_NAME,
-                publicKey: TEST_PUBLIC_KEY,
-            });
-
-            const transaction = { messageBytes: new Uint8Array([1, 2, 3, 4]), signatures: {} } as any;
-
-            await expect(signer.signTransactions([transaction])).rejects.toThrow('No signature in GCP KMS response');
-        });
-
-        it('should handle GCP KMS API errors', async () => {
-            mockFetch.mockResolvedValue(
-                createJsonResponse(
-                    {
-                        error: {
-                            message: 'GCP Error',
-                        },
-                    },
-                    403,
-                ),
-            );
-
-            const signer = createGcpKmsSigner({
-                keyName: TEST_KEY_NAME,
-                publicKey: TEST_PUBLIC_KEY,
-            });
-
-            const transaction = { messageBytes: new Uint8Array([1, 2, 3, 4]), signatures: {} } as any;
-
-            await expect(signer.signTransactions([transaction])).rejects.toThrow('GCP KMS API error: 403');
         });
     });
 

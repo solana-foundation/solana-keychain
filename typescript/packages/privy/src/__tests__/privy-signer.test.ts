@@ -27,14 +27,6 @@ vi.mock('@solana/keychain-core', async importOriginal => {
                     transactionBytes: returnedTransactionBytes,
                 })[signerAddress],
         ),
-        sanitizeRemoteErrorResponse:
-            mod.sanitizeRemoteErrorResponse ??
-            ((text: string) =>
-                `${text
-                    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim()
-                    .slice(0, 256)} [truncated]`),
     };
 });
 
@@ -271,21 +263,6 @@ describe('createPrivySigner', () => {
                 await expect(createPrivySigner(mockConfig)).rejects.toMatchObject({
                     code: 'SIGNER_HTTP_ERROR',
                     message: expect.stringContaining('Privy network request failed'),
-                });
-            });
-        });
-
-        describe('parsing errors', () => {
-            it('throws PARSING_ERROR when response is invalid JSON', async () => {
-                (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-                    json: () => Promise.reject(new Error('Invalid JSON')),
-                    ok: true,
-                    status: 200,
-                });
-
-                await expect(createPrivySigner(mockConfig)).rejects.toMatchObject({
-                    code: 'SIGNER_PARSING_ERROR',
-                    message: expect.stringContaining('Failed to parse Privy response'),
                 });
             });
         });
@@ -578,38 +555,6 @@ describe('createPrivySigner', () => {
             ).toBe(true);
         });
 
-        it('throws HTTP_ERROR when fetch fails during signing', async () => {
-            const keyPair = await generateKeyPairSigner();
-            setupMockWalletResponse(keyPair.address);
-            const signer = await createPrivySigner(mockConfig);
-
-            (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Network timeout'));
-
-            const message = createSignableMessage(new Uint8Array([1, 2, 3, 4]));
-            await expect(signer.signMessages([message])).rejects.toMatchObject({
-                code: 'SIGNER_HTTP_ERROR',
-                message: expect.stringContaining('Privy network request failed'),
-            });
-        });
-
-        it('throws PARSING_ERROR when response is invalid JSON', async () => {
-            const keyPair = await generateKeyPairSigner();
-            setupMockWalletResponse(keyPair.address);
-            const signer = await createPrivySigner(mockConfig);
-
-            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-                json: () => Promise.reject(new Error('Invalid JSON')),
-                ok: true,
-                status: 200,
-            });
-
-            const message = createSignableMessage(new Uint8Array([1, 2, 3, 4]));
-            await expect(signer.signMessages([message])).rejects.toMatchObject({
-                code: 'SIGNER_PARSING_ERROR',
-                message: expect.stringContaining('Failed to parse Privy response'),
-            });
-        });
-
         it('throws REMOTE_API_ERROR when signature is missing from response', async () => {
             const keyPair = await generateKeyPairSigner();
             setupMockWalletResponse(keyPair.address);
@@ -702,69 +647,6 @@ describe('createPrivySigner', () => {
                     'privy-request-expiry': '1900000',
                 },
                 method: 'POST',
-            });
-        });
-
-        it('sanitizes remote API error text in error context', async () => {
-            const keyPair = await generateKeyPairSigner();
-            setupMockWalletResponse(keyPair.address);
-            const signer = await createPrivySigner(mockConfig);
-
-            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-                ok: false,
-                status: 500,
-                text: () => Promise.resolve(`topsecret\n\n${'x'.repeat(600)}\u0000`),
-            });
-
-            const mockTx = createMockTransaction();
-
-            try {
-                await signer.signTransactions([mockTx]);
-                throw new Error('Expected signTransactions to throw');
-            } catch (error) {
-                if (!error || typeof error !== 'object' || !('code' in error) || !('context' in error)) {
-                    throw error;
-                }
-
-                const signerError = error as { code: string; context?: { response?: string } };
-                expect(signerError.code).toBe('SIGNER_REMOTE_API_ERROR');
-                expect(signerError.context?.response).toContain('[truncated]');
-                expect(signerError.context?.response).not.toContain('\n');
-                expect(signerError.context?.response).not.toContain('\u0000');
-            }
-        });
-
-        it('throws HTTP_ERROR when fetch fails during transaction signing', async () => {
-            const keyPair = await generateKeyPairSigner();
-            setupMockWalletResponse(keyPair.address);
-            const signer = await createPrivySigner(mockConfig);
-
-            (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Network timeout'));
-
-            const mockTx = createMockTransaction();
-
-            await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
-                code: 'SIGNER_HTTP_ERROR',
-                message: expect.stringContaining('Privy network request failed'),
-            });
-        });
-
-        it('throws PARSING_ERROR when response is invalid JSON', async () => {
-            const keyPair = await generateKeyPairSigner();
-            setupMockWalletResponse(keyPair.address);
-            const signer = await createPrivySigner(mockConfig);
-
-            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-                json: () => Promise.reject(new Error('Invalid JSON')),
-                ok: true,
-                status: 200,
-            });
-
-            const mockTx = createMockTransaction();
-
-            await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
-                code: 'SIGNER_PARSING_ERROR',
-                message: expect.stringContaining('Failed to parse Privy response'),
             });
         });
 

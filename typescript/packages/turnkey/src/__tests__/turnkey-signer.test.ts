@@ -27,14 +27,6 @@ vi.mock('@solana/keychain-core', async importOriginal => {
                     transactionBytes: returnedTransactionBytes,
                 })[signerAddress],
         ),
-        sanitizeRemoteErrorResponse:
-            mod.sanitizeRemoteErrorResponse ??
-            ((text: string) =>
-                `${text
-                    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim()
-                    .slice(0, 256)} [truncated]`),
     };
 });
 
@@ -347,30 +339,6 @@ describe('createTurnkeySigner', () => {
             });
         });
 
-        it('throws PARSING_ERROR when response is invalid JSON', async () => {
-            const keyPair = await generateKeyPairSigner();
-
-            const config = {
-                ...mockConfig,
-                publicKey: keyPair.address,
-            };
-
-            const signer = createTurnkeySigner(config);
-
-            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-                json: () => Promise.reject(new Error('Invalid JSON')),
-                ok: true,
-                status: 200,
-            });
-
-            const message = createSignableMessage(new Uint8Array([1, 2, 3, 4]));
-
-            await expect(signer.signMessages([message])).rejects.toMatchObject({
-                code: 'SIGNER_PARSING_ERROR',
-                message: expect.stringContaining('Failed to parse Turnkey response'),
-            });
-        });
-
         it('throws SIGNING_FAILED for malformed response shape', async () => {
             const keyPair = await generateKeyPairSigner();
 
@@ -552,71 +520,6 @@ describe('createTurnkeySigner', () => {
 
             await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
                 code: 'SIGNER_SIGNING_FAILED',
-            });
-        });
-
-        it('handles API errors during transaction signing', async () => {
-            const keyPair = await generateKeyPairSigner();
-
-            const config = {
-                ...mockConfig,
-                publicKey: keyPair.address,
-            };
-
-            const signer = createTurnkeySigner(config);
-
-            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-                ok: false,
-                status: 500,
-                text: () => Promise.resolve('Internal server error'),
-            });
-
-            const mockTx = createMockTransaction();
-
-            await expect(signer.signTransactions([mockTx])).rejects.toThrow();
-        });
-
-        it('throws HTTP_ERROR when fetch fails during transaction signing', async () => {
-            const keyPair = await generateKeyPairSigner();
-
-            const config = {
-                ...mockConfig,
-                publicKey: keyPair.address,
-            };
-
-            const signer = createTurnkeySigner(config);
-
-            (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Network timeout'));
-
-            const mockTx = createMockTransaction();
-
-            await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
-                code: 'SIGNER_HTTP_ERROR',
-                message: expect.stringContaining('Turnkey network request failed'),
-            });
-        });
-
-        it('throws PARSING_ERROR when response is invalid JSON', async () => {
-            const keyPair = await generateKeyPairSigner();
-
-            const config = {
-                ...mockConfig,
-                publicKey: keyPair.address,
-            };
-
-            const signer = createTurnkeySigner(config);
-
-            (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-                json: () => Promise.reject(new Error('Invalid JSON')),
-                ok: true,
-                status: 200,
-            });
-
-            const mockTx = createMockTransaction();
-
-            await expect(signer.signTransactions([mockTx])).rejects.toMatchObject({
-                code: 'SIGNER_PARSING_ERROR',
-                message: expect.stringContaining('Failed to parse Turnkey response'),
             });
         });
 

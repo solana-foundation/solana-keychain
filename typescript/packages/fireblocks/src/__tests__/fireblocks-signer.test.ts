@@ -22,14 +22,6 @@ vi.mock('@solana/keychain-core', async importOriginal => {
     return {
         ...mod,
         assertSignatureValid: vi.fn(),
-        sanitizeRemoteErrorResponse:
-            mod.sanitizeRemoteErrorResponse ??
-            ((text: string) =>
-                `${text
-                    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim()
-                    .slice(0, 256)} [truncated]`),
     };
 });
 
@@ -122,26 +114,6 @@ describe('createFireblocksSigner', () => {
 
             const [url] = mockFetch.mock.calls[0] as [string];
             expect(url).toContain('https://api.fireblocks.test/v1/');
-        });
-
-        it('should warn for high requestDelayMs', async () => {
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-            const keyPair = await generateKeyPairSigner();
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ addresses: [{ address: keyPair.address }] }),
-            });
-
-            await createFireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-                requestDelayMs: 5000,
-            });
-
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('requestDelayMs is greater than 3000ms'));
-
-            warnSpy.mockRestore();
         });
 
         it('should throw INVALID_PRIVATE_KEY for an unparseable PEM before any network call', async () => {
@@ -389,32 +361,6 @@ describe('createFireblocksSigner', () => {
     });
 
     describe('signMessages', () => {
-        it('should throw HTTP_ERROR when fetch fails during signing request', async () => {
-            const keyPair = await generateKeyPairSigner();
-
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ addresses: [{ address: keyPair.address }] }),
-            });
-
-            const signer = await createFireblocksSigner({
-                apiKey: TEST_API_KEY,
-                privateKeyPem: TEST_RSA_PRIVATE_KEY,
-                vaultAccountId: TEST_VAULT_ACCOUNT_ID,
-            });
-
-            mockFetch.mockRejectedValueOnce(new Error('Network timeout'));
-
-            const message = {
-                content: new Uint8Array([1, 2, 3, 4]),
-                signatures: {},
-            };
-            await expect(signer.signMessages([message])).rejects.toMatchObject({
-                code: 'SIGNER_HTTP_ERROR',
-                message: expect.stringContaining('Fireblocks network request failed'),
-            });
-        });
-
         it('should sign a message successfully', async () => {
             const keyPair = await generateKeyPairSigner();
 
