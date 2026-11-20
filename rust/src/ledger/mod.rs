@@ -4187,6 +4187,7 @@ mod tests {
                         answer
                             .expect("the device thread answers")
                             .expect("the probe passes");
+                        assert_eq!(Arc::strong_count(&signer.binding), 1);
                         break;
                     }
                 }
