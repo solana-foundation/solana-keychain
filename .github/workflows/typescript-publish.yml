@@ -392,7 +392,7 @@ jobs:
         run: |
           CURRENT_TAG="ts-keychain-v${{ steps.version.outputs.version }}"
           # Most recent ts-keychain-v* tag that isn't the one we just created
-          PREV_TAG=$(git tag -l 'ts-keychain-v*' --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -1 || true)
+          PREV_TAG=$(git -c versionsort.suffix=- -c versionsort.suffix=a -c versionsort.suffix=b -c versionsort.suffix=rc tag -l 'ts-keychain-v*' --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -1 || true)
           if [ -n "$PREV_TAG" ]; then
             echo "previous_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
             echo "Previous tag: ${PREV_TAG}"
