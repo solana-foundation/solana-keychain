@@ -136,7 +136,7 @@ jobs:
         run: |
           CURRENT_TAG="python-v${{ steps.version.outputs.version }}"
           # Most recent Python release tag that isn't the one we just created
-          PREV_TAG=$(git -c versionsort.suffix=- -c versionsort.suffix=a -c versionsort.suffix=b -c versionsort.suffix=rc tag -l 'python-v*' --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -1 || true)
+          PREV_TAG=$(git -c versionsort.suffix=- -c versionsort.suffix=.dev -c versionsort.suffix=a -c versionsort.suffix=b -c versionsort.suffix=rc tag -l 'python-v*' --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -1 || true)
           echo "previous_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
           echo "Previous tag: ${PREV_TAG:-none (first release)}"
 
